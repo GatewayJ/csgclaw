@@ -20,11 +20,11 @@ var defaultManagerPicoClawConfig []byte
 //go:embed defaults/manager-security.yml
 var defaultManagerSecurityConfig string
 
-func ensureManagerPicoClawConfig(server config.ServerConfig, model config.ModelConfig) (string, error) {
-	return ensureAgentPicoClawConfig(ManagerName, "u-manager", server, model)
+func ensureManagerPicoClawConfig(server config.ServerConfig, managerBoxBaseURL string, model config.ModelConfig) (string, error) {
+	return ensureAgentPicoClawConfig(ManagerName, "u-manager", server, managerBoxBaseURL, model)
 }
 
-func ensureAgentPicoClawConfig(agentName, botID string, server config.ServerConfig, model config.ModelConfig) (string, error) {
+func ensureAgentPicoClawConfig(agentName, botID string, server config.ServerConfig, managerBoxBaseURL string, model config.ModelConfig) (string, error) {
 	hostRoot, err := agentPicoClawRoot(agentName)
 	if err != nil {
 		return "", err
@@ -33,7 +33,7 @@ func ensureAgentPicoClawConfig(agentName, botID string, server config.ServerConf
 		return "", fmt.Errorf("create manager picoclaw logs dir: %w", err)
 	}
 
-	data, err := renderAgentPicoClawConfig(botID, server, model)
+	data, err := renderAgentPicoClawConfig(botID, server, managerBoxBaseURL, model)
 	if err != nil {
 		return "", err
 	}
@@ -61,20 +61,20 @@ func agentPicoClawRoot(agentName string) (string, error) {
 	return filepath.Join(homeDir, config.AppDirName, managerAgentsDirName, agentName, hostPicoClawDir), nil
 }
 
-func renderManagerPicoClawConfig(server config.ServerConfig, model config.ModelConfig) ([]byte, error) {
-	return renderAgentPicoClawConfig("u-manager", server, model)
+func renderManagerPicoClawConfig(server config.ServerConfig, managerBoxBaseURL string, model config.ModelConfig) ([]byte, error) {
+	return renderAgentPicoClawConfig("u-manager", server, managerBoxBaseURL, model)
 }
 
-func renderAgentPicoClawConfig(botID string, server config.ServerConfig, model config.ModelConfig) ([]byte, error) {
+func renderAgentPicoClawConfig(botID string, server config.ServerConfig, managerBoxBaseURL string, model config.ModelConfig) ([]byte, error) {
 	var cfg map[string]any
 	if err := json.Unmarshal(defaultManagerPicoClawConfig, &cfg); err != nil {
 		return nil, fmt.Errorf("decode embedded manager picoclaw config: %w", err)
 	}
 
-	if err := updateModelList(cfg, botID, server, model); err != nil {
+	if err := updateModelList(cfg, botID, server, managerBoxBaseURL, model); err != nil {
 		return nil, err
 	}
-	if err := updateCSGClawChannel(cfg, botID, server); err != nil {
+	if err := updateCSGClawChannel(cfg, botID, server, managerBoxBaseURL); err != nil {
 		return nil, err
 	}
 
@@ -85,7 +85,7 @@ func renderAgentPicoClawConfig(botID string, server config.ServerConfig, model c
 	return data, nil
 }
 
-func updateModelList(cfg map[string]any, botID string, server config.ServerConfig, modelCfg config.ModelConfig) error {
+func updateModelList(cfg map[string]any, botID string, server config.ServerConfig, managerBoxBaseURL string, modelCfg config.ModelConfig) error {
 	modelList, ok := cfg["model_list"].([]any)
 	if !ok || len(modelList) == 0 {
 		return fmt.Errorf("embedded manager picoclaw config is missing model_list[0]")
@@ -104,7 +104,7 @@ func updateModelList(cfg map[string]any, botID string, server config.ServerConfi
 		}
 	}
 
-	if managerBaseURL := resolveManagerBaseURL(server); managerBaseURL != "" {
+	if managerBaseURL := resolveManagerBaseURL(server, managerBoxBaseURL); managerBaseURL != "" {
 		model["api_base"] = llmBridgeBaseURL(managerBaseURL, botID)
 	}
 	if server.AccessToken != "" {
@@ -113,7 +113,7 @@ func updateModelList(cfg map[string]any, botID string, server config.ServerConfi
 	return nil
 }
 
-func updateCSGClawChannel(cfg map[string]any, botID string, server config.ServerConfig) error {
+func updateCSGClawChannel(cfg map[string]any, botID string, server config.ServerConfig, managerBoxBaseURL string) error {
 	channels, ok := cfg["channels"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("embedded manager picoclaw config is missing channels")
@@ -122,7 +122,7 @@ func updateCSGClawChannel(cfg map[string]any, botID string, server config.Server
 	if !ok {
 		return fmt.Errorf("embedded manager picoclaw config is missing channels.csgclaw")
 	}
-	if baseURL := resolveManagerBaseURL(server); baseURL != "" {
+	if baseURL := resolveManagerBaseURL(server, managerBoxBaseURL); baseURL != "" {
 		channel["base_url"] = baseURL
 	}
 	if server.AccessToken != "" {
@@ -133,13 +133,16 @@ func updateCSGClawChannel(cfg map[string]any, botID string, server config.Server
 	return nil
 }
 
-func resolveManagerBaseURL(server config.ServerConfig) string {
+func resolveManagerBaseURL(server config.ServerConfig, managerBoxBaseURL string) string {
+	if box := strings.TrimSpace(managerBoxBaseURL); box != "" {
+		return strings.TrimRight(box, "/")
+	}
 	port := config.ListenPort(server.ListenAddr)
 	if ip := localIPv4Resolver(); ip != "" {
 		return fmt.Sprintf("http://%s:%s", ip, port)
 	}
-	if server.AdvertiseBaseURL != "" {
-		return strings.TrimRight(server.AdvertiseBaseURL, "/")
+	if adv := strings.TrimSpace(server.AdvertiseBaseURL); adv != "" {
+		return strings.TrimRight(adv, "/")
 	}
 	return ""
 }

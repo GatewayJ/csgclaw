@@ -49,6 +49,9 @@ func (s *Service) ensureRuntimeAtHome(homeDir string) (*boxlite.Runtime, error) 
 	}
 
 	opts := []boxlite.RuntimeOption{boxlite.WithHomeDir(homeDir)}
+	if len(s.boxliteRegistries) > 0 {
+		opts = append(opts, boxlite.WithRegistries(s.boxliteRegistries...))
+	}
 	rt, err := boxlite.NewRuntime(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("create boxlite runtime: %w", err)

@@ -40,7 +40,7 @@ func TestRenderAgentPicoClawConfigUsesBridgeModelEndpoint(t *testing.T) {
 	data, err := renderAgentPicoClawConfig("u-ux", config.ServerConfig{
 		ListenAddr:  "0.0.0.0:18080",
 		AccessToken: "shared-token",
-	}, config.ModelConfig{
+	}, "", config.ModelConfig{
 		Provider: config.ProviderLLMAPI,
 		ModelID:  "gpt-5.4",
 		BaseURL:  "https://cloud.infini-ai.com/maas/v1",
@@ -73,7 +73,7 @@ func TestEnsureAgentPicoClawConfigWritesConfigFiles(t *testing.T) {
 	root, err := ensureAgentPicoClawConfig("ux", "u-ux", config.ServerConfig{
 		ListenAddr:  "0.0.0.0:18080",
 		AccessToken: "shared-token",
-	}, config.ModelConfig{
+	}, "", config.ModelConfig{
 		ModelID: "gpt-5.4",
 	})
 	if err != nil {

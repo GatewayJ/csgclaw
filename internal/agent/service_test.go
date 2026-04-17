@@ -1169,7 +1169,7 @@ func TestAddFeishuBoxEnvVarsRequiresExactBotIDMatch(t *testing.T) {
 	}
 }
 
-func TestResolveManagerBaseURLPrefersLocalIP(t *testing.T) {
+func TestResolveManagerBaseURLPrefersManagerBoxBaseURL(t *testing.T) {
 	orig := localIPv4Resolver
 	localIPv4Resolver = func() string { return "10.0.0.8" }
 	t.Cleanup(func() {
@@ -1178,10 +1178,46 @@ func TestResolveManagerBaseURLPrefersLocalIP(t *testing.T) {
 
 	got := resolveManagerBaseURL(config.ServerConfig{
 		ListenAddr:       "0.0.0.0:19090",
-		AdvertiseBaseURL: "http://127.0.0.1:18080",
+		AdvertiseBaseURL: "http://192.0.2.1:19090",
+	}, "http://127.0.0.1:19090")
+
+	want := "http://127.0.0.1:19090"
+	if got != want {
+		t.Fatalf("resolveManagerBaseURL() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveManagerBaseURLFallsBackToLocalIP(t *testing.T) {
+	orig := localIPv4Resolver
+	localIPv4Resolver = func() string { return "10.0.0.8" }
+	t.Cleanup(func() {
+		localIPv4Resolver = orig
 	})
 
+	got := resolveManagerBaseURL(config.ServerConfig{
+		ListenAddr:       "0.0.0.0:19090",
+		AdvertiseBaseURL: "",
+	}, "")
+
 	want := "http://10.0.0.8:19090"
+	if got != want {
+		t.Fatalf("resolveManagerBaseURL() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveManagerBaseURLFallsBackToAdvertise(t *testing.T) {
+	orig := localIPv4Resolver
+	localIPv4Resolver = func() string { return "" }
+	t.Cleanup(func() {
+		localIPv4Resolver = orig
+	})
+
+	got := resolveManagerBaseURL(config.ServerConfig{
+		ListenAddr:       "0.0.0.0:19090",
+		AdvertiseBaseURL: "http://192.0.2.2:19090",
+	}, "")
+
+	want := "http://192.0.2.2:19090"
 	if got != want {
 		t.Fatalf("resolveManagerBaseURL() = %q, want %q", got, want)
 	}

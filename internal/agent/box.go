@@ -55,7 +55,7 @@ func (s *Service) gatewayBoxOptions(name, botID string, modelCfg config.ModelCon
 		modelCfg = s.model.Resolved()
 	}
 	modelID := modelCfg.ModelID
-	managerBaseURL := resolveManagerBaseURL(s.server)
+	managerBaseURL := resolveManagerBaseURL(s.server, s.managerBoxBaseURL)
 	llmBaseURL := llmBridgeBaseURL(managerBaseURL, botID)
 	envVars := picoclawBoxEnvVars(managerBaseURL, s.server.AccessToken, botID, llmBaseURL, modelID)
 	addFeishuBoxEnvVars(envVars, botID, s.channels)
@@ -71,14 +71,19 @@ func (s *Service) gatewayBoxOptions(name, botID string, modelCfg config.ModelCon
 	}
 	//entrypoint, cmd := gatewayStartCommand(managerDebugMode)
 	opts = append(opts,
-		//boxlite.WithEntrypoint(entrypoint...),
-		//boxlite.WithCmd(cmd...),
-		boxlite.WithCmd("/bin/sh", "-c", "/usr/local/bin/picoclaw gateway -d 1>~/.picoclaw/gateway.log 2>/dev/null"),
+		// Override image entrypoint so command is executed by shell.
+		// Otherwise, if the image entrypoint is "picoclaw", "/bin/sh" becomes an invalid subcommand.
+		boxlite.WithEntrypoint("/bin/sh"),
+		// Keep gateway process in foreground and capture stderr for troubleshooting.
+		boxlite.WithCmd("-c", "picoclaw gateway 1>~/.picoclaw/gateway.log 2>&1"),
 		//boxlite.WithCmd("sleep", "infinity"),
 	)
 
 	hostWorkspaceRoot, err := ensureAgentWorkspace(name, workspaceTemplateForAgent(name, botID))
 	if err != nil {
+		return nil, err
+	}
+	if _, err := ensureAgentPicoClawConfig(name, botID, s.server, s.managerBoxBaseURL, modelCfg); err != nil {
 		return nil, err
 	}
 	projectsRoot, err := ensureAgentProjectsRoot()

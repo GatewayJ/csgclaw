@@ -450,10 +450,12 @@ access_token = %q
 
 [bootstrap]
 manager_image = %q
+manager_box_base_url = %q
+boxlite_registries = %s
 
 [models]
 default = %q
-`, cfg.Server.ListenAddr, cfg.Server.AdvertiseBaseURL, partiallyMaskSecret(cfg.Server.AccessToken), cfg.Bootstrap.ManagerImage, llmCfg.DefaultSelector()) + formatEffectiveProviders(llmCfg)
+`, cfg.Server.ListenAddr, cfg.Server.AdvertiseBaseURL, partiallyMaskSecret(cfg.Server.AccessToken), cfg.Bootstrap.ManagerImage, cfg.Bootstrap.ManagerBoxBaseURL, config.FormatStringArray(cfg.Bootstrap.BoxliteRegistries), llmCfg.DefaultSelector()) + formatEffectiveProviders(llmCfg)
 
 	if strings.TrimSpace(cfg.Channels.FeishuAdminOpenID) != "" {
 		content += fmt.Sprintf(`
@@ -536,7 +538,7 @@ func newAgentService(cfg config.Config) (*agent.Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return agent.NewServiceWithLLMAndChannels(effectiveLLMConfig(cfg), cfg.Server, cfg.Channels, cfg.Bootstrap.ManagerImage, agentsPath)
+	return agent.NewServiceWithLLMAndChannels(effectiveLLMConfig(cfg), cfg.Server, cfg.Channels, cfg.Bootstrap.ManagerImage, cfg.Bootstrap.ManagerBoxBaseURL, cfg.Bootstrap.BoxliteRegistries, agentsPath)
 }
 
 func newIMService() (*im.Service, error) {

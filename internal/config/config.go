@@ -44,7 +44,9 @@ type LLMConfig struct {
 }
 
 type BootstrapConfig struct {
-	ManagerImage string
+	ManagerImage      string
+	ManagerBoxBaseURL string
+	BoxliteRegistries []string
 }
 
 type ChannelsConfig struct {
@@ -213,6 +215,14 @@ func Load(path string) (Config, error) {
 			switch key {
 			case "manager_image":
 				cfg.Bootstrap.ManagerImage = value
+			case "manager_box_base_url":
+				cfg.Bootstrap.ManagerBoxBaseURL = strings.TrimRight(strings.TrimSpace(value), "/")
+			case "boxlite_registries":
+				regs, parseErr := parseStringArray(rawValue)
+				if parseErr != nil {
+					return Config{}, fmt.Errorf("parse bootstrap.boxlite_registries: %w", parseErr)
+				}
+				cfg.Bootstrap.BoxliteRegistries = regs
 			}
 		case section == "channels.feishu":
 			switch key {
@@ -300,10 +310,12 @@ access_token = %q
 
 [bootstrap]
 manager_image = %q
+manager_box_base_url = %q
+boxlite_registries = %s
 
 [models]
 default = %q
-`, cfg.Server.ListenAddr, cfg.Server.AdvertiseBaseURL, cfg.Server.AccessToken, cfg.Bootstrap.ManagerImage, defaultSelector)
+`, cfg.Server.ListenAddr, cfg.Server.AdvertiseBaseURL, cfg.Server.AccessToken, cfg.Bootstrap.ManagerImage, cfg.Bootstrap.ManagerBoxBaseURL, FormatStringArray(cfg.Bootstrap.BoxliteRegistries), defaultSelector)
 
 	for _, name := range sortedProviderNames(llmCfg.Providers) {
 		provider := llmCfg.Providers[name].Resolved()
@@ -312,7 +324,7 @@ default = %q
 base_url = %q
 api_key = %q
 models = %s
-`, name, provider.BaseURL, provider.APIKey, formatStringArray(provider.Models))
+`, name, provider.BaseURL, provider.APIKey, FormatStringArray(provider.Models))
 		if provider.ReasoningEffort != "" {
 			fmt.Fprintf(&b, "reasoning_effort = %q\n", provider.ReasoningEffort)
 		}
@@ -458,7 +470,8 @@ func parseStringArray(raw string) ([]string, error) {
 	return out, nil
 }
 
-func formatStringArray(values []string) string {
+// FormatStringArray renders a TOML-compatible string array literal (e.g. ["a", "b"]).
+func FormatStringArray(values []string) string {
 	if len(values) == 0 {
 		return "[]"
 	}

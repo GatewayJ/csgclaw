@@ -89,15 +89,17 @@ func TestOnlySetRunBoxCommandHook(hook func(*Service, context.Context, *boxlite.
 }
 
 type Service struct {
-	model        config.ModelConfig
-	llm          config.LLMConfig
-	server       config.ServerConfig
-	channels     config.ChannelsConfig
-	managerImage string
-	state        string
-	mu           sync.RWMutex
-	runtimes     map[string]*boxlite.Runtime
-	agents       map[string]Agent
+	model             config.ModelConfig
+	llm               config.LLMConfig
+	server            config.ServerConfig
+	channels          config.ChannelsConfig
+	managerImage      string
+	managerBoxBaseURL string
+	boxliteRegistries []string
+	state             string
+	mu                sync.RWMutex
+	runtimes          map[string]*boxlite.Runtime
+	agents            map[string]Agent
 }
 
 func NewService(model config.ModelConfig, server config.ServerConfig, managerImage, statePath string) (*Service, error) {
@@ -105,14 +107,14 @@ func NewService(model config.ModelConfig, server config.ServerConfig, managerIma
 }
 
 func NewServiceWithChannels(model config.ModelConfig, server config.ServerConfig, channels config.ChannelsConfig, managerImage, statePath string) (*Service, error) {
-	return NewServiceWithLLMAndChannels(config.SingleProfileLLM(model), server, channels, managerImage, statePath)
+	return NewServiceWithLLMAndChannels(config.SingleProfileLLM(model), server, channels, managerImage, "", nil, statePath)
 }
 
 func NewServiceWithLLM(llmCfg config.LLMConfig, server config.ServerConfig, managerImage, statePath string) (*Service, error) {
-	return NewServiceWithLLMAndChannels(llmCfg, server, config.ChannelsConfig{}, managerImage, statePath)
+	return NewServiceWithLLMAndChannels(llmCfg, server, config.ChannelsConfig{}, managerImage, "", nil, statePath)
 }
 
-func NewServiceWithLLMAndChannels(llmCfg config.LLMConfig, server config.ServerConfig, channels config.ChannelsConfig, managerImage, statePath string) (*Service, error) {
+func NewServiceWithLLMAndChannels(llmCfg config.LLMConfig, server config.ServerConfig, channels config.ChannelsConfig, managerImage string, managerBoxBaseURL string, boxliteRegistries []string, statePath string) (*Service, error) {
 	// step 8.0 agent.Service owns two things together:
 	// step 8.0.1 the persisted registry of manager/worker metadata
 	// step 8.0.2 the live Boxlite runtime/box lifecycle.
@@ -128,14 +130,16 @@ func NewServiceWithLLMAndChannels(llmCfg config.LLMConfig, server config.ServerC
 		model = config.ModelConfig{}.Resolved()
 	}
 	svc := &Service{
-		model:        model,
-		llm:          llmCfg.Normalized(),
-		server:       server,
-		channels:     cloneChannelsConfig(channels),
-		managerImage: managerImage,
-		state:        statePath,
-		runtimes:     make(map[string]*boxlite.Runtime),
-		agents:       make(map[string]Agent),
+		model:             model,
+		llm:               llmCfg.Normalized(),
+		server:            server,
+		channels:          cloneChannelsConfig(channels),
+		managerImage:      managerImage,
+		managerBoxBaseURL: managerBoxBaseURL,
+		boxliteRegistries: append([]string(nil), boxliteRegistries...),
+		state:             statePath,
+		runtimes:          make(map[string]*boxlite.Runtime),
+		agents:            make(map[string]Agent),
 	}
 	if strings.TrimSpace(svc.llm.DefaultProfile) == "" {
 		svc.llm.DefaultProfile = defaultProfile
@@ -182,7 +186,7 @@ func (svc *Service) EnsureBootstrapManager(ctx context.Context, forceRecreate bo
 	if err != nil {
 		return err
 	}
-	if _, err := ensureAgentPicoClawConfig(ManagerName, ManagerUserID, svc.server, defaultModel); err != nil {
+	if _, err := ensureAgentPicoClawConfig(ManagerName, ManagerUserID, svc.server, svc.managerBoxBaseURL, defaultModel); err != nil {
 		return err
 	}
 
@@ -381,7 +385,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Agent, error) 
 	if err != nil {
 		return Agent{}, err
 	}
-	managerBaseURL := resolveManagerBaseURL(s.server)
+	managerBaseURL := resolveManagerBaseURL(s.server, s.managerBoxBaseURL)
 	llmBaseURL := llmBridgeBaseURL(managerBaseURL, id)
 	boxOpts := []boxlite.BoxOption{
 		boxlite.WithName(name),

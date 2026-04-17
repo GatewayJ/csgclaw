@@ -62,9 +62,7 @@
       },
       "placeholder": {
         "enabled": true,
-        "text": [
-          "Thinking... 💭"
-        ]
+        "text": ["Thinking... 💭"]
       },
       "reasoning_channel_id": "",
       "crypto_passphrase": ""

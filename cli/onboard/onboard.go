@@ -142,7 +142,7 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 }
 
 func createManagerBot(ctx context.Context, agentsPath, imStatePath string, cfg config.Config, forceRecreateManager bool) (bot.Bot, error) {
-	agentSvc, err := agent.NewServiceWithLLMAndChannels(effectiveLLMConfig(cfg), cfg.Server, cfg.Channels, cfg.Bootstrap.ManagerImage, agentsPath)
+	agentSvc, err := agent.NewServiceWithLLMAndChannels(effectiveLLMConfig(cfg), cfg.Server, cfg.Channels, cfg.Bootstrap.ManagerImage, cfg.Bootstrap.ManagerBoxBaseURL, cfg.Bootstrap.BoxliteRegistries, agentsPath)
 	if err != nil {
 		return bot.Bot{}, err
 	}
