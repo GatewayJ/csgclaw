@@ -263,6 +263,7 @@ func (s *Service) createWorker(ctx context.Context, normalized CreateRequest) (B
 			Description: normalized.Description,
 			Role:        agent.RoleWorker,
 			ModelID:     normalized.ModelID,
+			RuntimeMode: normalized.RuntimeMode,
 		})
 		if err != nil {
 			return Bot{}, err

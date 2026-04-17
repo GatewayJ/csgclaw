@@ -91,6 +91,7 @@ func (c cmd) runCreate(ctx context.Context, run *command.Context, args []string,
 	name := fs.String("name", "", "agent name")
 	description := fs.String("description", "", "agent description")
 	profile := fs.String("profile", "", "agent llm profile")
+	runtimeMode := fs.String("runtime-mode", "", "worker runtime mode: local or external")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -102,6 +103,7 @@ func (c cmd) runCreate(ctx context.Context, run *command.Context, args []string,
 		ID:          *id,
 		Name:        *name,
 		Description: *description,
+		RuntimeMode: *runtimeMode,
 		Profile:     *profile,
 	})
 	if err != nil {

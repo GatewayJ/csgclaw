@@ -444,6 +444,58 @@ func TestCreateWorkerStoresBoxID(t *testing.T) {
 	}
 }
 
+func TestCreateWorkerExternalSkipsBoxCreationAndWritesConfig(t *testing.T) {
+	var ensureRuntimeCalls int
+	var createGatewayCalls int
+	SetTestHooks(
+		func(_ *Service, _ string) (*boxlite.Runtime, error) {
+			ensureRuntimeCalls++
+			return nil, nil
+		},
+		func(_ *Service, _ context.Context, _ *boxlite.Runtime, _ string, _ string, _ string, _ config.ModelConfig) (*boxlite.Box, *boxlite.BoxInfo, error) {
+			createGatewayCalls++
+			return nil, nil, fmt.Errorf("createGatewayBox should not be called in external mode")
+		},
+	)
+	defer ResetTestHooks()
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	svc, err := NewService(testModelConfig(), config.ServerConfig{}, "", "")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	got, err := svc.CreateWorker(context.Background(), CreateRequest{
+		Name:        "alice",
+		RuntimeMode: RuntimeModeExternal,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorker() error = %v", err)
+	}
+	if got.RuntimeMode != RuntimeModeExternal {
+		t.Fatalf("CreateWorker().RuntimeMode = %q, want %q", got.RuntimeMode, RuntimeModeExternal)
+	}
+	if got.BoxID != "" {
+		t.Fatalf("CreateWorker().BoxID = %q, want empty for external worker", got.BoxID)
+	}
+	if got.Status != RuntimeModeExternal {
+		t.Fatalf("CreateWorker().Status = %q, want %q", got.Status, RuntimeModeExternal)
+	}
+	if ensureRuntimeCalls != 0 {
+		t.Fatalf("ensureRuntime() calls = %d, want %d", ensureRuntimeCalls, 0)
+	}
+	if createGatewayCalls != 0 {
+		t.Fatalf("createGatewayBox() calls = %d, want %d", createGatewayCalls, 0)
+	}
+
+	configPath := filepath.Join(homeDir, config.AppDirName, "agents", "alice", ".picoclaw", "config.json")
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("external worker config not generated at %q: %v", configPath, err)
+	}
+}
+
 func TestCreateWorkerStoresResolvedProfileSnapshot(t *testing.T) {
 	SetTestHooks(
 		func(_ *Service, _ string) (*boxlite.Runtime, error) { return nil, nil },
@@ -654,6 +706,44 @@ func TestStreamLogsFallsBackToNameAndRefreshesStoredBoxID(t *testing.T) {
 	}
 	if got.BoxID != "box-new" {
 		t.Fatalf("Agent().BoxID = %q, want %q", got.BoxID, "box-new")
+	}
+}
+
+func TestStreamLogsExternalWorkerReturnsConsistentError(t *testing.T) {
+	var ensureRuntimeCalls int
+	SetTestHooks(
+		func(_ *Service, _ string) (*boxlite.Runtime, error) {
+			ensureRuntimeCalls++
+			return nil, nil
+		},
+		nil,
+	)
+	defer ResetTestHooks()
+
+	svc, err := NewService(testModelConfig(), config.ServerConfig{}, "", "")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-alice"] = Agent{
+		ID:          "u-alice",
+		Name:        "alice",
+		RuntimeMode: RuntimeModeExternal,
+		Role:        RoleWorker,
+		Status:      RuntimeModeExternal,
+		CreatedAt:   time.Date(2026, 4, 1, 11, 0, 0, 0, time.UTC),
+	}
+
+	var out strings.Builder
+	err = svc.StreamLogs(context.Background(), "u-alice", false, 20, &out)
+	if err == nil {
+		t.Fatal("StreamLogs() error = nil, want external worker error")
+	}
+	want := `agent "u-alice" is external; box logs unavailable`
+	if err.Error() != want {
+		t.Fatalf("StreamLogs() error = %q, want %q", err.Error(), want)
+	}
+	if ensureRuntimeCalls != 0 {
+		t.Fatalf("ensureRuntime() calls = %d, want %d", ensureRuntimeCalls, 0)
 	}
 }
 

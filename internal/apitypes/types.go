@@ -21,6 +21,7 @@ type CreateBotRequest struct {
 	Role        string `json:"role"`
 	Channel     string `json:"channel,omitempty"`
 	ModelID     string `json:"model_id,omitempty"`
+	RuntimeMode string `json:"runtime_mode,omitempty"`
 }
 
 type User struct {

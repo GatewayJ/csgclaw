@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -10,6 +11,9 @@ const (
 	RoleAgent   = "agent"
 	RoleWorker  = "worker"
 	RoleManager = "manager"
+
+	RuntimeModeLocal    = "local"
+	RuntimeModeExternal = "external"
 )
 
 type Agent struct {
@@ -18,6 +22,7 @@ type Agent struct {
 	Description     string    `json:"description,omitempty"`
 	Image           string    `json:"image,omitempty"`
 	BoxID           string    `json:"box_id,omitempty"`
+	RuntimeMode     string    `json:"runtime_mode,omitempty"`
 	Role            string    `json:"role"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -32,11 +37,23 @@ type CreateRequest struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description,omitempty"`
 	Image       string    `json:"image,omitempty"`
+	RuntimeMode string    `json:"runtime_mode,omitempty"`
 	Role        string    `json:"role,omitempty"`
 	Status      string    `json:"status,omitempty"`
 	CreatedAt   time.Time `json:"created_at,omitempty"`
 	Profile     string    `json:"profile,omitempty"`
 	ModelID     string    `json:"model_id,omitempty"`
+}
+
+func normalizeRuntimeMode(runtimeMode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(runtimeMode)) {
+	case "", RuntimeModeLocal:
+		return RuntimeModeLocal, nil
+	case RuntimeModeExternal:
+		return RuntimeModeExternal, nil
+	default:
+		return "", fmt.Errorf("runtime_mode must be one of %q or %q", RuntimeModeLocal, RuntimeModeExternal)
+	}
 }
 
 func normalizeRole(role string) string {

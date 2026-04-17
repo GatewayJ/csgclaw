@@ -352,6 +352,7 @@ func (h *Handler) handleCreateWorkerAlias(w http.ResponseWriter, r *http.Request
 		Role:        string(bot.RoleWorker),
 		Channel:     string(bot.ChannelCSGClaw),
 		ModelID:     req.ModelID,
+		RuntimeMode: req.RuntimeMode,
 	})
 	if err != nil {
 		status := http.StatusBadRequest

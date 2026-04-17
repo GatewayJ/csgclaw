@@ -25,3 +25,5 @@ manager-data/
 
 # Vendored native libraries fetched on demand
 third_party/boxlite-go/libboxlite.a
+# Full BoxLite SDK extract (large binaries; never commit)
+third_party/boxlite-go/boxlite-c-*/

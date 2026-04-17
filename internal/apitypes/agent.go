@@ -8,6 +8,7 @@ type Agent struct {
 	Description     string    `json:"description,omitempty"`
 	Image           string    `json:"image,omitempty"`
 	BoxID           string    `json:"box_id,omitempty"`
+	RuntimeMode     string    `json:"runtime_mode,omitempty"`
 	Role            string    `json:"role"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -22,6 +23,7 @@ type CreateAgentRequest struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description,omitempty"`
 	Image       string    `json:"image,omitempty"`
+	RuntimeMode string    `json:"runtime_mode,omitempty"`
 	Role        string    `json:"role,omitempty"`
 	Status      string    `json:"status,omitempty"`
 	CreatedAt   time.Time `json:"created_at,omitempty"`

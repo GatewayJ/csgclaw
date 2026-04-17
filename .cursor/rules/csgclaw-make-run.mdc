@@ -1,0 +1,24 @@
+---
+description: Start CSGClaw locally with Makefile (make run, prerequisites)
+alwaysApply: true
+---
+
+# Run CSGClaw with Make
+
+When starting or restarting the CSGClaw HTTP server / IM UI, use the **repository root** and this Makefile target:
+
+```bash
+cd /path/to/csgclaw
+export CGO_ENABLED=1
+make run
+```
+
+- **`make run`** runs `go run ./cmd/csgclaw serve` (see `Makefile` target `run`) after `boxlite-setup` if needed.
+- **CGO must be enabled** for BoxLite (`CGO_ENABLED=1`); omitting it breaks linking or native runtime.
+
+Other useful targets (see `make help`):
+
+- **`make build`** — produce `bin/csgclaw` (then `./bin/csgclaw serve` if you prefer not to use `go run`).
+- **`make onboard`** — bootstrap `~/.csgclaw/config.toml` defaults when appropriate.
+
+After startup, open the URL printed in the log (typically `http://127.0.0.1:18080/`). Do not paste real API keys or access tokens into chat; `config.toml` is the source of truth for provider URLs and keys.

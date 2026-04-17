@@ -124,6 +124,11 @@ func (s *Service) saveLocked() error {
 func (s *Service) normalizeLoadedAgent(a Agent) Agent {
 	a = *cloneAgent(&a)
 	a.Role = normalizeRole(a.Role)
+	if normalizedMode, err := normalizeRuntimeMode(a.RuntimeMode); err == nil {
+		a.RuntimeMode = normalizedMode
+	} else {
+		a.RuntimeMode = RuntimeModeLocal
+	}
 	if strings.TrimSpace(a.Profile) == "" {
 		a.Profile = s.inferProfileForAgent(a)
 	}

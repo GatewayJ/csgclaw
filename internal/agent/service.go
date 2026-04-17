@@ -581,6 +581,10 @@ func (s *Service) CreateWorker(ctx context.Context, req CreateRequest) (Agent, e
 	id := strings.TrimSpace(req.ID)
 	name := strings.TrimSpace(req.Name)
 	description := strings.TrimSpace(req.Description)
+	runtimeMode, err := normalizeRuntimeMode(req.RuntimeMode)
+	if err != nil {
+		return Agent{}, err
+	}
 	switch {
 	case name == "":
 		return Agent{}, fmt.Errorf("name is required")
@@ -606,6 +610,60 @@ func (s *Service) CreateWorker(ctx context.Context, req CreateRequest) (Agent, e
 		return Agent{}, fmt.Errorf("agent name %q already exists", name)
 	}
 
+	profileName, resolvedModel, err := s.resolveModelProfile(req.Profile)
+	if err != nil {
+		return Agent{}, err
+	}
+
+	if runtimeMode == RuntimeModeExternal {
+		if _, err := ensureAgentWorkspace(name, workspaceTemplateForAgent(name, id)); err != nil {
+			return Agent{}, err
+		}
+		if _, err := ensureAgentPicoClawConfig(name, id, s.server, s.managerBoxBaseURL, resolvedModel); err != nil {
+			return Agent{}, err
+		}
+
+		createdAt := req.CreatedAt.UTC()
+		if req.CreatedAt.IsZero() {
+			createdAt = time.Now().UTC()
+		}
+		status := strings.TrimSpace(req.Status)
+		if status == "" {
+			status = RuntimeModeExternal
+		}
+
+		worker := Agent{
+			ID:              id,
+			Name:            name,
+			Image:           s.managerImage,
+			RuntimeMode:     runtimeMode,
+			BoxID:           "",
+			Description:     description,
+			Status:          status,
+			CreatedAt:       createdAt,
+			Profile:         profileName,
+			Provider:        resolvedModel.Provider,
+			ModelID:         resolvedModel.ModelID,
+			ReasoningEffort: resolvedModel.ReasoningEffort,
+			Role:            RoleWorker,
+		}
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if _, ok := s.agents[id]; ok {
+			return Agent{}, fmt.Errorf("agent id %q already exists", id)
+		}
+		if s.hasNameLocked(name) {
+			return Agent{}, fmt.Errorf("agent name %q already exists", name)
+		}
+		s.agents[worker.ID] = worker
+		if err := s.saveLocked(); err != nil {
+			delete(s.agents, worker.ID)
+			return Agent{}, err
+		}
+		return *cloneAgent(&worker), nil
+	}
+
 	rt, err := s.ensureRuntime(name)
 	if err != nil {
 		return Agent{}, err
@@ -617,10 +675,7 @@ func (s *Service) CreateWorker(ctx context.Context, req CreateRequest) (Agent, e
 	defer func() {
 		_ = s.closeRuntime(runtimeHome, rt)
 	}()
-	profileName, resolvedModel, err := s.resolveModelProfile(req.Profile)
-	if err != nil {
-		return Agent{}, err
-	}
+
 	box, info, err := s.createGatewayBox(ctx, rt, s.managerImage, name, id, resolvedModel)
 	if err != nil {
 		return Agent{}, fmt.Errorf("create worker box: %w", err)
@@ -643,6 +698,7 @@ func (s *Service) CreateWorker(ctx context.Context, req CreateRequest) (Agent, e
 		ID:              id,
 		Name:            name,
 		Image:           s.managerImage,
+		RuntimeMode:     runtimeMode,
 		BoxID:           info.ID,
 		Description:     description,
 		Status:          string(info.State),
@@ -689,6 +745,9 @@ func (s *Service) StreamLogs(ctx context.Context, id string, follow bool, lines 
 	got, ok := s.Agent(id)
 	if !ok {
 		return fmt.Errorf("agent %q not found", id)
+	}
+	if strings.EqualFold(strings.TrimSpace(got.RuntimeMode), RuntimeModeExternal) {
+		return fmt.Errorf("agent %q is external; box logs unavailable", id)
 	}
 
 	rt, err := s.ensureRuntime(got.Name)

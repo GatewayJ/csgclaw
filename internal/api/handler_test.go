@@ -942,6 +942,33 @@ func TestHandleAgentLogsReloadsStateBeforeStreaming(t *testing.T) {
 	}
 }
 
+func TestHandleAgentLogsExternalWorkerPropagatesServiceError(t *testing.T) {
+	svc := mustNewSeededService(t, []agent.Agent{
+		{
+			ID:          "u-alice",
+			Name:        "alice",
+			RuntimeMode: agent.RuntimeModeExternal,
+			Role:        agent.RoleWorker,
+			Status:      agent.RuntimeModeExternal,
+			CreatedAt:   time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC),
+		},
+	})
+
+	srv := &Handler{svc: svc}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/u-alice/logs", nil)
+	rec := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	wantBody := "agent \"u-alice\" is external; box logs unavailable\n"
+	if rec.Body.String() != wantBody {
+		t.Fatalf("body = %q, want %q", rec.Body.String(), wantBody)
+	}
+}
+
 func TestHandleAgentsDeleteRemovesAgent(t *testing.T) {
 	agent.SetTestHooks(
 		func(_ *agent.Service, _ string) (*boxlite.Runtime, error) { return nil, nil },
