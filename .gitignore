@@ -19,6 +19,8 @@ manager-data/
 # Editor directories
 .idea/
 .vscode/
+.cursor/
 
 # Vendored native libraries fetched on demand
 third_party/boxlite-go/libboxlite.a
+third_party/boxlite-go/boxlite-c-v0.7.6-linux-x64-gnu/

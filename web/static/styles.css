@@ -703,12 +703,40 @@ body::after {
   color: inherit;
 }
 
+.sidebar-nav-button:nth-child(3) .sidebar-nav-icon {
+  background: transparent;
+  color: inherit;
+}
+
 .sidebar-rail-button:first-child .sidebar-rail-icon {
   color: inherit;
 }
 
 .sidebar-rail-button:nth-child(2) .sidebar-rail-icon {
   color: inherit;
+}
+
+.sidebar-rail-button:nth-child(3) .sidebar-rail-icon {
+  color: inherit;
+}
+
+.app-notice {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 10px 18px;
+  border-radius: 12px;
+  background: rgba(43, 109, 246, 0.12);
+  border: 1px solid rgba(43, 109, 246, 0.28);
+  color: var(--primary-strong);
+  font-size: 14px;
+  font-weight: 600;
+  max-width: min(92vw, 520px);
+  text-align: center;
+  pointer-events: none;
+  box-shadow: var(--shadow-soft);
 }
 
 .sidebar-nav-label {

@@ -40,6 +40,15 @@ const messages = {
     noMessages: "还没有消息，发一条开始吧。",
     noVisibleMessages: "工具调用已隐藏，当前没有可显示的消息。",
     createRoom: "创建房间",
+    createWorkerBot: "创建成员 Bot",
+    createWorkerBotSubtitle: "在本地创建 Worker（PicoClaw gateway），随后可在「邀请成员」中将其加入房间。",
+    workerBotName: "名称",
+    workerBotNamePlaceholder: "例如：researcher",
+    workerBotDescription: "说明（可选）",
+    workerBotDescriptionPlaceholder: "简要说明该成员的职责",
+    workerBotModelId: "模型 ID（可选）",
+    workerBotModelIdPlaceholder: "留空则使用配置中的默认模型",
+    workerBotCreatedHint: "成员 Bot 已创建，可在「邀请成员」中加入房间。",
     deleteRoom: "删除房间",
     conversationLabel: "房间",
     participants: "成员",
@@ -111,6 +120,15 @@ const messages = {
     noMessages: "No messages yet. Start this room.",
     noVisibleMessages: "Tool calls are hidden, and there are no visible messages in this room.",
     createRoom: "New Room",
+    createWorkerBot: "Create member bot",
+    createWorkerBotSubtitle: "Create a Worker (PicoClaw gateway). Then use Invite to add it to a room.",
+    workerBotName: "Name",
+    workerBotNamePlaceholder: "e.g. researcher",
+    workerBotDescription: "Description (optional)",
+    workerBotDescriptionPlaceholder: "What this member is responsible for",
+    workerBotModelId: "Model ID (optional)",
+    workerBotModelIdPlaceholder: "Leave empty to use the default model from config",
+    workerBotCreatedHint: "Member bot created. Use Invite members to add it to a room.",
     deleteRoom: "Delete Room",
     conversationLabel: "Room",
     participants: "participants",
@@ -376,6 +394,31 @@ function RoomsIcon() {
   `;
 }
 
+function WorkerBotIcon() {
+  return html`
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="10" fill="#e6ebf3" />
+      <path
+        d="M9.5 9.25h5a1.25 1.25 0 0 1 1.25 1.25v1.1a3.25 3.25 0 0 1-6.5 0v-1.1a1.25 1.25 0 0 1 1.25-1.25Z"
+        fill="none"
+        stroke="#1f2937"
+        stroke-width="1.5"
+        stroke-linejoin="round"
+      />
+      <circle cx="9.75" cy="11.2" r="0.65" fill="#1f2937" />
+      <circle cx="14.25" cy="11.2" r="0.65" fill="#1f2937" />
+      <path
+        d="M8.75 15.25h6.5"
+        fill="none"
+        stroke="#1f2937"
+        stroke-linecap="round"
+        stroke-width="1.4"
+      />
+      <path d="M12 7.15v1.35" fill="none" stroke="#1f2937" stroke-linecap="round" stroke-width="1.4" />
+    </svg>
+  `;
+}
+
 function App() {
   const [locale, setLocale] = useState(() => detectInitialLocale());
   const [showToolCalls, setShowToolCalls] = useState(() => {
@@ -392,8 +435,14 @@ function App() {
   const [composerSelectionStart, setComposerSelectionStart] = useState(0);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [showCreateRoom, setShowCreateRoom] = useState(false);
+  const [showCreateBot, setShowCreateBot] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showMemberList, setShowMemberList] = useState(false);
+  const [workerBotName, setWorkerBotName] = useState("");
+  const [workerBotDescription, setWorkerBotDescription] = useState("");
+  const [workerBotModelId, setWorkerBotModelId] = useState("");
+  const [createBotBusy, setCreateBotBusy] = useState(false);
+  const [appNotice, setAppNotice] = useState("");
   const [roomTitle, setRoomTitle] = useState("");
   const [roomDescription, setRoomDescription] = useState("");
   const [roomMemberIDs, setRoomMemberIDs] = useState([]);
@@ -510,6 +559,16 @@ function App() {
   }, [showInvite]);
 
   useEffect(() => {
+    if (!showCreateBot) {
+      setWorkerBotName("");
+      setWorkerBotDescription("");
+      setWorkerBotModelId("");
+      setSubmitError("");
+      setCreateBotBusy(false);
+    }
+  }, [showCreateBot]);
+
+  useEffect(() => {
     setShowMemberList(false);
   }, [activeConversationId]);
 
@@ -611,6 +670,52 @@ function App() {
     setShowInvite(false);
   }
 
+  async function refreshBootstrap() {
+    const resp = await fetch("/api/v1/bootstrap");
+    if (!resp.ok) {
+      throw new Error(await resp.text());
+    }
+    const payload = await resp.json();
+    setData(normalizeIMData(payload));
+  }
+
+  async function createWorkerBot() {
+    const name = workerBotName.trim();
+    if (!name || !data) {
+      return;
+    }
+    setSubmitError("");
+    setCreateBotBusy(true);
+    try {
+      const body = {
+        name,
+        description: workerBotDescription.trim(),
+        role: "worker",
+        channel: "csgclaw",
+      };
+      if (workerBotModelId.trim()) {
+        body.model_id = workerBotModelId.trim();
+      }
+      const resp = await fetch("/api/v1/bots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        setSubmitError(localizeError(await resp.text(), t));
+        return;
+      }
+      await refreshBootstrap();
+      setShowCreateBot(false);
+      setAppNotice(t("workerBotCreatedHint"));
+      window.setTimeout(() => setAppNotice(""), 5000);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreateBotBusy(false);
+    }
+  }
+
   async function deleteRoom(roomID) {
     if (!data || !roomID) {
       return;
@@ -702,6 +807,9 @@ function App() {
   return html`
     <${React.Fragment}>
       <div className=${`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+        ${appNotice
+          ? html`<div className="app-notice" role="status">${appNotice}</div>`
+          : null}
         <aside className=${`sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
           <div className="sidebar-header">
             <div className="sidebar-brand-row">
@@ -748,6 +856,15 @@ function App() {
                 >
                   <span className="sidebar-nav-icon" aria-hidden="true"><${RoomPlusIcon} /></span>
                   <span className="sidebar-nav-label">${t("createRoom")}</span>
+                </button>
+                <button
+                  className="sidebar-nav-button"
+                  aria-label=${t("createWorkerBot")}
+                  title=${t("createWorkerBot")}
+                  onClick=${() => setShowCreateBot(true)}
+                >
+                  <span className="sidebar-nav-icon" aria-hidden="true"><${WorkerBotIcon} /></span>
+                  <span className="sidebar-nav-label">${t("createWorkerBot")}</span>
                 </button>
                 <button
                   className="sidebar-nav-button active"
@@ -798,6 +915,14 @@ function App() {
                     onClick=${() => setShowCreateRoom(true)}
                   >
                     <span className="sidebar-rail-icon" aria-hidden="true"><${RoomPlusIcon} /></span>
+                  </button>
+                  <button
+                    className="sidebar-rail-button"
+                    aria-label=${t("createWorkerBot")}
+                    title=${t("createWorkerBot")}
+                    onClick=${() => setShowCreateBot(true)}
+                  >
+                    <span className="sidebar-rail-icon" aria-hidden="true"><${WorkerBotIcon} /></span>
                   </button>
                   <button
                     className="sidebar-rail-button active"
@@ -1019,6 +1144,60 @@ function App() {
                 <div className="modal-actions">
                   <button className="secondary-button" onClick=${() => setShowCreateRoom(false)}>${t("cancel")}</button>
                   <button className="send-button" disabled=${!roomTitle.trim()} onClick=${createRoom}>${t("create")}</button>
+                </div>
+              </div>
+            </div>
+          `
+        : null}
+
+      ${showCreateBot
+        ? html`
+            <div className="modal-backdrop" onClick=${() => !createBotBusy && setShowCreateBot(false)}>
+              <div className="modal-card" onClick=${(event) => event.stopPropagation()}>
+                <div className="modal-header">
+                  <div>
+                    <div className="modal-title">${t("createWorkerBot")}</div>
+                    <div className="modal-subtitle">${t("createWorkerBotSubtitle")}</div>
+                  </div>
+                  <button className="modal-close" disabled=${createBotBusy} onClick=${() => setShowCreateBot(false)}>${t("close")}</button>
+                </div>
+                <label className="field">
+                  <span>${t("workerBotName")}</span>
+                  <input
+                    value=${workerBotName}
+                    onInput=${(event) => setWorkerBotName(event.target.value)}
+                    placeholder=${t("workerBotNamePlaceholder")}
+                    disabled=${createBotBusy}
+                  />
+                </label>
+                <label className="field">
+                  <span>${t("workerBotDescription")}</span>
+                  <textarea
+                    value=${workerBotDescription}
+                    onInput=${(event) => setWorkerBotDescription(event.target.value)}
+                    placeholder=${t("workerBotDescriptionPlaceholder")}
+                    disabled=${createBotBusy}
+                  />
+                </label>
+                <label className="field">
+                  <span>${t("workerBotModelId")}</span>
+                  <input
+                    value=${workerBotModelId}
+                    onInput=${(event) => setWorkerBotModelId(event.target.value)}
+                    placeholder=${t("workerBotModelIdPlaceholder")}
+                    disabled=${createBotBusy}
+                  />
+                </label>
+                ${submitError ? html`<div className="form-error">${submitError}</div>` : null}
+                <div className="modal-actions">
+                  <button className="secondary-button" disabled=${createBotBusy} onClick=${() => setShowCreateBot(false)}>${t("cancel")}</button>
+                  <button
+                    className="send-button"
+                    disabled=${!workerBotName.trim() || createBotBusy}
+                    onClick=${createWorkerBot}
+                  >
+                    ${t("create")}
+                  </button>
                 </div>
               </div>
             </div>
