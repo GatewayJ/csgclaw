@@ -134,12 +134,14 @@ func updateCSGClawChannel(cfg map[string]any, botID string, server config.Server
 }
 
 func resolveManagerBaseURL(server config.ServerConfig) string {
+	// Prefer explicit advertise URL so microVM guests (e.g. libkrun 192.168.127.0/24) can reach
+	// the host; auto-detected LAN IPs are often unroutable from the guest network namespace.
+	if trimmed := strings.TrimSpace(server.AdvertiseBaseURL); trimmed != "" {
+		return strings.TrimRight(trimmed, "/")
+	}
 	port := config.ListenPort(server.ListenAddr)
 	if ip := localIPv4Resolver(); ip != "" {
 		return fmt.Sprintf("http://%s:%s", ip, port)
-	}
-	if server.AdvertiseBaseURL != "" {
-		return strings.TrimRight(server.AdvertiseBaseURL, "/")
 	}
 	return ""
 }

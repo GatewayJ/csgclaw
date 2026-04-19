@@ -28,6 +28,9 @@ func ensureAgentWorkspace(agentName, template string) (string, error) {
 	if strings.TrimSpace(template) == "" {
 		return "", fmt.Errorf("workspace template is required")
 	}
+	if err := migrateLegacyWorkspaceDirIfNeeded(agentName, hostRoot); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(hostRoot, 0o755); err != nil {
 		return "", fmt.Errorf("create agent workspace dir: %w", err)
 	}
@@ -38,11 +41,33 @@ func ensureAgentWorkspace(agentName, template string) (string, error) {
 }
 
 func agentWorkspaceRoot(agentName string) (string, error) {
-	agentHome, err := agentHomeDir(agentName)
+	hostPicoRoot, err := agentPicoClawRoot(agentName)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(agentHome, hostWorkspaceDir), nil
+	return filepath.Join(hostPicoRoot, hostWorkspaceDir), nil
+}
+
+// migrateLegacyWorkspaceDirIfNeeded moves ~/.csgclaw/agents/<name>/workspace to
+// ~/.csgclaw/agents/<name>/.picoclaw/workspace when the latter does not exist yet.
+func migrateLegacyWorkspaceDirIfNeeded(agentName, newRoot string) error {
+	agentHome, err := agentHomeDir(agentName)
+	if err != nil {
+		return err
+	}
+	legacyRoot := filepath.Join(agentHome, hostWorkspaceDir)
+	fi, err := os.Stat(newRoot)
+	if err == nil && fi.IsDir() {
+		return nil
+	}
+	leg, err := os.Stat(legacyRoot)
+	if err != nil || !leg.IsDir() {
+		return nil
+	}
+	if err := os.Rename(legacyRoot, newRoot); err != nil {
+		return fmt.Errorf("migrate legacy workspace dir %q -> %q: %w", legacyRoot, newRoot, err)
+	}
+	return nil
 }
 
 func copyEmbeddedWorkspace(template, dstRoot string) error {

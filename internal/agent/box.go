@@ -69,23 +69,29 @@ func (s *Service) gatewayBoxOptions(name, botID string, modelCfg config.ModelCon
 	for key, value := range envVars {
 		opts = append(opts, boxlite.WithEnv(key, value))
 	}
-	//entrypoint, cmd := gatewayStartCommand(managerDebugMode)
+	// Pair with PicoClaw docker/Dockerfile: ENTRYPOINT ["/sbin/tini","--"] CMD ["picoclaw","gateway","-d"].
+	// Override explicitly so images with ENTRYPOINT ["picoclaw"] (e.g. Dockerfile.full) are not used here.
+	entrypoint, cmd := gatewayStartCommand(false)
 	opts = append(opts,
-		//boxlite.WithEntrypoint(entrypoint...),
-		//boxlite.WithCmd(cmd...),
-		boxlite.WithCmd("/bin/sh", "-c", "/usr/local/bin/picoclaw gateway -d 1>~/.picoclaw/gateway.log 2>/dev/null"),
-		//boxlite.WithCmd("sleep", "infinity"),
+		boxlite.WithEntrypoint(entrypoint...),
+		boxlite.WithCmd(cmd...),
 	)
 
-	hostWorkspaceRoot, err := ensureAgentWorkspace(name, workspaceTemplateForAgent(name, botID))
+	if _, err := ensureAgentPicoClawConfig(name, botID, s.server, modelCfg); err != nil {
+		return nil, err
+	}
+
+	if _, err := ensureAgentWorkspace(name, workspaceTemplateForAgent(name, botID)); err != nil {
+		return nil, err
+	}
+	if _, err := ensureAgentProjectsRoot(); err != nil {
+		return nil, err
+	}
+	agentHome, err := agentHomeDir(name)
 	if err != nil {
 		return nil, err
 	}
-	projectsRoot, err := ensureAgentProjectsRoot()
-	if err != nil {
-		return nil, err
-	}
-	for _, mount := range gatewayVolumeMounts(hostWorkspaceRoot, projectsRoot) {
+	for _, mount := range gatewayVolumeMounts(agentHome) {
 		opts = append(opts, boxlite.WithVolume(mount.hostPath, mount.guestPath))
 	}
 
@@ -97,17 +103,15 @@ type gatewayVolumeMount struct {
 	guestPath string
 }
 
-func gatewayVolumeMounts(hostWorkspaceRoot, projectsRoot string) []gatewayVolumeMount {
-	return []gatewayVolumeMount{
-		{
-			hostPath:  hostWorkspaceRoot,
-			guestPath: boxWorkspaceDir,
-		},
-		{
-			hostPath:  projectsRoot,
-			guestPath: boxProjectsDir,
-		},
-	}
+// gatewayVolumeMounts uses a single virtio-fs mount so the microVM stays under libkrun's
+// virtio IRQ limit (each extra virtio-fs consumes a guest IRQ line on x86_64).
+// Host layout under ~/.csgclaw/agents/<name>/ mirrors /home/picoclaw (see agentPicoClawRoot /
+// agentWorkspaceRoot / ensureAgentProjectsRoot).
+func gatewayVolumeMounts(agentHome string) []gatewayVolumeMount {
+	return []gatewayVolumeMount{{
+		hostPath:  agentHome,
+		guestPath: "/home/picoclaw",
+	}}
 }
 
 func gatewayStartCommand(debug bool) ([]string, []string) {
@@ -122,7 +126,18 @@ func ensureAgentProjectsRoot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve host home dir: %w", err)
 	}
-	hostProjectsRoot := filepath.Join(homeDir, config.AppDirName, hostProjectsDir)
+	legacyRoot := filepath.Join(homeDir, config.AppDirName, hostProjectsDir)
+	hostProjectsRoot := filepath.Join(homeDir, config.AppDirName, managerAgentsDirName, ManagerName, hostPicoClawDir, hostWorkspaceDir, hostProjectsDir)
+	if err := os.MkdirAll(filepath.Dir(hostProjectsRoot), 0o755); err != nil {
+		return "", fmt.Errorf("create host projects parent dir: %w", err)
+	}
+	if _, err := os.Stat(hostProjectsRoot); os.IsNotExist(err) {
+		if leg, err2 := os.Stat(legacyRoot); err2 == nil && leg.IsDir() {
+			if err := os.Rename(legacyRoot, hostProjectsRoot); err != nil {
+				return "", fmt.Errorf("migrate legacy projects dir %q -> %q: %w", legacyRoot, hostProjectsRoot, err)
+			}
+		}
+	}
 	if err := os.MkdirAll(hostProjectsRoot, 0o755); err != nil {
 		return "", fmt.Errorf("create host projects dir: %w", err)
 	}

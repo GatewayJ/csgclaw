@@ -1061,7 +1061,7 @@ func TestEnsureAgentProjectsRootUsesHomeProjectsDir(t *testing.T) {
 		t.Fatalf("ensureAgentProjectsRoot() error = %v", err)
 	}
 
-	want := filepath.Join(homeDir, config.AppDirName, hostProjectsDir)
+	want := filepath.Join(homeDir, config.AppDirName, managerAgentsDirName, ManagerName, hostPicoClawDir, hostWorkspaceDir, hostProjectsDir)
 	if got != want {
 		t.Fatalf("ensureAgentProjectsRoot() = %q, want %q", got, want)
 	}
@@ -1169,7 +1169,7 @@ func TestAddFeishuBoxEnvVarsRequiresExactBotIDMatch(t *testing.T) {
 	}
 }
 
-func TestResolveManagerBaseURLPrefersLocalIP(t *testing.T) {
+func TestResolveManagerBaseURLPrefersAdvertiseWhenSet(t *testing.T) {
 	orig := localIPv4Resolver
 	localIPv4Resolver = func() string { return "10.0.0.8" }
 	t.Cleanup(func() {
@@ -1179,6 +1179,24 @@ func TestResolveManagerBaseURLPrefersLocalIP(t *testing.T) {
 	got := resolveManagerBaseURL(config.ServerConfig{
 		ListenAddr:       "0.0.0.0:19090",
 		AdvertiseBaseURL: "http://127.0.0.1:18080",
+	})
+
+	want := "http://127.0.0.1:18080"
+	if got != want {
+		t.Fatalf("resolveManagerBaseURL() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveManagerBaseURLFallsBackToLocalIP(t *testing.T) {
+	orig := localIPv4Resolver
+	localIPv4Resolver = func() string { return "10.0.0.8" }
+	t.Cleanup(func() {
+		localIPv4Resolver = orig
+	})
+
+	got := resolveManagerBaseURL(config.ServerConfig{
+		ListenAddr:       "0.0.0.0:19090",
+		AdvertiseBaseURL: "",
 	})
 
 	want := "http://10.0.0.8:19090"
