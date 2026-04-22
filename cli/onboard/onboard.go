@@ -57,6 +57,7 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 	apiKey := fs.String("api-key", "", "LLM provider API key")
 	modelsValue := fs.String("models", "", "comma-separated LLM model identifiers")
 	reasoningEffort := fs.String("reasoning-effort", "", "optional upstream reasoning_effort default")
+	sandboxProvider := fs.String("sandbox-provider", "", "sandbox provider for manager/worker: boxlite-sdk, boxlite-cli, or csghub")
 	managerImage := fs.String("manager-image", "", "bootstrap manager image")
 	debianRegistries := fs.String("debian-registries", "", "comma-separated OCI registries used for debian:bookworm-slim pulls (persisted to config)")
 	forceRecreateManager := fs.Bool("force-recreate-manager", false, "remove and recreate the bootstrap manager box")
@@ -110,6 +111,9 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 	syncConfigWithLLM(&cfg, llmCfg)
 	if *managerImage != "" {
 		cfg.Bootstrap.ManagerImage = *managerImage
+	}
+	if strings.TrimSpace(*sandboxProvider) != "" {
+		cfg.Sandbox.Provider = strings.TrimSpace(*sandboxProvider)
 	}
 	if strings.TrimSpace(*debianRegistries) != "" {
 		cfg.Sandbox.DebianRegistries = parseRegistriesFlag(*debianRegistries)
