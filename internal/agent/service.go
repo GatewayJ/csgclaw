@@ -373,7 +373,22 @@ func (s *Service) bootstrapManagerBoxIDOrName() string {
 			return boxID
 		}
 	}
-	return ManagerName
+	return sandboxManagerIdentifier(ManagerName)
+}
+
+func sandboxManagerIdentifier(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = ManagerName
+	}
+	prefix := strings.TrimSpace(os.Getenv("CSGCLAW_NAME"))
+	if prefix == "" {
+		return name
+	}
+	if strings.HasPrefix(name, prefix+"-") {
+		return name
+	}
+	return prefix + "-" + name
 }
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (Agent, error) {

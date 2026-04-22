@@ -219,6 +219,67 @@ func TestRuntimeCreateStartsAndWaitsHealthWhenNotRunning(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateStartsWhenDeployingThenWaitsForRunning(t *testing.T) {
+	var startCalls, getCalls int
+	var healthChecked bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sandboxes":
+			_, _ = w.Write([]byte(`{
+				"spec": {"sandbox_name":"worker-1","image":"img:1"},
+				"state": {"status":"deploying","created_at":"2026-04-22T00:00:00Z"}
+			}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/sandboxes/worker-1/status/start":
+			startCalls++
+			_, _ = w.Write([]byte(`{
+				"spec": {"sandbox_name":"worker-1","image":"img:1"},
+				"state": {"status":"starting","created_at":"2026-04-22T00:00:00Z"}
+			}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sandboxes/worker-1":
+			getCalls++
+			if getCalls == 1 {
+				_, _ = w.Write([]byte(`{
+					"spec": {"sandbox_name":"worker-1","image":"img:1"},
+					"state": {"status":"deploying","created_at":"2026-04-22T00:00:00Z"}
+				}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{
+				"spec": {"sandbox_name":"worker-1","image":"img:1"},
+				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
+			}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
+			healthChecked = true
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	setRequiredEnv(t, server.URL)
+
+	rtAny, err := NewProvider().Open(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	_, err = rtAny.(*Runtime).Create(context.Background(), sandbox.CreateSpec{
+		Image: "img:1",
+		Name:  "worker-1",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if startCalls != 1 {
+		t.Fatalf("start called = %d, want 1", startCalls)
+	}
+	if getCalls < 1 {
+		t.Fatalf("polling get count = %d, want >=1", getCalls)
+	}
+	if !healthChecked {
+		t.Fatal("Create() did not wait for runtime health")
+	}
+}
+
 func TestRuntimeCreateRejectsMountOutsidePVCPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -372,5 +433,37 @@ func TestParseDurationEnvSupportsSeconds(t *testing.T) {
 	}
 	if got != 12*time.Second {
 		t.Fatalf("parseDurationEnv() = %v, want %v", got, 12*time.Second)
+	}
+}
+
+func TestStartSandboxIdempotentAcceptsDuplicateStartDeployingState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/sandboxes/worker-1/status/start":
+			w.WriteHeader(http.StatusBadRequest)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sandboxes/worker-1":
+			_, _ = w.Write([]byte(`{
+				"spec": {"sandbox_name":"worker-1","image":"img:1"},
+				"state": {"status":"deploying","created_at":"2026-04-22T00:00:00Z"}
+			}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	setRequiredEnv(t, server.URL)
+
+	rtAny, err := NewProvider().Open(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	runtime := rtAny.(*Runtime)
+
+	resp, err := runtime.startSandboxIdempotent(context.Background(), "worker-1")
+	if err != nil {
+		t.Fatalf("startSandboxIdempotent() error = %v", err)
+	}
+	if got := strings.TrimSpace(resp.State.Status); got != "deploying" {
+		t.Fatalf("startSandboxIdempotent() status = %q, want %q", got, "deploying")
 	}
 }

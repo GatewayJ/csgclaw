@@ -231,16 +231,29 @@ func (c *Client) StreamExecute(ctx context.Context, sandboxName, command string,
 // RuntimeHealth probes the sandbox-runtime root through the gateway.
 func (c *Client) RuntimeHealth(ctx context.Context, sandboxName string) error {
 	url := c.cfg.aigatewayBase() + "/v1/sandboxes/" + sandboxName + "/?port=8888"
+	if c.logger != nil {
+		c.logger.Infof("[sandbox] start csg-sandbox-health method=%s trace=%s url=%s", http.MethodGet, strings.TrimSpace(sandboxName), url)
+	}
+	start := time.Now()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
+		if c.logger != nil {
+			c.logger.Errorf("[sandbox] build csg-sandbox-health request failed trace=%s url=%s: %v", sandboxName, url, err)
+		}
 		return fmt.Errorf("sandbox: build health request: %w", err)
 	}
 	c.setAuthHeader(req)
 	resp, err := c.doWithTimeout(req, DefaultTimeout)
 	if err != nil {
+		if c.logger != nil {
+			c.logger.Errorf("[sandbox] csg-sandbox-health transport failed trace=%s url=%s: %v", sandboxName, url, err)
+		}
 		return &TransportError{URL: url, Cause: err}
 	}
 	defer resp.Body.Close()
+	if c.logger != nil {
+		c.logger.Infof("[sandbox] response csg-sandbox-health status=%d trace=%s url=%s elapsed=%s", resp.StatusCode, strings.TrimSpace(sandboxName), url, time.Since(start))
+	}
 	if resp.StatusCode != http.StatusOK {
 		return &HTTPError{StatusCode: resp.StatusCode, URL: url, Detail: readErrorBody(resp)}
 	}
@@ -375,8 +388,9 @@ func (c *Client) rawJSON(ctx context.Context, r rawRequest) ([]byte, error) {
 
 func (c *Client) rawJSONWithTimeout(ctx context.Context, r rawRequest, timeout time.Duration) ([]byte, error) {
 	if c.logger != nil {
-		c.logger.Infof("[sandbox] %s trace=%s url=%s", r.span, r.trace, r.url)
+		c.logger.Infof("[sandbox] start %s method=%s trace=%s url=%s", r.span, r.method, r.trace, r.url)
 	}
+	start := time.Now()
 
 	var body io.Reader
 	if len(r.body) > 0 {
@@ -390,22 +404,40 @@ func (c *Client) rawJSONWithTimeout(ctx context.Context, r rawRequest, timeout t
 
 	resp, err := c.doWithTimeout(req, timeout)
 	if err != nil {
+		if c.logger != nil {
+			c.logger.Errorf("[sandbox] %s transport failed method=%s trace=%s url=%s: %v", r.span, r.method, r.trace, r.url, err)
+		}
 		return nil, &TransportError{URL: r.url, Cause: err}
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if c.logger != nil {
+			c.logger.Errorf("[sandbox] %s read response failed method=%s trace=%s url=%s: %v", r.span, r.method, r.trace, r.url, err)
+		}
 		return nil, &TransportError{URL: r.url, Cause: err}
 	}
+	elapsed := time.Since(start)
 
 	if !containsInt(r.success, resp.StatusCode) {
 		detail := decodeErrorBody(raw)
 		if c.logger != nil {
-			c.logger.Errorf("[sandbox] %s HTTP %d trace=%s url=%s body=%s",
-				r.span, resp.StatusCode, r.trace, r.url, truncate(detail, 2000))
+			responseBody := sanitizeJSONForLogs(truncate(string(raw), 3000))
+			c.logger.Errorf("[sandbox] response %s status=%d method=%s trace=%s url=%s elapsed=%s body=%s",
+				r.span, resp.StatusCode, r.method, r.trace, r.url, time.Since(start), responseBody)
 		}
 		return nil, &HTTPError{StatusCode: resp.StatusCode, URL: r.url, Detail: detail}
+	}
+	if c.logger != nil {
+		responseBody := truncate(string(raw), 3000)
+		if r.span == "csg-sandbox-get" {
+			c.logger.Infof("[sandbox] response %s status=%d method=%s trace=%s url=%s elapsed=%s body=%s", r.span, resp.StatusCode, r.method, r.trace, r.url, elapsed, sanitizeJSONForLogs(responseBody))
+		} else if r.span == "csg-sandbox-start" {
+			c.logger.Infof("[sandbox] response %s status=%d method=%s trace=%s url=%s elapsed=%s body=%s", r.span, resp.StatusCode, r.method, r.trace, r.url, elapsed, sanitizeJSONForLogs(responseBody))
+		} else {
+			c.logger.Infof("[sandbox] response %s status=%d method=%s trace=%s url=%s elapsed=%s", r.span, resp.StatusCode, r.method, r.trace, r.url, elapsed)
+		}
 	}
 	return raw, nil
 }
@@ -507,4 +539,47 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+func sanitizeJSONForLogs(raw string) string {
+	var root any
+	if err := json.Unmarshal([]byte(raw), &root); err != nil {
+		return raw
+	}
+	sanitizeForLog(&root)
+	out, err := json.Marshal(root)
+	if err != nil {
+		return raw
+	}
+	return string(out)
+}
+
+func sanitizeForLog(v any) any {
+	switch typed := v.(type) {
+	case map[string]any:
+		for key, value := range typed {
+			if shouldRedactKey(key) {
+				typed[key] = "<redacted>"
+				continue
+			}
+			typed[key] = sanitizeForLog(value)
+		}
+	case []any:
+		for i, item := range typed {
+			typed[i] = sanitizeForLog(item)
+		}
+	case string:
+		return typed
+	}
+	return v
+}
+
+func shouldRedactKey(key string) bool {
+	lk := strings.ToLower(key)
+	return strings.Contains(lk, "token") ||
+		strings.Contains(lk, "secret") ||
+		strings.Contains(lk, "api_key") ||
+		strings.Contains(lk, "access_token") ||
+		strings.Contains(lk, "password") ||
+		strings.Contains(lk, "authorization")
 }

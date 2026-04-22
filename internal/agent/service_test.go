@@ -1279,6 +1279,94 @@ func TestLookupBootstrapManagerUsesPerAgentHome(t *testing.T) {
 	}
 }
 
+func TestLookupBootstrapManagerUsesStoredIDWhenConfigured(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	var lookedUp []string
+	testEnsureRuntimeAtHomeHook = func(_ *Service, homeDir string) (sandbox.Runtime, error) {
+		if homeDir == "" {
+			t.Fatalf("ensureRuntimeAtHome() homeDir = %q, want non-empty", homeDir)
+		}
+		return &fakeRuntime{}, nil
+	}
+	testGetBoxHook = func(_ *Service, _ context.Context, _ sandbox.Runtime, idOrName string) (sandbox.Instance, error) {
+		lookedUp = append(lookedUp, idOrName)
+		return nil, fmt.Errorf("%w: missing", sandbox.ErrNotFound)
+	}
+	defer func() {
+		testEnsureRuntimeAtHomeHook = nil
+		testGetBoxHook = nil
+	}()
+
+	svc, err := NewService(config.ModelConfig{}, config.ServerConfig{}, "", "")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents[ManagerUserID] = Agent{
+		ID:     ManagerUserID,
+		Name:   ManagerName,
+		Role:   RoleManager,
+		BoxID:  "box-stale",
+		Status: "running",
+	}
+
+	_, _, err = svc.lookupBootstrapManager(context.Background())
+	if err != nil {
+		t.Fatalf("lookupBootstrapManager() error = %v", err)
+	}
+	if len(lookedUp) != 1 {
+		t.Fatalf("lookupBootstrapManager() called times = %d, want %d", len(lookedUp), 1)
+	}
+	if lookedUp[0] != "box-stale" {
+		t.Fatalf("lookupBootstrapManager() first lookup = %q, want %q", lookedUp[0], "box-stale")
+	}
+}
+
+func TestLookupBootstrapManagerUsesCSGCLAWNameWhenNoStoredID(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CSGCLAW_NAME", "tenant-a")
+
+	var lookedUp []string
+	testEnsureRuntimeAtHomeHook = func(_ *Service, homeDir string) (sandbox.Runtime, error) {
+		if homeDir == "" {
+			t.Fatalf("ensureRuntimeAtHome() homeDir = %q, want non-empty", homeDir)
+		}
+		return &fakeRuntime{}, nil
+	}
+	testGetBoxHook = func(_ *Service, _ context.Context, _ sandbox.Runtime, idOrName string) (sandbox.Instance, error) {
+		lookedUp = append(lookedUp, idOrName)
+		return nil, fmt.Errorf("%w: missing", sandbox.ErrNotFound)
+	}
+	defer func() {
+		testEnsureRuntimeAtHomeHook = nil
+		testGetBoxHook = nil
+	}()
+
+	svc, err := NewService(config.ModelConfig{}, config.ServerConfig{}, "", "")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents[ManagerUserID] = Agent{
+		ID:     ManagerUserID,
+		Name:   ManagerName,
+		Role:   RoleManager,
+		Status: "running",
+	}
+
+	_, _, err = svc.lookupBootstrapManager(context.Background())
+	if err != nil {
+		t.Fatalf("lookupBootstrapManager() error = %v", err)
+	}
+	if len(lookedUp) != 1 {
+		t.Fatalf("lookupBootstrapManager() called times = %d, want %d", len(lookedUp), 1)
+	}
+	if lookedUp[0] != "tenant-a-manager" {
+		t.Fatalf("lookupBootstrapManager() first lookup = %q, want %q", lookedUp[0], "tenant-a-manager")
+	}
+}
+
 func TestEnsureAgentProjectsRootUsesHomeProjectsDir(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

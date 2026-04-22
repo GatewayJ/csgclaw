@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,6 +126,7 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 	if err := cfg.Save(path); err != nil {
 		return err
 	}
+	log.Printf("onboard: config saved: %s", path)
 
 	agentsPath, err := config.DefaultAgentsPath()
 	if err != nil {
@@ -137,9 +139,11 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 	if err := EnsureIMBootstrapState(imStatePath); err != nil {
 		return err
 	}
+	log.Printf("onboard: ensuring IM bootstrap state at %s", imStatePath)
 	if _, err := CreateManagerBot(ctx, agentsPath, imStatePath, cfg, *forceRecreateManager); err != nil {
 		return err
 	}
+	log.Printf("onboard: bootstrap manager creation completed")
 
 	result := command.ActionResult{
 		Command:        "onboard",

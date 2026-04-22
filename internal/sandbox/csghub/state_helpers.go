@@ -26,6 +26,14 @@ func isSandboxRunning(status string) bool {
 	return false
 }
 
+func isSandboxDeploying(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "deploying")
+}
+
+func shouldStartOnCreate(status string) bool {
+	return !isSandboxRunning(status)
+}
+
 // isSandboxTerminalFailure is the "terminal unhealthy" check used by polling.
 func isSandboxTerminalFailure(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {

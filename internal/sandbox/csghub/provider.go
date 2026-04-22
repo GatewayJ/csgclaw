@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -56,8 +57,11 @@ func (Provider) Open(_ context.Context, _ string) (sandbox.Runtime, error) {
 		return nil, err
 	}
 	return &Runtime{
-		cfg:    cfg,
-		client: csghubsdk.New(cfg.clientCfg),
+		cfg: cfg,
+		client: csghubsdk.New(
+			cfg.clientCfg,
+			csghubsdk.WithLogger(runtimeLogger{}),
+		),
 	}, nil
 }
 
@@ -67,6 +71,16 @@ var _ sandbox.Provider = Provider{}
 type Runtime struct {
 	cfg    runtimeConfig
 	client *csghubsdk.Client
+}
+
+type runtimeLogger struct{}
+
+func (runtimeLogger) Infof(format string, args ...any) {
+	log.Printf("[csghub-runtime] "+format, args...)
+}
+
+func (runtimeLogger) Errorf(format string, args ...any) {
+	log.Printf("[csghub-runtime] "+format, args...)
 }
 
 var _ sandbox.Runtime = (*Runtime)(nil)
@@ -95,20 +109,28 @@ func (r *Runtime) Create(ctx context.Context, spec sandbox.CreateSpec) (sandbox.
 		}
 	}
 
-	started, startErr := r.startSandboxIdempotent(ctx, req.SandboxName)
-	if startErr != nil {
-		return nil, startErr
-	}
-	if started != nil {
-		resp = started
-	}
-
 	if !isSandboxRunning(resp.State.Status) {
-		resp, err = r.waitForRunning(ctx, req.SandboxName)
-		if err != nil {
-			return nil, err
+		if isSandboxDeploying(resp.State.Status) {
+			// Deploying indicates a previously created sandbox needs an explicit
+			// start trigger before polling until running.
+		}
+		if shouldStartOnCreate(resp.State.Status) {
+			started, startErr := r.startSandboxIdempotent(ctx, req.SandboxName)
+			if startErr != nil {
+				return nil, startErr
+			}
+			if started != nil {
+				resp = started
+			}
+			if !isSandboxRunning(resp.State.Status) {
+				resp, err = r.waitForRunning(ctx, req.SandboxName)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
+
 	if err := r.waitForRuntimeHealth(ctx, req.SandboxName); err != nil {
 		return nil, err
 	}
@@ -228,8 +250,11 @@ func (r *Runtime) waitForRunning(ctx context.Context, sandboxName string) (*csgh
 		resp, err := r.client.Get(waitCtx, sandboxName)
 		if err == nil {
 			lastStatus = strings.TrimSpace(resp.State.Status)
-			if isSandboxRunning(lastStatus) {
+			if isSandboxUpOrComingUp(lastStatus) {
 				return resp, nil
+			}
+			if isSandboxTerminalFailure(lastStatus) {
+				return nil, fmt.Errorf("wait csghub sandbox failed to start: status=%q", lastStatus)
 			}
 		} else if shouldRaiseImmediately(err) {
 			return nil, wrapError("poll csghub sandbox status", err)
