@@ -1,3 +1,6 @@
+//go:build !csghub
+// +build !csghub
+
 package agent
 
 import (
@@ -13,24 +16,6 @@ import (
 	"csgclaw/internal/config"
 	"csgclaw/internal/sandbox"
 )
-
-const (
-	ManagerName        = "manager"
-	ManagerUserID      = "u-manager"
-	managerHostPort    = 18790
-	managerGuestPort   = 18790
-	managerDebugMode   = true
-	hostPicoClawDir    = ".picoclaw"
-	hostWorkspaceDir   = "workspace"
-	hostProjectsDir    = "projects"
-	hostPicoClawConfig = "config.json"
-	hostPicoClawLogs   = "logs"
-	boxPicoClawDir     = "/home/picoclaw/.picoclaw"
-	boxWorkspaceDir    = boxPicoClawDir + "/workspace"
-	boxProjectsDir     = "/home/picoclaw/.picoclaw/workspace/projects"
-)
-
-var localIPv4Resolver = localIPv4
 
 var defaultSandboxProvider sandbox.Provider = unconfiguredSandboxProvider{}
 
@@ -127,7 +112,262 @@ type Service struct {
 	agents       map[string]Agent
 }
 
-type ServiceOption func(*Service) error
+func (s *Service) createWorkerBackend(ctx context.Context, name, id string, model config.ModelConfig) (sandbox.Info, string, error) {
+	rt, err := s.ensureRuntime(name)
+	if err != nil {
+		return sandbox.Info{}, "", err
+	}
+	runtimeHome, err := s.sandboxRuntimeHome(name)
+	if err != nil {
+		return sandbox.Info{}, "", err
+	}
+	defer func() { _ = s.closeRuntime(runtimeHome, rt) }()
+
+	box, info, err := s.createGatewayBox(ctx, rt, s.managerImage, name, id, model)
+	if err != nil {
+		return sandbox.Info{}, "", err
+	}
+	defer func() { _ = s.closeBox(box) }()
+
+	return info, info.ID, nil
+}
+
+func (s *Service) deleteSandboxBackend(ctx context.Context, agent Agent) error {
+	rt, err := s.ensureRuntime(agent.Name)
+	if err != nil {
+		return err
+	}
+	runtimeHome, err := s.sandboxRuntimeHome(agent.Name)
+	if err != nil {
+		return err
+	}
+	// testEnsureRuntimeHook may return (nil, nil) to simulate "no live
+	// runtime, nothing to tear down". Honor that so the registry-only
+	// delete path stays exercisable from tests without a full fake.
+	if rt == nil {
+		return nil
+	}
+	boxIDOrName := strings.TrimSpace(agent.BoxID)
+	if boxIDOrName == "" {
+		boxIDOrName = agent.Name
+	}
+	if _, resolvedKey, resolveErr := s.resolveAgentBox(ctx, rt, agent); resolveErr == nil && strings.TrimSpace(resolvedKey) != "" {
+		boxIDOrName = resolvedKey
+	}
+	if err := s.forceRemoveBox(ctx, rt, boxIDOrName); err != nil && !sandbox.IsNotFound(err) {
+		return fmt.Errorf("remove agent box: %w", err)
+	}
+	_ = s.closeRuntime(runtimeHome, rt)
+	return nil
+}
+
+// postDeleteLockedBackend prunes the per-agent runtime map in case
+// deleteSandboxBackend returned before reaching closeRuntime (e.g. the
+// test-only rt == nil short-circuit) and a stale entry is still
+// cached. closeRuntime already performs this prune atomically on
+// the happy path; this is defensive bookkeeping that mirrors the
+// pre-refactor behavior of Service.Delete.
+func (s *Service) postDeleteLockedBackend(agent Agent) {
+	home, err := s.sandboxRuntimeHome(agent.Name)
+	if err != nil {
+		return
+	}
+	if _, ok := s.runtimes[home]; ok {
+		delete(s.runtimes, home)
+	}
+}
+
+func (s *Service) agentHomeDirBackend(agentName string) (string, error) {
+	return agentHomeDir(agentName)
+}
+
+// ensureManager drives the BoxLite-specific bootstrap flow:
+// lookup via the ManagerName runtime, optional force-recreate
+// (remove box + drop runtime + wipe per-agent home + recreate
+// runtime), create-or-start branching, and background image-pull
+// progress logging. The heavy side-effect lifecycle lives here so
+// common EnsureManager only cares about registry persistence.
+func (s *Service) ensureManagerBackend(ctx context.Context, forceRecreate bool, model config.ModelConfig) (sandbox.Info, string, error) {
+	rt, box, err := s.lookupBootstrapManager(ctx)
+	if err != nil {
+		return sandbox.Info{}, "", err
+	}
+	runtimeHome, err := s.sandboxRuntimeHome(ManagerName)
+	if err != nil {
+		return sandbox.Info{}, "", err
+	}
+	defer func() {
+		_ = s.closeRuntime(runtimeHome, rt)
+	}()
+
+	if forceRecreate {
+		log.Printf("force recreating bootstrap manager box %q", ManagerName)
+		managerBoxIDOrName := s.bootstrapManagerBoxIDOrName()
+		if err := s.forceRemoveBox(ctx, rt, managerBoxIDOrName); err != nil {
+			if sandbox.IsNotFound(err) {
+				log.Printf("bootstrap manager box %q (%q) does not exist yet; continuing", ManagerName, managerBoxIDOrName)
+			} else {
+				return sandbox.Info{}, "", fmt.Errorf("force remove bootstrap manager box %q (%q): %w", ManagerName, managerBoxIDOrName, err)
+			}
+		} else {
+			log.Printf("bootstrap manager box %q (%q) removed", ManagerName, managerBoxIDOrName)
+		}
+		if err := s.closeRuntime(runtimeHome, rt); err != nil {
+			return sandbox.Info{}, "", fmt.Errorf("close bootstrap manager runtime before recreate: %w", err)
+		}
+		rt = nil
+		managerHome, err := agentHomeDir(ManagerName)
+		if err != nil {
+			return sandbox.Info{}, "", err
+		}
+		if err := os.RemoveAll(managerHome); err != nil {
+			return sandbox.Info{}, "", fmt.Errorf("remove bootstrap manager home: %w", err)
+		}
+		rt, err = s.ensureRuntimeAtHome(runtimeHome)
+		if err != nil {
+			return sandbox.Info{}, "", err
+		}
+		box = nil
+	}
+
+	var info sandbox.Info
+	if box == nil {
+		log.Printf("bootstrap manager box %q not found, creating it with image %q", ManagerName, s.managerImage)
+		log.Printf("if the image is not present locally, the first pull may take a while")
+		progressDone := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ticker.C:
+					log.Printf("still creating bootstrap manager box %q with image %q; image download may still be in progress", ManagerName, s.managerImage)
+				}
+			}
+		}()
+		box, info, err = s.createGatewayBox(ctx, rt, s.managerImage, ManagerName, ManagerUserID, model)
+		close(progressDone)
+		if err != nil {
+			return sandbox.Info{}, "", fmt.Errorf("create bootstrap manager box: %w", err)
+		}
+		log.Printf("bootstrap manager box %q created", ManagerName)
+	} else {
+		if err := s.startBox(ctx, box); err != nil {
+			return sandbox.Info{}, "", fmt.Errorf("start bootstrap manager box: %w", err)
+		}
+		info, err = s.boxInfo(ctx, box)
+		if err != nil {
+			return sandbox.Info{}, "", fmt.Errorf("read bootstrap manager box info: %w", err)
+		}
+	}
+	defer func() {
+		_ = s.closeBox(box)
+	}()
+
+	return info, info.ID, nil
+}
+
+// createAgent provisions a non-worker, non-manager role agent via the
+// BoxLite per-agent runtime. An empty image is rejected (BoxLite has
+// no "managed" default image to fall back to, unlike csghub). The
+// returned result intentionally leaves BoxID blank and Info zero so
+// that common Create applies its legacy time.Now()/"running"
+// fallback — this preserves pre-refactor behavior where
+// Service.Create never persisted a BoxID and always stamped
+// Status="running" regardless of sandbox state.
+func (s *Service) createAgentBackend(ctx context.Context, req createAgentRequest) (createAgentResult, error) {
+	image := strings.TrimSpace(req.Image)
+	if image == "" {
+		return createAgentResult{}, fmt.Errorf("image is required")
+	}
+
+	rt, err := s.ensureRuntime(req.Name)
+	if err != nil {
+		return createAgentResult{}, err
+	}
+	runtimeHome, err := s.sandboxRuntimeHome(req.Name)
+	if err != nil {
+		return createAgentResult{}, err
+	}
+	defer func() { _ = s.closeRuntime(runtimeHome, rt) }()
+
+	projectsRoot, err := ensureAgentProjectsRoot()
+	if err != nil {
+		return createAgentResult{}, err
+	}
+	managerBaseURL := resolveManagerBaseURL(s.server)
+	llmBaseURL := llmBridgeBaseURL(managerBaseURL, req.ID)
+	boxSpec := sandbox.CreateSpec{
+		Image:      image,
+		Name:       req.Name,
+		Detach:     true,
+		AutoRemove: false,
+		Mounts: []sandbox.Mount{
+			{HostPath: projectsRoot, GuestPath: boxProjectsDir},
+		},
+		Env: make(map[string]string),
+	}
+	for key, value := range bridgeLLMEnvVars(llmBaseURL, s.server.AccessToken, req.Model.ModelID) {
+		boxSpec.Env[key] = value
+	}
+	box, err := s.createBox(ctx, rt, boxSpec)
+	if err != nil {
+		return createAgentResult{}, fmt.Errorf("create sandbox agent: %w", err)
+	}
+	defer func() { _ = s.closeBox(box) }()
+
+	return createAgentResult{Image: image}, nil
+}
+
+// streamLogs opens a per-agent runtime, resolves the live box, and
+// tails gateway.log via an in-box `tail` exec. The sandbox runtime
+// (for this agent) and the resolved box handle are closed on return
+// so the logs call does not leak resources even when ctx is cancelled
+// mid-stream.
+func (s *Service) streamLogsBackend(ctx context.Context, agent Agent, follow bool, lines int, w io.Writer) error {
+	rt, err := s.ensureRuntime(agent.Name)
+	if err != nil {
+		return err
+	}
+	runtimeHome, err := s.sandboxRuntimeHome(agent.Name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = s.closeRuntime(runtimeHome, rt) }()
+
+	box, resolvedKey, err := s.resolveAgentBox(ctx, rt, agent)
+	if err != nil {
+		if sandbox.IsNotFound(err) {
+			boxIDOrName := strings.TrimSpace(agent.BoxID)
+			if boxIDOrName == "" {
+				boxIDOrName = agent.Name
+			}
+			return fmt.Errorf("agent box %q not found", boxIDOrName)
+		}
+		return err
+	}
+	defer func() { _ = s.closeBox(box) }()
+	if err := s.refreshAgentBoxID(agent, resolvedKey, box); err != nil {
+		return err
+	}
+
+	args := []string{"-n", fmt.Sprintf("%d", lines)}
+	if follow {
+		args = append(args, "-f")
+	}
+	args = append(args, boxPicoClawDir+"/gateway.log")
+
+	exitCode, err := s.runBoxCommand(ctx, box, "tail", args, w)
+	if err != nil {
+		return err
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("tail exited with code %d", exitCode)
+	}
+	return nil
+}
 
 func WithSandboxProvider(provider sandbox.Provider) ServiceOption {
 	return func(s *Service) error {
@@ -150,31 +390,12 @@ func WithSandboxHomeDirName(name string) ServiceOption {
 	}
 }
 
-func NewService(model config.ModelConfig, server config.ServerConfig, managerImage, statePath string, opts ...ServiceOption) (*Service, error) {
-	return NewServiceWithLLM(config.SingleProfileLLM(model), server, managerImage, statePath, opts...)
-}
-
-func NewServiceWithChannels(model config.ModelConfig, server config.ServerConfig, channels config.ChannelsConfig, managerImage, statePath string, opts ...ServiceOption) (*Service, error) {
-	return NewServiceWithLLMAndChannels(config.SingleProfileLLM(model), server, channels, managerImage, statePath, opts...)
-}
-
-func NewServiceWithLLM(llmCfg config.LLMConfig, server config.ServerConfig, managerImage, statePath string, opts ...ServiceOption) (*Service, error) {
-	return NewServiceWithLLMAndChannels(llmCfg, server, config.ChannelsConfig{}, managerImage, statePath, opts...)
-}
-
 func NewServiceWithLLMAndChannels(llmCfg config.LLMConfig, server config.ServerConfig, channels config.ChannelsConfig, managerImage, statePath string, opts ...ServiceOption) (*Service, error) {
 	// agent.Service owns the persisted registry and the live sandbox lifecycle.
 	if managerImage == "" {
 		managerImage = config.DefaultManagerImage
 	}
-	defaultProfile, model, err := llmCfg.Resolve("")
-	if err != nil {
-		defaultProfile = strings.TrimSpace(llmCfg.Normalized().Default)
-		if defaultProfile == "" {
-			defaultProfile = strings.TrimSpace(llmCfg.Normalized().DefaultProfile)
-		}
-		model = config.ModelConfig{}.Resolved()
-	}
+	defaultProfile, model := resolveDefaultProfileAndModel(llmCfg)
 	svc := &Service{
 		model:        model,
 		llm:          llmCfg.Normalized(),
@@ -204,34 +425,6 @@ func NewServiceWithLLMAndChannels(llmCfg config.LLMConfig, server config.ServerC
 	return svc, nil
 }
 
-func cloneChannelsConfig(channels config.ChannelsConfig) config.ChannelsConfig {
-	cloned := config.ChannelsConfig{
-		FeishuAdminOpenID: channels.FeishuAdminOpenID,
-	}
-	if len(channels.Feishu) > 0 {
-		cloned.Feishu = make(map[string]config.FeishuConfig, len(channels.Feishu))
-		for name, feishu := range channels.Feishu {
-			cloned.Feishu[name] = feishu
-		}
-	}
-	return cloned
-}
-
-func EnsureBootstrapState(ctx context.Context, statePath string, server config.ServerConfig, model config.ModelConfig, managerImage string, forceRecreate bool) error {
-	return EnsureBootstrapStateWithLLM(ctx, statePath, server, config.SingleProfileLLM(model), managerImage, forceRecreate)
-}
-
-func EnsureBootstrapStateWithLLM(ctx context.Context, statePath string, server config.ServerConfig, llmCfg config.LLMConfig, managerImage string, forceRecreate bool) error {
-	svc, err := NewServiceWithLLM(llmCfg, server, managerImage, statePath)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = svc.Close()
-	}()
-	return svc.EnsureBootstrapManager(ctx, forceRecreate)
-}
-
 func (svc *Service) EnsureBootstrapManager(ctx context.Context, forceRecreate bool) error {
 	if svc == nil {
 		return nil
@@ -248,119 +441,6 @@ func (svc *Service) EnsureBootstrapManager(ctx context.Context, forceRecreate bo
 	return err
 }
 
-func (s *Service) EnsureManager(ctx context.Context, forceRecreate bool) (Agent, error) {
-	if s == nil {
-		return Agent{}, fmt.Errorf("agent service is required")
-	}
-	defaultProfile, defaultModel, err := s.llm.Resolve("")
-	if err != nil {
-		return Agent{}, err
-	}
-
-	rt, box, err := s.lookupBootstrapManager(ctx)
-	if err != nil {
-		return Agent{}, err
-	}
-	runtimeHome, err := s.sandboxRuntimeHome(ManagerName)
-	if err != nil {
-		return Agent{}, err
-	}
-	defer func() {
-		_ = s.closeRuntime(runtimeHome, rt)
-	}()
-	if forceRecreate {
-		log.Printf("force recreating bootstrap manager box %q", ManagerName)
-		managerBoxIDOrName := s.bootstrapManagerBoxIDOrName()
-		if err := s.forceRemoveBox(ctx, rt, managerBoxIDOrName); err != nil {
-			if sandbox.IsNotFound(err) {
-				log.Printf("bootstrap manager box %q (%q) does not exist yet; continuing", ManagerName, managerBoxIDOrName)
-			} else {
-				return Agent{}, fmt.Errorf("force remove bootstrap manager box %q (%q): %w", ManagerName, managerBoxIDOrName, err)
-			}
-		} else {
-			log.Printf("bootstrap manager box %q (%q) removed", ManagerName, managerBoxIDOrName)
-		}
-		if err := s.closeRuntime(runtimeHome, rt); err != nil {
-			return Agent{}, fmt.Errorf("close bootstrap manager runtime before recreate: %w", err)
-		}
-		rt = nil
-		managerHome, err := agentHomeDir(ManagerName)
-		if err != nil {
-			return Agent{}, err
-		}
-		if err := os.RemoveAll(managerHome); err != nil {
-			return Agent{}, fmt.Errorf("remove bootstrap manager home: %w", err)
-		}
-		rt, err = s.ensureRuntimeAtHome(runtimeHome)
-		if err != nil {
-			return Agent{}, err
-		}
-		box = nil
-	}
-	var info sandbox.Info
-	if box == nil {
-		log.Printf("bootstrap manager box %q not found, creating it with image %q", ManagerName, s.managerImage)
-		log.Printf("if the image is not present locally, the first pull may take a while")
-		progressDone := make(chan struct{})
-		go func() {
-			ticker := time.NewTicker(10 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-progressDone:
-					return
-				case <-ticker.C:
-					log.Printf("still creating bootstrap manager box %q with image %q; image download may still be in progress", ManagerName, s.managerImage)
-				}
-			}
-		}()
-		box, info, err = s.createGatewayBox(ctx, rt, s.managerImage, ManagerName, ManagerUserID, defaultModel)
-		close(progressDone)
-		if err != nil {
-			return Agent{}, fmt.Errorf("create bootstrap manager box: %w", err)
-		}
-		log.Printf("bootstrap manager box %q created", ManagerName)
-	} else {
-		if err := s.startBox(ctx, box); err != nil {
-			return Agent{}, fmt.Errorf("start bootstrap manager box: %w", err)
-		}
-		info, err = s.boxInfo(ctx, box)
-		if err != nil {
-			return Agent{}, fmt.Errorf("read bootstrap manager box info: %w", err)
-		}
-	}
-	defer func() {
-		_ = s.closeBox(box)
-	}()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	manager := Agent{
-		ID:              ManagerUserID,
-		Name:            ManagerName,
-		Image:           s.managerImage,
-		BoxID:           info.ID,
-		Status:          string(info.State),
-		CreatedAt:       info.CreatedAt.UTC(),
-		Profile:         defaultProfile,
-		Provider:        defaultModel.Resolved().Provider,
-		ModelID:         defaultModel.Resolved().ModelID,
-		ReasoningEffort: defaultModel.Resolved().ReasoningEffort,
-		Role:            RoleManager,
-	}
-	for id, a := range s.agents {
-		if isManagerAgent(a) && id != manager.ID {
-			delete(s.agents, id)
-		}
-	}
-	s.agents[manager.ID] = manager
-	if err := s.saveLocked(); err != nil {
-		return Agent{}, err
-	}
-	return *cloneAgent(&manager), nil
-}
-
 func (s *Service) bootstrapManagerBoxIDOrName() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -374,135 +454,6 @@ func (s *Service) bootstrapManagerBoxIDOrName() string {
 		}
 	}
 	return ManagerName
-}
-
-func (s *Service) Create(ctx context.Context, req CreateRequest) (Agent, error) {
-	id := strings.TrimSpace(req.ID)
-	name := strings.TrimSpace(req.Name)
-	description := strings.TrimSpace(req.Description)
-	image := strings.TrimSpace(req.Image)
-	role := normalizeRole(req.Role)
-	if name == "" {
-		return Agent{}, fmt.Errorf("name is required")
-	}
-	if image == "" {
-		return Agent{}, fmt.Errorf("image is required")
-	}
-	if role == RoleManager {
-		return Agent{}, fmt.Errorf("role %q is reserved", role)
-	}
-	if id == "" {
-		id = fmt.Sprintf("%s-%d", role, time.Now().UnixNano())
-	}
-
-	s.mu.RLock()
-	idExists := false
-	if _, ok := s.agents[id]; ok {
-		idExists = true
-	}
-	nameExists := s.hasNameLocked(name)
-	s.mu.RUnlock()
-	if idExists {
-		return Agent{}, fmt.Errorf("agent id %q already exists", id)
-	}
-	if nameExists {
-		return Agent{}, fmt.Errorf("agent name %q already exists", name)
-	}
-
-	rt, err := s.ensureRuntime(name)
-	if err != nil {
-		return Agent{}, err
-	}
-	runtimeHome, err := s.sandboxRuntimeHome(name)
-	if err != nil {
-		return Agent{}, err
-	}
-	defer func() {
-		_ = s.closeRuntime(runtimeHome, rt)
-	}()
-
-	requestedProfile := strings.TrimSpace(req.Profile)
-	if requestedProfile == "" && strings.TrimSpace(req.ModelID) != "" {
-		matchedProfile, _, ok := s.llm.MatchProfile(config.ModelConfig{ModelID: req.ModelID})
-		if !ok {
-			return Agent{}, fmt.Errorf("no llm profile matches model %q", strings.TrimSpace(req.ModelID))
-		}
-		requestedProfile = matchedProfile
-	}
-
-	profileName, resolvedModel, err := s.resolveModelProfile(requestedProfile)
-	if err != nil {
-		return Agent{}, err
-	}
-
-	projectsRoot, err := ensureAgentProjectsRoot()
-	if err != nil {
-		return Agent{}, err
-	}
-	managerBaseURL := resolveManagerBaseURL(s.server)
-	llmBaseURL := llmBridgeBaseURL(managerBaseURL, id)
-	boxSpec := sandbox.CreateSpec{
-		Image:      image,
-		Name:       name,
-		Detach:     true,
-		AutoRemove: false,
-		Mounts: []sandbox.Mount{
-			{HostPath: projectsRoot, GuestPath: boxProjectsDir},
-		},
-		Env: make(map[string]string),
-	}
-	for key, value := range bridgeLLMEnvVars(llmBaseURL, s.server.AccessToken, resolvedModel.ModelID) {
-		boxSpec.Env[key] = value
-	}
-	box, err := s.createBox(ctx, rt, boxSpec)
-	if err != nil {
-		return Agent{}, fmt.Errorf("create sandbox agent: %w", err)
-	}
-	defer func() {
-		_ = s.closeBox(box)
-	}()
-
-	createdAt := req.CreatedAt.UTC()
-	if req.CreatedAt.IsZero() {
-		createdAt = time.Now().UTC()
-	}
-	status := strings.TrimSpace(req.Status)
-	if status == "" {
-		status = "running"
-	}
-	agent := Agent{
-		ID:              id,
-		Name:            name,
-		Description:     description,
-		Image:           image,
-		Role:            role,
-		Status:          status,
-		CreatedAt:       createdAt,
-		Profile:         profileName,
-		Provider:        resolvedModel.Provider,
-		ModelID:         resolvedModel.ModelID,
-		ReasoningEffort: resolvedModel.ReasoningEffort,
-	}
-
-	s.mu.Lock()
-	s.agents[id] = agent
-	err = s.saveLocked()
-	s.mu.Unlock()
-	if err != nil {
-		return Agent{}, err
-	}
-	return agent, nil
-}
-
-func (s *Service) Agent(id string) (Agent, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	a, ok := s.agents[strings.TrimSpace(id)]
-	if !ok {
-		return Agent{}, false
-	}
-	return *cloneAgent(&a), true
 }
 
 func (s *Service) resolveAgentBox(ctx context.Context, rt sandbox.Runtime, got Agent) (sandbox.Instance, string, error) {
@@ -537,7 +488,7 @@ func (s *Service) resolveAgentBox(ctx context.Context, rt sandbox.Runtime, got A
 	return nil, "", fmt.Errorf("agent box %q not found", got.Name)
 }
 
-func (s *Service) refreshAgentBoxID(id string, got Agent, resolvedKey string, box sandbox.Instance) error {
+func (s *Service) refreshAgentBoxID(got Agent, resolvedKey string, box sandbox.Instance) error {
 	if box == nil {
 		return nil
 	}
@@ -553,7 +504,7 @@ func (s *Service) refreshAgentBoxID(id string, got Agent, resolvedKey string, bo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	current, ok := s.agents[id]
+	current, ok := s.agents[got.ID]
 	if !ok {
 		return nil
 	}
@@ -561,238 +512,8 @@ func (s *Service) refreshAgentBoxID(id string, got Agent, resolvedKey string, bo
 		return nil
 	}
 	current.BoxID = info.ID
-	s.agents[id] = current
+	s.agents[got.ID] = current
 	return s.saveLocked()
-}
-
-func (s *Service) Delete(ctx context.Context, id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return fmt.Errorf("agent id is required")
-	}
-
-	s.mu.RLock()
-	existing, ok := s.agents[id]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("agent %q not found", id)
-	}
-	if isManagerAgent(existing) {
-		return fmt.Errorf("agent %q is reserved", id)
-	}
-
-	rt, err := s.ensureRuntime(existing.Name)
-	if err != nil {
-		return err
-	}
-	runtimeHome, err := s.sandboxRuntimeHome(existing.Name)
-	if err != nil {
-		return err
-	}
-	if rt != nil {
-		boxIDOrName := strings.TrimSpace(existing.BoxID)
-		if boxIDOrName == "" {
-			boxIDOrName = existing.Name
-		}
-		if _, resolvedKey, resolveErr := s.resolveAgentBox(ctx, rt, existing); resolveErr == nil && strings.TrimSpace(resolvedKey) != "" {
-			boxIDOrName = resolvedKey
-		}
-		if err := s.forceRemoveBox(ctx, rt, boxIDOrName); err != nil && !sandbox.IsNotFound(err) {
-			return fmt.Errorf("remove agent box: %w", err)
-		}
-		_ = s.closeRuntime(runtimeHome, rt)
-	}
-
-	agentHome, err := agentHomeDir(existing.Name)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(agentHome); err != nil {
-		return fmt.Errorf("remove agent home: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	current, ok := s.agents[id]
-	if !ok {
-		return fmt.Errorf("agent %q not found", id)
-	}
-	delete(s.agents, id)
-	runtimeHome, err = s.sandboxRuntimeHome(current.Name)
-	if err != nil {
-		return err
-	}
-	if rt := s.runtimes[runtimeHome]; rt != nil {
-		delete(s.runtimes, runtimeHome)
-	}
-	return s.saveLocked()
-}
-
-func (s *Service) List() []Agent {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return sortedAgentsFromMap(s.agents)
-}
-
-func (s *Service) CreateWorker(ctx context.Context, req CreateRequest) (Agent, error) {
-	id := strings.TrimSpace(req.ID)
-	name := strings.TrimSpace(req.Name)
-	description := strings.TrimSpace(req.Description)
-	switch {
-	case name == "":
-		return Agent{}, fmt.Errorf("name is required")
-	case strings.EqualFold(name, ManagerName):
-		return Agent{}, fmt.Errorf("name %q is reserved", name)
-	}
-	if id == "" {
-		// id = fmt.Sprintf("%s-%d", RoleWorker, time.Now().UnixNano())
-		id = fmt.Sprintf("u-%s", name)
-	}
-
-	s.mu.RLock()
-	idExists := false
-	if _, ok := s.agents[id]; ok {
-		idExists = true
-	}
-	nameExists := s.hasNameLocked(name)
-	s.mu.RUnlock()
-	if idExists {
-		return Agent{}, fmt.Errorf("agent id %q already exists", id)
-	}
-	if nameExists {
-		return Agent{}, fmt.Errorf("agent name %q already exists", name)
-	}
-
-	rt, err := s.ensureRuntime(name)
-	if err != nil {
-		return Agent{}, err
-	}
-	runtimeHome, err := s.sandboxRuntimeHome(name)
-	if err != nil {
-		return Agent{}, err
-	}
-	defer func() {
-		_ = s.closeRuntime(runtimeHome, rt)
-	}()
-	profileName, resolvedModel, err := s.resolveModelProfile(req.Profile)
-	if err != nil {
-		return Agent{}, err
-	}
-	box, info, err := s.createGatewayBox(ctx, rt, s.managerImage, name, id, resolvedModel)
-	if err != nil {
-		return Agent{}, fmt.Errorf("create worker box: %w", err)
-	}
-	defer func() {
-		_ = s.closeBox(box)
-	}()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.agents[id]; ok {
-		return Agent{}, fmt.Errorf("agent id %q already exists", id)
-	}
-	if s.hasNameLocked(name) {
-		return Agent{}, fmt.Errorf("agent name %q already exists", name)
-	}
-
-	worker := Agent{
-		ID:              id,
-		Name:            name,
-		Image:           s.managerImage,
-		BoxID:           info.ID,
-		Description:     description,
-		Status:          string(info.State),
-		CreatedAt:       info.CreatedAt.UTC(),
-		Profile:         profileName,
-		Provider:        resolvedModel.Provider,
-		ModelID:         resolvedModel.ModelID,
-		ReasoningEffort: resolvedModel.ReasoningEffort,
-		Role:            RoleWorker,
-	}
-	s.agents[worker.ID] = worker
-	if err := s.saveLocked(); err != nil {
-		delete(s.agents, worker.ID)
-		return Agent{}, err
-	}
-	return *cloneAgent(&worker), nil
-}
-
-func (s *Service) ListWorkers() []Agent {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	workers := make(map[string]Agent)
-	for id, a := range s.agents {
-		if a.Role == RoleWorker {
-			workers[id] = a
-		}
-	}
-	return sortedAgentsFromMap(workers)
-}
-
-func (s *Service) StreamLogs(ctx context.Context, id string, follow bool, lines int, w io.Writer) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return fmt.Errorf("agent id is required")
-	}
-	if w == nil {
-		return fmt.Errorf("log writer is required")
-	}
-	if lines <= 0 {
-		lines = 20
-	}
-
-	got, ok := s.Agent(id)
-	if !ok {
-		return fmt.Errorf("agent %q not found", id)
-	}
-
-	rt, err := s.ensureRuntime(got.Name)
-	if err != nil {
-		return err
-	}
-	runtimeHome, err := s.sandboxRuntimeHome(got.Name)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = s.closeRuntime(runtimeHome, rt)
-	}()
-
-	box, resolvedKey, err := s.resolveAgentBox(ctx, rt, got)
-	if err != nil {
-		if sandbox.IsNotFound(err) {
-			boxIDOrName := strings.TrimSpace(got.BoxID)
-			if boxIDOrName == "" {
-				boxIDOrName = got.Name
-			}
-			return fmt.Errorf("agent box %q not found", boxIDOrName)
-		}
-		return err
-	}
-	defer func() {
-		_ = s.closeBox(box)
-	}()
-	if err := s.refreshAgentBoxID(id, got, resolvedKey, box); err != nil {
-		return err
-	}
-
-	args := []string{"-n", fmt.Sprintf("%d", lines)}
-	if follow {
-		args = append(args, "-f")
-	}
-	args = append(args, boxPicoClawDir+"/gateway.log")
-
-	exitCode, err := s.runBoxCommand(ctx, box, "tail", args, w)
-	if err != nil {
-		return err
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("tail exited with code %d", exitCode)
-	}
-	return nil
 }
 
 func (s *Service) Close() error {
@@ -807,13 +528,4 @@ func (s *Service) Close() error {
 		delete(s.runtimes, name)
 	}
 	return closeErr
-}
-
-func (s *Service) hasNameLocked(name string) bool {
-	for _, existing := range s.agents {
-		if strings.EqualFold(existing.Name, name) {
-			return true
-		}
-	}
-	return false
 }

@@ -3,6 +3,7 @@
 # Go build/test artifacts
 .gocache/
 bin/
+bin-csghub/
 dist/
 *.test
 *.out
@@ -19,6 +20,11 @@ manager-data/
 # Editor directories
 .idea/
 .vscode/
-
+.cursor/
 # Vendored native libraries fetched on demand
 third_party/boxlite-go/libboxlite.a
+third_party/boxlite-go/boxlite-c-v0.7.6-linux-x64-gnu/
+
+# Keep local-only deployment docs/scripts out of remote history
+/docker/
+/docs/saas-env-contract.md

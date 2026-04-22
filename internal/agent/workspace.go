@@ -20,11 +20,7 @@ func workspaceTemplateForAgent(name, botID string) string {
 	return workspaceTemplateWorker
 }
 
-func ensureAgentWorkspace(agentName, template string) (string, error) {
-	hostRoot, err := agentWorkspaceRoot(agentName)
-	if err != nil {
-		return "", err
-	}
+func ensureAgentWorkspaceAt(hostRoot, template string) (string, error) {
 	if strings.TrimSpace(template) == "" {
 		return "", fmt.Errorf("workspace template is required")
 	}
@@ -35,14 +31,6 @@ func ensureAgentWorkspace(agentName, template string) (string, error) {
 		return "", err
 	}
 	return hostRoot, nil
-}
-
-func agentWorkspaceRoot(agentName string) (string, error) {
-	agentHome, err := agentHomeDir(agentName)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(agentHome, hostWorkspaceDir), nil
 }
 
 func copyEmbeddedWorkspace(template, dstRoot string) error {

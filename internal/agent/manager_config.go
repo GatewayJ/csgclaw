@@ -4,13 +4,15 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"csgclaw/internal/config"
 )
+
+// managerAgentsDirName is the sub-directory that holds per-agent state under
+// the server's home root (shared between both deployment backends).
 
 const managerAgentsDirName = "agents"
 
@@ -20,15 +22,7 @@ var defaultManagerPicoClawConfig []byte
 //go:embed defaults/manager-security.yml
 var defaultManagerSecurityConfig string
 
-func ensureManagerPicoClawConfig(server config.ServerConfig, model config.ModelConfig) (string, error) {
-	return ensureAgentPicoClawConfig(ManagerName, "u-manager", server, model)
-}
-
-func ensureAgentPicoClawConfig(agentName, botID string, server config.ServerConfig, model config.ModelConfig) (string, error) {
-	hostRoot, err := agentPicoClawRoot(agentName)
-	if err != nil {
-		return "", err
-	}
+func ensureAgentPicoClawConfigAt(hostRoot, botID string, server config.ServerConfig, model config.ModelConfig) (string, error) {
 	if err := os.MkdirAll(filepath.Join(hostRoot, hostPicoClawLogs), 0o755); err != nil {
 		return "", fmt.Errorf("create manager picoclaw logs dir: %w", err)
 	}
@@ -47,22 +41,6 @@ func ensureAgentPicoClawConfig(agentName, botID string, server config.ServerConf
 		return "", fmt.Errorf("write manager security config: %w", err)
 	}
 	return hostRoot, nil
-}
-
-func managerPicoClawRoot() (string, error) {
-	return agentPicoClawRoot(ManagerName)
-}
-
-func agentPicoClawRoot(agentName string) (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve host home dir: %w", err)
-	}
-	return filepath.Join(homeDir, config.AppDirName, managerAgentsDirName, agentName, hostPicoClawDir), nil
-}
-
-func renderManagerPicoClawConfig(server config.ServerConfig, model config.ModelConfig) ([]byte, error) {
-	return renderAgentPicoClawConfig("u-manager", server, model)
 }
 
 func renderAgentPicoClawConfig(botID string, server config.ServerConfig, model config.ModelConfig) ([]byte, error) {
@@ -150,83 +128,6 @@ func updateCSGClawChannel(cfg map[string]any, botID string, server config.Server
 	channel["bot_id"] = botID
 	channel["enabled"] = true
 	return nil
-}
-
-func resolveManagerBaseURL(server config.ServerConfig) string {
-	if server.AdvertiseBaseURL != "" {
-		return strings.TrimRight(server.AdvertiseBaseURL, "/")
-	}
-	port := config.ListenPort(server.ListenAddr)
-	if ip := localIPv4Resolver(); ip != "" {
-		return fmt.Sprintf("http://%s:%s", ip, port)
-	}
-	return ""
-}
-
-func localIPv4() string {
-	if ip := outboundIPv4(); ip != "" {
-		return ip
-	}
-	return interfaceIPv4()
-}
-
-func outboundIPv4() string {
-	conn, err := net.Dial("udp4", "8.8.8.8:80")
-	if err != nil {
-		return ""
-	}
-	defer conn.Close()
-
-	addr, ok := conn.LocalAddr().(*net.UDPAddr)
-	if !ok || addr.IP == nil {
-		return ""
-	}
-	ip := addr.IP.To4()
-	if ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
-		return ""
-	}
-	return ip.String()
-}
-
-func interfaceIPv4() string {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			if ip := ipv4FromAddr(addr); ip != "" {
-				return ip
-			}
-		}
-	}
-	return ""
-}
-
-func ipv4FromAddr(addr net.Addr) string {
-	switch v := addr.(type) {
-	case *net.IPNet:
-		ip := v.IP.To4()
-		if ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
-			return ""
-		}
-		return ip.String()
-	case *net.IPAddr:
-		ip := v.IP.To4()
-		if ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
-			return ""
-		}
-		return ip.String()
-	default:
-		return ""
-	}
 }
 
 func renderManagerSecurityConfig(server config.ServerConfig, model config.ModelConfig) string {

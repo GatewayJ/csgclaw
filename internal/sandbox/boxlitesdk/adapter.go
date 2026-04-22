@@ -1,16 +1,22 @@
-// Package boxlitesdk adapts the BoxLite SDK to the generic sandbox interfaces.
-package boxlitesdk
+//go:build !csghub
+// +build !csghub
+
+// Package boxlite adapts the BoxLite SDK to the generic sandbox interfaces.
+package boxlite
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
+	"strings"
 
 	boxlitesdk "github.com/RussellLuo/boxlite/sdks/go"
 
 	"csgclaw/internal/sandbox"
 )
 
-const providerName = "boxlite-sdk"
+const providerName = "boxlite"
 
 // Provider opens BoxLite-backed sandbox runtimes.
 type Provider struct{}
@@ -88,6 +94,62 @@ func (r *Runtime) Remove(ctx context.Context, idOrName string, opts sandbox.Remo
 	return wrapError("remove boxlite box", err)
 }
 
+// StreamExecute runs a shell command inside the named box and invokes
+// emit once per stdout line. Used by agent.Service to tail per-agent
+// gateway logs without caring which backend hosts the sandbox.
+func (r *Runtime) StreamExecute(ctx context.Context, name, command string, emit func(line string) error) error {
+	if r == nil || r.runtime == nil {
+		return fmt.Errorf("invalid boxlite runtime")
+	}
+	if emit == nil {
+		return fmt.Errorf("emit callback is required")
+	}
+	inst, err := r.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = inst.Close() }()
+	bi, ok := inst.(*Instance)
+	if !ok || bi.box == nil {
+		return fmt.Errorf("invalid boxlite instance")
+	}
+
+	pr, pw := io.Pipe()
+	cmd := bi.box.Command("sh", "-c", command)
+	cmd.Stdout = pw
+
+	errCh := make(chan error, 1)
+	go func() {
+		runErr := cmd.Run(ctx)
+		_ = pw.Close()
+		errCh <- runErr
+	}()
+
+	scanner := bufio.NewScanner(pr)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	var emitErr error
+	for scanner.Scan() {
+		if emitErr = emit(scanner.Text()); emitErr != nil {
+			_ = pr.CloseWithError(emitErr)
+			break
+		}
+	}
+	if scanErr := scanner.Err(); emitErr == nil && scanErr != nil {
+		emitErr = scanErr
+	}
+	runErr := <-errCh
+	if emitErr != nil {
+		return emitErr
+	}
+	if runErr != nil {
+		return wrapError("stream boxlite command", runErr)
+	}
+	if code := cmd.ExitCode(); code != 0 {
+		return fmt.Errorf("boxlite command exited with code %d", code)
+	}
+	return nil
+}
+
 // Close releases the BoxLite runtime handle.
 func (r *Runtime) Close() error {
 	if r == nil || r.runtime == nil {
@@ -162,6 +224,43 @@ func (i *Instance) Close() error {
 	err := i.box.Close()
 	i.box = nil
 	return wrapError("close boxlite box", err)
+}
+
+func boxOptions(spec sandbox.CreateSpec) ([]boxlitesdk.BoxOption, error) {
+	var opts []boxlitesdk.BoxOption
+	if strings.TrimSpace(spec.Name) != "" {
+		opts = append(opts, boxlitesdk.WithName(spec.Name))
+	}
+	opts = append(opts,
+		boxlitesdk.WithDetach(spec.Detach),
+		boxlitesdk.WithAutoRemove(spec.AutoRemove),
+	)
+	for key, value := range spec.Env {
+		if strings.TrimSpace(key) == "" {
+			return nil, fmt.Errorf("invalid sandbox env: key is required")
+		}
+		opts = append(opts, boxlitesdk.WithEnv(key, value))
+	}
+	for _, mount := range spec.Mounts {
+		if strings.TrimSpace(mount.HostPath) == "" {
+			return nil, fmt.Errorf("invalid sandbox mount: host path is required")
+		}
+		if strings.TrimSpace(mount.GuestPath) == "" {
+			return nil, fmt.Errorf("invalid sandbox mount: guest path is required")
+		}
+		if mount.ReadOnly {
+			opts = append(opts, boxlitesdk.WithVolumeReadOnly(mount.HostPath, mount.GuestPath))
+			continue
+		}
+		opts = append(opts, boxlitesdk.WithVolume(mount.HostPath, mount.GuestPath))
+	}
+	if len(spec.Entrypoint) > 0 {
+		opts = append(opts, boxlitesdk.WithEntrypoint(spec.Entrypoint...))
+	}
+	if len(spec.Cmd) > 0 {
+		opts = append(opts, boxlitesdk.WithCmd(spec.Cmd...))
+	}
+	return opts, nil
 }
 
 func boxInfo(info boxlitesdk.BoxInfo) sandbox.Info {
