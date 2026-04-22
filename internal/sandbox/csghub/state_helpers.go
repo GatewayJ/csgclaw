@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"csgclaw/internal/sandbox/csghub/csghubsdk"
+	"csgclaw/internal/sandbox/csghubsdk"
 )
 
 // isSandboxUpOrComingUp reports whether a Hub-reported state means the

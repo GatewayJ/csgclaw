@@ -1,3 +1,5 @@
+//go:build !boxlite_sdk && !csghub
+
 package sandboxproviders
 
 import (
@@ -14,9 +16,9 @@ func TestSupportedProvidersAlwaysIncludeBoxLiteCLI(t *testing.T) {
 	}
 }
 
-func TestSupportedProvidersIncludeCSGHubWithoutBuildTag(t *testing.T) {
+func TestSupportedProvidersExcludeBoxLiteSDKWithoutBuildTag(t *testing.T) {
 	supported := SupportedProviders()
-	if !slices.Contains(supported, config.CSGHubProvider) {
-		t.Fatalf("SupportedProviders() = %v, want %q to be compiled in", supported, config.CSGHubProvider)
+	if slices.Contains(supported, config.BoxLiteSDKProvider) {
+		t.Fatalf("SupportedProviders() = %v, did not expect %q without boxlite_sdk tag", supported, config.BoxLiteSDKProvider)
 	}
 }

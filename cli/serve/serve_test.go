@@ -282,12 +282,11 @@ app_secret = "${FEISHU_APP_SECRET}"
 		"sk-env-secret",
 		"feishu-env-secret",
 	} {
-		if strings.Contains(got, leaked) {
-			t.Fatalf("effective config leaked %q:\n%s", leaked, got)
+			if strings.Contains(got, leaked) {
+				t.Fatalf("effective config leaked %q:\n%s", leaked, got)
+			}
 		}
 	}
-}
-
 func TestSandboxServiceOptionsSupportsConfiguredProvider(t *testing.T) {
 	opts, err := sandboxServiceOptions(config.SandboxConfig{
 		Provider:         config.BoxLiteCLIProvider,

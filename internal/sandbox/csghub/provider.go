@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"csgclaw/internal/sandbox"
-	"csgclaw/internal/sandbox/csghub/csghubsdk"
+	"csgclaw/internal/sandbox/csghubsdk"
 )
 
 const providerName = "csghub"
@@ -38,7 +38,7 @@ type runtimeConfig struct {
 	pollInterval time.Duration
 }
 
-// Provider is the sandbox.Provider implementation for [sandbox].provider = csghub.
+// Provider is the sandbox.Provider entry for csghub-tagged builds.
 type Provider struct{}
 
 func NewProvider() Provider {
