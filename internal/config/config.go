@@ -557,7 +557,7 @@ func isLegacyConfigSection(section string) bool {
 }
 
 func parseStringValue(raw string) string {
-	return expandEnv(parseRawStringValue(raw))
+	return os.ExpandEnv(strings.Trim(strings.TrimSpace(raw), `"`))
 }
 
 func parseBoolValue(raw string) (bool, error) {

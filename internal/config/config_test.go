@@ -140,6 +140,38 @@ models = ["minimax-m2.7"]
 	}
 }
 
+func TestLoadExpandsEnvironmentVariablesInConfigValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	t.Setenv("SANDBOX_PROVIDER", CSGHubProvider)
+
+	content := `[server]
+listen_addr = "127.0.0.1:18080"
+
+[sandbox]
+provider = "${SANDBOX_PROVIDER}"
+
+[models]
+default = "default.minimax-m2.7"
+
+[models.providers.default]
+base_url = "http://127.0.0.1:4000"
+api_key = "sk"
+models = ["minimax-m2.7"]
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.Sandbox.Provider, CSGHubProvider; got != want {
+		t.Fatalf("cfg.Sandbox.Provider = %q, want %q", got, want)
+	}
+}
+
 func TestLoadReadsModelsProviderPool(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
