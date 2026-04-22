@@ -107,6 +107,68 @@ func TestRuntimeCreateBuildsRequestAndMapsMounts(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreatePrefixesSandboxNameWhenCSGCLAWNameProvided(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sandboxes":
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			_, _ = w.Write([]byte(`{
+				"spec": {"sandbox_name":"cluster-a-worker-1","image":"img:1"},
+				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
+			}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/cluster-a-worker-1/":
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	setRequiredEnv(t, server.URL)
+	t.Setenv("CSGCLAW_NAME", "cluster-a")
+
+	rtAny, err := NewProvider().Open(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	_, err = rtAny.(*Runtime).Create(context.Background(), sandbox.CreateSpec{
+		Image: "img:1",
+		Name:  "worker-1",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if gotBody["sandbox_name"] != "cluster-a-worker-1" {
+		t.Fatalf("sandbox_name = %v", gotBody["sandbox_name"])
+	}
+}
+
+func TestRuntimeGetUsesPrefixedSandboxNameWhenCSGCLAWNameProvided(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/sandboxes/cluster-a-worker-1" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"spec": {"sandbox_name":"cluster-a-worker-1","image":"img:1"},
+				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
+			}`))
+			return
+		}
+		t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(server.Close)
+	setRequiredEnv(t, server.URL)
+	t.Setenv("CSGCLAW_NAME", "cluster-a")
+
+	rtAny, err := NewProvider().Open(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	_, err = rtAny.(*Runtime).Get(context.Background(), "worker-1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+}
+
 func TestRuntimeCreateStartsAndWaitsHealthWhenNotRunning(t *testing.T) {
 	var started bool
 	var healthChecked bool
