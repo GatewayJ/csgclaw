@@ -569,7 +569,7 @@ func parseStringValue(raw string) string {
 }
 
 func parseBoolValue(raw string) (bool, error) {
-	value := strings.TrimSpace(expandEnv(parseRawStringValue(raw)))
+	value := strings.TrimSpace(parseStringValue(raw))
 	if value == "" {
 		return false, nil
 	}
