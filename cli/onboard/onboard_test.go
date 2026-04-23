@@ -98,6 +98,95 @@ func TestRunInteractiveDefaultUsesCSGHubLiteModels(t *testing.T) {
 	}
 }
 
+func TestRunCustomStoragePathPersists(t *testing.T) {
+	const storagePath = "/mnt/csgclaw/storage"
+	var gotStoragePath string
+	restore := stubBootstrap(t, func(_ context.Context, _, _ string, cfg config.Config, _ bool) (bot.Bot, error) {
+		gotStoragePath = cfg.Sandbox.StoragePath
+		return bot.Bot{}, nil
+	})
+	defer restore()
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	run := testContext()
+	if err := NewCmd().Run(context.Background(), run, []string{
+		"--provider", "custom",
+		"--base-url", "http://llm.test/v1",
+		"--api-key", "secret",
+		"--models", "gpt-test",
+		"--sandbox-provider", "csghub",
+		"--storage_bash", storagePath,
+	}, command.GlobalOptions{Config: configPath}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if gotStoragePath != storagePath {
+		t.Fatalf("cfg.Sandbox.StoragePath = %q, want %q", gotStoragePath, storagePath)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, fmt.Sprintf(`storage_path = %q`, storagePath)) {
+		t.Fatalf("saved config missing storage path:\n%s", content)
+	}
+}
+
+func TestRunServerFlagsPersist(t *testing.T) {
+	const (
+		listenAddr      = "127.0.0.1:28080"
+		advertiseURL    = "https://example.test/csgclaw"
+		accessTokenTest = "test-token"
+	)
+	var gotServer config.ServerConfig
+	restore := stubBootstrap(t, func(_ context.Context, _, _ string, cfg config.Config, _ bool) (bot.Bot, error) {
+		gotServer = cfg.Server
+		return bot.Bot{}, nil
+	})
+	defer restore()
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	run := testContext()
+	if err := NewCmd().Run(context.Background(), run, []string{
+		"--provider", "custom",
+		"--base-url", "http://llm.test/v1",
+		"--api-key", "secret",
+		"--models", "gpt-test",
+		"--listen-addr", listenAddr,
+		"--advertise-base-url", advertiseURL,
+		"--access-token", accessTokenTest,
+	}, command.GlobalOptions{Config: configPath}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if gotServer.ListenAddr != listenAddr {
+		t.Fatalf("cfg.Server.ListenAddr = %q, want %q", gotServer.ListenAddr, listenAddr)
+	}
+	if gotServer.AdvertiseBaseURL != advertiseURL {
+		t.Fatalf("cfg.Server.AdvertiseBaseURL = %q, want %q", gotServer.AdvertiseBaseURL, advertiseURL)
+	}
+	if gotServer.AccessToken != accessTokenTest {
+		t.Fatalf("cfg.Server.AccessToken = %q, want %q", gotServer.AccessToken, accessTokenTest)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`[server]`,
+		fmt.Sprintf(`listen_addr = %q`, listenAddr),
+		fmt.Sprintf(`advertise_base_url = %q`, advertiseURL),
+		fmt.Sprintf(`access_token = %q`, accessTokenTest),
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("saved config missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func TestSandboxServiceOptionsSupportsConfiguredProvider(t *testing.T) {
 	opts, err := sandboxServiceOptions(config.SandboxConfig{
 		Provider:         config.BoxLiteCLIProvider,
