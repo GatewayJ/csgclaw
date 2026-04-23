@@ -270,15 +270,21 @@ func (s *Service) EnsureManager(ctx context.Context, forceRecreate bool) (Agent,
 	}()
 	if forceRecreate {
 		log.Printf("force recreating bootstrap manager box %q", ManagerName)
-		managerBoxIDOrName := s.bootstrapManagerBoxIDOrName()
-		if err := s.forceRemoveBox(ctx, rt, managerBoxIDOrName); err != nil {
-			if sandbox.IsNotFound(err) {
-				log.Printf("bootstrap manager box %q (%q) does not exist yet; continuing", ManagerName, managerBoxIDOrName)
-			} else {
+		removed := false
+		for _, managerBoxIDOrName := range s.bootstrapManagerLookupKeys() {
+			if err := s.forceRemoveBox(ctx, rt, managerBoxIDOrName); err != nil {
+				if sandbox.IsNotFound(err) {
+					log.Printf("bootstrap manager box %q (%q) does not exist yet; continuing", ManagerName, managerBoxIDOrName)
+					continue
+				}
 				return Agent{}, fmt.Errorf("force remove bootstrap manager box %q (%q): %w", ManagerName, managerBoxIDOrName, err)
 			}
-		} else {
 			log.Printf("bootstrap manager box %q (%q) removed", ManagerName, managerBoxIDOrName)
+			removed = true
+			break
+		}
+		if !removed {
+			log.Printf("bootstrap manager box %q not found under known identifiers; continuing", ManagerName)
 		}
 		if err := s.closeRuntime(runtimeHome, rt); err != nil {
 			return Agent{}, fmt.Errorf("close bootstrap manager runtime before recreate: %w", err)
@@ -374,6 +380,15 @@ func (s *Service) bootstrapManagerBoxIDOrName() string {
 		}
 	}
 	return sandboxManagerIdentifier(ManagerName)
+}
+
+func (s *Service) bootstrapManagerLookupKeys() []string {
+	primary := s.bootstrapManagerBoxIDOrName()
+	keys := []string{primary}
+	if primary != ManagerName {
+		keys = append(keys, ManagerName)
+	}
+	return keys
 }
 
 func sandboxManagerIdentifier(name string) string {

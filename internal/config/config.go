@@ -565,11 +565,11 @@ func isLegacyConfigSection(section string) bool {
 }
 
 func parseStringValue(raw string) string {
-	return os.ExpandEnv(strings.Trim(strings.TrimSpace(raw), `"`))
+	return expandEnv(parseRawStringValue(raw))
 }
 
 func parseBoolValue(raw string) (bool, error) {
-	value := strings.TrimSpace(parseStringValue(raw))
+	value := strings.TrimSpace(expandEnv(parseRawStringValue(raw)))
 	if value == "" {
 		return false, nil
 	}
@@ -669,7 +669,6 @@ func normalizeStringList(values []string) []string {
 	}
 	return out
 }
-
 func expandEnv(value string) string {
 	return os.Expand(value, func(name string) string {
 		return os.Getenv(name)

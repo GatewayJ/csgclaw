@@ -63,13 +63,14 @@ func (s *Service) lookupBootstrapManager(ctx context.Context) (sandbox.Runtime, 
 	if err != nil {
 		return nil, nil, err
 	}
-	key := s.bootstrapManagerBoxIDOrName()
-	box, err := s.getBox(ctx, rt, key)
-	if err == nil {
-		return rt, box, nil
-	}
-	if !sandbox.IsNotFound(err) {
-		return nil, nil, err
+	for _, key := range s.bootstrapManagerLookupKeys() {
+		box, err := s.getBox(ctx, rt, key)
+		if err == nil {
+			return rt, box, nil
+		}
+		if !sandbox.IsNotFound(err) {
+			return nil, nil, err
+		}
 	}
 	return rt, nil, nil
 }

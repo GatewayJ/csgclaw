@@ -1315,11 +1315,14 @@ func TestLookupBootstrapManagerUsesStoredIDWhenConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lookupBootstrapManager() error = %v", err)
 	}
-	if len(lookedUp) != 1 {
-		t.Fatalf("lookupBootstrapManager() called times = %d, want %d", len(lookedUp), 1)
+	if len(lookedUp) != 2 {
+		t.Fatalf("lookupBootstrapManager() called times = %d, want %d", len(lookedUp), 2)
 	}
 	if lookedUp[0] != "box-stale" {
 		t.Fatalf("lookupBootstrapManager() first lookup = %q, want %q", lookedUp[0], "box-stale")
+	}
+	if lookedUp[1] != ManagerName {
+		t.Fatalf("lookupBootstrapManager() second lookup = %q, want %q", lookedUp[1], ManagerName)
 	}
 }
 
@@ -1359,11 +1362,14 @@ func TestLookupBootstrapManagerUsesCSGCLAWNameWhenNoStoredID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lookupBootstrapManager() error = %v", err)
 	}
-	if len(lookedUp) != 1 {
-		t.Fatalf("lookupBootstrapManager() called times = %d, want %d", len(lookedUp), 1)
+	if len(lookedUp) != 2 {
+		t.Fatalf("lookupBootstrapManager() called times = %d, want %d", len(lookedUp), 2)
 	}
 	if lookedUp[0] != "tenant-a-manager" {
 		t.Fatalf("lookupBootstrapManager() first lookup = %q, want %q", lookedUp[0], "tenant-a-manager")
+	}
+	if lookedUp[1] != ManagerName {
+		t.Fatalf("lookupBootstrapManager() second lookup = %q, want %q", lookedUp[1], ManagerName)
 	}
 }
 
