@@ -230,7 +230,7 @@ func (c *Client) StreamExecute(ctx context.Context, sandboxName, command string,
 
 // RuntimeHealth probes the sandbox-runtime root through the gateway.
 func (c *Client) RuntimeHealth(ctx context.Context, sandboxName string) error {
-	url := c.cfg.aigatewayBase() + "/v1/sandboxes/" + sandboxName + "/?port=8888"
+	url := c.cfg.aigatewayBase() + "/v1/sandboxes/" + sandboxName + "?port=8888"
 	if c.logger != nil {
 		c.logger.Infof("[sandbox] start csg-sandbox-health method=%s trace=%s url=%s", http.MethodGet, strings.TrimSpace(sandboxName), url)
 	}

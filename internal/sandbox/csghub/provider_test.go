@@ -107,6 +107,156 @@ func TestRuntimeCreateBuildsRequestAndMapsMounts(t *testing.T) {
 	}
 }
 
+func TestRuntimeOpenWithPVCMountPathOverridesEnvMountPath(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sandboxes":
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			_, _ = w.Write([]byte(`{
+				"spec": {"sandbox_name":"worker-1","image":"img:1"},
+				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
+			}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	setRequiredEnv(t, server.URL)
+
+	rtAny, err := NewProvider(WithPVCMountPath("/shared/csgclaw")).Open(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	rt := rtAny.(*Runtime)
+
+	_, err = rt.Create(context.Background(), sandbox.CreateSpec{
+		Image: "img:1",
+		Name:  "worker-1",
+		Mounts: []sandbox.Mount{
+			{
+				HostPath:  "/shared/csgclaw/tenant-a/projects",
+				GuestPath: "/home/picoclaw/.picoclaw/workspace/projects",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	volumes, ok := gotBody["volumes"].([]any)
+	if !ok || len(volumes) != 1 {
+		t.Fatalf("volumes = %#v", gotBody["volumes"])
+	}
+	volume := volumes[0].(map[string]any)
+	if volume["sandbox_mount_subpath"] != "tenant-a/projects" {
+		t.Fatalf("sandbox_mount_subpath = %v", volume["sandbox_mount_subpath"])
+	}
+}
+
+func TestRuntimeOpenWithPVCMountSubpathPrefix(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sandboxes":
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			_, _ = w.Write([]byte(`{
+				"spec": {"sandbox_name":"worker-1","image":"img:1"},
+				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
+			}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	setRequiredEnv(t, server.URL)
+
+	rtAny, err := NewProvider(
+		WithPVCMountSubpathPrefix("/tenant-a-data/"),
+	).Open(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	rt := rtAny.(*Runtime)
+
+	_, err = rt.Create(context.Background(), sandbox.CreateSpec{
+		Image: "img:1",
+		Name:  "worker-1",
+		Mounts: []sandbox.Mount{
+			{
+				HostPath:  "/opt/csgclaw/agents/manager/workspace",
+				GuestPath: "/home/picoclaw/.picoclaw/workspace",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	volumes, ok := gotBody["volumes"].([]any)
+	if !ok || len(volumes) != 1 {
+		t.Fatalf("volumes = %#v", gotBody["volumes"])
+	}
+	volume := volumes[0].(map[string]any)
+	if volume["sandbox_mount_subpath"] != "tenant-a-data/agents/manager/workspace" {
+		t.Fatalf("sandbox_mount_subpath = %v", volume["sandbox_mount_subpath"])
+	}
+}
+
+func TestRuntimeOpenReadsPVCSubpathPrefixFromEnv(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sandboxes":
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			_, _ = w.Write([]byte(`{
+				"spec": {"sandbox_name":"worker-1","image":"img:1"},
+				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
+			}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	setRequiredEnv(t, server.URL)
+	t.Setenv("CSGCLAW_PVC_SUBPATH_PREFIX", "tenant-b-space")
+
+	rtAny, err := NewProvider().Open(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	rt := rtAny.(*Runtime)
+
+	_, err = rt.Create(context.Background(), sandbox.CreateSpec{
+		Image: "img:1",
+		Name:  "worker-1",
+		Mounts: []sandbox.Mount{
+			{
+				HostPath:  "/opt/csgclaw/agents/manager/workspace",
+				GuestPath: "/home/picoclaw/.picoclaw/workspace",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	volumes, ok := gotBody["volumes"].([]any)
+	if !ok || len(volumes) != 1 {
+		t.Fatalf("volumes = %#v", gotBody["volumes"])
+	}
+	volume := volumes[0].(map[string]any)
+	if volume["sandbox_mount_subpath"] != "tenant-b-space/agents/manager/workspace" {
+		t.Fatalf("sandbox_mount_subpath = %v", volume["sandbox_mount_subpath"])
+	}
+}
+
 func TestRuntimeCreatePrefixesSandboxNameWhenCSGCLAWNameProvided(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

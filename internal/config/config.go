@@ -56,6 +56,7 @@ type SandboxConfig struct {
 	Provider         string
 	HomeDirName      string
 	BoxLiteCLIPath   string
+	StoragePath      string
 	DebianRegistries []string
 }
 
@@ -69,6 +70,7 @@ func (c SandboxConfig) Resolved() SandboxConfig {
 	if strings.TrimSpace(c.BoxLiteCLIPath) == "" {
 		c.BoxLiteCLIPath = DefaultBoxLiteCLIPath
 	}
+	c.StoragePath = strings.TrimSpace(c.StoragePath)
 	c.DebianRegistries = normalizeStringList(c.DebianRegistries)
 	if len(c.DebianRegistries) == 0 {
 		c.DebianRegistries = append([]string(nil), DefaultDebianRegistries...)
@@ -302,6 +304,9 @@ func Load(path string) (Config, error) {
 			case "boxlite_cli_path":
 				cfg.raw.sandbox.BoxLiteCLIPath = parseRawStringValue(rawValue)
 				cfg.Sandbox.BoxLiteCLIPath = value
+			case "storage_path":
+				cfg.raw.sandbox.StoragePath = parseRawStringValue(rawValue)
+				cfg.Sandbox.StoragePath = value
 			case "debian_registries":
 				registries, parseErr := parseStringArray(rawValue)
 				if parseErr != nil {
@@ -418,7 +423,10 @@ manager_image = %q
 provider = %q
 home_dir_name = %q
 boxlite_cli_path = %q
-`, cfg.rawOrResolvedString(cfg.raw.sandbox.Provider, loadedRaw.sandbox.Provider, resolvedSandbox.Provider), cfg.rawOrResolvedString(cfg.raw.sandbox.HomeDirName, loadedRaw.sandbox.HomeDirName, resolvedSandbox.HomeDirName), cfg.rawOrResolvedString(cfg.raw.sandbox.BoxLiteCLIPath, loadedRaw.sandbox.BoxLiteCLIPath, resolvedSandbox.BoxLiteCLIPath))
+	`, cfg.rawOrResolvedString(cfg.raw.sandbox.Provider, loadedRaw.sandbox.Provider, resolvedSandbox.Provider), cfg.rawOrResolvedString(cfg.raw.sandbox.HomeDirName, loadedRaw.sandbox.HomeDirName, resolvedSandbox.HomeDirName), cfg.rawOrResolvedString(cfg.raw.sandbox.BoxLiteCLIPath, loadedRaw.sandbox.BoxLiteCLIPath, resolvedSandbox.BoxLiteCLIPath))
+	if strings.TrimSpace(resolvedSandbox.StoragePath) != "" {
+		sandboxSection = strings.Replace(sandboxSection, "[sandbox]\n", fmt.Sprintf("[sandbox]\nstorage_path = %q\n", cfg.rawOrResolvedString(cfg.raw.sandbox.StoragePath, loadedRaw.sandbox.StoragePath, resolvedSandbox.StoragePath)), 1)
+	}
 	if len(resolvedSandbox.DebianRegistries) > 0 {
 		sandboxSection = strings.Replace(sandboxSection, "[sandbox]\n", fmt.Sprintf("[sandbox]\ndebian_registries = %s\n", formatStringArray(resolvedSandbox.DebianRegistries)), 1)
 	}
@@ -735,6 +743,9 @@ func (c Config) resolvedRawValues() *rawConfigValues {
 	}
 	if c.raw.sandbox.BoxLiteCLIPath != "" {
 		out.sandbox.BoxLiteCLIPath = c.Sandbox.BoxLiteCLIPath
+	}
+	if c.raw.sandbox.StoragePath != "" {
+		out.sandbox.StoragePath = c.Sandbox.StoragePath
 	}
 	if c.raw.modelsDefault != "" {
 		out.modelsDefault = c.Models.Default

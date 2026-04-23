@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -29,33 +30,59 @@ const (
 )
 
 type runtimeConfig struct {
-	clientCfg    csghubsdk.Config
-	clusterID    string
-	resourceID   int
-	port         int
-	timeout      int
-	pvcMountPath string
-	readyTimeout time.Duration
-	pollInterval time.Duration
-	namePrefix   string
+	clientCfg       csghubsdk.Config
+	clusterID       string
+	resourceID      int
+	port            int
+	timeout         int
+	pvcMountPath    string
+	pvcMountSubpath string
+	readyTimeout    time.Duration
+	pollInterval    time.Duration
+	namePrefix      string
 }
 
 // Provider is the sandbox.Provider implementation for [sandbox].provider = csghub.
-type Provider struct{}
+type Provider struct {
+	options []ProviderOption
+}
 
-func NewProvider() Provider {
-	return Provider{}
+type ProviderOption func(*runtimeConfig)
+
+// WithPVCMountPath sets the host PVC mount root used to compute subpaths for
+// sandbox volume mounts.
+func WithPVCMountPath(path string) ProviderOption {
+	return func(cfg *runtimeConfig) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		cfg.pvcMountPath = path
+	}
+}
+
+// WithPVCMountSubpathPrefix prepends a PVC subpath prefix to all computed sandbox
+// mount subpaths.
+func WithPVCMountSubpathPrefix(path string) ProviderOption {
+	return func(cfg *runtimeConfig) {
+		cfg.pvcMountSubpath = normalizePVCSubpath(path)
+	}
+}
+
+func NewProvider(opts ...ProviderOption) Provider {
+	return Provider{options: opts}
 }
 
 func (Provider) Name() string {
 	return providerName
 }
 
-func (Provider) Open(_ context.Context, _ string) (sandbox.Runtime, error) {
+func (p Provider) Open(_ context.Context, _ string) (sandbox.Runtime, error) {
 	cfg, err := loadRuntimeConfigFromEnv()
 	if err != nil {
 		return nil, err
 	}
+	p.applyRuntimeOptions(&cfg)
 	return &Runtime{
 		cfg: cfg,
 		client: csghubsdk.New(
@@ -63,6 +90,17 @@ func (Provider) Open(_ context.Context, _ string) (sandbox.Runtime, error) {
 			csghubsdk.WithLogger(runtimeLogger{}),
 		),
 	}, nil
+}
+
+func (p Provider) applyRuntimeOptions(cfg *runtimeConfig) {
+	if cfg == nil {
+		return
+	}
+	for _, opt := range p.options {
+		if opt != nil {
+			opt(cfg)
+		}
+	}
 }
 
 var _ sandbox.Provider = Provider{}
@@ -225,6 +263,12 @@ func (r *Runtime) volumeSpecs(mounts []sandbox.Mount) ([]csghubsdk.VolumeSpec, e
 		rel = filepath.ToSlash(rel)
 		if rel == "." || strings.HasPrefix(rel, "../") || rel == ".." {
 			return nil, fmt.Errorf("invalid sandbox mount: host path %q must be under %q", host, root)
+		}
+		if rel == "." {
+			rel = ""
+		}
+		if strings.TrimSpace(r.cfg.pvcMountSubpath) != "" {
+			rel = path.Join(r.cfg.pvcMountSubpath, rel)
 		}
 		volumes = append(volumes, csghubsdk.VolumeSpec{
 			SandboxMountSubpath: rel,
@@ -499,6 +543,7 @@ func loadRuntimeConfigFromEnv() (runtimeConfig, error) {
 	if pvcMountPath == "" {
 		pvcMountPath = defaultPVCMountPath
 	}
+	subpathPrefix := normalizePVCSubpath(os.Getenv("CSGCLAW_PVC_SUBPATH_PREFIX"))
 
 	return runtimeConfig{
 		clientCfg: csghubsdk.Config{
@@ -506,15 +551,33 @@ func loadRuntimeConfigFromEnv() (runtimeConfig, error) {
 			AIGatewayURL: strings.TrimSpace(os.Getenv("CSGHUB_AIGATEWAY_URL")),
 			Token:        token,
 		},
-		clusterID:    strings.TrimSpace(os.Getenv("CSGCLAW_CLUSTER_ID")),
-		resourceID:   resourceID,
-		port:         port,
-		timeout:      timeout,
-		pvcMountPath: pvcMountPath,
-		readyTimeout: readyTimeout,
-		pollInterval: pollInterval,
-		namePrefix:   strings.TrimSpace(os.Getenv("CSGCLAW_NAME")),
+		clusterID:       strings.TrimSpace(os.Getenv("CSGCLAW_CLUSTER_ID")),
+		resourceID:      resourceID,
+		port:            port,
+		timeout:         timeout,
+		pvcMountPath:    pvcMountPath,
+		pvcMountSubpath: subpathPrefix,
+		readyTimeout:    readyTimeout,
+		pollInterval:    pollInterval,
+		namePrefix:      strings.TrimSpace(os.Getenv("CSGCLAW_NAME")),
 	}, nil
+}
+
+func normalizePVCSubpath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	normalized := path.Clean(filepath.ToSlash(raw))
+	normalized = strings.TrimPrefix(normalized, "./")
+	normalized = strings.Trim(normalized, "/")
+	if normalized == "." || normalized == "" {
+		return ""
+	}
+	if normalized == ".." || strings.HasPrefix(normalized, "../") {
+		return ""
+	}
+	return normalized
 }
 
 func withNamePrefix(name, prefix string) string {
