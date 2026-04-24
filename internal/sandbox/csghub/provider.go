@@ -229,7 +229,7 @@ func (r *Runtime) createRequest(spec sandbox.CreateSpec) (csghubsdk.CreateReques
 	req := csghubsdk.CreateRequest{
 		Image:        image,
 		SandboxName:  name,
-		Environments: cloneStringMap(spec.Env),
+		Environments: r.createEnvironments(spec.Env),
 		Volumes:      volumes,
 		ClusterID:    strings.TrimSpace(r.cfg.clusterID),
 		ResourceID:   r.cfg.resourceID,
@@ -237,6 +237,16 @@ func (r *Runtime) createRequest(spec sandbox.CreateSpec) (csghubsdk.CreateReques
 		Timeout:      r.cfg.timeout,
 	}
 	return req, nil
+}
+
+func (r *Runtime) createEnvironments(specEnv map[string]string) map[string]string {
+	env := cloneStringMap(specEnv)
+	if env == nil {
+		env = make(map[string]string, 2)
+	}
+	env["CSGHUB_API_BASE_URL"] = strings.TrimSpace(r.cfg.clientCfg.BaseURL)
+	env["CSGHUB_USER_TOKEN"] = strings.TrimSpace(r.cfg.clientCfg.Token)
+	return env
 }
 
 func (r *Runtime) volumeSpecs(mounts []sandbox.Mount) ([]csghubsdk.VolumeSpec, error) {
