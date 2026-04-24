@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,13 +155,28 @@ func updateCSGClawChannel(cfg map[string]any, botID string, server config.Server
 
 func resolveManagerBaseURL(server config.ServerConfig) string {
 	if server.AdvertiseBaseURL != "" {
-		return strings.TrimRight(server.AdvertiseBaseURL, "/")
+		return normalizeAdvertiseBaseURL(server.AdvertiseBaseURL)
 	}
 	port := config.ListenPort(server.ListenAddr)
 	if ip := localIPv4Resolver(); ip != "" {
 		return fmt.Sprintf("http://%s:%s", ip, port)
 	}
 	return ""
+}
+
+func normalizeAdvertiseBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimRight(raw, "/")
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return parsed.String()
 }
 
 func localIPv4() string {
