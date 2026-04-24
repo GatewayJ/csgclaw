@@ -54,7 +54,7 @@ func TestRuntimeCreateBuildsRequestAndMapsMounts(t *testing.T) {
 				"spec": {"sandbox_name":"worker-1","image":"img:1"},
 				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
 			}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -150,7 +150,7 @@ func TestRuntimeOpenWithPVCMountPathOverridesEnvMountPath(t *testing.T) {
 				"spec": {"sandbox_name":"worker-1","image":"img:1"},
 				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
 			}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -199,7 +199,7 @@ func TestRuntimeOpenWithPVCMountSubpathPrefix(t *testing.T) {
 				"spec": {"sandbox_name":"worker-1","image":"img:1"},
 				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
 			}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -250,7 +250,7 @@ func TestRuntimeOpenReadsPVCSubpathPrefixFromEnv(t *testing.T) {
 				"spec": {"sandbox_name":"worker-1","image":"img:1"},
 				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
 			}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -300,7 +300,7 @@ func TestRuntimeCreatePrefixesSandboxNameWhenCSGCLAWNameProvided(t *testing.T) {
 				"spec": {"sandbox_name":"cluster-a-worker-1","image":"img:1"},
 				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
 			}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/cluster-a-worker-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/cluster-a-worker-1/":
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -373,7 +373,7 @@ func TestRuntimeCreateStartsAndWaitsHealthWhenNotRunning(t *testing.T) {
 				"spec": {"sandbox_name":"worker-1","image":"img:1"},
 				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
 			}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
 			healthChecked = true
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -431,7 +431,7 @@ func TestRuntimeCreateStartsWhenDeployingThenWaitsForRunning(t *testing.T) {
 				"spec": {"sandbox_name":"worker-1","image":"img:1"},
 				"state": {"status":"running","created_at":"2026-04-22T00:00:00Z"}
 			}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/worker-1/":
 			healthChecked = true
 			w.WriteHeader(http.StatusOK)
 		default:

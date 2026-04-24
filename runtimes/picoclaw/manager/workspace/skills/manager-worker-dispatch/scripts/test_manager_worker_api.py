@@ -1,7 +1,6 @@
 import importlib.util
 import unittest
 from pathlib import Path
-from urllib import parse
 
 
 MODULE_PATH = Path(__file__).resolve().parent / "manager_worker_api.py"
@@ -58,35 +57,6 @@ def make_bootstrap():
 
 def dispatch_message(task):
     return manager_worker_api.build_tracking_message(task, TODO_PATH)
-
-
-class URLBuilderTests(unittest.TestCase):
-    def test_build_url_merges_path_query_with_base_query(self):
-        got = manager_worker_api.build_url(
-            "https://example.test/v1/sandboxes/sb-1?port=18080",
-            "/api/v1/messages?room_id=room-123",
-        )
-        parsed = parse.urlsplit(got)
-        self.assertEqual(parsed.path, "/v1/sandboxes/sb-1/api/v1/messages")
-        query = dict(parse.parse_qsl(parsed.query, keep_blank_values=True))
-        self.assertEqual(query.get("room_id"), "room-123")
-        self.assertEqual(query.get("port"), "18080")
-
-    def test_build_url_preserves_query_when_appending_path(self):
-        got = manager_worker_api.build_url(
-            "https://example.test/v1/sandboxes/sb-1?port=18080",
-            "/api/v1/agents",
-        )
-        want = "https://example.test/v1/sandboxes/sb-1/api/v1/agents?port=18080"
-        self.assertEqual(got, want)
-
-    def test_build_url_trims_trailing_slash_before_appending_path(self):
-        got = manager_worker_api.build_url(
-            "https://example.test/v1/sandboxes/sb-1/",
-            "/api/v1/agents",
-        )
-        want = "https://example.test/v1/sandboxes/sb-1/api/v1/agents"
-        self.assertEqual(got, want)
 
 
 class TrackingDecisionTests(unittest.TestCase):

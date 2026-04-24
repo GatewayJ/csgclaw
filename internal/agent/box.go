@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,18 +128,8 @@ func ProjectsRoot() (string, error) {
 }
 
 func llmBridgeBaseURL(managerBaseURL, botID string) string {
-	managerBaseURL = normalizeAdvertiseBaseURL(managerBaseURL)
-	botID = strings.TrimSpace(botID)
-	suffix := "/api/bots/" + botID + "/llm"
-	if managerBaseURL == "" {
-		return suffix
-	}
-	parsed, err := url.Parse(managerBaseURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return strings.TrimRight(managerBaseURL, "/") + suffix
-	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + suffix
-	return parsed.String()
+	managerBaseURL = strings.TrimRight(strings.TrimSpace(managerBaseURL), "/")
+	return managerBaseURL + "/api/bots/" + strings.TrimSpace(botID) + "/llm"
 }
 
 func bridgeLLMEnvVars(llmBaseURL, accessToken, modelID string) map[string]string {

@@ -201,11 +201,7 @@ func (c *Client) Stream(ctx context.Context, path string, values url.Values, w i
 		path += "?" + encoded
 	}
 
-	requestURL, err := buildRequestURL(c.endpoint, path)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint+path, nil)
 	if err != nil {
 		return err
 	}
@@ -244,11 +240,7 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body any, out 
 		reader = &buf
 	}
 
-	requestURL, err := buildRequestURL(c.endpoint, path)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, reader)
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint+path, reader)
 	if err != nil {
 		return err
 	}
@@ -275,84 +267,6 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body any, out 
 		return err
 	}
 	return nil
-}
-
-func buildRequestURL(endpoint, requestPath string) (string, error) {
-	endpoint = strings.TrimSpace(endpoint)
-	if endpoint == "" {
-		endpoint = DefaultAPIBaseURL()
-	}
-
-	baseURL, err := url.Parse(endpoint)
-	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
-		return "", fmt.Errorf("invalid endpoint %q", endpoint)
-	}
-
-	requestPath = strings.TrimSpace(requestPath)
-	if requestPath == "" {
-		baseURL.Fragment = ""
-		return baseURL.String(), nil
-	}
-
-	pathURL, err := url.Parse(requestPath)
-	if err != nil {
-		return "", fmt.Errorf("invalid request path %q: %w", requestPath, err)
-	}
-	if pathURL.Scheme != "" && pathURL.Host != "" {
-		pathURL.Fragment = ""
-		return pathURL.String(), nil
-	}
-
-	suffixPath := pathURL.Path
-	if suffixPath == "" {
-		suffixPath = "/"
-	}
-	if !strings.HasPrefix(suffixPath, "/") {
-		suffixPath = "/" + suffixPath
-	}
-	basePath := strings.TrimRight(baseURL.Path, "/")
-	if basePath == "" {
-		baseURL.Path = suffixPath
-	} else if suffixPath == "/" {
-		baseURL.Path = basePath + "/"
-	} else {
-		baseURL.Path = basePath + suffixPath
-	}
-
-	mergedQuery, err := mergeRawQueries(pathURL.RawQuery, baseURL.RawQuery)
-	if err != nil {
-		return "", err
-	}
-	baseURL.RawQuery = mergedQuery
-	baseURL.Fragment = ""
-	return baseURL.String(), nil
-}
-
-func mergeRawQueries(pathQuery, baseQuery string) (string, error) {
-	merged := make(url.Values)
-	if strings.TrimSpace(pathQuery) != "" {
-		values, err := url.ParseQuery(pathQuery)
-		if err != nil {
-			return "", fmt.Errorf("invalid request path query %q: %w", pathQuery, err)
-		}
-		for key, items := range values {
-			for _, item := range items {
-				merged.Add(key, item)
-			}
-		}
-	}
-	if strings.TrimSpace(baseQuery) != "" {
-		values, err := url.ParseQuery(baseQuery)
-		if err != nil {
-			return "", fmt.Errorf("invalid endpoint query %q: %w", baseQuery, err)
-		}
-		for key, items := range values {
-			for _, item := range items {
-				merged.Add(key, item)
-			}
-		}
-	}
-	return merged.Encode(), nil
 }
 
 func QueryInt(values url.Values, key string, value int) {

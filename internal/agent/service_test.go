@@ -1598,22 +1598,3 @@ func TestResolveManagerBaseURLPrefersAdvertiseBaseURL(t *testing.T) {
 		t.Fatalf("resolveManagerBaseURL() = %q, want %q", got, want)
 	}
 }
-
-func TestResolveManagerBaseURLPreservesAdvertiseQueryAndStripsFragment(t *testing.T) {
-	got := resolveManagerBaseURL(config.ServerConfig{
-		AdvertiseBaseURL: "https://example.test/sandboxes/sb-1/?port=18080#gateway",
-	})
-
-	want := "https://example.test/sandboxes/sb-1?port=18080"
-	if got != want {
-		t.Fatalf("resolveManagerBaseURL() = %q, want %q", got, want)
-	}
-}
-
-func TestLLMBridgeBaseURLPreservesQueryWhenAppendingPath(t *testing.T) {
-	got := llmBridgeBaseURL("https://example.test/sandboxes/sb-1?port=18080", "u-worker-1")
-	want := "https://example.test/sandboxes/sb-1/api/bots/u-worker-1/llm?port=18080"
-	if got != want {
-		t.Fatalf("llmBridgeBaseURL() = %q, want %q", got, want)
-	}
-}

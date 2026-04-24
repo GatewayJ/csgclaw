@@ -30,25 +30,7 @@ FEISHU_DISPATCH_DELAY_SECONDS = 5.0
 
 
 def build_url(base_url: str, path: str) -> str:
-    base_raw = (base_url or "").strip()
-    path_raw = (path or "").strip()
-    parsed_base = parse.urlsplit(base_raw)
-    if parsed_base.scheme and parsed_base.netloc:
-        parsed_path = parse.urlsplit(path_raw)
-        if parsed_path.scheme and parsed_path.netloc:
-            return parse.urlunsplit((parsed_path.scheme, parsed_path.netloc, parsed_path.path, parsed_path.query, ""))
-
-        suffix_path = parsed_path.path or "/"
-        if not suffix_path.startswith("/"):
-            suffix_path = "/" + suffix_path
-        base_path = parsed_base.path.rstrip("/")
-        joined_path = f"{base_path}{suffix_path}" if base_path else suffix_path
-
-        query_pairs = parse.parse_qsl(parsed_path.query, keep_blank_values=True)
-        query_pairs.extend(parse.parse_qsl(parsed_base.query, keep_blank_values=True))
-        merged_query = parse.urlencode(query_pairs, doseq=True)
-        return parse.urlunsplit((parsed_base.scheme, parsed_base.netloc, joined_path, merged_query, ""))
-    return f"{base_raw.rstrip('/')}/{path_raw.lstrip('/')}"
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
 def channel_resource_path(channel: str, resource: str) -> str:
