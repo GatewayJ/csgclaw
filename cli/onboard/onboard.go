@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,18 +53,12 @@ func (cmd) Summary() string {
 func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globals command.GlobalOptions) error {
 	fs := run.NewFlagSet("onboard", run.Program+" onboard [flags]", c.Summary())
 	provider := fs.String("provider", "", "LLM provider preset: csghub-lite or custom")
-	listenAddr := fs.String("listen-addr", "", "server listen address")
-	advertiseBaseURL := fs.String("advertise-base-url", "", "public server base URL")
-	accessToken := fs.String("access-token", "", "server access token")
 	baseURL := fs.String("base-url", "", "LLM provider base URL")
 	apiKey := fs.String("api-key", "", "LLM provider API key")
 	modelsValue := fs.String("models", "", "comma-separated LLM model identifiers")
 	reasoningEffort := fs.String("reasoning-effort", "", "optional upstream reasoning_effort default")
-	sandboxProvider := fs.String("sandbox-provider", "", "sandbox provider for manager/worker: boxlite-sdk, boxlite-cli, or csghub")
 	managerImage := fs.String("manager-image", "", "bootstrap manager image")
 	debianRegistries := fs.String("debian-registries", "", "comma-separated OCI registries used for debian:bookworm-slim pulls (persisted to config)")
-	storagePath := fs.String("storage-path", "", "PVC subpath prefix for all manager/worker sandbox mounts, e.g. 77/<tenant>/")
-	storagePathAlias := fs.String("storage_bash", "", "alias for --storage-path")
 	forceRecreateManager := fs.Bool("force-recreate-manager", false, "remove and recreate the bootstrap manager box")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -118,30 +111,8 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 	if *managerImage != "" {
 		cfg.Bootstrap.ManagerImage = *managerImage
 	}
-	if strings.TrimSpace(*sandboxProvider) != "" {
-		cfg.Sandbox.Provider = strings.TrimSpace(*sandboxProvider)
-	}
 	if strings.TrimSpace(*debianRegistries) != "" {
 		cfg.Sandbox.DebianRegistries = parseRegistriesFlag(*debianRegistries)
-	parsedStoragePath := strings.TrimSpace(*storagePath)
-	parsedStoragePathAlias := strings.TrimSpace(*storagePathAlias)
-	switch {
-	case parsedStoragePath != "" && parsedStoragePathAlias != "" && parsedStoragePath != parsedStoragePathAlias:
-		return fmt.Errorf("conflicting storage-path flags: --storage-path=%q and --storage_bash=%q", parsedStoragePath, parsedStoragePathAlias)
-	case parsedStoragePath == "" && parsedStoragePathAlias != "":
-		parsedStoragePath = parsedStoragePathAlias
-	}
-	if parsedStoragePath != "" {
-		cfg.Sandbox.StoragePath = parsedStoragePath
-	}
-	if strings.TrimSpace(*listenAddr) != "" {
-		cfg.Server.ListenAddr = strings.TrimSpace(*listenAddr)
-	}
-	if strings.TrimSpace(*advertiseBaseURL) != "" {
-		cfg.Server.AdvertiseBaseURL = strings.TrimSpace(*advertiseBaseURL)
-	}
-	if strings.TrimSpace(*accessToken) != "" {
-		cfg.Server.AccessToken = strings.TrimSpace(*accessToken)
 	}
 	if err := validateModelConfig(cfg); err != nil {
 		return err
@@ -150,7 +121,6 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 	if err := cfg.Save(path); err != nil {
 		return err
 	}
-	log.Printf("onboard: config saved: %s", path)
 
 	agentsPath, err := config.DefaultAgentsPath()
 	if err != nil {
@@ -163,11 +133,9 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 	if err := EnsureIMBootstrapState(imStatePath); err != nil {
 		return err
 	}
-	log.Printf("onboard: ensuring IM bootstrap state at %s", imStatePath)
 	if _, err := CreateManagerBot(ctx, agentsPath, imStatePath, cfg, *forceRecreateManager); err != nil {
 		return err
 	}
-	log.Printf("onboard: bootstrap manager creation completed")
 
 	result := command.ActionResult{
 		Command:        "onboard",
