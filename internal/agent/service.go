@@ -379,7 +379,7 @@ func (s *Service) bootstrapManagerBoxIDOrName() string {
 			return boxID
 		}
 	}
-	return sandboxManagerIdentifier(ManagerName)
+	return ManagerName
 }
 
 func (s *Service) bootstrapManagerLookupKeys() []string {
@@ -389,21 +389,6 @@ func (s *Service) bootstrapManagerLookupKeys() []string {
 		keys = append(keys, ManagerName)
 	}
 	return keys
-}
-
-func sandboxManagerIdentifier(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = ManagerName
-	}
-	prefix := strings.TrimSpace(os.Getenv("CSGCLAW_NAME"))
-	if prefix == "" {
-		return name
-	}
-	if strings.HasPrefix(name, prefix+"-") {
-		return name
-	}
-	return prefix + "-" + name
 }
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (Agent, error) {
