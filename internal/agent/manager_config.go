@@ -173,7 +173,6 @@ func normalizeAdvertiseBaseURL(raw string) string {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return strings.TrimRight(raw, "/")
 	}
-	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	return parsed.String()
