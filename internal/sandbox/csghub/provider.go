@@ -246,6 +246,7 @@ func (r *Runtime) createEnvironments(specEnv map[string]string) map[string]strin
 	}
 	env["CSGHUB_API_BASE_URL"] = strings.TrimSpace(r.cfg.clientCfg.BaseURL)
 	env["CSGHUB_USER_TOKEN"] = strings.TrimSpace(r.cfg.clientCfg.Token)
+	env["SKILLS_POLL_INTERVAL"] = os.Getenv("SKILLS_POLL_INTERVAL")
 	return env
 }
 
