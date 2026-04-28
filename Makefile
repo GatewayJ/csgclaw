@@ -7,8 +7,8 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 VERSION_PKG ?= csgclaw/internal/version
-LDFLAGS ?= -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME)
-CLI_LDFLAGS ?= -s -w $(LDFLAGS)
+GO_LDFLAGS ?= -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME)
+CLI_LDFLAGS ?= -s -w $(GO_LDFLAGS)
 CMD_PATH ?= ./cmd/$(APP)
 BOXLITE_SDK_TAG ?= boxlite_sdk
 BOXLITE_CLI_VERSION ?= v0.8.2
@@ -77,11 +77,11 @@ test-with-boxlite-sdk: boxlite-setup sync-agent-runtimes
 
 build: sync-agent-runtimes
 	mkdir -p $(BIN_DIR)
-	env GOCACHE=$(GOCACHE) $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) $(CMD_PATH)
+	env GOCACHE=$(GOCACHE) $(GO) build -ldflags "$(GO_LDFLAGS)" -o $(BIN) $(CMD_PATH)
 
 build-with-boxlite-sdk: boxlite-setup sync-agent-runtimes
 	mkdir -p $(BIN_DIR)
-	env GOCACHE=$(GOCACHE) $(GO) build -tags $(BOXLITE_SDK_TAG) -ldflags "$(LDFLAGS)" -o $(BIN) $(CMD_PATH)
+	env GOCACHE=$(GOCACHE) $(GO) build -tags $(BOXLITE_SDK_TAG) -ldflags "$(GO_LDFLAGS)" -o $(BIN) $(CMD_PATH)
 
 build-csgclaw:
 	$(MAKE) build APP=csgclaw
@@ -97,20 +97,20 @@ build-csgclaw-cli-for-picoclaw:
 build-all: build-csgclaw build-csgclaw-cli
 
 run: sync-agent-runtimes
-	env GOCACHE=$(GOCACHE) $(GO) run -ldflags "$(LDFLAGS)" ./cmd/csgclaw serve
+	env GOCACHE=$(GOCACHE) $(GO) run -ldflags "$(GO_LDFLAGS)" ./cmd/csgclaw serve
 
 run-with-boxlite-sdk: boxlite-setup sync-agent-runtimes
-	env GOCACHE=$(GOCACHE) $(GO) run -tags $(BOXLITE_SDK_TAG) -ldflags "$(LDFLAGS)" ./cmd/csgclaw serve
+	env GOCACHE=$(GOCACHE) $(GO) run -tags $(BOXLITE_SDK_TAG) -ldflags "$(GO_LDFLAGS)" ./cmd/csgclaw serve
 
 onboard: sync-agent-runtimes
-	env GOCACHE=$(GOCACHE) $(GO) run -ldflags "$(LDFLAGS)" ./cmd/csgclaw onboard \
+	env GOCACHE=$(GOCACHE) $(GO) run -ldflags "$(GO_LDFLAGS)" ./cmd/csgclaw onboard \
 		--base-url $(ONBOARD_BASE_URL) \
 		--api-key $(ONBOARD_API_KEY) \
 		--models $(ONBOARD_MODEL_ID) \
 		--manager-image $(ONBOARD_MANAGER_IMAGE)
 
 onboard-with-boxlite-sdk: boxlite-setup sync-agent-runtimes
-	env GOCACHE=$(GOCACHE) $(GO) run -tags $(BOXLITE_SDK_TAG) -ldflags "$(LDFLAGS)" ./cmd/csgclaw onboard \
+	env GOCACHE=$(GOCACHE) $(GO) run -tags $(BOXLITE_SDK_TAG) -ldflags "$(GO_LDFLAGS)" ./cmd/csgclaw onboard \
 		--base-url $(ONBOARD_BASE_URL) \
 		--api-key $(ONBOARD_API_KEY) \
 		--models $(ONBOARD_MODEL_ID) \
