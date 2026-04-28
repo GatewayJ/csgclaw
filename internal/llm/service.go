@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -94,7 +95,7 @@ func (s *Service) forwardRemoteChat(ctx context.Context, cfg config.ModelConfig,
 		return nil, 0, "", &HTTPError{Status: http.StatusBadRequest, Message: fmt.Sprintf("encode request: %v", err)}
 	}
 
-	upstreamURL := strings.TrimRight(cfg.BaseURL, "/") + "/chat/completions"
+	upstreamURL := openAIChatCompletionsURL(cfg.BaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(encoded))
 	if err != nil {
 		return nil, 0, "", &HTTPError{Status: http.StatusInternalServerError, Message: fmt.Sprintf("build upstream request: %v", err)}
@@ -117,6 +118,22 @@ func (s *Service) forwardRemoteChat(ctx context.Context, cfg config.ModelConfig,
 		contentType = "application/json"
 	}
 	return respBody, resp.StatusCode, contentType, nil
+}
+
+func openAIChatCompletionsURL(baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return "/v1/chat/completions"
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return baseURL + "/chat/completions"
+	}
+	if strings.Trim(parsed.Path, "/") == "" {
+		parsed.Path = "/v1"
+		baseURL = strings.TrimRight(parsed.String(), "/")
+	}
+	return baseURL + "/chat/completions"
 }
 
 func applyReasoningEffortDefault(payload map[string]any, defaultEffort string) {

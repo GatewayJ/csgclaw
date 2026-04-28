@@ -1639,7 +1639,7 @@ func TestGatewayCreateSpecBuildsSandboxSpec(t *testing.T) {
 	if got, want := spec.Env["CSGCLAW_BASE_URL"], "http://10.0.0.8:18080"; got != want {
 		t.Fatalf("CSGCLAW_BASE_URL = %q, want %q", got, want)
 	}
-	if got, want := spec.Env["CSGCLAW_LLM_BASE_URL"], "http://10.0.0.8:18080/api/bots/u-worker-1/llm"; got != want {
+	if got, want := spec.Env["CSGCLAW_LLM_BASE_URL"], "http://10.0.0.8:18080/api/bots/u-worker-1/llm/v1"; got != want {
 		t.Fatalf("CSGCLAW_LLM_BASE_URL = %q, want %q", got, want)
 	}
 	if got, want := spec.Env["PICOCLAW_CHANNELS_FEISHU_APP_ID"], "cli_worker"; got != want {
@@ -1686,7 +1686,7 @@ func TestPicoclawBoxEnvVars(t *testing.T) {
 		"http://10.0.0.8:18080",
 		"shared-token",
 		"u-worker-1",
-		"http://10.0.0.8:18080/api/bots/u-worker-1/llm",
+		"http://10.0.0.8:18080/api/bots/u-worker-1/llm/v1",
 		"minimax-m2.7",
 	)
 
@@ -1696,17 +1696,17 @@ func TestPicoclawBoxEnvVars(t *testing.T) {
 		"PICOCLAW_CHANNELS_CSGCLAW_BASE_URL":     "http://10.0.0.8:18080",
 		"PICOCLAW_CHANNELS_CSGCLAW_ACCESS_TOKEN": "shared-token",
 		"PICOCLAW_CHANNELS_CSGCLAW_BOT_ID":       "u-worker-1",
-		"CSGCLAW_LLM_BASE_URL":                   "http://10.0.0.8:18080/api/bots/u-worker-1/llm",
+		"CSGCLAW_LLM_BASE_URL":                   "http://10.0.0.8:18080/api/bots/u-worker-1/llm/v1",
 		"CSGCLAW_LLM_API_KEY":                    "shared-token",
 		"CSGCLAW_LLM_MODEL_ID":                   "minimax-m2.7",
-		"OPENAI_BASE_URL":                        "http://10.0.0.8:18080/api/bots/u-worker-1/llm",
+		"OPENAI_BASE_URL":                        "http://10.0.0.8:18080/api/bots/u-worker-1/llm/v1",
 		"OPENAI_API_KEY":                         "shared-token",
 		"OPENAI_MODEL":                           "minimax-m2.7",
 		"PICOCLAW_AGENTS_DEFAULTS_MODEL_NAME":    "minimax-m2.7",
 		"PICOCLAW_CUSTOM_MODEL_NAME":             "minimax-m2.7",
 		"PICOCLAW_CUSTOM_MODEL_ID":               "openai/minimax-m2.7",
 		"PICOCLAW_CUSTOM_MODEL_API_KEY":          "shared-token",
-		"PICOCLAW_CUSTOM_MODEL_BASE_URL":         "http://10.0.0.8:18080/api/bots/u-worker-1/llm",
+		"PICOCLAW_CUSTOM_MODEL_BASE_URL":         "http://10.0.0.8:18080/api/bots/u-worker-1/llm/v1",
 	}
 	for key, want := range wants {
 		if got[key] != want {
@@ -1720,7 +1720,7 @@ func TestPicoclawBoxEnvVarsPrefixesCustomModelIDForSlashNames(t *testing.T) {
 		"http://10.0.0.8:18080",
 		"shared-token",
 		"u-worker-1",
-		"http://10.0.0.8:18080/api/bots/u-worker-1/llm",
+		"http://10.0.0.8:18080/api/bots/u-worker-1/llm/v1",
 		"Qwen/Qwen3-0.6B-GGUF",
 	)
 

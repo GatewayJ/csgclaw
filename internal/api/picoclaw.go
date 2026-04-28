@@ -49,6 +49,8 @@ func (h *Handler) handlePicoClawBotRoutes(w http.ResponseWriter, r *http.Request
 		h.handlePicoClawEvents(w, r, botID)
 	case r.Method == http.MethodPost && action == "messages/send":
 		h.handlePicoClawSendMessage(w, r, botID)
+	case r.Method == http.MethodGet && action == "llm":
+		h.handlePicoClawModels(w, r, botID)
 	case r.Method == http.MethodGet && (action == "llm/models" || action == "llm/v1/models"):
 		h.handlePicoClawModels(w, r, botID)
 	case r.Method == http.MethodPost && (action == "llm/chat/completions" || action == "llm/v1/chat/completions"):
@@ -129,7 +131,7 @@ func parsePicoClawBotPath(path string) (botID, action string, ok bool) {
 	botID = parts[0]
 	action = strings.Join(parts[1:], "/")
 	switch action {
-	case "events", "messages/send", "llm/models", "llm/v1/models", "llm/chat/completions", "llm/v1/chat/completions":
+	case "events", "messages/send", "llm", "llm/models", "llm/v1/models", "llm/chat/completions", "llm/v1/chat/completions":
 		return botID, action, true
 	default:
 		return "", "", false

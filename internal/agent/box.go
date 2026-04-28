@@ -129,7 +129,7 @@ func ProjectsRoot() (string, error) {
 
 func llmBridgeBaseURL(managerBaseURL, botID string) string {
 	managerBaseURL = strings.TrimRight(strings.TrimSpace(managerBaseURL), "/")
-	return managerBaseURL + "/api/bots/" + strings.TrimSpace(botID) + "/llm"
+	return managerBaseURL + "/api/bots/" + strings.TrimSpace(botID) + "/llm/v1"
 }
 
 func bridgeLLMEnvVars(llmBaseURL, accessToken, modelID string) map[string]string {

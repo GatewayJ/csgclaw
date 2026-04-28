@@ -54,7 +54,7 @@ func TestRenderAgentPicoClawConfigUsesBridgeModelEndpoint(t *testing.T) {
 	for _, want := range []string{
 		`"model_name": "gpt-5.4"`,
 		`"model": "openai/gpt-5.4"`,
-		`"api_base": "http://10.0.0.8:18080/api/bots/u-ux/llm"`,
+		`"api_base": "http://10.0.0.8:18080/api/bots/u-ux/llm/v1"`,
 		`"api_key": "shared-token"`,
 		`"bot_id": "u-ux"`,
 	} {

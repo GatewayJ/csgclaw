@@ -73,6 +73,45 @@ func TestChatCompletionsLLMAPIOverridesModelAndProxiesUpstream(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsLLMAPIAddsV1ForHostOnlyBaseURL(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/v1/chat/completions")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"remote result"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	agentSvc := mustSeededAgentService(t, config.SingleProfileLLM(config.ModelConfig{
+		Provider: config.ProviderLLMAPI,
+		BaseURL:  upstream.URL,
+		APIKey:   "sk-test",
+		ModelID:  "gpt-5.4",
+	}), []agent.Agent{
+		{
+			ID:        agent.ManagerUserID,
+			Name:      agent.ManagerName,
+			Role:      agent.RoleManager,
+			Profile:   config.DefaultLLMProfile,
+			Provider:  config.ProviderLLMAPI,
+			ModelID:   "gpt-5.4",
+			CreatedAt: time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+		},
+	})
+
+	svc := NewService(config.ModelConfig{}, agentSvc)
+	_, status, _, err := svc.ChatCompletions(context.Background(), agent.ManagerUserID, []byte(`{"messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want %d", status, http.StatusOK)
+	}
+}
+
 func TestChatCompletionsLLMAPIDoesNotOverrideRequestReasoningEffort(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
