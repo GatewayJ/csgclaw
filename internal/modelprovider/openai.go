@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"csgclaw/internal/httplog"
 )
 
 const (
@@ -35,6 +37,8 @@ func ListOpenAIModels(ctx context.Context, baseURL, apiKey string) ([]string, er
 	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+
+	httplog.LogCurl("llm upstream models request", req, nil)
 
 	resp, err := client.Do(req)
 	if err != nil {

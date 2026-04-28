@@ -12,6 +12,7 @@ import (
 
 	"csgclaw/internal/agent"
 	"csgclaw/internal/config"
+	"csgclaw/internal/httplog"
 )
 
 type Service struct {
@@ -101,6 +102,8 @@ func (s *Service) forwardRemoteChat(ctx context.Context, cfg config.ModelConfig,
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	req.Header.Set("Content-Type", "application/json")
+
+	httplog.LogCurl("llm upstream chat completions request", req, encoded)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
