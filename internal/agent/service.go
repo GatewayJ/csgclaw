@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -1246,17 +1247,20 @@ func (s *Service) StreamLogs(ctx context.Context, id string, follow bool, lines 
 func (s *Service) hydrateAgentStatus(ctx context.Context, a Agent) Agent {
 	a = *cloneAgent(&a)
 	if strings.TrimSpace(a.Name) == "" {
+		logHydrateUnknownStatus(a, "validate_name", fmt.Errorf("agent name is required"))
 		a.Status = string(sandbox.StateUnknown)
 		return a
 	}
 
 	rt, err := s.ensureRuntime(a.Name)
 	if err != nil {
+		logHydrateUnknownStatus(a, "ensure_runtime", err)
 		a.Status = string(sandbox.StateUnknown)
 		return a
 	}
 	runtimeHome, err := s.sandboxRuntimeHome(a.Name)
 	if err != nil {
+		logHydrateUnknownStatus(a, "resolve_runtime_home", err)
 		a.Status = string(sandbox.StateUnknown)
 		return a
 	}
@@ -1266,6 +1270,7 @@ func (s *Service) hydrateAgentStatus(ctx context.Context, a Agent) Agent {
 
 	box, _, err := s.resolveAgentBox(ctx, rt, a)
 	if err != nil {
+		logHydrateUnknownStatus(a, "resolve_agent_box", err)
 		a.Status = string(sandbox.StateUnknown)
 		return a
 	}
@@ -1275,6 +1280,7 @@ func (s *Service) hydrateAgentStatus(ctx context.Context, a Agent) Agent {
 
 	info, err := s.boxInfo(ctx, box)
 	if err != nil {
+		logHydrateUnknownStatus(a, "read_box_info", err)
 		a.Status = string(sandbox.StateUnknown)
 		return a
 	}
@@ -1283,6 +1289,19 @@ func (s *Service) hydrateAgentStatus(ctx context.Context, a Agent) Agent {
 	}
 	a.Status = string(info.State)
 	return a
+}
+
+func logHydrateUnknownStatus(a Agent, stage string, err error) {
+	if strings.TrimSpace(stage) == "" {
+		stage = "unknown_stage"
+	}
+	slog.Warn("agent status downgraded to unknown",
+		"agent_id", strings.TrimSpace(a.ID),
+		"agent_name", strings.TrimSpace(a.Name),
+		"agent_box_id", strings.TrimSpace(a.BoxID),
+		"stage", stage,
+		"error", err,
+	)
 }
 
 func (s *Service) Close() error {
