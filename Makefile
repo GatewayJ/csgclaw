@@ -95,11 +95,11 @@ build-csgclaw-cli-for-picoclaw:
 
 build-all: build-csgclaw build-csgclaw-cli
 
-run: sync-agent-runtimes
-	env GOCACHE=$(GOCACHE) $(GO) run -ldflags "$(LDFLAGS)" ./cmd/csgclaw serve
+run: build-csgclaw
+	$(BIN) serve
 
-run-with-boxlite-sdk: boxlite-setup sync-agent-runtimes
-	env GOCACHE=$(GOCACHE) $(GO) run -tags $(BOXLITE_SDK_TAG) -ldflags "$(LDFLAGS)" ./cmd/csgclaw serve
+run-with-boxlite-sdk: build-with-boxlite-sdk
+	$(BIN) serve
 
 onboard: sync-agent-runtimes
 	env GOCACHE=$(GOCACHE) $(GO) run -ldflags "$(LDFLAGS)" ./cmd/csgclaw onboard \
