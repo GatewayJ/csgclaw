@@ -83,6 +83,7 @@ func FullSpec() CommandSpec {
 			},
 			agentSpec(),
 			modelSpec(),
+			channelSpec(),
 			userSpec(),
 			botSpec(),
 			roomSpec(),
@@ -274,6 +275,33 @@ func modelSpec() CommandSpec {
 						Flags:   []FlagSpec{{Name: "no-browser"}},
 						Values:  []string{"codex", "claude-code"},
 					},
+				},
+			},
+		},
+	}
+}
+
+func channelSpec() CommandSpec {
+	return CommandSpec{
+		Name:    "channel",
+		Summary: "Manage channel configuration.",
+		Children: []CommandSpec{
+			{Name: "reload", Summary: "Reload channel configuration"},
+			{
+				Name:    "feishu",
+				Summary: "Manage Feishu channel configuration",
+				Children: []CommandSpec{
+					{Name: "get", Summary: "Get masked Feishu config", Flags: []FlagSpec{{Name: "bot-id", TakesValue: true}}},
+					{Name: "set", Summary: "Set Feishu config", Flags: []FlagSpec{
+						{Name: "bot-id", TakesValue: true},
+						{Name: "app-id", TakesValue: true},
+						{Name: "admin-open-id", TakesValue: true},
+						{Name: "app-secret-file", TakesValue: true},
+						{Name: "app-secret-env", TakesValue: true},
+						{Name: "app-secret-stdin"},
+						{Name: "no-reload"},
+					}},
+					{Name: "doctor", Summary: "Check Feishu config", Flags: []FlagSpec{{Name: "bot-id", TakesValue: true}}},
 				},
 			},
 		},

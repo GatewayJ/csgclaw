@@ -288,6 +288,40 @@ func cloneChannelsConfig(channels config.ChannelsConfig) config.ChannelsConfig {
 	return cloned
 }
 
+type channelRuntimeUpdater interface {
+	SetChannels(config.ChannelsConfig)
+}
+
+func (s *Service) SetChannels(channels config.ChannelsConfig) {
+	if s == nil {
+		return
+	}
+	cloned := cloneChannelsConfig(channels)
+	updaters := make([]channelRuntimeUpdater, 0)
+
+	s.mu.Lock()
+	s.channels = cloned
+	for _, rt := range s.runtimeRegistry {
+		if updater, ok := rt.(channelRuntimeUpdater); ok {
+			updaters = append(updaters, updater)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, updater := range updaters {
+		updater.SetChannels(cloned)
+	}
+}
+
+func (s *Service) Channels() config.ChannelsConfig {
+	if s == nil {
+		return config.ChannelsConfig{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneChannelsConfig(s.channels)
+}
+
 func EnsureBootstrapState(ctx context.Context, statePath string, server config.ServerConfig, model config.ModelConfig, managerImage string, forceRecreate bool) error {
 	return EnsureBootstrapStateWithLLM(ctx, statePath, server, config.SingleProfileLLM(model), managerImage, forceRecreate)
 }

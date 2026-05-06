@@ -60,10 +60,16 @@ type PicoClawRuntimeHost struct {
 }
 
 func (s *Service) PicoClawRuntimeHost() PicoClawRuntimeHost {
+	s.mu.RLock()
+	modelFallback := s.model.Resolved().ModelID
+	server := s.server
+	channels := cloneChannelsConfig(s.channels)
+	s.mu.RUnlock()
+
 	return PicoClawRuntimeHost{
-		ModelFallback: s.model.Resolved().ModelID,
-		Server:        s.server,
-		Channels:      s.channels,
+		ModelFallback: modelFallback,
+		Server:        server,
+		Channels:      channels,
 		EnsureRuntime: s.ensureRuntime,
 		AgentHome:     agentHomeDir,
 		RuntimeHome:   s.sandboxRuntimeHome,

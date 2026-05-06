@@ -11,6 +11,7 @@ import (
 
 	agentcmd "csgclaw/cli/agent"
 	"csgclaw/cli/bot"
+	channelcmd "csgclaw/cli/channel"
 	"csgclaw/cli/command"
 	completioncmd "csgclaw/cli/completion"
 	"csgclaw/cli/member"
@@ -74,6 +75,7 @@ func (a *App) registerDefaultCommands() {
 		servecmd.NewStopCmd(),
 		agentcmd.NewCmd(),
 		modelcmd.NewCmd(),
+		channelcmd.NewCmd(),
 		usercmd.NewCmd(),
 		bot.NewCmd(),
 		room.NewCmd(),

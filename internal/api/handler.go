@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"csgclaw/internal/agent"
@@ -28,6 +29,8 @@ type Handler struct {
 	botBridge         *im.BotBridge
 	feishu            *channel.FeishuService
 	llm               *llm.Service
+	channelConfigMu   sync.Mutex
+	configPath        string
 	serverAccessToken string
 	serverNoAuth      bool
 	upgradeManager    *upgrade.Manager
@@ -138,6 +141,13 @@ func (h *Handler) SetUpgradeApplyFunc(apply func(upgrade.ApplyHelperOptions) err
 		return
 	}
 	h.upgradeApply = apply
+}
+
+func (h *Handler) SetConfigPath(path string) {
+	if h == nil {
+		return
+	}
+	h.configPath = strings.TrimSpace(path)
 }
 
 func (h *Handler) validateServerAccessToken(authHeader string) bool {

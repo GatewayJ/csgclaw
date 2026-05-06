@@ -200,11 +200,28 @@ func (s *FeishuService) AppConfigs() map[string]FeishuAppConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	apps := make(map[string]FeishuAppConfig, len(s.apps))
-	for name, app := range s.apps {
-		apps[name] = app
+	return cloneFeishuAppConfigs(s.apps)
+}
+
+func (s *FeishuService) SetAppConfigs(apps map[string]FeishuAppConfig) {
+	if s == nil {
+		return
 	}
-	return apps
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.apps = cloneFeishuAppConfigs(apps)
+}
+
+func cloneFeishuAppConfigs(apps map[string]FeishuAppConfig) map[string]FeishuAppConfig {
+	cloned := make(map[string]FeishuAppConfig, len(apps))
+	for name, app := range apps {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		cloned[name] = app
+	}
+	return cloned
 }
 
 func (s *FeishuService) CreateUser(req FeishuCreateUserRequest) (im.User, error) {

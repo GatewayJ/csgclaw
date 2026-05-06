@@ -723,9 +723,9 @@ func partiallyMaskSecret(value string) string {
 
 func loadConfig(path string) (config.Config, error) {
 	if path == "" {
-		return config.LoadDefault()
+		return config.LoadDefaultWithChannelFiles()
 	}
-	return config.Load(path)
+	return config.LoadWithChannelFiles(path)
 }
 
 func validateModelConfig(cfg config.Config) error {
