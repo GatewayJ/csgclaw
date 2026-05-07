@@ -154,6 +154,6 @@ CSGClaw 会为每个 agent 调用 BoxLite CLI 时显式传入 `--home`，目录�
 
 Channel 集成是可选的。默认情况下，CSGClaw 直接使用内置 Web UI；只有在你需要接入飞书等外部消息平台时，才需要增加 channel 配置。
 
-Channel 相关配置通常放在顶层字段下，例如 `channels.feishu`。主配置文档主要说明通用的 server、model、bootstrap 和 sandbox 配置；实际使用时，再按需补充对应的 channel 配置块。
+`config.toml` 只保留通用的 server、model、bootstrap 和 sandbox 配置。飞书凭证放在所选 `config.toml` 旁边的独立 `channels/feishu.toml` 文件中；`config.toml` 里的旧 `[channels.feishu]` 配置块不会被读取。
 
 更详细的字段说明和示例，请参阅 [飞书 Channel 配置](channel/feishu.zh.md)。

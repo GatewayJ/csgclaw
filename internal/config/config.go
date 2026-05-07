@@ -102,13 +102,7 @@ type rawConfigValues struct {
 	sandbox       SandboxConfig
 	modelsDefault string
 	models        map[string]rawProviderConfig
-	channels      rawChannelsConfig
 	resolved      *rawConfigValues
-}
-
-type rawChannelsConfig struct {
-	FeishuAdminOpenID string
-	Feishu            map[string]FeishuConfig
 }
 
 type rawProviderConfig struct {
@@ -238,9 +232,6 @@ func Load(path string) (Config, error) {
 		LLM:    newLLMConfig(),
 		raw: rawConfigValues{
 			models: make(map[string]rawProviderConfig),
-			channels: rawChannelsConfig{
-				Feishu: make(map[string]FeishuConfig),
-			},
 		},
 	}
 
@@ -317,32 +308,6 @@ func Load(path string) (Config, error) {
 				}
 				cfg.Sandbox.DebianRegistriesOverride = registries
 			}
-		case section == "channels.feishu":
-			switch key {
-			case "admin_open_id":
-				cfg.raw.channels.FeishuAdminOpenID = parseRawStringValue(rawValue)
-				cfg.Channels.FeishuAdminOpenID = value
-			}
-		case strings.HasPrefix(section, "channels.feishu."):
-			name := strings.TrimPrefix(section, "channels.feishu.")
-			if name == "" {
-				return Config{}, fmt.Errorf("invalid feishu channel section: %q", section)
-			}
-			if cfg.Channels.Feishu == nil {
-				cfg.Channels.Feishu = make(map[string]FeishuConfig)
-			}
-			feishu := cfg.Channels.Feishu[name]
-			rawFeishu := cfg.raw.channels.Feishu[name]
-			switch key {
-			case "app_id":
-				rawFeishu.AppID = parseRawStringValue(rawValue)
-				feishu.AppID = value
-			case "app_secret":
-				rawFeishu.AppSecret = parseRawStringValue(rawValue)
-				feishu.AppSecret = value
-			}
-			cfg.Channels.Feishu[name] = feishu
-			cfg.raw.channels.Feishu[name] = rawFeishu
 		default:
 			if name, ok := modelsProviderSectionName(section); ok {
 				provider := modelsCfg.Providers[name]
@@ -451,31 +416,6 @@ models = %s
 			if provider.ReasoningEffort != "" {
 				fmt.Fprintf(&b, "reasoning_effort = %q\n", cfg.rawOrResolvedString(rawProvider.ReasoningEffort, loadedProvider.ReasoningEffort, provider.ReasoningEffort))
 			}
-		}
-	}
-
-	if strings.TrimSpace(c.Channels.FeishuAdminOpenID) != "" {
-		fmt.Fprintf(&b, `
-[channels.feishu]
-admin_open_id = %q
-`, cfg.rawOrResolvedString(cfg.raw.channels.FeishuAdminOpenID, loadedRaw.channels.FeishuAdminOpenID, c.Channels.FeishuAdminOpenID))
-	}
-
-	if len(c.Channels.Feishu) > 0 {
-		names := make([]string, 0, len(c.Channels.Feishu))
-		for name := range c.Channels.Feishu {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			feishu := c.Channels.Feishu[name]
-			rawFeishu := cfg.raw.channels.Feishu[name]
-			loadedFeishu := loadedRaw.channels.Feishu[name]
-			fmt.Fprintf(&b, `
-[channels.feishu.%s]
-app_id = %q
-app_secret = %q
-`, name, cfg.rawOrResolvedString(rawFeishu.AppID, loadedFeishu.AppID, feishu.AppID), cfg.rawOrResolvedString(rawFeishu.AppSecret, loadedFeishu.AppSecret, feishu.AppSecret))
 		}
 	}
 
@@ -722,9 +662,6 @@ func (r rawConfigValues) resolvedOrZero() rawConfigValues {
 	if r.resolved == nil {
 		return rawConfigValues{
 			models: make(map[string]rawProviderConfig),
-			channels: rawChannelsConfig{
-				Feishu: make(map[string]FeishuConfig),
-			},
 		}
 	}
 	return *r.resolved
@@ -733,9 +670,6 @@ func (r rawConfigValues) resolvedOrZero() rawConfigValues {
 func (c Config) resolvedRawValues() *rawConfigValues {
 	out := rawConfigValues{
 		models: make(map[string]rawProviderConfig),
-		channels: rawChannelsConfig{
-			Feishu: make(map[string]FeishuConfig),
-		},
 	}
 
 	if c.raw.server.ListenAddr != "" {
@@ -782,21 +716,6 @@ func (c Config) resolvedRawValues() *rawConfigValues {
 			loadedProvider.ReasoningEffort = provider.ReasoningEffort
 		}
 		out.models[name] = loadedProvider
-	}
-
-	if c.raw.channels.FeishuAdminOpenID != "" {
-		out.channels.FeishuAdminOpenID = c.Channels.FeishuAdminOpenID
-	}
-	for name, rawFeishu := range c.raw.channels.Feishu {
-		feishu := c.Channels.Feishu[name]
-		loadedFeishu := FeishuConfig{}
-		if rawFeishu.AppID != "" {
-			loadedFeishu.AppID = feishu.AppID
-		}
-		if rawFeishu.AppSecret != "" {
-			loadedFeishu.AppSecret = feishu.AppSecret
-		}
-		out.channels.Feishu[name] = loadedFeishu
 	}
 
 	return &out

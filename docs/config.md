@@ -154,6 +154,6 @@ The `boxlite-cli` provider does not need a vendored Go SDK at runtime. Current s
 
 Channel integration is optional. CSGClaw works with the built-in Web UI by default, and you only need channel config when you want to connect external messaging platforms such as Feishu.
 
-Channel-specific settings live under top-level config sections such as `channels.feishu`. Keep the main config focused on shared server, model, bootstrap, and sandbox settings, then add only the channel blocks you actually use.
+Keep `config.toml` focused on shared server, model, bootstrap, and sandbox settings. Feishu credentials live in a standalone `channels/feishu.toml` file next to the selected `config.toml`; legacy `[channels.feishu]` blocks in `config.toml` are not read.
 
 For detailed field definitions and examples, see [Feishu Channel Configuration](channel/feishu.md).

@@ -61,7 +61,7 @@ func LoadWithChannelFiles(path string) (Config, error) {
 		return Config{}, err
 	}
 	if ok {
-		cfg.Channels = MergeChannelConfigs(cfg.Channels, channels)
+		cfg.Channels = channels
 	}
 	return cfg, nil
 }
@@ -241,38 +241,4 @@ func ValidateFeishuChannelBotID(botID string) error {
 		}
 	}
 	return nil
-}
-
-func MergeChannelConfigs(base, overlay ChannelsConfig) ChannelsConfig {
-	merged := ChannelsConfig{
-		FeishuAdminOpenID: strings.TrimSpace(base.FeishuAdminOpenID),
-		Feishu:            cloneFeishuConfigs(base.Feishu),
-	}
-	if strings.TrimSpace(overlay.FeishuAdminOpenID) != "" {
-		merged.FeishuAdminOpenID = strings.TrimSpace(overlay.FeishuAdminOpenID)
-	}
-	if len(overlay.Feishu) > 0 {
-		if merged.Feishu == nil {
-			merged.Feishu = make(map[string]FeishuConfig, len(overlay.Feishu))
-		}
-		for name, feishu := range overlay.Feishu {
-			name = strings.TrimSpace(name)
-			if name == "" {
-				continue
-			}
-			merged.Feishu[name] = feishu
-		}
-	}
-	return merged
-}
-
-func cloneFeishuConfigs(in map[string]FeishuConfig) map[string]FeishuConfig {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]FeishuConfig, len(in))
-	for name, feishu := range in {
-		out[name] = feishu
-	}
-	return out
 }

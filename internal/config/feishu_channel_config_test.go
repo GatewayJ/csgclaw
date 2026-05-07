@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLoadWithChannelFilesMergesStandaloneFeishuConfig(t *testing.T) {
+func TestLoadWithChannelFilesUsesStandaloneFeishuConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	content := `[server]
@@ -62,8 +62,8 @@ app_secret = "worker-secret"
 	if got, want := cfg.Channels.FeishuAdminOpenID, "ou_standalone"; got != want {
 		t.Fatalf("FeishuAdminOpenID = %q, want %q", got, want)
 	}
-	if got, want := cfg.Channels.Feishu["u-manager"].AppID, "cli_legacy_manager"; got != want {
-		t.Fatalf("u-manager app_id = %q, want %q", got, want)
+	if _, ok := cfg.Channels.Feishu["u-manager"]; ok {
+		t.Fatalf("legacy u-manager app config was loaded: %+v", cfg.Channels.Feishu["u-manager"])
 	}
 	if got, want := cfg.Channels.Feishu["u-dev"].AppID, "cli_standalone_dev"; got != want {
 		t.Fatalf("u-dev app_id = %q, want %q", got, want)
@@ -74,9 +74,12 @@ app_secret = "worker-secret"
 	if got, want := cfg.Channels.Feishu["u-worker"].AppID, "cli_worker"; got != want {
 		t.Fatalf("u-worker app_id = %q, want %q", got, want)
 	}
+	if got, want := len(cfg.Channels.Feishu), 2; got != want {
+		t.Fatalf("feishu app config count = %d, want %d", got, want)
+	}
 }
 
-func TestLoadWithChannelFilesAllowsMissingStandaloneFeishuConfig(t *testing.T) {
+func TestLoadWithChannelFilesIgnoresLegacyFeishuWhenStandaloneConfigIsMissing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	content := `[server]
@@ -102,8 +105,11 @@ app_secret = "legacy-manager-secret"
 	if err != nil {
 		t.Fatalf("LoadWithChannelFiles() error = %v", err)
 	}
-	if got, want := cfg.Channels.Feishu["u-manager"].AppID, "cli_legacy_manager"; got != want {
-		t.Fatalf("u-manager app_id = %q, want %q", got, want)
+	if got := cfg.Channels.FeishuAdminOpenID; got != "" {
+		t.Fatalf("FeishuAdminOpenID = %q, want empty", got)
+	}
+	if len(cfg.Channels.Feishu) != 0 {
+		t.Fatalf("legacy feishu channel config was loaded: %+v", cfg.Channels.Feishu)
 	}
 }
 

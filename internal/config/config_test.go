@@ -283,7 +283,7 @@ reasoning_effort = "medium"
 	}
 }
 
-func TestLoadSupportsNamedFeishuChannelConfigs(t *testing.T) {
+func TestLoadIgnoresLegacyFeishuChannelConfigs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	content := `[server]
@@ -318,20 +318,11 @@ app_secret = "dev-secret"
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if got, want := cfg.Channels.Feishu["manager"].AppID, "cli_manager"; got != want {
-		t.Fatalf("manager app_id = %q, want %q", got, want)
+	if got := cfg.Channels.FeishuAdminOpenID; got != "" {
+		t.Fatalf("feishu admin_open_id = %q, want empty", got)
 	}
-	if got, want := cfg.Channels.FeishuAdminOpenID, "ou_admin"; got != want {
-		t.Fatalf("feishu admin_open_id = %q, want %q", got, want)
-	}
-	if got, want := cfg.Channels.Feishu["manager"].AppSecret, "manager-secret"; got != want {
-		t.Fatalf("manager app_secret = %q, want %q", got, want)
-	}
-	if got, want := cfg.Channels.Feishu["dev"].AppID, "cli_dev"; got != want {
-		t.Fatalf("dev app_id = %q, want %q", got, want)
-	}
-	if got, want := cfg.Channels.Feishu["dev"].AppSecret, "dev-secret"; got != want {
-		t.Fatalf("dev app_secret = %q, want %q", got, want)
+	if len(cfg.Channels.Feishu) != 0 {
+		t.Fatalf("legacy feishu channel config was loaded: %+v", cfg.Channels.Feishu)
 	}
 }
 
@@ -414,17 +405,16 @@ func TestSaveWritesModelsSection(t *testing.T) {
 	if strings.Contains(content, "[llm]") || strings.Contains(content, "model_id = ") {
 		t.Fatalf("saved config should not contain legacy llm/profile keys:\n%s", content)
 	}
-	for _, want := range []string{
-		"[channels.feishu.dev]",
-		`admin_open_id = "ou_admin"`,
-		`app_id = "cli_dev"`,
-		`app_secret = "dev-secret"`,
-		"[channels.feishu.manager]",
-		`app_id = "cli_manager"`,
-		`app_secret = "manager-secret"`,
+	for _, notWant := range []string{
+		"[channels.feishu",
+		"admin_open_id",
+		"cli_dev",
+		"dev-secret",
+		"cli_manager",
+		"manager-secret",
 	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("saved config missing %q:\n%s", want, content)
+		if strings.Contains(content, notWant) {
+			t.Fatalf("saved config should not contain feishu channel config %q:\n%s", notWant, content)
 		}
 	}
 }
@@ -628,9 +618,6 @@ func TestLoadExpandsNonServerEnvValues(t *testing.T) {
 	t.Setenv("MODEL_API_KEY", "sk-env")
 	t.Setenv("MODEL_ID", "gpt-env")
 	t.Setenv("REASONING_EFFORT", "HIGH")
-	t.Setenv("FEISHU_ADMIN_OPEN_ID", "ou_env_admin")
-	t.Setenv("FEISHU_APP_ID", "cli_env")
-	t.Setenv("FEISHU_APP_SECRET", "feishu-env-secret")
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
@@ -652,13 +639,6 @@ base_url = "https://${MODEL_BASE_HOST}/v1"
 api_key = "${MODEL_API_KEY}"
 models = ["${MODEL_ID}", "gpt-static"]
 reasoning_effort = "${REASONING_EFFORT}"
-
-[channels.feishu]
-admin_open_id = "${FEISHU_ADMIN_OPEN_ID}"
-
-[channels.feishu.manager]
-app_id = "${FEISHU_APP_ID}"
-app_secret = "${FEISHU_APP_SECRET}"
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -696,15 +676,6 @@ app_secret = "${FEISHU_APP_SECRET}"
 	if got, want := strings.Join(cfg.Models.Providers["remote"].Models, ","), "gpt-env,gpt-static"; got != want {
 		t.Fatalf("cfg.Models.Providers[remote].Models = %q, want %q", got, want)
 	}
-	if got, want := cfg.Channels.FeishuAdminOpenID, "ou_env_admin"; got != want {
-		t.Fatalf("cfg.Channels.FeishuAdminOpenID = %q, want %q", got, want)
-	}
-	if got, want := cfg.Channels.Feishu["manager"].AppID, "cli_env"; got != want {
-		t.Fatalf("cfg.Channels.Feishu[manager].AppID = %q, want %q", got, want)
-	}
-	if got, want := cfg.Channels.Feishu["manager"].AppSecret, "feishu-env-secret"; got != want {
-		t.Fatalf("cfg.Channels.Feishu[manager].AppSecret = %q, want %q", got, want)
-	}
 }
 
 func TestSavePreservesEnvPlaceholdersAfterLoad(t *testing.T) {
@@ -719,9 +690,6 @@ func TestSavePreservesEnvPlaceholdersAfterLoad(t *testing.T) {
 	t.Setenv("MODEL_API_KEY", "sk-env")
 	t.Setenv("MODEL_ID", "gpt-env")
 	t.Setenv("REASONING_EFFORT", "medium")
-	t.Setenv("FEISHU_ADMIN_OPEN_ID", "ou_env_admin")
-	t.Setenv("FEISHU_APP_ID", "cli_env")
-	t.Setenv("FEISHU_APP_SECRET", "feishu-env-secret")
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
@@ -745,13 +713,6 @@ base_url = "https://${MODEL_BASE_HOST}/v1"
 api_key = "${MODEL_API_KEY}"
 models = ["${MODEL_ID}", "gpt-static"]
 reasoning_effort = "${REASONING_EFFORT}"
-
-[channels.feishu]
-admin_open_id = "${FEISHU_ADMIN_OPEN_ID}"
-
-[channels.feishu.manager]
-app_id = "${FEISHU_APP_ID}"
-app_secret = "${FEISHU_APP_SECRET}"
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -766,7 +727,6 @@ app_secret = "${FEISHU_APP_SECRET}"
 	t.Setenv("ACCESS_TOKEN", "changed_access_token")
 	t.Setenv("MANAGER_IMAGE", "changed-image")
 	t.Setenv("MODEL_API_KEY", "changed-model-key")
-	t.Setenv("FEISHU_APP_SECRET", "changed-feishu-secret")
 
 	if err := cfg.Save(path); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -789,13 +749,13 @@ app_secret = "${FEISHU_APP_SECRET}"
 		`api_key = "${MODEL_API_KEY}"`,
 		`models = ["${MODEL_ID}", "gpt-static"]`,
 		`reasoning_effort = "${REASONING_EFFORT}"`,
-		`admin_open_id = "${FEISHU_ADMIN_OPEN_ID}"`,
-		`app_id = "${FEISHU_APP_ID}"`,
-		`app_secret = "${FEISHU_APP_SECRET}"`,
 	} {
 		if !strings.Contains(saved, want) {
 			t.Fatalf("saved config missing %q:\n%s", want, saved)
 		}
+	}
+	if strings.Contains(saved, "[channels.feishu") {
+		t.Fatalf("saved config should not contain feishu channel config:\n%s", saved)
 	}
 }
 

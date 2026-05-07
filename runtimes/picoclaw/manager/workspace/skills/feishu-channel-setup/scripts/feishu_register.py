@@ -35,6 +35,7 @@ ONBOARD_OPEN_URLS = {
 }
 REGISTRATION_PATH = "/oauth/v1/app/registration"
 REQUEST_TIMEOUT = 15
+API_REQUEST_TIMEOUT = 600
 DEFAULT_EXPIRE_SECONDS = 600
 
 
@@ -195,6 +196,20 @@ def api_token(args: argparse.Namespace) -> str:
     return getattr(args, "csgclaw_access_token", "") or os.environ.get("CSGCLAW_ACCESS_TOKEN", "")
 
 
+def api_request_timeout(args: argparse.Namespace) -> int:
+    value = getattr(args, "api_timeout", None)
+    if value is None:
+        raw = os.environ.get("CSGCLAW_API_TIMEOUT", "").strip()
+        if raw:
+            try:
+                value = int(raw)
+            except ValueError:
+                value = API_REQUEST_TIMEOUT
+        else:
+            value = API_REQUEST_TIMEOUT
+    return max(1, int(value))
+
+
 def api_json(args: argparse.Namespace, method: str, path: str, body: Optional[dict] = None) -> Any:
     data = None if body is None else json.dumps(body).encode("utf-8")
     headers = {"Content-Type": "application/json"}
@@ -203,7 +218,7 @@ def api_json(args: argparse.Namespace, method: str, path: str, body: Optional[di
         headers["Authorization"] = f"Bearer {token}"
     req = Request(f"{api_base(args)}{path}", data=data, headers=headers, method=method)
     try:
-        with urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+        with urlopen(req, timeout=api_request_timeout(args)) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else None
     except HTTPError as exc:
@@ -214,13 +229,28 @@ def api_json(args: argparse.Namespace, method: str, path: str, body: Optional[di
 def configure_csgclaw(args: argparse.Namespace, state: dict, result: dict) -> dict:
     bot_id = state["bot_id"]
     path_bot_id = quote(bot_id, safe="")
+    existing = api_json(args, "GET", f"/api/v1/channels/feishu/config/{path_bot_id}", None) or {}
+    existing_admin_open_id = str(existing.get("admin_open_id") or "").strip()
+    candidate_admin_open_id = str(state.get("admin_open_id") or result.get("open_id") or "").strip()
     payload = {
         "app_id": result["app_id"],
         "app_secret": result["app_secret"],
-        "admin_open_id": result.get("open_id") or state.get("admin_open_id", ""),
         "reload": True,
     }
-    return api_json(args, "PUT", f"/api/v1/channels/feishu/config/{path_bot_id}", payload)
+    if not existing_admin_open_id and candidate_admin_open_id:
+        payload["admin_open_id"] = candidate_admin_open_id
+    response = api_json(args, "PUT", f"/api/v1/channels/feishu/config/{path_bot_id}", payload) or {}
+    if existing_admin_open_id and not response.get("admin_open_id"):
+        response["admin_open_id"] = existing_admin_open_id
+        response["admin_open_id_preserved"] = True
+    elif payload.get("admin_open_id"):
+        response["admin_open_id_source"] = "registration"
+    return response
+
+
+def resolve_role(args: argparse.Namespace, state: dict) -> str:
+    bot_id = state["bot_id"]
+    return args.role or state.get("role") or ("manager" if bot_id == "u-manager" else "worker")
 
 
 def ensure_bot(args: argparse.Namespace, state: dict, result: dict) -> Optional[dict]:
@@ -228,7 +258,7 @@ def ensure_bot(args: argparse.Namespace, state: dict, result: dict) -> Optional[
         return None
     bot_id = state["bot_id"]
     name = args.bot_name or state.get("bot_name") or bot_id.removeprefix("u-") or bot_id
-    role = args.role or state.get("role") or ("manager" if bot_id == "u-manager" else "worker")
+    role = resolve_role(args, state)
     description = args.description or state.get("description") or f"{name} Feishu {role} agent"
     payload = {
         "id": bot_id,
@@ -240,16 +270,49 @@ def ensure_bot(args: argparse.Namespace, state: dict, result: dict) -> Optional[
     return api_json(args, "POST", "/api/v1/bots", payload)
 
 
-def maybe_recreate(args: argparse.Namespace, state: dict) -> Optional[dict]:
+def worker_box_conflict_message(bot_id: str, name: str) -> str:
+    return (
+        f"worker {bot_id!r} could not be created because a residual BoxLite box named {name!r} already exists, "
+        f"but CSGClaw has no matching agent record. Stop here and ask the host operator to clean the stale worker "
+        f"runtime, for example: ./bin/boxlite --home ~/.csgclaw/agents/{name}/boxlite rm -f {name}"
+    )
+
+
+def is_box_name_conflict(exc: RuntimeError, name: str) -> bool:
+    message = str(exc)
+    return "box with name" in message and f"'{name}' already exists" in message
+
+
+def agent_exists(args: argparse.Namespace, bot_id: str) -> bool:
+    try:
+        api_json(args, "GET", f"/api/v1/agents/{quote(bot_id, safe='')}", None)
+        return True
+    except RuntimeError as exc:
+        message = str(exc)
+        if "HTTP 404" in message and "agent not found" in message:
+            return False
+        raise
+
+
+def maybe_recreate(args: argparse.Namespace, state: dict, worker_existed_before_ensure: Optional[bool] = None) -> Optional[dict]:
     mode = args.recreate
     bot_id = state["bot_id"]
-    role = args.role or state.get("role") or ("manager" if bot_id == "u-manager" else "worker")
+    role = resolve_role(args, state)
     if mode == "none":
         return None
-    if mode == "worker" and role == "manager":
-        return None
-    if mode == "auto" and role == "manager":
-        return {"skipped": True, "reason": "manager recreate requires explicit final confirmation"}
+    if role == "manager":
+        if mode in ("auto", "worker"):
+            return {"skipped": True, "reason": "manager recreate requires explicit final confirmation"}
+        if mode == "manager" and not getattr(args, "confirm_manager", False):
+            raise RuntimeError("manager recreate can interrupt the current run; pass --confirm-manager as the final confirmed action")
+        result = api_json(args, "POST", f"/api/v1/agents/{quote(bot_id, safe='')}/recreate", None)
+        return manager_recreate_terminal_result(bot_id, result)
+    if mode == "manager":
+        return {"skipped": True, "reason": "manager recreate requested for a worker bot"}
+    if worker_existed_before_ensure is False:
+        if getattr(args, "no_ensure_bot", False):
+            return {"skipped": True, "reason": "worker agent does not exist and --no-ensure-bot skipped creation"}
+        return {"skipped": True, "reason": "worker agent did not exist before ensure; ensure_bot created it with current config"}
     return api_json(args, "POST", f"/api/v1/agents/{quote(bot_id, safe='')}/recreate", None)
 
 
@@ -259,6 +322,17 @@ def public_result(data: dict) -> dict:
         if key in clean:
             clean[key] = "present"
     return clean
+
+
+def manager_recreate_terminal_result(bot_id: str, result: Optional[dict]) -> dict:
+    return {
+        "status": "recreate_requested",
+        "bot_id": bot_id,
+        "terminal": True,
+        "post_recreate_status_check": "skip",
+        "message": "Manager self-recreate was requested. Stop this manager-hosted run here; do not inspect, start, or retry manager based on runtime status.",
+        "result": public_result(result or {}),
+    }
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -296,6 +370,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "expires_in": min(begin["expire_in"], args.timeout),
         "state_path": str(state_path(args, registration_id)),
         "next": f"python scripts/feishu_register.py finalize --registration-id {registration_id}",
+        "next_tool_timeout_seconds": API_REQUEST_TIMEOUT,
     }
     if args.json:
         print(json.dumps(output, ensure_ascii=False, indent=2))
@@ -312,6 +387,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         print()
         print("After the user confirms, run:")
         print(output["next"])
+        print(f"Use a tool timeout of at least {API_REQUEST_TIMEOUT} seconds for finalize when creating worker boxes.")
     return 0
 
 
@@ -358,7 +434,13 @@ def cmd_poll(args: argparse.Namespace) -> int:
     state = load_state(args)
     result = poll_until_success(args, state, wait=False)
     if result:
-        print(json.dumps({"status": "confirmed", "bot_id": state["bot_id"], "credentials": "available", "next": f"python scripts/feishu_register.py finalize --registration-id {state['registration_id']}"}, ensure_ascii=False, indent=2))
+        print(json.dumps({
+            "status": "confirmed",
+            "bot_id": state["bot_id"],
+            "credentials": "available",
+            "next": f"python scripts/feishu_register.py finalize --registration-id {state['registration_id']}",
+            "next_tool_timeout_seconds": API_REQUEST_TIMEOUT,
+        }, ensure_ascii=False, indent=2))
     else:
         print(json.dumps({"status": "pending", "bot_id": state["bot_id"]}, ensure_ascii=False, indent=2))
     return 0
@@ -370,10 +452,27 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     if not result:
         raise RuntimeError("registration has not completed")
     configured = configure_csgclaw(args, state, result) if not args.no_configure else None
-    ensured = ensure_bot(args, state, result)
-    recreated = maybe_recreate(args, state)
+    role = resolve_role(args, state)
+    worker_existed_before_ensure = None
+    if role == "worker" and args.recreate in ("auto", "worker"):
+        worker_existed_before_ensure = agent_exists(args, state["bot_id"])
+    try:
+        ensured = ensure_bot(args, state, result)
+    except RuntimeError as exc:
+        name = args.bot_name or state.get("bot_name") or state["bot_id"].removeprefix("u-") or state["bot_id"]
+        if role == "worker" and worker_existed_before_ensure is False and is_box_name_conflict(exc, name):
+            raise RuntimeError(worker_box_conflict_message(state["bot_id"], name)) from None
+        raise
+    recreated = maybe_recreate(args, state, worker_existed_before_ensure)
     if not args.keep_state:
         delete_state(args, state["registration_id"])
+    if configured is not None:
+        admin_open_id = str((configured or {}).get("admin_open_id") or "").strip()
+    else:
+        admin_open_id = str(result.get("open_id") or state.get("admin_open_id") or "").strip()
+    worker_recreate_policy = None
+    if role == "worker":
+        worker_recreate_policy = "existing_worker_recreated" if worker_existed_before_ensure else "new_worker_not_recreated"
     output = {
         "status": "configured" if configured else "credentials_received",
         "bot_id": state["bot_id"],
@@ -381,9 +480,11 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "app_id": result["app_id"],
         "app_secret": "present",
         "domain": result.get("domain"),
-        "admin_open_id": result.get("open_id") or state.get("admin_open_id") or "",
+        "admin_open_id": admin_open_id,
         "config": public_result(configured or {}),
         "bot_ensured": ensured is not None,
+        "worker_existed_before_ensure": worker_existed_before_ensure,
+        "worker_recreate_policy": worker_recreate_policy,
         "recreate": public_result(recreated or {}),
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
@@ -403,7 +504,11 @@ def cmd_recreate_agent(args: argparse.Namespace) -> int:
     if bot_id == "u-manager" and not args.confirm_manager:
         raise RuntimeError("manager recreate can interrupt the current run; pass --confirm-manager as the final confirmed action")
     result = api_json(args, "POST", f"/api/v1/agents/{quote(bot_id, safe='')}/recreate", None)
-    print(json.dumps({"status": "recreate_requested", "bot_id": bot_id, "result": public_result(result or {})}, ensure_ascii=False, indent=2))
+    if bot_id == "u-manager":
+        output = manager_recreate_terminal_result(bot_id, result)
+    else:
+        output = {"status": "recreate_requested", "bot_id": bot_id, "result": public_result(result or {})}
+    print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -413,6 +518,7 @@ def add_common(p: argparse.ArgumentParser) -> None:
 
 def add_api_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--csgclaw-base-url", default="", help="CSGClaw base URL; default $CSGCLAW_BASE_URL or http://127.0.0.1:18080")
+    p.add_argument("--api-timeout", type=int, default=None, help="CSGClaw API timeout in seconds; default $CSGCLAW_API_TIMEOUT or 600")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -448,7 +554,8 @@ def build_parser() -> argparse.ArgumentParser:
     finalize.add_argument("--role", choices=["worker", "manager"], default="", help="Override role for ensure/recreate logic")
     finalize.add_argument("--bot-name", default="", help="Override bot name for ensure")
     finalize.add_argument("--description", default="", help="Override bot description for ensure")
-    finalize.add_argument("--recreate", choices=["none", "auto", "worker", "manager"], default="auto", help="auto recreates workers but skips manager; manager requires explicit --recreate manager")
+    finalize.add_argument("--recreate", choices=["none", "auto", "worker", "manager"], default="auto", help="auto recreates existing workers but skips newly created workers and manager; manager requires --recreate manager --confirm-manager")
+    finalize.add_argument("--confirm-manager", action="store_true", help="Required with --recreate manager; run only as the final confirmed action")
     finalize.add_argument("--keep-state", action="store_true", help="Keep registration state file after successful finalize")
     finalize.set_defaults(func=cmd_finalize)
 
