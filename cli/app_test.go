@@ -394,6 +394,30 @@ func TestExecuteBotDeleteSupportsJSONOutput(t *testing.T) {
 	}
 }
 
+func TestExecuteBotConfigGetUsesFeishuConfigRoute(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &App{
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodGet {
+				t.Fatalf("method = %q, want %q", req.Method, http.MethodGet)
+			}
+			if req.URL.String() != "http://example.test/api/v1/channels/feishu/config?bot_id=u-dev" {
+				t.Fatalf("url = %q, want feishu config get route", req.URL.String())
+			}
+			return jsonResponse(http.StatusOK, `{"bot_id":"u-dev","configured":true,"app_id":"cli_dev","app_secret":"present"}`), nil
+		}),
+	}
+
+	if err := app.Execute(context.Background(), []string{"--endpoint", "http://example.test", "bot", "config", "--channel", "feishu", "--get", "--bot-id", "u-dev"}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "u-dev") || !strings.Contains(stdout.String(), "present") {
+		t.Fatalf("stdout = %s, want bot and masked secret", stdout.String())
+	}
+}
+
 func TestExecuteBotCreateRequiresNameAndRole(t *testing.T) {
 	app := &App{
 		stdout:     &bytes.Buffer{},

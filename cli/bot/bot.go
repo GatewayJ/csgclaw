@@ -9,26 +9,10 @@ import (
 	"csgclaw/internal/apitypes"
 )
 
-type cmd struct {
-	enableConfig bool
-}
+type cmd struct{}
 
-type Option func(*cmd)
-
-func WithConfigCommand() Option {
-	return func(c *cmd) {
-		c.enableConfig = true
-	}
-}
-
-func NewCmd(opts ...Option) command.Command {
-	c := cmd{}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&c)
-		}
-	}
-	return c
+func NewCmd() command.Command {
+	return cmd{}
 }
 
 func (cmd) Name() string {
@@ -57,11 +41,7 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 	case "delete":
 		return c.runDelete(ctx, run, args[1:], globals)
 	case "config":
-		if c.enableConfig {
-			return c.runConfig(ctx, run, args[1:], globals)
-		}
-		c.usage(run)
-		return fmt.Errorf("unknown bot subcommand %q", args[0])
+		return c.runConfig(ctx, run, args[1:], globals)
 	default:
 		c.usage(run)
 		return fmt.Errorf("unknown bot subcommand %q", args[0])
@@ -73,9 +53,7 @@ func (c cmd) usage(run *command.Context) {
 		"list               List bots",
 		"create             Create a bot",
 		"delete <id>        Delete a bot",
-	}
-	if c.enableConfig {
-		subcommands = append(subcommands, "config             Manage bot channel config")
+		"config             Manage bot channel config",
 	}
 	run.UsageCommandGroup(c, run.Program+" bot <subcommand> [flags]", subcommands)
 }

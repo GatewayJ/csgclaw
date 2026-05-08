@@ -116,16 +116,6 @@ func requireBotID(botID string) (string, error) {
 	if botID == "" {
 		return "", fmt.Errorf("--bot-id is required")
 	}
-	for _, r := range botID {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= 'A' && r <= 'Z':
-		case r >= '0' && r <= '9':
-		case r == '-' || r == '_':
-		default:
-			return "", fmt.Errorf("invalid --bot-id %q: only letters, digits, '-' and '_' are allowed", botID)
-		}
-	}
 	return botID, nil
 }
 

@@ -65,7 +65,7 @@ func (a *App) AddCommand(commands ...command.Command) {
 
 func (a *App) registerDefaultCommands() {
 	a.AddCommand(
-		bot.NewCmd(bot.WithConfigCommand()),
+		bot.NewCmd(),
 		room.NewCmd(),
 		member.NewCmd(),
 		message.NewCmd(),

@@ -68,7 +68,7 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
 2. If a secret must be represented in examples or summaries, write `[REDACTED]`.
 3. The script must print only `app_secret: present` after finalize.
 4. Do not store returned `client_secret` in skill state files. `finalize` pipes it directly to `csgclaw-cli bot config --channel feishu --set --app-secret-stdin`.
-5. Verify with masked config/doctor, not by printing the secret.
+5. Verify with `csgclaw-cli bot config --channel feishu --get`, not by printing the secret.
 
 ## Choose Target Bot
 
