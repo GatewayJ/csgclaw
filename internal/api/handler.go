@@ -13,7 +13,6 @@ import (
 	"csgclaw/internal/apitypes"
 	"csgclaw/internal/bot"
 	"csgclaw/internal/channel"
-	feishuchannel "csgclaw/internal/channel/feishu"
 	"csgclaw/internal/im"
 	"csgclaw/internal/llm"
 	"csgclaw/internal/upgrade"
@@ -28,9 +27,7 @@ type Handler struct {
 	imProvisioner     *im.Provisioner
 	botBridge         *im.BotBridge
 	feishu            *channel.FeishuService
-	feishuConfig      *feishuchannel.ConfigHandler
 	llm               *llm.Service
-	configPath        string
 	serverAccessToken string
 	serverNoAuth      bool
 	upgradeManager    *upgrade.Manager
@@ -125,13 +122,6 @@ func NewHandlerWithBotAndAuth(svc *agent.Service, botSvc *bot.Service, imSvc *im
 		serverNoAuth:      serverNoAuth,
 		upgradeApply:      upgrade.StartApplyHelper,
 	}
-	h.feishuConfig = feishuchannel.NewConfigHandler(feishuchannel.ConfigHandlerOptions{
-		AgentService:        svc,
-		BotService:          botSvc,
-		IMService:           imSvc,
-		FeishuService:       feishu,
-		ValidateAccessToken: h.validateServerAccessToken,
-	})
 	return h
 }
 
@@ -149,16 +139,6 @@ func (h *Handler) SetUpgradeApplyFunc(apply func(upgrade.ApplyHelperOptions) err
 		return
 	}
 	h.upgradeApply = apply
-}
-
-func (h *Handler) SetConfigPath(path string) {
-	if h == nil {
-		return
-	}
-	h.configPath = strings.TrimSpace(path)
-	if h.feishuConfig != nil {
-		h.feishuConfig.SetConfigPath(h.configPath)
-	}
 }
 
 func (h *Handler) validateServerAccessToken(authHeader string) bool {

@@ -21,8 +21,8 @@ func TestFeishuChannelConfigPutWritesStandaloneConfigAndReloads(t *testing.T) {
 	writeMinimalAPIConfig(t, configPath)
 
 	feishuSvc := channel.NewFeishuService()
+	feishuSvc.SetConfigPath(configPath)
 	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, feishuSvc, nil, "secret", false)
-	h.SetConfigPath(configPath)
 
 	body := []byte(`{"bot_id":"u-dev","app_id":"cli_dev","app_secret":"dev-secret","admin_open_id":"ou_admin"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/channels/feishu/config", bytes.NewReader(body))
@@ -80,8 +80,9 @@ func TestFeishuChannelConfigGetMasksSecret(t *testing.T) {
 		t.Fatalf("SaveFeishuChannelConfig() error = %v", err)
 	}
 
-	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, channel.NewFeishuService(), nil, "secret", false)
-	h.SetConfigPath(configPath)
+	feishuSvc := channel.NewFeishuService()
+	feishuSvc.SetConfigPath(configPath)
+	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, feishuSvc, nil, "secret", false)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels/feishu/config?bot_id=u-dev", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
@@ -98,13 +99,19 @@ func TestFeishuChannelConfigGetMasksSecret(t *testing.T) {
 	}
 }
 
-func TestChannelsReloadRequiresAuthorization(t *testing.T) {
-	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, channel.NewFeishuService(), nil, "secret", false)
+func TestChannelsReloadDoesNotDuplicateAuthorization(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, config.ConfigFileName)
+	writeMinimalAPIConfig(t, configPath)
+
+	feishuSvc := channel.NewFeishuService()
+	feishuSvc.SetConfigPath(configPath)
+	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, feishuSvc, nil, "secret", false)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/config", nil)
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 }
 

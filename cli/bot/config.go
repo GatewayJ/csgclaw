@@ -14,6 +14,8 @@ import (
 	"csgclaw/internal/apitypes"
 )
 
+const feishuConfigAPIPath = "/api/v1/channels/feishu/config"
+
 func (c cmd) runConfig(ctx context.Context, run *command.Context, args []string, globals command.GlobalOptions) error {
 	fs := run.NewFlagSet(
 		"bot config",
@@ -70,7 +72,7 @@ func (c cmd) runConfigGet(ctx context.Context, run *command.Context, globals com
 	}
 	values := url.Values{"bot_id": []string{id}}
 	var resp apitypes.FeishuConfigResponse
-	if err := run.APIClient(globals).DoJSON(ctx, http.MethodGet, apitypes.FeishuConfigAPIPath+"?"+values.Encode(), nil, &resp); err != nil {
+	if err := run.APIClient(globals).DoJSON(ctx, http.MethodGet, feishuConfigAPIPath+"?"+values.Encode(), nil, &resp); err != nil {
 		return err
 	}
 	return renderConfig(globals.Output, run.Stdout, resp)
@@ -97,7 +99,7 @@ func (c cmd) runConfigSet(ctx context.Context, run *command.Context, globals com
 		Reload:      &reload,
 	}
 	var resp apitypes.FeishuConfigResponse
-	if err := run.APIClient(globals).DoJSON(ctx, http.MethodPut, apitypes.FeishuConfigAPIPath, req, &resp); err != nil {
+	if err := run.APIClient(globals).DoJSON(ctx, http.MethodPut, feishuConfigAPIPath, req, &resp); err != nil {
 		return err
 	}
 	return renderConfig(globals.Output, run.Stdout, resp)
@@ -105,7 +107,7 @@ func (c cmd) runConfigSet(ctx context.Context, run *command.Context, globals com
 
 func (c cmd) runConfigReload(ctx context.Context, run *command.Context, globals command.GlobalOptions) error {
 	var resp apitypes.FeishuConfigReloadResponse
-	if err := run.APIClient(globals).DoJSON(ctx, http.MethodPost, apitypes.FeishuConfigAPIPath, nil, &resp); err != nil {
+	if err := run.APIClient(globals).DoJSON(ctx, http.MethodPost, feishuConfigAPIPath, nil, &resp); err != nil {
 		return err
 	}
 	return renderConfigReload(globals.Output, run.Stdout, resp)

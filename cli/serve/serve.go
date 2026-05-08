@@ -685,28 +685,6 @@ home_dir_name = %q
 default = %q
 `, llmCfg.DefaultSelector()) + formatEffectiveProviders(llmCfg)
 
-	if strings.TrimSpace(cfg.Channels.FeishuAdminOpenID) != "" {
-		content += fmt.Sprintf(`
-[channels.feishu]
-admin_open_id = %q
-`, cfg.Channels.FeishuAdminOpenID)
-	}
-
-	if len(cfg.Channels.Feishu) > 0 {
-		names := make([]string, 0, len(cfg.Channels.Feishu))
-		for name := range cfg.Channels.Feishu {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			feishu := cfg.Channels.Feishu[name]
-			content += fmt.Sprintf(`
-[channels.feishu.%s]
-app_id = %q
-app_secret = %q
-`, name, feishu.AppID, partiallyMaskSecret(feishu.AppSecret))
-		}
-	}
 	return content
 }
 

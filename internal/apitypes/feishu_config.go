@@ -1,7 +1,5 @@
 package apitypes
 
-const FeishuConfigAPIPath = "/api/v1/channels/feishu/config"
-
 type FeishuConfigRequest struct {
 	BotID       string `json:"bot_id,omitempty"`
 	AppID       string `json:"app_id"`

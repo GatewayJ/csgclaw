@@ -11,6 +11,7 @@ import (
 	"csgclaw/internal/api"
 	"csgclaw/internal/bot"
 	"csgclaw/internal/channel"
+	"csgclaw/internal/config"
 	"csgclaw/internal/im"
 	"csgclaw/internal/llm"
 	"csgclaw/internal/upgrade"
@@ -37,10 +38,10 @@ func Run(opts Options) error {
 	if opts.Context == nil {
 		opts.Context = context.Background()
 	}
+	configureFeishuService(opts.Feishu, opts.Service, opts.ConfigPath)
 	handler := api.NewHandlerWithBotAndAuth(opts.Service, opts.Bot, opts.IM, opts.IMBus, opts.BotBridge, opts.Feishu, opts.LLM, opts.AccessToken, opts.NoAuth)
 	handler.SetUpgradeManager(opts.Upgrade)
 	handler.SetUpgradeConfigPath(opts.ConfigPath)
-	handler.SetConfigPath(opts.ConfigPath)
 	mux := handler.Routes()
 	mux.Handle("/", uiHandler())
 
@@ -101,4 +102,16 @@ func Run(opts Options) error {
 		return opts.Service.Close()
 	}
 	return nil
+}
+
+func configureFeishuService(feishu *channel.FeishuService, svc *agent.Service, configPath string) {
+	if feishu == nil {
+		return
+	}
+	feishu.SetConfigPath(configPath)
+	feishu.SetConfigReloadHook(func(channels config.ChannelsConfig) {
+		if svc != nil {
+			svc.SetChannels(channels)
+		}
+	})
 }

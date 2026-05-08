@@ -546,16 +546,14 @@ func TestServeForegroundPassesContextToServer(t *testing.T) {
 		`[models]`,
 		`default = "default.model-test"`,
 		`[models.providers.default]`,
-		`[channels.feishu]`,
-		`admin_open_id = "ou_admin"`,
-		`[channels.feishu.manager]`,
-		`app_id = "cli_manager"`,
-		`app_secret = "ma**********et"`,
 		"CSGClaw IM is available at: http://example.test/",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("stdout missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "[channels.feishu") {
+		t.Fatalf("stdout included Feishu channel config:\n%s", got)
 	}
 	if strings.Contains(got, "sk-secret") {
 		t.Fatalf("stdout leaked model API key:\n%s", got)
