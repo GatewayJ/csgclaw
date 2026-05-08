@@ -8,13 +8,12 @@ import (
 	"sync"
 
 	"csgclaw/internal/agent"
+	"csgclaw/internal/apitypes"
 	"csgclaw/internal/bot"
 	channelroot "csgclaw/internal/channel"
 	"csgclaw/internal/config"
 	"csgclaw/internal/im"
 )
-
-const ConfigAPIPath = "/api/v1/channels/feishu/config"
 
 type ConfigHandlerOptions struct {
 	AgentService        *agent.Service
@@ -33,28 +32,6 @@ type ConfigHandler struct {
 	feishu              *channelroot.FeishuService
 	configPath          string
 	validateAccessToken func(string) bool
-}
-
-type ConfigRequest struct {
-	BotID       string `json:"bot_id,omitempty"`
-	AppID       string `json:"app_id"`
-	AppSecret   string `json:"app_secret"`
-	AdminOpenID string `json:"admin_open_id,omitempty"`
-	Reload      *bool  `json:"reload,omitempty"`
-}
-
-type ConfigResponse struct {
-	BotID       string `json:"bot_id"`
-	Configured  bool   `json:"configured"`
-	AppID       string `json:"app_id,omitempty"`
-	AppSecret   string `json:"app_secret"`
-	AdminOpenID string `json:"admin_open_id,omitempty"`
-	Reloaded    bool   `json:"reloaded,omitempty"`
-}
-
-type ReloadResponse struct {
-	Status     string   `json:"status"`
-	FeishuBots []string `json:"feishu_bots"`
 }
 
 func NewConfigHandler(opts ConfigHandlerOptions) *ConfigHandler {
@@ -86,7 +63,7 @@ func (h *ConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
-	case r.URL.Path == ConfigAPIPath:
+	case r.URL.Path == apitypes.FeishuConfigAPIPath:
 		h.handleConfig(w, r)
 	default:
 		http.NotFound(w, r)
@@ -129,7 +106,7 @@ func (h *ConfigHandler) handleGet(w http.ResponseWriter, botID string) {
 }
 
 func (h *ConfigHandler) handlePut(w http.ResponseWriter, r *http.Request) {
-	var req ConfigRequest
+	var req apitypes.FeishuConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid feishu channel config request", http.StatusBadRequest)
 		return
@@ -202,7 +179,7 @@ func (h *ConfigHandler) handleReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, ReloadResponse{Status: "reloaded", FeishuBots: sortedBotIDs(cfg.Channels)})
+	writeJSON(w, http.StatusOK, apitypes.FeishuConfigReloadResponse{Status: "reloaded", FeishuBots: sortedBotIDs(cfg.Channels)})
 }
 
 func (h *ConfigHandler) botIDFromRequest(r *http.Request, bodyBotID string) (string, bool) {
@@ -255,8 +232,8 @@ func (h *ConfigHandler) loadStandaloneFeishuChannelConfig() (config.ChannelsConf
 	return channels, nil
 }
 
-func MaskConfig(botID string, app config.FeishuConfig, configured bool, adminOpenID string, reloaded bool) ConfigResponse {
-	resp := ConfigResponse{
+func MaskConfig(botID string, app config.FeishuConfig, configured bool, adminOpenID string, reloaded bool) apitypes.FeishuConfigResponse {
+	resp := apitypes.FeishuConfigResponse{
 		BotID:       botID,
 		Configured:  configured,
 		AdminOpenID: strings.TrimSpace(adminOpenID),

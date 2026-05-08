@@ -11,7 +11,7 @@ import (
 	"text/tabwriter"
 
 	"csgclaw/cli/command"
-	feishuchannel "csgclaw/internal/channel/feishu"
+	"csgclaw/internal/apitypes"
 )
 
 func (c cmd) runConfig(ctx context.Context, run *command.Context, args []string, globals command.GlobalOptions) error {
@@ -69,8 +69,8 @@ func (c cmd) runConfigGet(ctx context.Context, run *command.Context, globals com
 		return err
 	}
 	values := url.Values{"bot_id": []string{id}}
-	var resp feishuchannel.ConfigResponse
-	if err := run.APIClient(globals).DoJSON(ctx, http.MethodGet, feishuchannel.ConfigAPIPath+"?"+values.Encode(), nil, &resp); err != nil {
+	var resp apitypes.FeishuConfigResponse
+	if err := run.APIClient(globals).DoJSON(ctx, http.MethodGet, apitypes.FeishuConfigAPIPath+"?"+values.Encode(), nil, &resp); err != nil {
 		return err
 	}
 	return renderConfig(globals.Output, run.Stdout, resp)
@@ -89,23 +89,23 @@ func (c cmd) runConfigSet(ctx context.Context, run *command.Context, globals com
 		return err
 	}
 	reload := !noReload
-	req := feishuchannel.ConfigRequest{
+	req := apitypes.FeishuConfigRequest{
 		BotID:       id,
 		AppID:       strings.TrimSpace(appID),
 		AppSecret:   secret,
 		AdminOpenID: strings.TrimSpace(adminOpenID),
 		Reload:      &reload,
 	}
-	var resp feishuchannel.ConfigResponse
-	if err := run.APIClient(globals).DoJSON(ctx, http.MethodPut, feishuchannel.ConfigAPIPath, req, &resp); err != nil {
+	var resp apitypes.FeishuConfigResponse
+	if err := run.APIClient(globals).DoJSON(ctx, http.MethodPut, apitypes.FeishuConfigAPIPath, req, &resp); err != nil {
 		return err
 	}
 	return renderConfig(globals.Output, run.Stdout, resp)
 }
 
 func (c cmd) runConfigReload(ctx context.Context, run *command.Context, globals command.GlobalOptions) error {
-	var resp feishuchannel.ReloadResponse
-	if err := run.APIClient(globals).DoJSON(ctx, http.MethodPost, feishuchannel.ConfigAPIPath, nil, &resp); err != nil {
+	var resp apitypes.FeishuConfigReloadResponse
+	if err := run.APIClient(globals).DoJSON(ctx, http.MethodPost, apitypes.FeishuConfigAPIPath, nil, &resp); err != nil {
 		return err
 	}
 	return renderConfigReload(globals.Output, run.Stdout, resp)
@@ -171,7 +171,7 @@ func readSecret(stdin io.Reader, filePath, envName string, fromStdin bool) (stri
 	return secret, nil
 }
 
-func renderConfig(output string, w io.Writer, cfg feishuchannel.ConfigResponse) error {
+func renderConfig(output string, w io.Writer, cfg apitypes.FeishuConfigResponse) error {
 	if output == "json" {
 		return command.WriteJSON(w, cfg)
 	}
@@ -181,7 +181,7 @@ func renderConfig(output string, w io.Writer, cfg feishuchannel.ConfigResponse) 
 	return tw.Flush()
 }
 
-func renderConfigReload(output string, w io.Writer, resp feishuchannel.ReloadResponse) error {
+func renderConfigReload(output string, w io.Writer, resp apitypes.FeishuConfigReloadResponse) error {
 	if output == "json" {
 		return command.WriteJSON(w, resp)
 	}

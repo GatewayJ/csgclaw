@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"csgclaw/internal/apitypes"
 	"csgclaw/internal/channel"
-	feishuchannel "csgclaw/internal/channel/feishu"
 	"csgclaw/internal/config"
 )
 
@@ -36,7 +36,7 @@ func TestFeishuChannelConfigPutWritesStandaloneConfigAndReloads(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "dev-secret") {
 		t.Fatalf("response leaked app_secret: %s", rec.Body.String())
 	}
-	var resp feishuchannel.ConfigResponse
+	var resp apitypes.FeishuConfigResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
