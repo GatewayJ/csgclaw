@@ -36,7 +36,7 @@ type fakeCompatRuntime struct {
 }
 
 func init() {
-	_ = agent.TestOnlySetDefaultServiceOption(runtimewiring.WithPicoClawSandboxRuntime())
+	_ = agent.TestOnlySetDefaultServiceOption(runtimewiring.WithPicoClawSandboxRuntime(config.ChannelsConfig{}))
 }
 
 func (f fakeCompatRuntime) Kind() string {

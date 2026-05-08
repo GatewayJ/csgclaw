@@ -13,15 +13,6 @@ import (
 
 const FeishuChannelConfigFileName = "feishu.toml"
 
-type FeishuChannelFile struct {
-	Global FeishuChannelGlobal
-	Bots   map[string]FeishuConfig
-}
-
-type FeishuChannelGlobal struct {
-	AdminOpenID string
-}
-
 func DefaultFeishuChannelConfigPath() (string, error) {
 	dir, err := DefaultDomainDir(ChannelsDirName)
 	if err != nil {

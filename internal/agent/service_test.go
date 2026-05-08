@@ -3176,22 +3176,23 @@ func TestGatewayCreateSpecBuildsSandboxSpec(t *testing.T) {
 	localIPv4Resolver = func() string { return "10.0.0.8" }
 	defer func() { localIPv4Resolver = orig }()
 
-	svc, err := NewServiceWithChannels(
-		testModelConfig(),
-		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
-		config.ChannelsConfig{
-			Feishu: map[string]config.FeishuConfig{
-				"u-worker-1": {
-					AppID:     "cli_worker",
-					AppSecret: "worker-secret",
-				},
+	channels := config.ChannelsConfig{
+		Feishu: map[string]config.FeishuConfig{
+			"u-worker-1": {
+				AppID:     "cli_worker",
+				AppSecret: "worker-secret",
 			},
 		},
+	}
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
 		"",
 		"",
+		withTestPicoClawSandboxRuntime(channels),
 	)
 	if err != nil {
-		t.Fatalf("NewServiceWithChannels() error = %v", err)
+		t.Fatalf("NewService() error = %v", err)
 	}
 
 	spec, err := svc.gatewayCreateSpec("picoclaw:latest", "alice", "u-worker-1", AgentProfile{
@@ -3513,13 +3514,17 @@ func addFeishuBoxEnvVars(envVars map[string]string, botID string, channels confi
 	envVars["PICOCLAW_CHANNELS_FEISHU_APP_SECRET"] = feishu.AppSecret
 }
 
-func withTestPicoClawSandboxRuntime() ServiceOption {
+func withTestPicoClawSandboxRuntime(channels ...config.ChannelsConfig) ServiceOption {
 	return func(s *Service) error {
+		channelConfig := config.ChannelsConfig{}
+		if len(channels) > 0 {
+			channelConfig = channels[0]
+		}
 		host := s.PicoClawRuntimeHost()
 		return WithRuntime(picoclawsandbox.New(picoclawsandbox.Dependencies{
 			ModelFallback:  host.ModelFallback,
 			Server:         host.Server,
-			Channels:       host.Channels,
+			Channels:       channelConfig,
 			ResolveBaseURL: resolveManagerBaseURL,
 			EnsureRuntime:  host.EnsureRuntime,
 			RuntimeHome:    host.RuntimeHome,

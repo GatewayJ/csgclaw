@@ -1517,7 +1517,7 @@ func (s *FeishuService) SetConfigPath(path string) {
 	if s == nil {
 		return
 	}
-	s.config().SetPath(path)
+	s.configStore.SetPath(path)
 }
 
 func (s *FeishuService) SetConfigReloadHook(hook FeishuConfigReloadHook) {
@@ -1530,24 +1530,15 @@ func (s *FeishuService) SetConfigReloadHook(hook FeishuConfigReloadHook) {
 }
 
 func (s *FeishuService) GetConfig(botID string) (feishuconfig.Entry, error) {
-	return s.config().Get(botID)
+	return s.configStore.Get(botID)
 }
 
 func (s *FeishuService) UpdateConfig(update feishuconfig.Update) (feishuconfig.Entry, error) {
-	return s.config().Update(update)
-}
-
-func (s *FeishuService) config() *feishuconfig.Config {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.configStore == nil {
-		s.configStore = feishuconfig.NewConfig("")
-	}
-	return s.configStore
+	return s.configStore.Update(update)
 }
 
 func (s *FeishuService) ReloadConfig() ([]string, error) {
-	cfg, err := s.config().Load()
+	cfg, err := s.configStore.Load()
 	if err != nil {
 		return nil, err
 	}

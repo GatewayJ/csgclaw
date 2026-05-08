@@ -110,8 +110,8 @@ func createManagerBot(ctx context.Context, agentsPath, imStatePath string, cfg c
 	if err != nil {
 		return bot.Bot{}, err
 	}
-	opts = append(opts, runtimewiring.WithPicoClawSandboxRuntime())
-	agentSvc, err := agent.NewServiceWithLLMAndChannels(effectiveLLMConfig(cfg), cfg.Server, cfg.Channels, cfg.Bootstrap.EffectiveManagerImage(), agentsPath, opts...)
+	opts = append(opts, runtimewiring.WithPicoClawSandboxRuntime(cfg.Channels))
+	agentSvc, err := agent.NewServiceWithLLM(effectiveLLMConfig(cfg), cfg.Server, cfg.Bootstrap.EffectiveManagerImage(), agentsPath, opts...)
 	if err != nil {
 		return bot.Bot{}, err
 	}

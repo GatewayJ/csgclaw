@@ -453,6 +453,9 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 			})
 		},
 	})
+	configureFeishuService(feishuSvc, configPath, func(channels config.ChannelsConfig) {
+		runtimewiring.UpdatePicoClawChannels(svc, channels)
+	})
 	return RunServer(server.Options{
 		ListenAddr:  cfg.Server.ListenAddr,
 		Service:     svc,
@@ -492,6 +495,18 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 				}
 			}()
 		},
+	})
+}
+
+func configureFeishuService(feishu *channel.FeishuService, configPath string, onReload func(config.ChannelsConfig)) {
+	if feishu == nil {
+		return
+	}
+	feishu.SetConfigPath(configPath)
+	feishu.SetConfigReloadHook(func(channels config.ChannelsConfig) {
+		if onReload != nil {
+			onReload(channels)
+		}
 	})
 }
 
@@ -749,9 +764,9 @@ func newAgentService(cfg config.Config) (*agent.Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	opts = append(opts, runtimewiring.WithPicoClawSandboxRuntime())
+	opts = append(opts, runtimewiring.WithPicoClawSandboxRuntime(cfg.Channels))
 	opts = append(opts, runtimewiring.WithCodexRuntime())
-	return agent.NewServiceWithLLMAndChannels(effectiveLLMConfig(cfg), cfg.Server, cfg.Channels, cfg.Bootstrap.EffectiveManagerImage(), agentsPath, opts...)
+	return agent.NewServiceWithLLM(effectiveLLMConfig(cfg), cfg.Server, cfg.Bootstrap.EffectiveManagerImage(), agentsPath, opts...)
 }
 
 type codexBridgeManager interface {
