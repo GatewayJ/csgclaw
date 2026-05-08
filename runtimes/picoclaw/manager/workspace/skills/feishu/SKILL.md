@@ -126,7 +126,7 @@ By default, `finalize` will:
 
 1. poll Feishu/Lark until credentials are available or timeout
 2. receive `client_id/client_secret`
-3. write `app_id/app_secret` to CSGClaw via API
+3. write `app_id/app_secret` to CSGClaw through `csgclaw-cli bot config`
    - if global `admin_open_id` already exists, preserve it
    - if global `admin_open_id` is missing, fill it from explicit `--admin-open-id` or the registration `open_id`
 4. auto-reload channel config
@@ -244,13 +244,13 @@ curl -sS -X POST "$CSGCLAW_BASE_URL/api/v1/agents/u-dev/recreate" \
 
 ## CLI Workflow for Manual Control
 
-Use `csgclaw-cli bot config` for channel config. Use full `csgclaw` only for agent recreate, because lite `csgclaw-cli` does not expose agent commands.
+Use `csgclaw-cli bot config` for channel config. Use the helper script or the backend recreate API for agent recreate, because lite `csgclaw-cli` does not expose agent commands and manager boxes usually do not have full `csgclaw`.
 
 ```bash
 csgclaw-cli bot config --channel feishu --get --bot-id u-dev
 csgclaw-cli bot config --channel feishu --reload
 csgclaw-cli bot create --id u-dev --name dev --description "dev worker agent" --role worker --channel feishu
-csgclaw agent create --replace --id u-dev --force
+python scripts/feishu_register.py recreate-agent --bot-id u-dev
 ```
 
 ## Worker One-Shot Recipe
@@ -299,10 +299,11 @@ python scripts/feishu_register.py recreate-agent --bot-id u-manager --confirm-ma
 
 Stop after this command succeeds. Do not inspect manager agent or bot status afterward; the caller is the manager being recreated, and `stopped` can be a BoxLite daemon-mode artifact rather than a Feishu setup failure.
 
-Alternative full CLI/API recreate:
+Alternative backend API recreate:
 
 ```bash
-csgclaw agent create --replace --id u-manager --force
+curl -sS -X POST "$CSGCLAW_BASE_URL/api/v1/agents/u-manager/recreate" \
+  -H "Authorization: Bearer [REDACTED]"
 ```
 
 ## Common Pitfalls

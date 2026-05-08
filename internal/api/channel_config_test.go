@@ -119,6 +119,17 @@ func TestLegacyChannelsReloadRouteIsNotRegistered(t *testing.T) {
 	}
 }
 
+func TestLegacyFeishuConfigBotIDPathIsNotRegistered(t *testing.T) {
+	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, channel.NewFeishuService(), nil, "secret", false)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels/feishu/config/u-dev", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
 func writeMinimalAPIConfig(t *testing.T, path string) {
 	t.Helper()
 	content := `[server]

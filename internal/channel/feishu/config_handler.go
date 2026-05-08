@@ -14,10 +14,7 @@ import (
 	"csgclaw/internal/im"
 )
 
-const (
-	ConfigAPIPath             = "/api/v1/channels/feishu/config"
-	LegacyConfigAPIPathPrefix = "/api/v1/channels/feishu/config/"
-)
+const ConfigAPIPath = "/api/v1/channels/feishu/config"
 
 type ConfigHandlerOptions struct {
 	AgentService        *agent.Service
@@ -89,7 +86,7 @@ func (h *ConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
-	case r.URL.Path == ConfigAPIPath || strings.HasPrefix(r.URL.Path, LegacyConfigAPIPathPrefix):
+	case r.URL.Path == ConfigAPIPath:
 		h.handleConfig(w, r)
 	default:
 		http.NotFound(w, r)
@@ -209,19 +206,9 @@ func (h *ConfigHandler) handleReload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ConfigHandler) botIDFromRequest(r *http.Request, bodyBotID string) (string, bool) {
-	pathBotID := ""
-	if strings.HasPrefix(r.URL.Path, LegacyConfigAPIPathPrefix) {
-		pathBotID = strings.TrimSpace(strings.TrimPrefix(r.URL.Path, LegacyConfigAPIPathPrefix))
-	}
 	botID := strings.TrimSpace(bodyBotID)
 	if botID == "" {
 		botID = strings.TrimSpace(r.URL.Query().Get("bot_id"))
-	}
-	if pathBotID != "" {
-		if botID != "" && botID != pathBotID {
-			return "", false
-		}
-		botID = pathBotID
 	}
 	if err := config.ValidateFeishuChannelBotID(botID); err != nil {
 		return "", false
