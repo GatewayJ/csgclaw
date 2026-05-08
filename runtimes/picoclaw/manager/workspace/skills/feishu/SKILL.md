@@ -1,16 +1,16 @@
 ---
-name: feishu-channel-setup
-description: Configure CSGClaw Feishu channel credentials for manager or worker bots. Use when the Manager needs to generate a Feishu/Lark bot creation URL or QR code, collect App ID/App Secret through the registration flow, write channel config through CSGClaw API, reload channels, ensure the bot, and recreate worker/manager agents safely.
+name: feishu
+description: Configure and troubleshoot CSGClaw Feishu/Lark channel credentials for manager or worker bots. Use when the Manager needs to generate a bot creation URL or QR code, collect App ID/App Secret through registration, write channel config through CSGClaw API, reload channels, ensure or recreate agents, or debug Feishu messages not reaching CSGClaw/PicoClaw bots.
 ---
 
-# Feishu Channel Setup
+# Feishu
 
 This skill sets up Feishu/Lark bot credentials for CSGClaw-managed PicoClaw manager and worker bots.
 
 The primary automation is the local script:
 
 ```bash
-cd ~/.picoclaw/workspace/skills/feishu-channel-setup
+cd ~/.picoclaw/workspace/skills/feishu
 python scripts/feishu_register.py start --bot-id u-dev --role worker --bot-name dev --qr
 python scripts/feishu_register.py finalize --registration-id <id>
 ```
@@ -55,8 +55,8 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
    - `CSGCLAW_BASE_URL`, default `http://127.0.0.1:18080`
    - `CSGCLAW_ACCESS_TOKEN`, unless server auth is disabled
 3. The script is run from this skill directory:
-   - inside manager box: `~/.picoclaw/workspace/skills/feishu-channel-setup`
-   - host repo path: `runtimes/picoclaw/manager/workspace/skills/feishu-channel-setup`
+   - inside manager box: `~/.picoclaw/workspace/skills/feishu`
+   - host repo path: `runtimes/picoclaw/manager/workspace/skills/feishu`
 4. Server build supports:
    - `PUT /api/v1/channels/feishu/config/{bot_id}`
    - `POST /api/v1/bots`
