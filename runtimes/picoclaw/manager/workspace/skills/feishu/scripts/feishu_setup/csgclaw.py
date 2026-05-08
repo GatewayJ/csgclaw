@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from typing import Any, Optional
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -54,24 +55,69 @@ def api_json(args, method: str, path: str, body: Optional[dict] = None) -> Any:
         raise RuntimeError(f"CSGClaw API {method} {path} failed: HTTP {exc.code}: {raw.strip()}") from None
 
 
+def csgclaw_cli_env(args) -> dict[str, str]:
+    env = os.environ.copy()
+    base_url = getattr(args, "csgclaw_base_url", "") or os.environ.get("CSGCLAW_BASE_URL", "")
+    token = api_token(args)
+    if base_url:
+        env["CSGCLAW_BASE_URL"] = base_url
+    if token:
+        env["CSGCLAW_ACCESS_TOKEN"] = token
+    return env
+
+
+def csgclaw_cli_json(args, cli_args: list[str], input_text: Optional[str] = None) -> dict:
+    command = ["csgclaw-cli", "--output", "json", *cli_args]
+    try:
+        completed = subprocess.run(
+            command,
+            input=input_text,
+            text=True,
+            capture_output=True,
+            timeout=api_request_timeout(args),
+            env=csgclaw_cli_env(args),
+            check=False,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("csgclaw-cli was not found in PATH") from None
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"csgclaw-cli timed out after {api_request_timeout(args)} seconds") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(f"csgclaw-cli {' '.join(cli_args)} failed: {detail}") from None
+    raw = completed.stdout.strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"csgclaw-cli returned invalid JSON: {raw}") from exc
+
+
 def configure_csgclaw(args, state: dict, result: dict) -> dict:
     bot_id = state["bot_id"]
-    path_bot_id = path_id(bot_id)
-    existing = api_json(args, "GET", f"/api/v1/channels/feishu/config/{path_bot_id}", None) or {}
+    existing = csgclaw_cli_json(args, ["bot", "config", "--channel", "feishu", "--get", "--bot-id", bot_id]) or {}
     existing_admin_open_id = str(existing.get("admin_open_id") or "").strip()
     candidate_admin_open_id = str(state.get("admin_open_id") or result.get("open_id") or "").strip()
-    payload = {
-        "app_id": result["app_id"],
-        "app_secret": result["app_secret"],
-        "reload": True,
-    }
+    cli_args = [
+        "bot",
+        "config",
+        "--channel",
+        "feishu",
+        "--set",
+        "--bot-id",
+        bot_id,
+        "--app-id",
+        result["app_id"],
+        "--app-secret-stdin",
+    ]
     if not existing_admin_open_id and candidate_admin_open_id:
-        payload["admin_open_id"] = candidate_admin_open_id
-    response = api_json(args, "PUT", f"/api/v1/channels/feishu/config/{path_bot_id}", payload) or {}
+        cli_args.extend(["--admin-open-id", candidate_admin_open_id])
+    response = csgclaw_cli_json(args, cli_args, input_text=result["app_secret"] + "\n") or {}
     if existing_admin_open_id and not response.get("admin_open_id"):
         response["admin_open_id"] = existing_admin_open_id
         response["admin_open_id_preserved"] = True
-    elif payload.get("admin_open_id"):
+    elif not existing_admin_open_id and candidate_admin_open_id:
         response["admin_open_id_source"] = "registration"
     return response
 

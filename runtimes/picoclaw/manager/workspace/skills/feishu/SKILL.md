@@ -1,6 +1,6 @@
 ---
 name: feishu
-description: Configure and troubleshoot CSGClaw Feishu/Lark channel credentials for manager or worker bots. Use when the Manager needs to generate a bot creation URL or QR code, collect App ID/App Secret through registration, write channel config through CSGClaw API, reload channels, ensure or recreate agents, or debug Feishu messages not reaching CSGClaw/PicoClaw bots.
+description: Configure and troubleshoot CSGClaw Feishu/Lark channel credentials for manager or worker bots. Use when the Manager needs to generate a bot creation URL or QR code, collect App ID/App Secret through registration, write and reload channel config through csgclaw-cli bot config, ensure or recreate agents, or debug Feishu messages not reaching CSGClaw/PicoClaw bots.
 ---
 
 # Feishu
@@ -23,7 +23,7 @@ The script uses Feishu/Lark's accounts registration flow:
 4. poll with `action=poll`, `device_code=<...>`, `tp=ob_app`
 5. when the user completes app creation, receive `client_id` and `client_secret`
 6. map `client_id` -> CSGClaw `app_id`, and `client_secret` -> CSGClaw `app_secret`
-7. immediately write the secret to CSGClaw through `PUT /api/v1/channels/feishu/config/{bot_id}` without printing it
+7. immediately write the secret to CSGClaw through `csgclaw-cli bot config --channel feishu --set` without printing it
 
 Do not add or require a public Feishu Open Platform HTTP webhook as the main inbound path. PicoClaw uses Feishu/Lark WebSocket mode for inbound bot messages. CSGClaw's `/api/v1/channels/feishu/bots/{bot}/events` endpoint is an internal SSE bridge for PicoClaw workers, not a Feishu public webhook.
 
@@ -58,7 +58,7 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
    - inside manager box: `~/.picoclaw/workspace/skills/feishu`
    - host repo path: `runtimes/picoclaw/manager/workspace/skills/feishu`
 4. Server build supports:
-   - `PUT /api/v1/channels/feishu/config/{bot_id}`
+   - `csgclaw-cli bot config --channel feishu --set/--get/--reload`
    - `POST /api/v1/bots`
    - `POST /api/v1/agents/{id}/recreate`
 
@@ -67,7 +67,7 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
 1. Never print `app_secret`, `client_secret`, access tokens, verification tokens, encryption keys, or connection strings.
 2. If a secret must be represented in examples or summaries, write `[REDACTED]`.
 3. The script must print only `app_secret: present` after finalize.
-4. Do not store returned `client_secret` in skill state files. `finalize` writes it directly to CSGClaw config API.
+4. Do not store returned `client_secret` in skill state files. `finalize` pipes it directly to `csgclaw-cli bot config --channel feishu --set --app-secret-stdin`.
 5. Verify with masked config/doctor, not by printing the secret.
 
 ## Choose Target Bot
@@ -152,7 +152,7 @@ For manager, default finalize configures and ensures the bot, but skips manager 
 python scripts/feishu_register.py recreate-agent --bot-id u-manager --confirm-manager
 ```
 
-Treat `status: recreate_requested` or an HTTP success response from this command as terminal success for this skill. Do not expect to continue the current manager-hosted skill after manager recreate. Do not run `csgclaw agent list`, `csgclaw bot list`, `csgclaw channel feishu doctor`, `/api/v1/agents/u-manager/start`, `/api/v1/agents/u-manager/recreate`, or any manager status polling after this command.
+Treat `status: recreate_requested` or an HTTP success response from this command as terminal success for this skill. Do not expect to continue the current manager-hosted skill after manager recreate. Do not run `csgclaw agent list`, `csgclaw bot list`, `csgclaw-cli bot config --channel feishu --get`, `/api/v1/agents/u-manager/start`, `/api/v1/agents/u-manager/recreate`, or any manager status polling after this command.
 
 For manager only, BoxLite status is not a valid post-recreate success check in this skill. The manager gateway starts with `picoclaw gateway -d`, so the launch command can return while the daemonized gateway continues separately; BoxLite may report `stopped` and CSGClaw may show `AVAILABLE=false`. Do not treat that as a reason to recreate manager again from the same manager-hosted run.
 
@@ -184,10 +184,10 @@ If Feishu/Lark registration endpoint fails, expires, or tenant policy blocks sca
    - App ID, usually `cli_...`
    - App Secret, provided only through a secure path.
 
-Use full `csgclaw`, not `csgclaw-cli`, to set manually:
+Use `csgclaw-cli bot config` to set manually:
 
 ```bash
-printf '%s' '[REDACTED]' | csgclaw channel feishu set \
+printf '%s' '[REDACTED]' | csgclaw-cli bot config --channel feishu --set \
   --bot-id u-dev \
   --app-id cli_xxx \
   --app-secret-stdin
@@ -196,23 +196,24 @@ printf '%s' '[REDACTED]' | csgclaw channel feishu set \
 or:
 
 ```bash
-csgclaw channel feishu set \
+csgclaw-cli bot config --channel feishu --set \
   --bot-id u-dev \
   --app-id cli_xxx \
   --app-secret-file /secure/path/feishu_app_secret
 ```
 
-## API Workflow Used by Script
+## CLI Workflow Used by Script
 
-The script writes config through CSGClaw API because sandboxed skills should not edit host files directly.
+The script writes and reloads Feishu config through `csgclaw-cli bot config` because sandboxed skills should not edit host files directly or hand-roll config API calls.
 
 Set config and auto-reload:
 
 ```bash
-curl -sS -X PUT "$CSGCLAW_BASE_URL/api/v1/channels/feishu/config/u-dev" \
-  -H "Authorization: Bearer $CSGCLAW_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"app_id":"cli_xxx","app_secret":"[REDACTED]","admin_open_id":"ou_xxx","reload":true}'
+printf '%s' '[REDACTED]' | csgclaw-cli --output json bot config --channel feishu --set \
+  --bot-id u-dev \
+  --app-id cli_xxx \
+  --admin-open-id ou_xxx \
+  --app-secret-stdin
 ```
 
 Expected response shape:
@@ -231,10 +232,7 @@ Expected response shape:
 Ensure bot:
 
 ```bash
-curl -sS -X POST "$CSGCLAW_BASE_URL/api/v1/bots" \
-  -H "Authorization: Bearer $CSGCLAW_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"id":"u-dev","name":"dev","description":"dev worker agent","role":"worker","channel":"feishu"}'
+csgclaw-cli bot create --id u-dev --name dev --description "dev worker agent" --role worker --channel feishu
 ```
 
 Recreate existing worker only if `GET /api/v1/agents/u-dev` returned an existing worker before ensure; if the worker was missing, the bot ensure step creates it with the already-reloaded config and this recreate call is skipped:
@@ -244,15 +242,14 @@ curl -sS -X POST "$CSGCLAW_BASE_URL/api/v1/agents/u-dev/recreate" \
   -H "Authorization: Bearer [REDACTED]"
 ```
 
-## Full CLI Workflow for Manual Control
+## CLI Workflow for Manual Control
 
-Use full `csgclaw`, not lite `csgclaw-cli`, for channel config and agent recreate.
+Use `csgclaw-cli bot config` for channel config. Use full `csgclaw` only for agent recreate, because lite `csgclaw-cli` does not expose agent commands.
 
 ```bash
-csgclaw channel feishu get --bot-id u-dev
-csgclaw channel feishu doctor --bot-id u-dev
-csgclaw channel reload
-csgclaw bot create --id u-dev --name dev --description "dev worker agent" --role worker --channel feishu
+csgclaw-cli bot config --channel feishu --get --bot-id u-dev
+csgclaw-cli bot config --channel feishu --reload
+csgclaw-cli bot create --id u-dev --name dev --description "dev worker agent" --role worker --channel feishu
 csgclaw agent create --replace --id u-dev --force
 ```
 
@@ -312,7 +309,7 @@ csgclaw agent create --replace --id u-manager --force
 
 1. Using `csgclaw-cli agent ...`: lite CLI does not have agent commands. Use full `csgclaw` or API.
 2. Running host-only `csgclaw` or `boxlite` commands from inside manager: manager usually only has `csgclaw-cli`; use this script/API from manager, and ask the host operator to clean stale BoxLite boxes if needed.
-3. Using `csgclaw-cli channel ...`: channel config belongs to full `csgclaw` or CSGClaw API.
+3. Looking for removed `csgclaw channel ...` commands: Feishu config belongs to `csgclaw-cli bot config --channel feishu`.
 4. Creating the CSGClaw bot before writing/reloading Feishu config: this can create local placeholder identity.
 5. Expecting reload to update an already-running PicoClaw box: recreate is still required.
 6. Recreating manager in the middle of a skill: this can terminate the current task.

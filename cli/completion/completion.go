@@ -83,9 +83,8 @@ func FullSpec() CommandSpec {
 			},
 			agentSpec(),
 			modelSpec(),
-			channelSpec(),
 			userSpec(),
-			botSpec(),
+			botSpec(false),
 			roomSpec(),
 			memberSpec(),
 			messageSpec(),
@@ -99,7 +98,7 @@ func LiteSpec() CommandSpec {
 		Name:  "csgclaw-cli",
 		Flags: liteGlobalFlags(),
 		Children: []CommandSpec{
-			botSpec(),
+			botSpec(true),
 			roomSpec(),
 			memberSpec(),
 			messageSpec(),
@@ -281,33 +280,6 @@ func modelSpec() CommandSpec {
 	}
 }
 
-func channelSpec() CommandSpec {
-	return CommandSpec{
-		Name:    "channel",
-		Summary: "Manage channel configuration.",
-		Children: []CommandSpec{
-			{Name: "reload", Summary: "Reload channel configuration"},
-			{
-				Name:    "feishu",
-				Summary: "Manage Feishu channel configuration",
-				Children: []CommandSpec{
-					{Name: "get", Summary: "Get masked Feishu config", Flags: []FlagSpec{{Name: "bot-id", TakesValue: true}}},
-					{Name: "set", Summary: "Set Feishu config", Flags: []FlagSpec{
-						{Name: "bot-id", TakesValue: true},
-						{Name: "app-id", TakesValue: true},
-						{Name: "admin-open-id", TakesValue: true},
-						{Name: "app-secret-file", TakesValue: true},
-						{Name: "app-secret-env", TakesValue: true},
-						{Name: "app-secret-stdin"},
-						{Name: "no-reload"},
-					}},
-					{Name: "doctor", Summary: "Check Feishu config", Flags: []FlagSpec{{Name: "bot-id", TakesValue: true}}},
-				},
-			},
-		},
-	}
-}
-
 func userSpec() CommandSpec {
 	return CommandSpec{
 		Name:    "user",
@@ -330,29 +302,48 @@ func userSpec() CommandSpec {
 	}
 }
 
-func botSpec() CommandSpec {
-	return CommandSpec{
-		Name:    "bot",
-		Summary: "Manage bots.",
-		Children: []CommandSpec{
-			{
-				Name:    "list",
-				Summary: "List bots",
-				Flags:   append(channelFlags(), FlagSpec{Name: "role", TakesValue: true, Values: roleValues()}),
-			},
-			{
-				Name:    "create",
-				Summary: "Create a bot",
-				Flags: append(channelFlags(),
-					FlagSpec{Name: "id", TakesValue: true},
-					FlagSpec{Name: "name", TakesValue: true},
-					FlagSpec{Name: "description", TakesValue: true},
-					FlagSpec{Name: "role", TakesValue: true, Values: roleValues()},
-					FlagSpec{Name: "model-id", TakesValue: true},
-				),
-			},
-			{Name: "delete", Summary: "Delete a bot", Flags: channelFlags()},
+func botSpec(includeConfig bool) CommandSpec {
+	children := []CommandSpec{
+		{
+			Name:    "list",
+			Summary: "List bots",
+			Flags:   append(channelFlags(), FlagSpec{Name: "role", TakesValue: true, Values: roleValues()}),
 		},
+		{
+			Name:    "create",
+			Summary: "Create a bot",
+			Flags: append(channelFlags(),
+				FlagSpec{Name: "id", TakesValue: true},
+				FlagSpec{Name: "name", TakesValue: true},
+				FlagSpec{Name: "description", TakesValue: true},
+				FlagSpec{Name: "role", TakesValue: true, Values: roleValues()},
+				FlagSpec{Name: "model-id", TakesValue: true},
+			),
+		},
+		{Name: "delete", Summary: "Delete a bot", Flags: channelFlags()},
+	}
+	if includeConfig {
+		children = append(children, CommandSpec{
+			Name:    "config",
+			Summary: "Manage bot channel config",
+			Flags: append(feishuChannelFlags(),
+				FlagSpec{Name: "get"},
+				FlagSpec{Name: "set"},
+				FlagSpec{Name: "reload"},
+				FlagSpec{Name: "bot-id", TakesValue: true},
+				FlagSpec{Name: "app-id", TakesValue: true},
+				FlagSpec{Name: "admin-open-id", TakesValue: true},
+				FlagSpec{Name: "app-secret-file", TakesValue: true},
+				FlagSpec{Name: "app-secret-env", TakesValue: true},
+				FlagSpec{Name: "app-secret-stdin"},
+				FlagSpec{Name: "no-reload"},
+			),
+		})
+	}
+	return CommandSpec{
+		Name:     "bot",
+		Summary:  "Manage bots.",
+		Children: children,
 	}
 }
 
@@ -436,6 +427,10 @@ func completionSpec() CommandSpec {
 
 func channelFlags() []FlagSpec {
 	return []FlagSpec{{Name: "channel", TakesValue: true, Values: []string{"csgclaw", "feishu"}}}
+}
+
+func feishuChannelFlags() []FlagSpec {
+	return []FlagSpec{{Name: "channel", TakesValue: true, Values: []string{"feishu"}}}
 }
 
 func logLevelValues() []string {

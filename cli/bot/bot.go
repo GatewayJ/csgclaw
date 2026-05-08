@@ -9,10 +9,26 @@ import (
 	"csgclaw/internal/apitypes"
 )
 
-type cmd struct{}
+type cmd struct {
+	enableConfig bool
+}
 
-func NewCmd() command.Command {
-	return cmd{}
+type Option func(*cmd)
+
+func WithConfigCommand() Option {
+	return func(c *cmd) {
+		c.enableConfig = true
+	}
+}
+
+func NewCmd(opts ...Option) command.Command {
+	c := cmd{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&c)
+		}
+	}
+	return c
 }
 
 func (cmd) Name() string {
@@ -40,6 +56,12 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 		return c.runCreate(ctx, run, args[1:], globals)
 	case "delete":
 		return c.runDelete(ctx, run, args[1:], globals)
+	case "config":
+		if c.enableConfig {
+			return c.runConfig(ctx, run, args[1:], globals)
+		}
+		c.usage(run)
+		return fmt.Errorf("unknown bot subcommand %q", args[0])
 	default:
 		c.usage(run)
 		return fmt.Errorf("unknown bot subcommand %q", args[0])
@@ -47,11 +69,15 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 }
 
 func (c cmd) usage(run *command.Context) {
-	run.UsageCommandGroup(c, run.Program+" bot <subcommand> [flags]", []string{
+	subcommands := []string{
 		"list               List bots",
 		"create             Create a bot",
 		"delete <id>        Delete a bot",
-	})
+	}
+	if c.enableConfig {
+		subcommands = append(subcommands, "config             Manage bot channel config")
+	}
+	run.UsageCommandGroup(c, run.Program+" bot <subcommand> [flags]", subcommands)
 }
 
 func (c cmd) runList(ctx context.Context, run *command.Context, args []string, globals command.GlobalOptions) error {

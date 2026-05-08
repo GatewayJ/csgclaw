@@ -43,6 +43,15 @@ func TestExecuteAgentListUsesHTTPClientJSON(t *testing.T) {
 	}
 }
 
+func TestExecuteChannelCommandIsRemoved(t *testing.T) {
+	var stderr bytes.Buffer
+	app := &App{stdout: io.Discard, stderr: &stderr}
+	err := app.Execute(context.Background(), []string{"channel", "reload"})
+	if err == nil || !strings.Contains(err.Error(), `unknown command "channel"`) {
+		t.Fatalf("Execute() error = %v, want unknown channel command", err)
+	}
+}
+
 func TestExecuteDefaultsToJSONOutputForNonTerminalStdout(t *testing.T) {
 	stdout, err := os.CreateTemp(t.TempDir(), "stdout-*")
 	if err != nil {

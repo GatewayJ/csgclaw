@@ -29,6 +29,15 @@ func TestCompleteSubcommandsAndFlags(t *testing.T) {
 
 	got = Complete(FullSpec(), "csgclaw", []string{"csgclaw", "agent", "create", "--"})
 	assertContainsAll(t, got, "--replace", "--force", "--id", "--name", "--description", "--image", "--profile")
+
+	got = Complete(LiteSpec(), "csgclaw-cli", []string{"csgclaw-cli", "bot", ""})
+	assertContainsAll(t, got, "list", "create", "delete", "config")
+
+	got = Complete(FullSpec(), "csgclaw", []string{"csgclaw", "bot", ""})
+	assertContainsNone(t, got, "config")
+
+	got = Complete(LiteSpec(), "csgclaw-cli", []string{"csgclaw-cli", "bot", "config", "--"})
+	assertContainsAll(t, got, "--channel", "--get", "--set", "--reload", "--bot-id", "--app-secret-stdin")
 }
 
 func TestCompleteFlagValues(t *testing.T) {

@@ -7,13 +7,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"csgclaw/internal/agent"
 	"csgclaw/internal/apitypes"
 	"csgclaw/internal/bot"
 	"csgclaw/internal/channel"
+	feishuchannel "csgclaw/internal/channel/feishu"
 	"csgclaw/internal/im"
 	"csgclaw/internal/llm"
 	"csgclaw/internal/upgrade"
@@ -28,8 +28,8 @@ type Handler struct {
 	imProvisioner     *im.Provisioner
 	botBridge         *im.BotBridge
 	feishu            *channel.FeishuService
+	feishuConfig      *feishuchannel.ConfigHandler
 	llm               *llm.Service
-	channelConfigMu   sync.Mutex
 	configPath        string
 	serverAccessToken string
 	serverNoAuth      bool
@@ -112,7 +112,7 @@ func NewHandlerWithBotAndAuth(svc *agent.Service, botSvc *bot.Service, imSvc *im
 		botSvc.SetDependencies(svc, imSvc, feishu)
 		botSvc.SetIMBus(imBus)
 	}
-	return &Handler{
+	h := &Handler{
 		svc:               svc,
 		botSvc:            botSvc,
 		im:                imSvc,
@@ -125,6 +125,14 @@ func NewHandlerWithBotAndAuth(svc *agent.Service, botSvc *bot.Service, imSvc *im
 		serverNoAuth:      serverNoAuth,
 		upgradeApply:      upgrade.StartApplyHelper,
 	}
+	h.feishuConfig = feishuchannel.NewConfigHandler(feishuchannel.ConfigHandlerOptions{
+		AgentService:        svc,
+		BotService:          botSvc,
+		IMService:           imSvc,
+		FeishuService:       feishu,
+		ValidateAccessToken: h.validateServerAccessToken,
+	})
+	return h
 }
 
 func (h *Handler) SetUpgradeManager(manager *upgrade.Manager) {
@@ -148,6 +156,9 @@ func (h *Handler) SetConfigPath(path string) {
 		return
 	}
 	h.configPath = strings.TrimSpace(path)
+	if h.feishuConfig != nil {
+		h.feishuConfig.SetConfigPath(h.configPath)
+	}
 }
 
 func (h *Handler) validateServerAccessToken(authHeader string) bool {

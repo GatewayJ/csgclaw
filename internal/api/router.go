@@ -1,6 +1,10 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	feishuchannel "csgclaw/internal/channel/feishu"
+)
 
 func (h *Handler) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
@@ -42,8 +46,10 @@ func (h *Handler) registerCoreRoutes(mux *http.ServeMux) {
 }
 
 func (h *Handler) registerChannelRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/v1/channels/reload", h.handleChannelsReload)
-	mux.HandleFunc("/api/v1/channels/feishu/config/", h.handleFeishuChannelConfigByBotID)
+	if h.feishuConfig != nil {
+		mux.Handle(feishuchannel.ConfigAPIPath, h.feishuConfig)
+		mux.Handle(feishuchannel.LegacyConfigAPIPathPrefix, h.feishuConfig)
+	}
 	mux.HandleFunc("/api/v1/channels/feishu/bots/", h.handleFeishuBotByID)
 	mux.HandleFunc("/api/v1/channels/feishu/users", h.handleFeishuUsers)
 	mux.HandleFunc("/api/v1/channels/feishu/users/", h.handleFeishuUserByID)

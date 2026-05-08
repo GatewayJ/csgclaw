@@ -180,10 +180,10 @@ PicoClaw Feishu channel 在启动时检查 CSGClaw SSE 配置：
 
 当前 CSGClaw 可以从主配置读取 `[channels.feishu.<bot_id>]`，但方案需要让 skill 自动写入或更新配置。
 
-建议新增 CLI：
+当前采用 lite CLI 的 bot config 子命令：
 
 ```bash
-csgclaw-cli channel feishu set \
+csgclaw-cli bot config --channel feishu --set \
   --bot-id u-manager \
   --app-id cli_xxx \
   --app-secret-env CSGCLAW_FEISHU_U_MANAGER_APP_SECRET
@@ -192,10 +192,17 @@ csgclaw-cli channel feishu set \
 或：
 
 ```bash
-csgclaw-cli channel feishu set \
+csgclaw-cli bot config --channel feishu --set \
   --bot-id u-dev \
   --app-id cli_xxx \
   --app-secret-file /path/to/secret-file
+```
+
+读取和 reload：
+
+```bash
+csgclaw-cli bot config --channel feishu --get --bot-id u-dev
+csgclaw-cli bot config --channel feishu --reload
 ```
 
 要求：
@@ -280,57 +287,40 @@ func addFeishuBoxEnvVars(envVars map[string]string, botID string, channels confi
 1. CSGClaw 进程内的 `ChannelsConfig` 是 server 启动时读入并传给 runtime wiring 的。只改磁盘配置文件，不一定会更新当前进程内的 `channels.Feishu`。
 2. 即使 CSGClaw 进程内配置已经更新，PicoClaw worker 的 `PICOCLAW_CHANNELS_FEISHU_*` 环境变量也是创建 sandbox/container 时固化进去的；对已运行 box 执行普通 start/stop 不会重新生成环境变量。
 
-当前可行的生效路径应是“更新 CSGClaw 配置 -> 让 CSGClaw 重新读取配置 -> 重建 worker box”：
+当前可行的生效路径应是“通过 `csgclaw-cli bot config --channel feishu --set` 更新配置并 reload -> 重建 worker box”：
 
 ```text
-写入 [channels.feishu.u-dev]
-  -> restart/reload CSGClaw server，使 ChannelsConfig 包含 u-dev
+写入 ~/.csgclaw/channels/feishu.toml
+  -> csgclaw-cli bot config --channel feishu --reload，使 ChannelsConfig 包含 u-dev
   -> 重建 u-dev worker box
   -> 新 box 创建时 BuildRuntimeEnv 注入 PICOCLAW_CHANNELS_FEISHU_APP_ID/APP_SECRET
   -> PicoClaw Feishu WebSocket channel 使用新凭证启动
 ```
 
-当前代码里已有两个可用于重建 worker 的能力：
-
-1. 后端 API：
+当前代码里用于重建 worker 的能力是后端 API：
 
 ```http
 POST /api/v1/agents/{id}/recreate
 ```
 
-2. 现有 CLI：
-
-```bash
-csgclaw-cli agent create --replace --id u-dev --force
-```
-
-`agent create --replace` 对已有 worker 的行为是删除旧 agent box，再按同一个 id 创建新的 worker box。它会重新走 runtime 创建流程，因此会重新执行 `GatewayCreateSpec(...)`、`BuildRuntimeEnv(...)` 和 `addFeishuBoxEnvVars(...)`。
-
-因此 Phase 1 不需要新增 `agent recreate` CLI。方案应优先复用现有命令：
-
-```bash
-csgclaw-cli agent create --replace --id <bot-id> --force
-```
+重建会重新走 runtime 创建流程，因此会重新执行 `GatewayCreateSpec(...)`、`BuildRuntimeEnv(...)` 和 `addFeishuBoxEnvVars(...)`。
 
 注意：
 
 - `agent stop <id>` + `agent start <id>` 不是等价替代，因为它通常不会重新生成 sandbox/container 环境变量。
 - `bot create --channel feishu` 也不是等价替代，因为它只创建/确认 bot/channel 绑定，不负责重建 worker box。
-- `agent create --replace --id <id> --force` 是当前 CLI 里最接近 recreate 的现有能力。
+- `csgclaw-cli` 不暴露 agent 命令；skill 中需要重建 worker 时使用后端 recreate API。
 
 Phase 1 建议采用确定性流程：
 
-1. 写入或更新 CSGClaw 主配置里的 `[channels.feishu.<bot_id>]`。
-2. 提示或自动重启 CSGClaw server，使进程内 `ChannelsConfig` 更新。
-3. 调用现有 CLI 重建对应 worker box：
-   ```bash
-   csgclaw-cli agent create --replace --id <bot-id> --force
-   ```
-4. 通过 doctor 验证 worker 是否实际拿到了飞书 app_id，并能建立 Feishu WebSocket 连接。
+1. 通过 `csgclaw-cli bot config --channel feishu --set` 写入或更新目标 bot 配置。
+2. 默认 `--set` 会触发 reload，也可以显式运行 `csgclaw-cli bot config --channel feishu --reload`。
+3. 调用 `POST /api/v1/agents/{id}/recreate` 重建对应 worker box。
+4. 通过 masked config 和 worker 日志验证 worker 是否实际拿到了飞书 app_id，并能建立 Feishu WebSocket 连接。
 
 Phase 2 再考虑：
 
-1. CSGClaw channel config reload API，减少重启 server。
+1. 更细粒度的 runtime env refresh 能力，减少完整 recreate。
 2. 是否需要给现有 recreate API 增加 CLI 别名；不是 Phase 1 必需项。
 3. worker runtime 热更新或安全 recreate 编排。
 
@@ -354,13 +344,14 @@ Phase 2 再考虑：
 
 边界：扫码流程用于“创建新 bot 并拿到 secret”；已有应用的 secret 仍不能假设可由 API 读取。
 
-### 5.6 Doctor 验证命令
+### 5.6 配置验证命令
 
-建议新增：
+当前不提供独立 doctor 命令，先通过配置读取和 reload 验证：
 
 ```bash
-csgclaw-cli channel feishu doctor --bot-id u-manager
-csgclaw-cli channel feishu doctor --bot-id u-dev
+csgclaw-cli bot config --channel feishu --get --bot-id u-manager
+csgclaw-cli bot config --channel feishu --get --bot-id u-dev
+csgclaw-cli bot config --channel feishu --reload
 ```
 
 检查项：
@@ -409,7 +400,7 @@ csgclaw-cli channel feishu doctor --bot-id u-dev
 1. 增加 loader：读取 `~/.csgclaw/channels/feishu.toml`。
 2. 定义 merge precedence：独立 channel 配置是否覆盖主配置。
 3. 增加 saver：只更新目标 bot 的 Feishu 配置。
-4. 修改 `channel feishu set` 默认写独立配置。
+4. `csgclaw-cli bot config --channel feishu --set` 默认写独立配置。
 5. 保持兼容旧的 `[channels.feishu.<bot_id>]`。
 
 验收：
@@ -468,11 +459,11 @@ manager skill：
 4. 获取 app_id/app_secret。
 5. 写入：
    ```bash
-   csgclaw-cli channel feishu set --bot-id u-manager --app-id cli_xxx --app-secret-file /secure/path
+   csgclaw-cli bot config --channel feishu --set --bot-id u-manager --app-id cli_xxx --app-secret-file /secure/path
    ```
-6. 运行：
+6. 验证：
    ```bash
-   csgclaw-cli channel feishu doctor --bot-id u-manager
+   csgclaw-cli bot config --channel feishu --get --bot-id u-manager
    ```
 7. 重启或 reload manager。
 8. 告诉用户去飞书里搜索该 bot 并发消息测试。
@@ -496,16 +487,14 @@ manager skill：
 4. 获取 app_id/app_secret。
 5. 写入 CSGClaw Feishu app config：
    ```bash
-   csgclaw-cli channel feishu set --bot-id u-dev --app-id cli_xxx --app-secret-file /secure/path
+   csgclaw-cli bot config --channel feishu --set --bot-id u-dev --app-id cli_xxx --app-secret-file /secure/path
    ```
 6. 让 CSGClaw server 重新读取配置。
-   - 当前 Phase 1 可提示/执行重启 CSGClaw server。
-   - Phase 2 再做 channel config reload API。
-7. 重建 worker box，让 PicoClaw sandbox creation 重新生成环境变量。Phase 1 优先复用现有 CLI：
-   ```bash
-   csgclaw-cli agent create --replace --id u-dev --force
+   - 默认 `--set` 会触发 reload；也可以显式执行 `csgclaw-cli bot config --channel feishu --reload`。
+7. 重建 worker box，让 PicoClaw sandbox creation 重新生成环境变量：
+   ```http
+   POST /api/v1/agents/u-dev/recreate
    ```
-   也可以直接调用已有后端 API：`POST /api/v1/agents/u-dev/recreate`，但不是必须新增 CLI。
 8. 新 worker box 创建时，当前 runtime wiring 会从 `[channels.feishu.u-dev]` 自动注入：
    ```bash
    PICOCLAW_CHANNELS_FEISHU_APP_ID=cli_xxx
@@ -559,8 +548,8 @@ CSGClaw FeishuService.SendMessage
 ### 10.1 manager 飞书接入
 
 - `csgclaw-cli bot create --channel feishu` 可创建/确认 manager。
-- `channel feishu set --bot-id u-manager` 可写入配置。
-- `doctor --bot-id u-manager` 通过。
+- `csgclaw-cli bot config --channel feishu --set --bot-id u-manager` 可写入配置。
+- `csgclaw-cli bot config --channel feishu --get --bot-id u-manager` 返回 masked 配置。
 - 用户可在飞书中私聊或 @ manager。
 - manager 能回复。
 
@@ -594,43 +583,38 @@ CSGClaw FeishuService.SendMessage
 - `cli/app.go` 当前注册的顶层命令只有 `serve`、`stop`、`agent`、`model`、`user`、`bot`、`room`、`member`、`message`、`completion`、`__complete`、`_serve`。
 - `cli/` 目录下也没有 channel 命令包。
 
-Phase 1 推荐：不一定新增通用 channel 命令。为了最大复用现有能力，skill 可以先直接安全更新主配置文件里的 `[channels.feishu.<bot_id>]`，并严格保证：
+Phase 1 已采用 `csgclaw-cli bot config --channel feishu` 统一读写和 reload 配置，skill 不直接编辑配置文件，也不直接调用配置 API。实现要求：
 
 - 不在日志和聊天内容里打印 `app_secret`。
-- 写入前备份原配置。
-- 只改目标 bot_id 对应段落，不重排或覆盖无关配置。
-
-如果需要产品化 CLI，再新增最小命令：
+- 只改目标 bot_id 对应配置，不覆盖无关 bot。
+- 通过 server 侧 handler 写入独立 Feishu channel 配置并 reload。
 
 ```bash
-csgclaw-cli channel feishu set \
+csgclaw-cli bot config --channel feishu --set \
   --bot-id u-dev \
   --app-id cli_xxx \
   --app-secret-file /secure/path
 
-csgclaw-cli channel feishu doctor --bot-id u-dev
+csgclaw-cli bot config --channel feishu --get --bot-id u-dev
+csgclaw-cli bot config --channel feishu --reload
 ```
-
-但这不是 Phase 1 必须项。
 
 ### 11.2 写配置后如何让运行中的 CSGClaw server 重新读取 `ChannelsConfig`
 
-结论：当前没有面向 `ChannelsConfig` 的热 reload 闭环。
+结论：当前通过 `csgclaw-cli bot config --channel feishu --reload` 触发 Feishu channel 配置 reload。
 
 代码依据：
 
 - `serve` 启动时加载 config，并把 `cfg.Channels` 传入 FeishuService、bot service、agent runtime wiring。
-- `agent.Service.Reload()` 只重新读取 agent state，不等价于重新读取主配置，也不会重建 FeishuService 或刷新 runtime wiring 里的 `ChannelsConfig`。
+- Feishu config handler 会重新读取主配置和独立 channel 配置文件，并刷新 FeishuService、bot service 和 agent runtime wiring 里的 `ChannelsConfig`。
 
-Phase 1 推荐：配置写入后提示或执行 CSGClaw server restart，让 server 重新读取主配置。
-
-Phase 2 可做：新增 config/channel reload API，但要同时刷新这些对象：
+reload 必须同时刷新这些对象：
 
 1. `FeishuService` 的 app config 映射。
 2. bot service 依赖的 channel service。
 3. agent runtime wiring 里用于创建 worker env 的 `ChannelsConfig`。
 
-只 reload agent state 不够。
+只 reload agent state 不够。已经废弃并删除独立 `csgclaw channel reload` CLI 入口，避免和 `csgclaw-cli bot config --channel feishu --reload` 混淆。
 
 ### 11.3 是否需要新增 `agent recreate` CLI
 
@@ -639,23 +623,17 @@ Phase 2 可做：新增 config/channel reload API，但要同时刷新这些对�
 代码依据：
 
 - 已有后端 `POST /api/v1/agents/{id}/recreate`。
-- 已有 CLI `csgclaw-cli agent create --replace --id <id> --force`。
+- 已有后端 API 可重建 agent。
 - `agent.Service.Create(ctx, req)` 在 `req.Replace == true` 时走 `replace(ctx, req)`。
 - 已有测试 `TestCreateReplaceWorkerRecreatesExistingAgent` 覆盖了 replace worker 会删除旧 box 并重新 run 新 box。
 
-Phase 1 推荐复用：
+Phase 1 推荐复用后端 API：
 
-```bash
-csgclaw-cli agent create --replace --id u-dev --force
+```http
+POST /api/v1/agents/u-dev/recreate
 ```
 
-已确认字段保留行为：CLI 会把实际传入的 `--id/--name/--description/--image/--profile` 形成 `FieldMask`；服务端 `mergeReplaceSpec(...)` 会以已有 agent 为基础，只覆盖 FieldMask 中出现的字段。因此：
-
-```bash
-csgclaw-cli agent create --replace --id u-dev --force
-```
-
-只传 `--id` 时，会保留已有 agent 的 name、description、image、profile/model 等 metadata，同时删除旧 box 并重新创建 worker box。
+服务端以已有 agent 记录为准删除旧 box 并重新创建 worker box，保留已有 agent 的 name、description、image、profile/model 等 metadata。
 
 `agent recreate` CLI 可以作为体验优化，但不能作为 Phase 1 的必要前置。
 
@@ -699,15 +677,15 @@ Hermes 代码依据：
 2. skill 向用户展示 QR URL 或二维码。
 3. 用户扫码确认创建 PersonalAgent。
 4. skill poll 到 `client_id/client_secret` 后，把它们映射为 `app_id/app_secret`。
-5. skill 安全写入 CSGClaw 主配置 `[channels.feishu.<bot_id>]`。
-6. restart/reload CSGClaw server。
-7. 复用 `csgclaw-cli agent create --replace --id <bot-id> --force` 重建 worker box。
+5. skill 通过 `csgclaw-cli bot config --channel feishu --set` 安全写入独立 Feishu channel 配置。
+6. 默认 `--set` 触发 reload。
+7. 调用 `POST /api/v1/agents/{id}/recreate` 重建 worker box。
 
 路径 B：选择已有 bot（fallback）
 
 1. skill 引导用户进入飞书开放平台控制台。
 2. 用户手动提供已有应用的 `app_id/app_secret`。
-3. skill 安全写入 CSGClaw 主配置。
+3. skill 通过 `csgclaw-cli bot config --channel feishu --set` 安全写入独立 Feishu channel 配置。
 4. 后续生效流程同路径 A。
 
 边界：

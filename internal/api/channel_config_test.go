@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"csgclaw/internal/channel"
+	feishuchannel "csgclaw/internal/channel/feishu"
 	"csgclaw/internal/config"
 )
 
@@ -23,8 +24,8 @@ func TestFeishuChannelConfigPutWritesStandaloneConfigAndReloads(t *testing.T) {
 	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, feishuSvc, nil, "secret", false)
 	h.SetConfigPath(configPath)
 
-	body := []byte(`{"app_id":"cli_dev","app_secret":"dev-secret","admin_open_id":"ou_admin"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/channels/feishu/config/u-dev", bytes.NewReader(body))
+	body := []byte(`{"bot_id":"u-dev","app_id":"cli_dev","app_secret":"dev-secret","admin_open_id":"ou_admin"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/channels/feishu/config", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
@@ -35,7 +36,7 @@ func TestFeishuChannelConfigPutWritesStandaloneConfigAndReloads(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "dev-secret") {
 		t.Fatalf("response leaked app_secret: %s", rec.Body.String())
 	}
-	var resp feishuChannelConfigResponse
+	var resp feishuchannel.ConfigResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
@@ -81,7 +82,7 @@ func TestFeishuChannelConfigGetMasksSecret(t *testing.T) {
 
 	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, channel.NewFeishuService(), nil, "secret", false)
 	h.SetConfigPath(configPath)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels/feishu/config/u-dev", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels/feishu/config?bot_id=u-dev", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
@@ -99,11 +100,22 @@ func TestFeishuChannelConfigGetMasksSecret(t *testing.T) {
 
 func TestChannelsReloadRequiresAuthorization(t *testing.T) {
 	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, channel.NewFeishuService(), nil, "secret", false)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/reload", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/config", nil)
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestLegacyChannelsReloadRouteIsNotRegistered(t *testing.T) {
+	h := NewHandlerWithBotAndAuth(nil, nil, nil, nil, nil, channel.NewFeishuService(), nil, "secret", false)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/reload", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
 
