@@ -190,7 +190,9 @@ func (h *Handler) handleUpgradeApply(w http.ResponseWriter, r *http.Request) {
 	if apply == nil {
 		apply = upgrade.StartApplyHelper
 	}
+	h.upgradeManager.MarkUpgrading()
 	if err := apply(upgrade.ApplyHelperOptions{ConfigPath: h.upgradeConfigPath}); err != nil {
+		h.upgradeManager.MarkUpgradeFailed(err)
 		http.Error(w, fmt.Sprintf("start upgrade helper: %v", err), http.StatusInternalServerError)
 		return
 	}

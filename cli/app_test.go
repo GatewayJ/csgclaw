@@ -1924,12 +1924,11 @@ func TestExecuteUpgradeCheckPrintsTable(t *testing.T) {
 				t.Fatalf("url = %q, want latest release endpoint", req.URL.String())
 			}
 			return jsonResponse(http.StatusOK, fmt.Sprintf(`{
-				"version":"v0.2.7",
-				"download_base_url":"https://downloads.example.test/csgclaw/v0.2.7",
+				"name":"v0.2.7",
 				"assets":[
-					{"name":"%s"}
+					{"name":"%s","browser_download_url":"https://downloads.example.test/csgclaw/v0.2.7/%s"}
 				]
-			}`, assetName)), nil
+			}`, assetName, assetName)), nil
 		}),
 	}
 
@@ -1958,7 +1957,7 @@ func TestExecuteUpgradeDefaultsToCheckResult(t *testing.T) {
 		stdout: &stdout,
 		stderr: &bytes.Buffer{},
 		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return jsonResponse(http.StatusOK, `{"version":"v0.2.7","assets":[]}`), nil
+			return jsonResponse(http.StatusOK, `{"name":"v0.2.7","assets":[]}`), nil
 		}),
 	}
 
@@ -1989,11 +1988,11 @@ func TestExecuteUpgradeSupportsJSONOutput(t *testing.T) {
 		stderr: &bytes.Buffer{},
 		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return jsonResponse(http.StatusOK, fmt.Sprintf(`{
-				"version":"v0.2.7",
+				"name":"v0.2.7",
 				"assets":[
-					{"name":"%s"}
+					{"name":"%s","browser_download_url":"https://downloads.example.test/csgclaw/v0.2.7/%s"}
 				]
-			}`, assetName)), nil
+			}`, assetName, assetName)), nil
 		}),
 	}
 

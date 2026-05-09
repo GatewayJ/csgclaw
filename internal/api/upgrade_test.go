@@ -111,6 +111,9 @@ func TestHandleUpgradeApply(t *testing.T) {
 	if got.ConfigPath != "/tmp/csgclaw.toml" {
 		t.Fatalf("ApplyHelperOptions.ConfigPath = %q, want %q", got.ConfigPath, "/tmp/csgclaw.toml")
 	}
+	if status := manager.Status(); !status.Upgrading {
+		t.Fatalf("manager.Status().Upgrading = false, want true")
+	}
 
 	var body apitypes.UpgradeActionResponse
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
@@ -161,6 +164,9 @@ func TestHandleUpgradeApplyHelperFailure(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+	if status := manager.Status(); status.Upgrading || status.LastError == "" {
+		t.Fatalf("manager.Status() = %+v, want upgrading false and last_error populated", status)
 	}
 }
 
