@@ -102,20 +102,26 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
 
 ## Choose Target Bot
 
-Ask or infer the target:
+Ask for the target when it is not explicit.
 
-- Manager setup:
-  - `bot_id = u-manager`
-  - `role = manager`
-  - manager recreate must be handed off to the action-card flow; do not let this manager-hosted skill call the recreate API itself.
-  - always return the action-card JSON so the current window can render the rebuild button; do not branch on request origin.
-  - after finalize prints the action card, return that JSON object as the entire chat message content with no prose, no Markdown table, and no wrapper text.
-- Worker setup:
-  - `bot_id = u-{name}`, for example `u-dev`
-  - `role = worker`
-  - after credentials are configured and reloaded, an existing worker is recreated; a missing worker is created by `POST /api/v1/bots` and is not redundantly recreated.
+If the user does not specify an agent in the request, ask: "请明确要对接飞书的目标 Agent 名字（如 `manager`/`u-manager` 或 `dev`/`u-dev`）".  
+Resolve target:
+1. If input is `manager` or `u-manager`, treat as manager flow.
+2. Otherwise, treat input as worker flow, set `bot_id` to the input if it already starts with `u-`, otherwise prefix `u-`.
+3. If only role was inferred as manager, stop using recreate path and force action-card flow.
 
-If the user says "dev 飞书机器人", use `u-dev` unless they specify another ID.
+Example normalization:
+- `dev` -> worker `u-dev`
+- `u-dev` -> worker `u-dev`
+- `manager` -> manager
+- `u-manager` -> manager
+
+For worker flow, run this existence check before decide recreate:
+```bash
+curl -sS -o /tmp/feishu_agent.json -w "%{http_code}" "$CSGCLAW_BASE_URL/api/v1/agents/$bot_id" \
+  -H "Authorization: Bearer $CSGCLAW_ACCESS_TOKEN"
+```
+Treat `200` as existing worker (needs recreate after ensure), and `404` as missing worker (skip recreate, let `POST /api/v1/bots` create it).
 
 ## Primary QR/Launcher Flow
 
@@ -125,9 +131,9 @@ Run from this skill directory:
 
 ```bash
 python "${skill_root}/scripts/feishu_register.py" start \
-  --bot-id u-dev \
+  --bot-id <worker_id> \
   --role worker \
-  --bot-name dev \
+  --bot-name <worker_name> \
   --description "dev worker agent" \
   --qr
 ```
@@ -175,7 +181,10 @@ For a worker, default finalize is usually enough:
 python "${skill_root}/scripts/feishu_register.py" finalize --registration-id <id>
 ```
 
-Use an exec/tool timeout of at least 600 seconds for this command. If `worker_existed_before_ensure` is `true`, the script recreates the existing worker after config reload; do not create a second worker or change the bot id.
+Use an exec/tool timeout of at least 600 seconds for this command. Before deciding recreate, use `GET /api/v1/agents/<worker_id>`:
+ - `200`: recreate existing worker
+ - `404`: skip recreate, because bot ensure has already created it
+If `worker_existed_before_ensure` is `true`, the script recreates the existing worker after config reload; do not create a second worker or change the bot id.
 
 For manager, default finalize configures and ensures the bot, then prints a structured action card. Return the JSON object exactly as the chat message content: no leading sentence, no Markdown table, no bullet list, no ```json fence, and no explanatory wrapper. The CSGClaw Web frontend will render a "重建 Manager" button.
 The click is handled by the browser and calls the manager bootstrap replace surface (`POST /api/v1/agents` with `{"id":"u-manager","replace":true}`), not the hazardous generic recreate route.
@@ -286,7 +295,7 @@ python "${skill_root}/scripts/feishu_register.py" recreate-agent --bot-id u-dev
 1. Start registration:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" start --bot-id u-dev --role worker --bot-name dev --description "dev worker agent" --qr
+python "${skill_root}/scripts/feishu_register.py" start --bot-id <worker_id> --role worker --bot-name <worker_name> --description "<worker_desc>" --qr
 ```
 
 2. Send the printed URL/QR to the user.
@@ -298,7 +307,17 @@ python "${skill_root}/scripts/feishu_register.py" finalize --registration-id <id
 
 Run the command with exec `timeout` at least `600`.
 
-4. Tell the user to test from Feishu by messaging or @mentioning the bot.
+4. Confirm existing worker before taking recreate path:
+
+```bash
+curl -sS -o /tmp/feishu_agent.json -w "%{http_code}" "$CSGCLAW_BASE_URL/api/v1/agents/<worker_id>" \
+  -H "Authorization: Bearer $CSGCLAW_ACCESS_TOKEN"
+```
+
+If the status is `200`, the manager can trigger recreate flow for this worker after reload.
+If the status is `404`, skip recreate and let `POST /api/v1/bots` creation stand.
+
+5. Tell the user to test from Feishu by messaging or @mentioning the bot.
 
 ## Manager One-Shot Recipe
 
