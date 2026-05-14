@@ -32,7 +32,7 @@ func Resolve(runtimeKind, role string) (string, error) {
 		case roleWorker:
 			return OpenClawWorkerRoot, nil
 		case roleManager:
-			return "", fmt.Errorf("runtime kind %q does not provide a %q template", runtimeKind, role)
+			return OpenClawManagerRoot, nil
 		}
 	}
 	return "", fmt.Errorf("runtime template not found for runtime kind %q role %q", runtimeKind, role)

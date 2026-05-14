@@ -38,6 +38,11 @@ assert(
   'saving the manager profile must not auto-trigger manager rebuild; rebuilds require an explicit window button click',
 );
 assert(
+  source.includes('const payload = {\n        name: agentPageDraft.name,\n        description: agentPageDraft.description,\n        agent_profile: profile,\n      };') &&
+    source.includes('body: JSON.stringify(isCreate ? payload : {\n          name: payload.name,\n          description: payload.description,\n          agent_profile: payload.agent_profile,\n        }),'),
+  'ordinary agent save flows must keep runtime_kind and image out of PATCH payloads',
+);
+assert(
   source.includes('link.setAttribute("target", "_blank");'),
   'markdown links must open in a new browser tab',
 );

@@ -14,6 +14,7 @@ import (
 )
 
 var builtinRuntimeTemplates = map[string]string{
+	"openclaw-manager": templates.OpenClawManagerRoot,
 	"openclaw-worker":  templates.OpenClawWorkerRoot,
 	"picoclaw-manager": templates.PicoClawManagerRoot,
 	"picoclaw-worker":  templates.PicoClawWorkerRoot,

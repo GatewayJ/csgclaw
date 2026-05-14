@@ -2093,6 +2093,19 @@ body::after {
   align-items: end;
 }
 
+.manager-rebuild-grid {
+  grid-template-columns: minmax(180px, 0.72fr) minmax(320px, 1.68fr);
+  align-items: end;
+}
+
+.manager-rebuild-runtime-field {
+  max-width: 280px;
+}
+
+.manager-rebuild-image-field {
+  min-width: 0;
+}
+
 .auth-status-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

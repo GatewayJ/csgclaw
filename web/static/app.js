@@ -196,7 +196,7 @@ const messages = {
     templateNone: "空白",
     profilePreview: "Profile 预览",
     openProfile: "打开 Profile",
-    openDM: "打开私信",
+    openDM: "私信",
     personProfile: "成员资料",
     roleLabel: "角色",
     handleLabel: "Handle",
@@ -240,6 +240,9 @@ const messages = {
     agentUpdated: "Agent 已更新",
     agentActionFailed: "Agent 操作失败",
     managerRebuildConfirm: "重建 Manager 会中断当前 Manager，会话可能需要刷新。确认继续？",
+    managerRebuildTitle: "重建 Manager",
+    managerRebuildSubtitle: "选择重建时使用的 runtime 和 image。这个操作会中断当前 Manager。",
+    managerRebuildAction: "重建",
     profileRestartRequired: "需要重建",
     profileCompleteBadge: "已配置",
     profileIncompleteBadge: "未配置",
@@ -423,7 +426,7 @@ const messages = {
     templateNone: "Blank",
     profilePreview: "Profile preview",
     openProfile: "Open profile",
-    openDM: "Open DM",
+    openDM: "DM",
     personProfile: "Person profile",
     roleLabel: "Role",
     handleLabel: "Handle",
@@ -467,6 +470,9 @@ const messages = {
     agentUpdated: "Agent updated",
     agentActionFailed: "Agent action failed",
     managerRebuildConfirm: "Rebuilding Manager interrupts the current Manager and this session may need a refresh. Continue?",
+    managerRebuildTitle: "Recreate Manager",
+    managerRebuildSubtitle: "Choose the runtime and image to use for recreate. This interrupts the current Manager.",
+    managerRebuildAction: "Recreate",
     profileRestartRequired: "Restart needed",
     profileCompleteBadge: "Configured",
     profileIncompleteBadge: "Incomplete",
@@ -1005,6 +1011,9 @@ function App() {
   const [upgradeError, setUpgradeError] = useState("");
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradePhase, setUpgradePhase] = useState("idle");
+  const [showManagerRebuildModal, setShowManagerRebuildModal] = useState(false);
+  const [managerRebuildRuntimeKind, setManagerRebuildRuntimeKind] = useState("picoclaw_sandbox");
+  const [managerRebuildImage, setManagerRebuildImage] = useState("");
   const editorRef = useRef(null);
   const messageListRef = useRef(null);
   const memberMenuRef = useRef(null);
@@ -1694,6 +1703,9 @@ function App() {
       const normalized = {
         ...payload,
         runtime_kind: normalizeRuntimeKind(payload.runtime_kind),
+        supported_runtime_kinds: Array.isArray(payload.supported_runtime_kinds)
+          ? payload.supported_runtime_kinds.map((item) => normalizeRuntimeKind(item)).filter((item, index, array) => item && array.indexOf(item) === index)
+          : [],
         runtime_default_images: normalizeRuntimeImageMap(payload.runtime_default_images),
       };
       setBootstrapConfig(normalized);
@@ -2053,6 +2065,7 @@ function App() {
   const previewAgent = profilePreview
     ? agentItems.find((item) => item.id === profilePreview.id || agentMatchesUser(item, previewUser)) ?? null
     : null;
+  const managerRuntimeOptions = availableManagerRuntimeOptions(bootstrapConfig);
 
   async function refreshManagerProfile() {
     try {
@@ -2247,13 +2260,33 @@ function App() {
     }
   }
 
-  async function requestManagerRebuild() {
+  function openManagerRebuildModal(item = managerAgent) {
+    const initialRuntimeKind = normalizeRuntimeKind(item?.runtime_kind || bootstrapConfig?.runtime_kind || managerRebuildRuntimeKind);
+    const fallbackRuntimeKind = managerRuntimeOptions[0]?.value || "picoclaw_sandbox";
+    const resolvedRuntimeKind = managerRuntimeOptions.some((option) => option.value === initialRuntimeKind)
+      ? initialRuntimeKind
+      : fallbackRuntimeKind;
+    const resolvedImage = runtimeImageForKind(
+      resolvedRuntimeKind,
+      bootstrapConfig,
+      item?.image || managerAgent?.image || "",
+    );
+    setManagerRebuildRuntimeKind(resolvedRuntimeKind);
+    setManagerRebuildImage(resolvedImage);
+    setShowManagerRebuildModal(true);
+  }
+
+  async function requestManagerRebuild(options = {}) {
+    const runtimeKind = normalizeRuntimeKind(options.runtimeKind || managerAgent?.runtime_kind || bootstrapConfig?.runtime_kind || managerRuntimeOptions[0]?.value);
+    const image = String(options.image ?? managerAgent?.image ?? "").trim();
     const resp = await fetch("api/v1/agents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: "u-manager",
         replace: true,
+        image,
+        runtime_kind: runtimeKind,
       }),
     });
     if (!resp.ok) {
@@ -2261,17 +2294,14 @@ function App() {
     }
     await refreshAgents();
     await refreshManagerProfile();
+    await refreshBootstrapConfig();
   }
 
   async function rebuildManagerFromBrowser(options = {}) {
-    const confirmText = options.confirm || t("managerRebuildConfirm");
-    if (!options.skipConfirm && confirmText && !window.confirm(confirmText)) {
-      return false;
-    }
     setAgentActionBusy("u-manager:recreate");
     setAgentsError("");
     try {
-      await requestManagerRebuild();
+      await requestManagerRebuild(options);
       return true;
     } catch (err) {
       setAgentsError(err.message || t("agentActionFailed"));
@@ -2281,27 +2311,28 @@ function App() {
     }
   }
 
+  async function confirmManagerRebuild() {
+    if (agentActionBusy) {
+      return;
+    }
+    const selectedRuntimeKind = normalizeRuntimeKind(managerRebuildRuntimeKind || managerAgent?.runtime_kind || bootstrapConfig?.runtime_kind);
+    const selectedImage = String(managerRebuildImage ?? "").trim();
+    setMessageActionError({ key: "", message: "" });
+    const rebuilt = await rebuildManagerFromBrowser({ runtimeKind: selectedRuntimeKind, image: selectedImage });
+    if (rebuilt) {
+      setShowManagerRebuildModal(false);
+    }
+  }
+
   async function handleMessageAction(action, message) {
     if (!action || action.id !== ACTION_REBUILD_MANAGER) {
       return;
     }
-    const busyKey = `${message?.id || "message"}:${action.id}`;
     if (messageActionBusy || agentActionBusy) {
       return;
     }
-    const confirmText = action.confirm || t("managerRebuildConfirm");
-    if (confirmText && !window.confirm(confirmText)) {
-      return;
-    }
-    setMessageActionBusy(busyKey);
     setMessageActionError({ key: "", message: "" });
-    try {
-      await requestManagerRebuild();
-    } catch (err) {
-      setMessageActionError({ key: busyKey, message: err.message || t("agentActionFailed") });
-    } finally {
-      setMessageActionBusy("");
-    }
+    openManagerRebuildModal(managerAgent);
   }
 
   async function saveManagerProfile() {
@@ -2545,7 +2576,6 @@ function App() {
       const payload = {
         name: agentPageDraft.name,
         description: agentPageDraft.description,
-        image: agentPageDraft.image,
         agent_profile: profile,
       };
       const resp = await fetch(`api/v1/agents/${encodeURIComponent(selectedAgentForPage.id)}`, {
@@ -2629,8 +2659,6 @@ function App() {
         body: JSON.stringify(isCreate ? payload : {
           name: payload.name,
           description: payload.description,
-          image: payload.image,
-          runtime_kind: payload.runtime_kind,
           agent_profile: payload.agent_profile,
         }),
       });
@@ -2670,7 +2698,7 @@ function App() {
     setAgentsError("");
     try {
       if (action === "recreate" && isManagerAgent(item)) {
-        await rebuildManagerFromBrowser({ confirm: t("managerRebuildConfirm") });
+        openManagerRebuildModal(item);
         return;
       }
       const url = action === "delete"
@@ -3690,6 +3718,56 @@ function App() {
           `
         : null}
 
+      ${showManagerRebuildModal
+        ? html`
+            <div className="modal-backdrop">
+              <div className="modal-card profile-modal" onClick=${(event) => event.stopPropagation()}>
+                <div className="modal-header">
+                  <div>
+                    <div className="modal-title">${t("managerRebuildTitle")}</div>
+                    <div className="modal-subtitle">${t("managerRebuildSubtitle")}</div>
+                  </div>
+                  <button className="btn btn-secondary-gray btn-sm modal-close" onClick=${() => setShowManagerRebuildModal(false)}>${t("close")}</button>
+                </div>
+                <div className="profile-editor-shell">
+                  <section className="profile-section">
+                    <div className="profile-grid profile-grid-compact manager-rebuild-grid">
+                      <label className="field manager-rebuild-runtime-field">
+                        <span>${t("profileRuntimeKind")}</span>
+                        <select
+                          value=${normalizeRuntimeKind(managerRebuildRuntimeKind)}
+                          onChange=${(event) => {
+                            const runtimeKind = normalizeRuntimeKind(event.target.value);
+                            setManagerRebuildRuntimeKind(runtimeKind);
+                            setManagerRebuildImage(runtimeImageForKind(runtimeKind, bootstrapConfig, managerAgent?.image || ""));
+                          }}
+                        >
+                          ${managerRuntimeOptions.map((option) => html`
+                            <option key=${option.value} value=${option.value}>${option.value}</option>
+                          `)}
+                        </select>
+                      </label>
+                      <label className="field manager-rebuild-image-field">
+                        <span>${t("agentImage")}</span>
+                        <input value=${managerRebuildImage} onInput=${(event) => setManagerRebuildImage(event.target.value)} placeholder=${t("agentImagePlaceholder")} />
+                      </label>
+                    </div>
+                  </section>
+                  ${agentsError ? html`<div className="form-error">${agentsError}</div>` : null}
+                  <div className="modal-actions">
+                    <button className="secondary-button" disabled=${agentActionBusy === "u-manager:recreate"} onClick=${() => setShowManagerRebuildModal(false)}>
+                      ${t("close")}
+                    </button>
+                    <button className="send-button" disabled=${agentActionBusy === "u-manager:recreate"} onClick=${confirmManagerRebuild}>
+                      ${agentActionBusy === "u-manager:recreate" ? t("profileLoadingModels") : t("managerRebuildAction")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `
+        : null}
+
       ${showAgentModal && agentDraft
         ? html`
             <div className="modal-backdrop" onClick=${() => setShowAgentModal(false)}>
@@ -3773,7 +3851,9 @@ function App() {
                       </label>
                       <label className="field">
                         <span>${t("agentImage")}</span>
-                        <input value=${agentDraft.image} onInput=${(event) => setAgentDraft({ ...agentDraft, image: event.target.value })} placeholder=${t("agentImagePlaceholder")} />
+                        ${agentModalMode === "create"
+                          ? html`<input value=${agentDraft.image} onInput=${(event) => setAgentDraft({ ...agentDraft, image: event.target.value })} placeholder=${t("agentImagePlaceholder")} />`
+                          : html`<input value=${agentDraft.image} readOnly disabled placeholder=${t("agentImagePlaceholder")} />`}
                       </label>
                       <label className="field span-2">
                         <span>${t("agentDescription")}</span>
@@ -4602,14 +4682,13 @@ function AgentDetailPane({ item, t, activeRoom, busyKey, error, draft, models, m
         >
           ${saving ? t("profileLoadingModels") : t("agentUpdateSave")}
         </button>
-        <button className="btn btn-secondary-gray btn-sm preview-action-button" disabled=${busyKey.startsWith(busyPrefix) || incomplete} onClick=${() => running ? onStop(item) : onStart(item)}>
-          ${running ? t("agentStop") : t("agentStart")}
-        </button>
-        <button className="btn btn-secondary-gray btn-sm preview-action-button" disabled=${busyKey.startsWith(busyPrefix) || incomplete} onClick=${() => onRecreate(item)}>${t("agentRecreate")}</button>
         ${activeRoom && !isManager
           ? html`<button className="btn btn-secondary-gray btn-sm preview-action-button" disabled=${busyKey.startsWith(busyPrefix)} onClick=${() => onInvite(item)}>${t("inviteToRoom")}</button>`
           : null}
         <button className="btn btn-secondary-gray btn-sm preview-action-button" onClick=${() => onOpenDM(item)}>${t("openDM")}</button>
+        ${isManager
+          ? html`<button className="btn btn-outline-danger btn-sm preview-action-button preview-action-button-danger" disabled=${busyKey.startsWith(busyPrefix) || incomplete} onClick=${() => onRecreate(item)}>${t("agentRecreate")}</button>`
+          : null}
         ${!isManager
           ? html`<button className="btn btn-outline-danger btn-sm preview-action-button preview-action-button-danger" disabled=${busyKey.startsWith(busyPrefix)} onClick=${() => onDelete(item)}>${t("agentDelete")}</button>`
           : null}
@@ -4679,7 +4758,7 @@ function AgentDetailPane({ item, t, activeRoom, busyKey, error, draft, models, m
                   </label>
                   <label className="field">
                     <span>${t("agentImage")}</span>
-                    <input value=${draft.image} onInput=${(event) => updateDraft({ image: event.target.value })} placeholder=${t("agentImagePlaceholder")} />
+                    <input value=${draft.image} readOnly disabled placeholder=${t("agentImagePlaceholder")} />
                   </label>
                   <label className="field span-2">
                     <span>${t("agentDescription")}</span>
@@ -5696,6 +5775,16 @@ function runtimeImageForKind(kind, bootstrapConfig, fallbackImage = "") {
     return String(bootstrapConfig.effective_manager_image).trim();
   }
   return String(fallbackImage ?? "").trim();
+}
+
+function availableManagerRuntimeOptions(bootstrapConfig) {
+  const configuredKinds = Array.isArray(bootstrapConfig?.supported_runtime_kinds)
+    ? bootstrapConfig.supported_runtime_kinds
+    : [];
+  const gatewayKinds = (configuredKinds.length ? configuredKinds : ["picoclaw_sandbox", "openclaw_sandbox"])
+    .map((kind) => normalizeRuntimeKind(kind))
+    .filter((kind, index, array) => kind && kind !== "codex" && array.indexOf(kind) === index);
+  return RUNTIME_KIND_OPTIONS.filter((option) => gatewayKinds.includes(option.value));
 }
 
 function agentCreateProgressSteps(runtimeKind) {

@@ -40,7 +40,6 @@ type CreateChatRequest struct {
 	Title        string
 	Description  string
 	CreatorID    string
-	MemberBotIDs []string
 	MemberAppIDs []string
 }
 
@@ -463,7 +462,6 @@ func (s *Service) CreateRoom(req im.CreateRoomRequest) (im.Room, error) {
 		Title:        title,
 		Description:  description,
 		CreatorID:    adminOpenID,
-		MemberBotIDs: memberBotIDs,
 		MemberAppIDs: memberAppIDs,
 	})
 	if err != nil {

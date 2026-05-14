@@ -1148,6 +1148,77 @@ func TestCreateReplaceManagerWithoutRequestedImageUsesManagerDefault(t *testing.
 	}
 }
 
+func TestCreateReplaceManagerSwitchesRuntimeKind(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	var gotImages []string
+	SetTestHooks(
+		func(_ *Service, _ string) (sandbox.Runtime, error) { return &fakeRuntime{}, nil },
+		func(_ *Service, _ context.Context, _ sandbox.Runtime, image, name, _ string, _ AgentProfile) (sandbox.Instance, sandbox.Info, error) {
+			gotImages = append(gotImages, image)
+			return &fakeInstance{}, sandbox.Info{
+				ID:        "box-" + name,
+				Name:      name,
+				State:     sandbox.StateRunning,
+				CreatedAt: time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+			}, nil
+		},
+	)
+	testGetBoxHook = func(_ *Service, _ context.Context, _ sandbox.Runtime, _ string) (sandbox.Instance, error) {
+		return nil, fmt.Errorf("%w: missing", sandbox.ErrNotFound)
+	}
+	testForceRemoveBoxHook = func(_ *Service, _ context.Context, _ sandbox.Runtime, _ string) error {
+		return nil
+	}
+	defer ResetTestHooks()
+
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:1",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if _, err := svc.Create(context.Background(), CreateRequest{
+		Spec: CreateAgentSpec{
+			ID:   ManagerUserID,
+			Name: ManagerName,
+		},
+	}); err != nil {
+		t.Fatalf("seed Create() error = %v", err)
+	}
+
+	replaced, err := svc.Create(context.Background(), CreateRequest{
+		Spec: CreateAgentSpec{
+			ID:          ManagerUserID,
+			Name:        ManagerName,
+			RuntimeKind: RuntimeKindOpenClawSandbox,
+		},
+		Replace: true,
+	})
+	if err != nil {
+		t.Fatalf("Create() replace error = %v", err)
+	}
+	if got, want := replaced.RuntimeKind, RuntimeKindOpenClawSandbox; got != want {
+		t.Fatalf("Create() runtime_kind = %q, want %q", got, want)
+	}
+	if got, want := replaced.Image, config.DefaultOpenClawManagerImage; got != want {
+		t.Fatalf("Create() image = %q, want %q", got, want)
+	}
+	if got, want := svc.GatewayRuntime(), RuntimeKindOpenClawSandbox; got != want {
+		t.Fatalf("GatewayRuntime() = %q, want %q", got, want)
+	}
+	if len(gotImages) != 2 {
+		t.Fatalf("createGatewayBox() calls = %d, want 2", len(gotImages))
+	}
+	if got, want := gotImages[1], config.DefaultOpenClawManagerImage; got != want {
+		t.Fatalf("recreate manager image = %q, want %q", got, want)
+	}
+}
+
 func TestLoadMigratesLegacyWorkersIntoAgents(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "agents.json")
@@ -3898,7 +3969,7 @@ func mustNewLocalTemplateHubServiceWithoutWorkspace(t *testing.T, id string, ite
 	return svc
 }
 
-func TestWithGatewayRuntimeRejectsOpenClawManagerRuntime(t *testing.T) {
+func TestWithGatewayRuntimeAcceptsOpenClawManagerRuntime(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -3906,12 +3977,12 @@ func TestWithGatewayRuntimeRejectsOpenClawManagerRuntime(t *testing.T) {
 		"",
 		WithGatewayRuntime(RuntimeKindOpenClawSandbox),
 	)
-	if err == nil {
-		_ = svc.Close()
-		t.Fatal("NewService() error = nil, want unsupported gateway runtime")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), `gateway runtime "openclaw_sandbox" is not supported`) {
-		t.Fatalf("NewService() error = %v, want unsupported openclaw gateway runtime", err)
+	defer svc.Close()
+	if got, want := svc.GatewayRuntime(), RuntimeKindOpenClawSandbox; got != want {
+		t.Fatalf("GatewayRuntime() = %q, want %q", got, want)
 	}
 }
 

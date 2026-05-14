@@ -418,15 +418,46 @@ func (s *Service) logBootstrapManagerBoxProgress(elapsed time.Duration) {
 }
 
 func (s *Service) EnsureManager(ctx context.Context, forceRecreate bool) (Agent, error) {
-	return s.ensureManager(ctx, forceRecreate, "")
+	return s.ensureManager(ctx, forceRecreate, "", "")
 }
 
-func (s *Service) ensureManager(ctx context.Context, forceRecreate bool, imageOverride string) (Agent, error) {
+func (s *Service) ensureManager(ctx context.Context, forceRecreate bool, imageOverride, runtimeOverride string) (_ Agent, retErr error) {
 	if s == nil {
 		return Agent{}, fmt.Errorf("agent service is required")
 	}
+	runtimeKind := runtimeKindForGatewayRuntime(runtimeOverride)
+	if strings.TrimSpace(runtimeOverride) != "" && runtimeKind == "" {
+		return Agent{}, fmt.Errorf("gateway runtime %q is not supported", runtimeOverride)
+	}
+	if runtimeKind == "" {
+		runtimeKind = s.gatewayRuntimeKind()
+	}
+
 	managerImage := strings.TrimSpace(imageOverride)
-	if managerImage == "" {
+	previousGatewayRuntime := ""
+	previousManagerImage := ""
+	if runtimeKind != s.gatewayRuntimeKind() {
+		s.mu.Lock()
+		previousGatewayRuntime = s.gatewayRuntime
+		previousManagerImage = s.managerImage
+		s.gatewayRuntime = runtimeKind
+		if managerImage == "" {
+			if defaultImage := managerImageForRuntimeKind(runtimeKind); defaultImage != "" {
+				s.managerImage = defaultImage
+			}
+		}
+		managerImage = s.managerImage
+		s.mu.Unlock()
+		defer func() {
+			if retErr == nil {
+				return
+			}
+			s.mu.Lock()
+			s.gatewayRuntime = previousGatewayRuntime
+			s.managerImage = previousManagerImage
+			s.mu.Unlock()
+		}()
+	} else if managerImage == "" {
 		managerImage = s.managerImage
 	}
 	startProfile, detectionResults := s.managerStartupProfile(ctx)
@@ -1010,7 +1041,7 @@ func (s *Service) replace(ctx context.Context, req CreateRequest) (Agent, error)
 	}
 
 	if isManagerAgent(existing) || isManagerCreateSpec(spec) {
-		return s.ensureManager(ctx, true, managerImageOverride)
+		return s.ensureManager(ctx, true, managerImageOverride, spec.RuntimeKind)
 	}
 	if shouldCreateWorkerSpec(spec) || strings.EqualFold(existing.Role, RoleWorker) {
 		if err := s.Delete(ctx, existing.ID); err != nil {

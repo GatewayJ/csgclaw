@@ -17,19 +17,24 @@ func TestRuntimeTemplateFSEmbedsCompleteTemplateUnits(t *testing.T) {
 		workspaceDoc string
 	}{
 		{
+			name:         "openclaw manager",
+			manifestPath: "embed/openclaw-manager/agent.toml",
+			workspaceDoc: "embed/openclaw-manager/workspace/AGENTS.md",
+		},
+		{
 			name:         "picoclaw manager",
-			manifestPath: "embed/runtimes/picoclaw/manager/agent.toml",
-			workspaceDoc: "embed/runtimes/picoclaw/manager/workspace/AGENT.md",
+			manifestPath: "embed/picoclaw-manager/agent.toml",
+			workspaceDoc: "embed/picoclaw-manager/workspace/AGENT.md",
 		},
 		{
 			name:         "picoclaw worker",
-			manifestPath: "embed/runtimes/picoclaw/worker/agent.toml",
-			workspaceDoc: "embed/runtimes/picoclaw/worker/workspace/AGENT.md",
+			manifestPath: "embed/picoclaw-worker/agent.toml",
+			workspaceDoc: "embed/picoclaw-worker/workspace/AGENT.md",
 		},
 		{
 			name:         "openclaw worker",
-			manifestPath: "embed/runtimes/openclaw/worker/agent.toml",
-			workspaceDoc: "embed/runtimes/openclaw/worker/workspace/AGENTS.md",
+			manifestPath: "embed/openclaw-worker/agent.toml",
+			workspaceDoc: "embed/openclaw-worker/workspace/AGENTS.md",
 		},
 	}
 
@@ -64,7 +69,7 @@ func TestOpenClawWorkerTemplateUsesOpenClawBootstrapFiles(t *testing.T) {
 		"HEARTBEAT.md",
 	}
 	for _, name := range required {
-		path := "embed/runtimes/openclaw/worker/workspace/" + name
+		path := "embed/openclaw-worker/workspace/" + name
 		data, err := fs.ReadFile(templates.FS(), path)
 		if err != nil {
 			t.Fatalf("ReadFile(%q) error = %v", path, err)
@@ -75,10 +80,10 @@ func TestOpenClawWorkerTemplateUsesOpenClawBootstrapFiles(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		"embed/runtimes/openclaw/worker/workspace/AGENT.md",
-		"embed/runtimes/openclaw/worker/workspace/MEMORY.md",
-		"embed/runtimes/openclaw/worker/workspace/memory/MEMORY.md",
-		"embed/runtimes/openclaw/worker/workspace/BOOTSTRAP.md",
+		"embed/openclaw-worker/workspace/AGENT.md",
+		"embed/openclaw-worker/workspace/MEMORY.md",
+		"embed/openclaw-worker/workspace/memory/MEMORY.md",
+		"embed/openclaw-worker/workspace/BOOTSTRAP.md",
 	} {
 		if _, err := fs.Stat(templates.FS(), path); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("Stat(%q) error = %v, want fs.ErrNotExist", path, err)
@@ -94,10 +99,10 @@ func TestResolveRuntimeTemplateRoot(t *testing.T) {
 		want        string
 		wantErr     bool
 	}{
+		{name: "openclaw manager", runtimeKind: RuntimeKindOpenClawSandbox, role: RoleManager, want: templates.OpenClawManagerRoot},
 		{name: "picoclaw manager", runtimeKind: RuntimeKindPicoClawSandbox, role: RoleManager, want: templates.PicoClawManagerRoot},
 		{name: "picoclaw worker", runtimeKind: RuntimeKindPicoClawSandbox, role: RoleWorker, want: templates.PicoClawWorkerRoot},
 		{name: "openclaw worker", runtimeKind: RuntimeKindOpenClawSandbox, role: RoleWorker, want: templates.OpenClawWorkerRoot},
-		{name: "openclaw manager unsupported", runtimeKind: RuntimeKindOpenClawSandbox, role: RoleManager, wantErr: true},
 		{name: "unknown runtime", runtimeKind: "missing", role: RoleWorker, wantErr: true},
 	}
 

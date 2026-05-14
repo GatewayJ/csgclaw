@@ -62,10 +62,12 @@ func isGatewayRuntimeKind(kind string) bool {
 }
 
 func runtimeKindForGatewayRuntime(runtime string) string {
-	if kind := normalizeRuntimeKind(runtime); kind == RuntimeKindPicoClawSandbox {
+	switch kind := normalizeRuntimeKind(runtime); kind {
+	case RuntimeKindPicoClawSandbox, RuntimeKindOpenClawSandbox:
 		return kind
+	default:
+		return ""
 	}
-	return ""
 }
 
 func managerImageForRuntimeKind(kind string) string {

@@ -204,6 +204,7 @@ func bootstrapConfigView(ctx context.Context, cfg config.Config, hubSvc *hub.Ser
 		DefaultWorkerTemplate:  cfg.Bootstrap.ResolvedDefaultWorkerTemplate(),
 		SupportedRuntimeKinds: []string{
 			agent.RuntimeKindPicoClawSandbox,
+			agent.RuntimeKindOpenClawSandbox,
 		},
 		RuntimeDefaultImages: map[string]string{
 			agent.RuntimeKindPicoClawSandbox: config.DefaultManagerImageForRuntimeKind(agent.RuntimeKindPicoClawSandbox),

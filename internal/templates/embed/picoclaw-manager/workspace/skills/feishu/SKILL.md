@@ -85,8 +85,8 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
    - `CSGCLAW_BASE_URL`, default `http://127.0.0.1:18080`
    - `CSGCLAW_ACCESS_TOKEN`, unless server auth is disabled
 3. The script is run from the deployed skill directory:
-  - inside manager box: typically `~/.picoclaw/workspace/skills/feishu` or your configured skill root
-  - host repo path: `internal/templates/embed/runtimes/picoclaw/manager/workspace/skills/feishu` (or your checked-out path, e.g. `openclaw/...`)
+   - inside manager box: typically `~/.picoclaw/workspace/skills/feishu` or your configured skill root
+   - host repo path: `internal/templates/embed/picoclaw-manager/workspace/skills/feishu`
 4. Server build supports:
    - `csgclaw-cli bot config --channel feishu --set/--get/--reload`
    - `POST /api/v1/bots`
@@ -104,7 +104,7 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
 
 Ask for the target when it is not explicit.
 
-If the user does not specify an agent in the request, ask: "请明确要对接飞书的目标 Agent 名字（如 `manager`/`u-manager` 或 `dev`/`u-dev`）".  
+If the user does not specify an agent in the request, ask: "请明确要对接飞书的目标 Agent 名字（如 `manager`/`u-manager` 或 `dev`/`u-dev`）".
 Resolve target:
 1. If input is `manager` or `u-manager`, treat as manager flow.
 2. Otherwise, treat input as worker flow, set `bot_id` to the input if it already starts with `u-`, otherwise prefix `u-`.

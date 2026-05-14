@@ -20,14 +20,20 @@ func TestNewServiceUsesResolvedBuiltinRegistry(t *testing.T) {
 	if svc == nil {
 		t.Fatal("NewService() = nil, want service")
 	}
-	if len(got) != 1 {
-		t.Fatalf("len(factory calls) = %d, want 1", len(got))
+	if len(got) != 2 {
+		t.Fatalf("len(factory calls) = %d, want 2", len(got))
 	}
 	if got[0].Name != config.DefaultHubRegistry {
 		t.Fatalf("factory registry name = %q, want %q", got[0].Name, config.DefaultHubRegistry)
 	}
 	if got[0].Kind != config.HubRegistryKindBuiltin {
 		t.Fatalf("factory registry kind = %q, want %q", got[0].Kind, config.HubRegistryKindBuiltin)
+	}
+	if got[1].Name != config.DefaultHubPublishRegistry {
+		t.Fatalf("factory registry name = %q, want %q", got[1].Name, config.DefaultHubPublishRegistry)
+	}
+	if got[1].Kind != config.HubRegistryKindLocal {
+		t.Fatalf("factory registry kind = %q, want %q", got[1].Kind, config.HubRegistryKindLocal)
 	}
 }
 
@@ -43,6 +49,7 @@ func TestListAggregatesAndNamespacesTemplates(t *testing.T) {
 		"builtin": stubStore{
 			listResult: []Template{{ID: "frontend-alice", Name: "frontend-alice"}},
 		},
+		"local": stubStore{},
 		"team": stubStore{
 			listResult: []Template{{Name: "review-bot"}},
 		},
