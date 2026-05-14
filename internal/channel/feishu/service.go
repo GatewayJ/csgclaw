@@ -37,10 +37,11 @@ type BotInfo struct {
 }
 
 type CreateChatRequest struct {
-	Title       string
-	Description string
-	CreatorID   string
-	MemberIDs   []string
+	Title        string
+	Description  string
+	CreatorID    string
+	MemberBotIDs []string
+	MemberAppIDs []string
 }
 
 type CreateChatResponse struct {
@@ -53,7 +54,7 @@ type CreateChatFunc func(context.Context, AppConfig, CreateChatRequest) (CreateC
 
 type AddChatMembersRequest struct {
 	ChatID       string
-	MemberIDs    []string
+	MemberBotIDs []string
 	MemberAppIDs []string
 }
 
@@ -451,14 +452,19 @@ func (s *Service) CreateRoom(req im.CreateRoomRequest) (im.Room, error) {
 		return im.Room{}, fmt.Errorf("feishu admin_open_id is required")
 	}
 	members := normalizeMembers(creatorID, req.MemberIDs)
-	memberIDs := members[1:]
+	memberBotIDs := members[1:]
+	memberAppIDs, err := s.appIDsForMembers(memberBotIDs)
+	if err != nil {
+		return im.Room{}, err
+	}
 	description := strings.TrimSpace(req.Description)
 
 	created, err := s.createChat(context.Background(), app, CreateChatRequest{
-		Title:       title,
-		Description: description,
-		CreatorID:   adminOpenID, // TODO: use u-manager app_id?
-		MemberIDs:   memberIDs,
+		Title:        title,
+		Description:  description,
+		CreatorID:    adminOpenID,
+		MemberBotIDs: memberBotIDs,
+		MemberAppIDs: memberAppIDs,
 	})
 	if err != nil {
 		return im.Room{}, err
@@ -500,8 +506,8 @@ func defaultCreateChat(ctx context.Context, app AppConfig, req CreateChatRequest
 			Name(req.Title).
 			Description(req.Description).
 			OwnerId(req.CreatorID).
-			UserIdList(req.MemberIDs).
-			BotIdList([]string{}).
+			UserIdList([]string{}).
+			BotIdList(req.MemberAppIDs).
 			GroupMessageType("chat").
 			ChatMode("group").
 			ChatType("private").
@@ -1200,11 +1206,10 @@ func (s *Service) AddRoomMembers(req im.AddRoomMembersRequest) (im.Room, error) 
 		}
 		existing[userID] = struct{}{}
 		newMembers = append(newMembers, userID)
-		memberAppID := userID
-		if app, ok := s.apps[userID]; ok {
-			if configuredAppID := strings.TrimSpace(app.AppID); configuredAppID != "" {
-				memberAppID = configuredAppID
-			}
+		memberAppID, err := s.appIDForMemberLocked(userID)
+		if err != nil {
+			s.mu.Unlock()
+			return im.Room{}, err
 		}
 		newMemberAppIDs = append(newMemberAppIDs, memberAppID)
 	}
@@ -1225,7 +1230,7 @@ func (s *Service) AddRoomMembers(req im.AddRoomMembersRequest) (im.Room, error) 
 
 	if err := s.addChatMembers(context.Background(), app, AddChatMembersRequest{
 		ChatID:       roomID,
-		MemberIDs:    newMembers,
+		MemberBotIDs: newMembers,
 		MemberAppIDs: newMemberAppIDs,
 	}); err != nil {
 		return im.Room{}, err
@@ -1371,13 +1376,32 @@ func (s *Service) appIDForMemberLocked(memberID string) (string, error) {
 	}
 	app, ok := s.apps[memberID]
 	if !ok {
-		return "", fmt.Errorf("feishu app is not configured for member_id %q", memberID)
+		return "", fmt.Errorf("feishu app is not configured for bot %q", memberID)
 	}
 	appID := strings.TrimSpace(app.AppID)
 	if appID == "" {
-		return "", fmt.Errorf("feishu app_id is required for member_id %q", memberID)
+		return "", fmt.Errorf("feishu app_id is required for bot %q", memberID)
 	}
 	return appID, nil
+}
+
+func (s *Service) appIDsForMembers(memberIDs []string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	appIDs := make([]string, 0, len(memberIDs))
+	for _, memberID := range memberIDs {
+		memberID = strings.TrimSpace(memberID)
+		if memberID == "" {
+			continue
+		}
+		appID, err := s.appIDForMemberLocked(memberID)
+		if err != nil {
+			return nil, err
+		}
+		appIDs = append(appIDs, appID)
+	}
+	return appIDs, nil
 }
 
 func normalizeNonEmptyStrings(values []string) []string {

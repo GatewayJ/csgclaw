@@ -228,9 +228,9 @@ func displayAgentProfile(profile string) string {
 
 func RenderBotsTable(w io.Writer, bots []apitypes.Bot) error {
 	tw := NewTableWriter(w)
-	fmt.Fprintln(tw, "ID\tNAME\tDESCRIPTION\tROLE\tCHANNEL\tRUNTIME\tAGENT\tUSER\tAVAILABLE")
+	fmt.Fprintln(tw, "ID\tNAME\tDESCRIPTION\tROLE\tCHANNEL")
 	for _, b := range bots {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%t\n", b.ID, b.Name, displayBotDescription(b.Description), b.Role, b.Channel, displayBotField(b.RuntimeKind), displayBotField(b.AgentID), displayBotField(b.UserID), b.Available)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", b.ID, b.Name, displayBotDescription(b.Description), b.Role, b.Channel)
 	}
 	return tw.Flush()
 }

@@ -217,7 +217,7 @@ func TestExecuteBotListUsesDefaultChannel(t *testing.T) {
 	if err := app.Execute(context.Background(), []string{"--endpoint", "http://example.test", "bot", "list"}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	assertTableHasRow(t, stdout.String(), "bot-alice", "alice", "-", "worker", "csgclaw", "codex", "u-alice", "u-alice", "true")
+	assertTableHasRow(t, stdout.String(), "bot-alice", "alice", "-", "worker", "csgclaw")
 }
 
 func TestExecuteBotListFeishuUsesChannelQuery(t *testing.T) {
@@ -263,7 +263,7 @@ func TestExecuteBotListUsesRoleQuery(t *testing.T) {
 	if err := app.Execute(context.Background(), []string{"--endpoint", "http://example.test", "bot", "list", "--role", "worker"}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	assertTableHasRow(t, stdout.String(), "bot-alice", "alice", "abcdefghijklmnopqrstuvwxyz1234567890ABCD...", "worker", "csgclaw", "codex", "u-alice", "u-alice", "true")
+	assertTableHasRow(t, stdout.String(), "bot-alice", "alice", "abcdefghijklmnopqrstuvwxyz1234567890ABCD...", "worker", "csgclaw")
 }
 
 func TestExecuteBotCreateUsesDefaultChannel(t *testing.T) {
@@ -299,7 +299,7 @@ func TestExecuteBotCreateUsesDefaultChannel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	assertTableHasRow(t, stdout.String(), "u-alice", "alice", "test-lead", "worker", "csgclaw", "codex", "u-alice", "u-alice", "true")
+	assertTableHasRow(t, stdout.String(), "u-alice", "alice", "test-lead", "worker", "csgclaw")
 }
 
 func TestExecuteBotCreateFeishuSendsChannelPayload(t *testing.T) {
