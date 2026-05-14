@@ -164,8 +164,8 @@ By default, `finalize` will:
 1. poll Feishu/Lark until credentials are available or timeout
 2. receive `client_id/client_secret`
 3. write `app_id/app_secret` to CSGClaw through `csgclaw-cli bot config`
-   - if global `admin_open_id` already exists, preserve it
-   - if global `admin_open_id` is missing, fill it from explicit `--admin-open-id` or the registration `open_id`
+   - for `u-manager`, overwrite global `admin_open_id` only with the registration `open_id`
+   - for worker bots, ignore registration `open_id` and do not read, preserve, write, or report `admin_open_id`
 4. auto-reload channel config
 5. ensure the CSGClaw bot through `POST /api/v1/bots`
 6. for worker targets, check whether the worker agent already existed before ensure:
@@ -243,11 +243,11 @@ csgclaw-cli bot config --channel feishu --set \
 
 The script writes and reloads Feishu config through `csgclaw-cli bot config` because sandboxed skills should not edit host files directly or hand-roll config API calls.
 
-Set config and auto-reload:
+For `u-manager`, the script passes the registration `open_id` as the global `admin_open_id` while setting config and auto-reloading:
 
 ```bash
 printf '%s' '[REDACTED]' | csgclaw-cli --output json bot config --channel feishu --set \
-  --bot-id u-dev \
+  --bot-id u-manager \
   --app-id cli_xxx \
   --admin-open-id ou_xxx \
   --app-secret-stdin
@@ -257,7 +257,7 @@ Expected response shape:
 
 ```json
 {
-  "bot_id": "u-dev",
+  "bot_id": "u-manager",
   "configured": true,
   "app_id": "cli_xxx",
   "app_secret": "present",

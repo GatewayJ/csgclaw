@@ -51,7 +51,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         "role": role,
         "bot_name": args.bot_name or bot_id.removeprefix("u-") or bot_id,
         "description": args.description or "",
-        "admin_open_id": args.admin_open_id or "",
         "domain": domain,
         "device_code": begin["device_code"],
         "qr_url": begin["qr_url"],
@@ -136,9 +135,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     if not args.keep_state:
         delete_state(args, state["registration_id"])
     if configured is not None:
-        admin_open_id = str((configured or {}).get("admin_open_id") or "").strip()
+        admin_open_id = str((configured or {}).get("admin_open_id") or "").strip() if state["bot_id"] == "u-manager" else ""
     else:
-        admin_open_id = str(result.get("open_id") or state.get("admin_open_id") or "").strip()
+        admin_open_id = str(result.get("open_id") or "").strip() if state["bot_id"] == "u-manager" else ""
     worker_recreate_policy = None
     if role == "worker":
         if worker_existed_before_ensure is True:
@@ -212,7 +211,6 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--role", choices=["worker", "manager"], default="", help="Bot role; inferred from bot id when omitted")
     start.add_argument("--bot-name", default="", help="CSGClaw bot display name")
     start.add_argument("--description", default="", help="CSGClaw bot description")
-    start.add_argument("--admin-open-id", default="", help="Fallback admin open_id if registration does not return one")
     start.add_argument("--domain", choices=["feishu", "lark"], default="feishu")
     start.add_argument("--timeout", type=int, default=DEFAULT_EXPIRE_SECONDS)
     start.add_argument("--json", action="store_true", help="Print machine-readable JSON")
