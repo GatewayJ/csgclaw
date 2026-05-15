@@ -69,7 +69,7 @@ def csgclaw_cli_env(args) -> dict[str, str]:
     return env
 
 
-def csgclaw_cli_json(args, cli_args: list[str], input_text: Optional[str] = None) -> dict:
+def csgclaw_cli_json(args, cli_args: list[str], input_text: Optional[str] = None) -> Any:
     command = ["csgclaw-cli", "--output", "json", *cli_args]
     try:
         completed = subprocess.run(
@@ -161,15 +161,11 @@ def is_box_name_conflict(exc: RuntimeError, name: str) -> bool:
     return "box with name" in message and f"'{name}' already exists" in message
 
 
-def agent_exists(args, bot_id: str) -> bool:
-    try:
-        api_json(args, "GET", f"/api/v1/agents/{path_id(bot_id)}", None)
-        return True
-    except RuntimeError as exc:
-        message = str(exc)
-        if "HTTP 404" in message and "agent not found" in message:
-            return False
-        raise
+def bot_exists(args, bot_id: str) -> bool:
+    bots = csgclaw_cli_json(args, ["bot", "list", "--channel", "feishu"])
+    if not isinstance(bots, list):
+        raise RuntimeError(f"csgclaw-cli bot list returned unexpected JSON: {bots!r}")
+    return any(str(bot.get("id") or "").strip() == bot_id for bot in bots if isinstance(bot, dict))
 
 
 def maybe_recreate(args, state: dict, worker_existed_before_ensure: Optional[bool] = None) -> Optional[dict]:

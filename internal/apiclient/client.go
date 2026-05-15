@@ -318,8 +318,10 @@ func ExtractAPIErrorMessage(body []byte) string {
 
 func channelPath(channelName, resource string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(channelName)) {
-	case "", "csgclaw":
+	case "":
 		return "/api/v1/" + resource, nil
+	case "csgclaw":
+		return "/api/v1/channels/csgclaw/" + resource, nil
 	case "feishu":
 		return "/api/v1/channels/feishu/" + resource, nil
 	default:
@@ -341,7 +343,9 @@ func roomMembersPath(channelName, roomID, operation string) (string, error) {
 	switch channelName {
 	case "feishu":
 		return "/api/v1/channels/feishu/rooms/" + url.PathEscape(roomID) + "/members", nil
-	case "", "csgclaw":
+	case "csgclaw":
+		return "/api/v1/channels/csgclaw/rooms/" + url.PathEscape(roomID) + "/members", nil
+	case "":
 		return "/api/v1/rooms/" + url.PathEscape(roomID) + "/members", nil
 	default:
 		return "", fmt.Errorf("unsupported channel %q", channelName)
@@ -355,8 +359,10 @@ func roomDeletePath(channelName, roomID string) (string, error) {
 		return "", fmt.Errorf("room id is required")
 	}
 	switch channelName {
-	case "", "csgclaw":
+	case "":
 		return "/api/v1/rooms/" + url.PathEscape(roomID), nil
+	case "csgclaw":
+		return "/api/v1/channels/csgclaw/rooms/" + url.PathEscape(roomID), nil
 	case "feishu":
 		return "/api/v1/channels/feishu/rooms/" + url.PathEscape(roomID), nil
 	default:
@@ -371,8 +377,10 @@ func userDeletePath(channelName, userID string) (string, error) {
 		return "", fmt.Errorf("user id is required")
 	}
 	switch channelName {
-	case "", "csgclaw":
+	case "":
 		return "/api/v1/users/" + url.PathEscape(userID), nil
+	case "csgclaw":
+		return "/api/v1/channels/csgclaw/users/" + url.PathEscape(userID), nil
 	case "feishu":
 		return "/api/v1/channels/feishu/users/" + url.PathEscape(userID), nil
 	default:

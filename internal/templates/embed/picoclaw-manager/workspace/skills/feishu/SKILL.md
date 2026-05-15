@@ -7,33 +7,16 @@ description: Configure and troubleshoot CSGClaw Feishu/Lark channel credentials 
 
 This skill sets up Feishu/Lark bot credentials for CSGClaw-managed PicoClaw manager and worker bots.
 
-The primary automation is the local script.
+## Script
 
-## Script location discovery
-
-This skill package uses one fixed layout:
-- `<skill_root>/SKILL.md` (this file)
-- `<skill_root>/scripts/` (all executable script entry files)
-
-Examples:
-- `feishu_register.py` is `<skill_root>/scripts/feishu_register.py`
-- helpers are under `<skill_root>/scripts/feishu_setup/*`
-
-How to locate `skill_root`:
-1. If the absolute `SKILL.md` path is already known, `skill_root` is its parent directory.
-2. Otherwise, use the current working directory and move upward until a directory contains `scripts/feishu_register.py`.
-3. If `start`/`poll` was already run in machine mode, prefer the absolute path reported by `next`.
-
-After you locate it, call:
+Use the bundled script at `/home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py`:
 
 ```bash
-python "<skill_root>/scripts/feishu_register.py" start --bot-id u-dev --role worker --bot-name dev --qr
-python "<skill_root>/scripts/feishu_register.py" finalize --registration-id <id>
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py start --bot-id u-dev --role worker --bot-name dev --qr
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py finalize --registration-id <id>
 ```
 
-If no location can be resolved, ask the caller for the skill root path explicitly and stop.
-
-When the flow is already in machine mode, prefer `next` from `start`/`poll`; it already contains an absolute path to `scripts/feishu_register.py`.
+If `start`/`poll` returns a machine-mode `next` command, prefer that absolute command.
 
 ## Script roles
 
@@ -116,12 +99,11 @@ Example normalization:
 - `manager` -> manager
 - `u-manager` -> manager
 
-For worker flow, run this existence check before decide recreate:
+For worker flow, check whether the Feishu bot already exists before deciding recreate:
 ```bash
-curl -sS -o /tmp/feishu_agent.json -w "%{http_code}" "$CSGCLAW_BASE_URL/api/v1/agents/$bot_id" \
-  -H "Authorization: Bearer $CSGCLAW_ACCESS_TOKEN"
+./csgclaw-cli --output json bot list --channel feishu
 ```
-Treat `200` as existing worker (needs recreate after ensure), and `404` as missing worker (skip recreate, let `POST /api/v1/bots` create it).
+Treat a row whose `id` equals `$bot_id` as an existing Feishu bot (needs recreate after ensure), and no matching row as missing (skip recreate, let bot ensure create it).
 
 ## Primary QR/Launcher Flow
 
@@ -130,7 +112,7 @@ Treat `200` as existing worker (needs recreate after ensure), and `404` as missi
 Run from this skill directory:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" start \
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py start \
   --bot-id <worker_id> \
   --role worker \
   --bot-name <worker_name> \
@@ -154,7 +136,7 @@ If `--qr` cannot render a QR code because `qrcode` is not installed, send the pr
 After the user clicks the link and completes creation:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" finalize --registration-id <id>
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py finalize --registration-id <id>
 ```
 
 When running `finalize` through the manager's exec tool, always set the tool timeout to at least 600 seconds. Worker setup can create or pull a BoxLite image on first use, and the default tool timeout can interrupt the create flow before CSGClaw persists the worker agent.
@@ -168,9 +150,9 @@ By default, `finalize` will:
    - for worker bots, ignore registration `open_id` and do not read, preserve, write, or report `admin_open_id`
 4. auto-reload channel config
 5. ensure the CSGClaw bot through `POST /api/v1/bots`
-6. for worker targets, check whether the worker agent already existed before ensure:
-   - existing worker: recreate it so the new Feishu env takes effect
-   - missing worker: let `POST /api/v1/bots` create it with the already-reloaded config, then skip redundant recreate
+6. for worker targets, check whether the Feishu bot already existed before ensure using `./csgclaw-cli --output json bot list --channel feishu`:
+   - existing bot: recreate its worker so the new Feishu env takes effect
+   - missing bot: let bot ensure create it with the already-reloaded config, then skip redundant recreate
    - if BoxLite reports `box with name '<name>' already exists` while CSGClaw reports `agent "<id>" not found`, stop and tell the user the host has a stale partial worker box; do not keep trying random API paths or host-only commands from inside manager
 7. for manager targets, print a `csgclaw.action_card` JSON payload with a whitelisted `rebuild-manager` action; the CSGClaw Web chat message should render the button to complete the window-triggered manager bootstrap replace flow.
 8. print JSON with `app_secret: present`, never the real secret
@@ -178,18 +160,18 @@ By default, `finalize` will:
 For a worker, default finalize is usually enough:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" finalize --registration-id <id>
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py finalize --registration-id <id>
 ```
 
-Use an exec/tool timeout of at least 600 seconds for this command. Before deciding recreate, use `GET /api/v1/agents/<worker_id>`:
- - `200`: recreate existing worker
- - `404`: skip recreate, because bot ensure has already created it
+Use an exec/tool timeout of at least 600 seconds for this command. Before deciding recreate, use `./csgclaw-cli --output json bot list --channel feishu`:
+ - matching `id`: recreate existing worker
+ - no matching `id`: skip recreate, because bot ensure has already created it
 If `worker_existed_before_ensure` is `true`, the script recreates the existing worker after config reload; do not create a second worker or change the bot id.
 
 For manager, default finalize configures and ensures the bot, then prints a structured action card. Return the JSON object exactly as the chat message content: no leading sentence, no Markdown table, no bullet list, no ```json fence, and no explanatory wrapper. The CSGClaw Web frontend will render a "重建 Manager" button.
 The click is handled by the browser and calls the manager bootstrap replace surface (`POST /api/v1/agents` with `{"id":"u-manager","replace":true}`), not the hazardous generic recreate route.
 
-Do not run `python "${skill_root}/scripts/feishu_register.py" recreate-agent --bot-id u-manager` as a terminal self-recreate step anymore. The manager-rebuild action must be completed by clicking the rendered Web window button, which calls `POST /api/v1/agents` with `{"id":"u-manager","replace":true}`.
+Do not run `python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py recreate-agent --bot-id u-manager` as a terminal self-recreate step anymore. The manager-rebuild action must be completed by clicking the rendered Web window button, which calls `POST /api/v1/agents` with `{"id":"u-manager","replace":true}`.
 
 For manager only, BoxLite status is not a valid post-recreate success check in this skill. The manager gateway starts with `picoclaw gateway -d`, so the launch command can return while the daemonized gateway continues separately; BoxLite may report `stopped` and CSGClaw may show `AVAILABLE=false`. Do not treat that as a reason to recreate manager again from the same manager-hosted run.
 
@@ -198,13 +180,13 @@ For manager only, BoxLite status is not a valid post-recreate success check in t
 Check saved state without exposing device_code or secret:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" status --registration-id <id>
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py status --registration-id <id>
 ```
 
 Check whether user has confirmed yet:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" poll --registration-id <id>
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py poll --registration-id <id>
 ```
 
 `poll` never prints credentials. If credentials are available, use `finalize` to write them immediately to CSGClaw.
@@ -272,7 +254,7 @@ Ensure bot:
 csgclaw-cli bot create --id u-dev --name dev --description "dev worker agent" --role worker --channel feishu
 ```
 
-Recreate existing worker only if `GET /api/v1/agents/u-dev` returned an existing worker before ensure; if the worker was missing, the bot ensure step creates it with the already-reloaded config and this recreate call is skipped:
+Recreate existing worker only if `./csgclaw-cli --output json bot list --channel feishu` showed `u-dev` before ensure; if the bot was missing, the bot ensure step creates it with the already-reloaded config and this recreate call is skipped:
 
 ```bash
 curl -sS -X POST "$CSGCLAW_BASE_URL/api/v1/agents/u-dev/recreate" \
@@ -287,7 +269,7 @@ Use `csgclaw-cli bot config` for channel config. Use the helper script or the ba
 csgclaw-cli bot config --channel feishu --get --bot-id u-dev
 csgclaw-cli bot config --channel feishu --reload
 csgclaw-cli bot create --id u-dev --name dev --description "dev worker agent" --role worker --channel feishu
-python "${skill_root}/scripts/feishu_register.py" recreate-agent --bot-id u-dev
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py recreate-agent --bot-id u-dev
 ```
 
 ## Worker One-Shot Recipe
@@ -295,27 +277,26 @@ python "${skill_root}/scripts/feishu_register.py" recreate-agent --bot-id u-dev
 1. Start registration:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" start --bot-id <worker_id> --role worker --bot-name <worker_name> --description "<worker_desc>" --qr
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py start --bot-id <worker_id> --role worker --bot-name <worker_name> --description "<worker_desc>" --qr
 ```
 
 2. Send the printed URL/QR to the user.
 3. After user confirms creation, finalize:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" finalize --registration-id <id>
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py finalize --registration-id <id>
 ```
 
 Run the command with exec `timeout` at least `600`.
 
-4. Confirm existing worker before taking recreate path:
+4. Confirm existing Feishu bot before taking recreate path:
 
 ```bash
-curl -sS -o /tmp/feishu_agent.json -w "%{http_code}" "$CSGCLAW_BASE_URL/api/v1/agents/<worker_id>" \
-  -H "Authorization: Bearer $CSGCLAW_ACCESS_TOKEN"
+./csgclaw-cli --output json bot list --channel feishu
 ```
 
-If the status is `200`, the manager can trigger recreate flow for this worker after reload.
-If the status is `404`, skip recreate and let `POST /api/v1/bots` creation stand.
+If the list contains `<worker_id>`, the manager can trigger recreate flow for this worker after reload.
+If the list does not contain `<worker_id>`, skip recreate and let bot ensure creation stand.
 
 5. Tell the user to test from Feishu by messaging or @mentioning the bot.
 
@@ -326,14 +307,14 @@ Run this recipe from the normal flow and render the manager rebuild action card 
 1. Start registration:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" start --bot-id u-manager --role manager --bot-name manager --description "manager agent" --qr
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py start --bot-id u-manager --role manager --bot-name manager --description "manager agent" --qr
 ```
 
 2. Send the printed URL/QR to the user.
 3. After user confirms creation, finalize without recreate:
 
 ```bash
-python "${skill_root}/scripts/feishu_register.py" finalize --registration-id <id>
+python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py finalize --registration-id <id>
 ```
 
 4. Return the `finalize` JSON object exactly as the chat response. Do not summarize it, translate it, add a Markdown table, or wrap it in a code fence. The object contains `type: csgclaw.action_card` and action metadata so the Web frontend can render the button.

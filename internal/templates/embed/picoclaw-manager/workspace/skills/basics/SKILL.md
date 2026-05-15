@@ -43,7 +43,7 @@ Create a room:
 csgclaw-cli room create --title test-room --creator-id u-manager --member-ids u-manager,u-dev --channel <current_channel>
 ```
 
-For `csgclaw-cli`, use CSGClaw bot IDs in room, member, and message commands. Do not ask the user for agent IDs, Feishu open IDs, Feishu app IDs, App ID/App Secret, or other channel credentials. Feishu channel code resolves bot IDs to configured app credentials and Feishu identifiers internally. When Feishu group creation needs a real human owner ID, CSGClaw continues to use the configured `admin_open_id` internally.
+Use CSGClaw bot IDs in room, member, and message commands.
 
 List rooms and check whether a room is direct:
 
@@ -85,7 +85,7 @@ csgclaw-cli room create \
   --channel <current_channel>
 ```
 
-For Feishu, keep the same bot ID parameters. The Feishu channel adapter handles app credential and bot identifier conversion internally:
+For Feishu, keep the same bot ID parameters:
 
 ```bash
 csgclaw-cli room create \
@@ -108,6 +108,6 @@ csgclaw-cli message create --room-id oc_xxx --sender-id u-manager --content "Ple
 - When creating a bot, always pass a meaningful `--description` so later matching and reuse remain clear.
 - Verify room membership with `member list` after adding a member when room presence matters.
 - A direct room cannot accept an added bot as a new member. Create a new room with `--member-ids` containing the existing DM bots and the new bot.
-- Keep `csgclaw-cli` parameters bot-facing across channels: use bot IDs such as `u-manager`, `u-dev`, and `u-alex`; never expose agent IDs, Feishu open IDs, Feishu app IDs, or credentials in room/member/message commands.
+- Keep `csgclaw-cli` parameters bot-facing across channels: use bot IDs such as `u-manager`, `u-dev`, and `u-alex`.
 - Keep the response focused on the concrete CLI result instead of introducing external planning artifacts.
 - Hand off to `manager-worker-dispatch` only if the user explicitly needs manager orchestration or multi-worker sequencing.

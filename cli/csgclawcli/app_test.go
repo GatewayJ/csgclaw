@@ -631,7 +631,7 @@ func TestExecuteMemberListUsesCSGClawDefault(t *testing.T) {
 			if req.Method != http.MethodGet {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodGet)
 			}
-			if req.URL.String() != "http://example.test/api/v1/rooms/oc_alpha/members" {
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/rooms/oc_alpha/members" {
 				t.Fatalf("url = %q, want csgclaw room members route", req.URL.String())
 			}
 			return jsonResponse(http.StatusOK, `[{"id":"u_alice","name":"Alice","handle":"alice","role":"worker","is_online":true}]`), nil

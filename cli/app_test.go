@@ -450,7 +450,7 @@ func TestExecuteMessageCreateSendsToDefaultChannel(t *testing.T) {
 			if req.Method != http.MethodPost {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodPost)
 			}
-			if req.URL.String() != "http://example.test/api/v1/messages" {
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/messages" {
 				t.Fatalf("url = %q, want csgclaw messages route", req.URL.String())
 			}
 			var payload map[string]any
@@ -480,7 +480,7 @@ func TestExecuteMessageCreateSendsMentionIDToDefaultChannel(t *testing.T) {
 			if req.Method != http.MethodPost {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodPost)
 			}
-			if req.URL.String() != "http://example.test/api/v1/messages" {
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/messages" {
 				t.Fatalf("url = %q, want default messages route", req.URL.String())
 			}
 			var payload map[string]any
@@ -544,7 +544,7 @@ func TestExecuteMessageListReadsFromDefaultChannel(t *testing.T) {
 			if req.Method != http.MethodGet {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodGet)
 			}
-			if req.URL.String() != "http://example.test/api/v1/messages?room_id=room-1" {
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/messages?room_id=room-1" {
 				t.Fatalf("url = %q, want csgclaw message list route", req.URL.String())
 			}
 			return jsonResponse(http.StatusOK, `[{"id":"msg-1","room_id":"room-1","sender_id":"u-admin","kind":"message","content":"hello","created_at":"2026-04-12T09:00:00Z","mentions":[]}]`), nil
@@ -1406,8 +1406,8 @@ func TestExecuteRoomListUsesHTTPClient(t *testing.T) {
 			if req.Method != http.MethodGet {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodGet)
 			}
-			if req.URL.String() != "http://example.test/api/v1/rooms" {
-				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/rooms")
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/rooms" {
+				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/channels/csgclaw/rooms")
 			}
 			return jsonResponse(http.StatusOK, `[{"id":"room-1","title":"alpha","members":["u-admin","u-alice"],"messages":[{"id":"msg-1"}]}]`), nil
 		}),
@@ -1539,7 +1539,7 @@ func TestExecuteMemberListCsgclawUsesRoomMembersRoute(t *testing.T) {
 			if req.Method != http.MethodGet {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodGet)
 			}
-			if req.URL.String() != "http://example.test/api/v1/rooms/room-1/members" {
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/rooms/room-1/members" {
 				t.Fatalf("url = %q, want csgclaw room members route", req.URL.String())
 			}
 			return jsonResponse(http.StatusOK, `[{"id":"u-alice","name":"Alice","handle":"alice","role":"worker","is_online":true}]`), nil
@@ -1562,7 +1562,7 @@ func TestExecuteMemberCreateCsgclawUsesRoomMembersRoute(t *testing.T) {
 			if req.Method != http.MethodPost {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodPost)
 			}
-			if req.URL.String() != "http://example.test/api/v1/rooms/room-1/members" {
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/rooms/room-1/members" {
 				t.Fatalf("url = %q, want csgclaw room members route", req.URL.String())
 			}
 
@@ -1600,7 +1600,7 @@ func TestExecuteMemberCreateUsesCsgclawDefault(t *testing.T) {
 			if req.Method != http.MethodPost {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodPost)
 			}
-			if req.URL.String() != "http://example.test/api/v1/rooms/room-1/members" {
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/rooms/room-1/members" {
 				t.Fatalf("url = %q, want csgclaw room members route", req.URL.String())
 			}
 
@@ -1635,8 +1635,8 @@ func TestExecuteRoomCreateUsesHTTPClient(t *testing.T) {
 			if req.Method != http.MethodPost {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodPost)
 			}
-			if req.URL.String() != "http://example.test/api/v1/rooms" {
-				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/rooms")
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/rooms" {
+				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/channels/csgclaw/rooms")
 			}
 
 			var payload map[string]any
@@ -1675,8 +1675,8 @@ func TestExecuteRoomDeleteUsesHTTPClient(t *testing.T) {
 			if req.Method != http.MethodDelete {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodDelete)
 			}
-			if req.URL.String() != "http://example.test/api/v1/rooms/room-1" {
-				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/rooms/room-1")
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/rooms/room-1" {
+				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/channels/csgclaw/rooms/room-1")
 			}
 			return &http.Response{
 				StatusCode: http.StatusNoContent,
@@ -1726,8 +1726,8 @@ func TestExecuteUserListUsesHTTPClient(t *testing.T) {
 			if req.Method != http.MethodGet {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodGet)
 			}
-			if req.URL.String() != "http://example.test/api/v1/users" {
-				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/users")
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/users" {
+				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/channels/csgclaw/users")
 			}
 			return jsonResponse(http.StatusOK, `[{"id":"u-alice","name":"Alice","handle":"alice","role":"Worker","is_online":true}]`), nil
 		}),
@@ -1748,8 +1748,8 @@ func TestExecuteUserCreateUsesHTTPClient(t *testing.T) {
 			if req.Method != http.MethodPost {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodPost)
 			}
-			if req.URL.String() != "http://example.test/api/v1/users" {
-				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/users")
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/users" {
+				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/channels/csgclaw/users")
 			}
 			var body apitypes.CreateUserRequest
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -1803,8 +1803,8 @@ func TestExecuteUserDeleteUsesHTTPClient(t *testing.T) {
 			if req.Method != http.MethodDelete {
 				t.Fatalf("method = %q, want %q", req.Method, http.MethodDelete)
 			}
-			if req.URL.String() != "http://example.test/api/v1/users/u-alice" {
-				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/users/u-alice")
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/users/u-alice" {
+				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/channels/csgclaw/users/u-alice")
 			}
 			return &http.Response{
 				StatusCode: http.StatusNoContent,

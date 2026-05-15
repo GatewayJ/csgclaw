@@ -11,8 +11,8 @@ from typing import Any, Optional
 
 from .config import API_REQUEST_TIMEOUT, DEFAULT_EXPIRE_SECONDS
 from .csgclaw import (
-    agent_exists,
     api_json,
+    bot_exists,
     configure_csgclaw,
     ensure_bot,
     is_box_name_conflict,
@@ -70,7 +70,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "interval": begin["interval"],
         "expires_in": min(begin["expire_in"], args.timeout),
         "state_path": str(state_path(args, registration_id)),
-        "next": f"python scripts/feishu_register.py finalize --registration-id {registration_id}",
+        "next": f"python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py finalize --registration-id {registration_id}",
         "next_tool_timeout_seconds": API_REQUEST_TIMEOUT,
     }
     if args.json:
@@ -102,7 +102,7 @@ def cmd_poll(args: argparse.Namespace) -> int:
                     "status": "confirmed",
                     "bot_id": state["bot_id"],
                     "credentials": "available",
-                    "next": f"python scripts/feishu_register.py finalize --registration-id {state['registration_id']}",
+                    "next": f"python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.py finalize --registration-id {state['registration_id']}",
                     "next_tool_timeout_seconds": API_REQUEST_TIMEOUT,
                 },
                 ensure_ascii=False,
@@ -123,7 +123,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     role = resolve_role(args, state)
     worker_existed_before_ensure = None
     if role == "worker" and args.recreate in ("auto", "worker"):
-        worker_existed_before_ensure = agent_exists(args, state["bot_id"])
+        worker_existed_before_ensure = bot_exists(args, state["bot_id"])
     try:
         ensured = ensure_bot(args, state, result)
     except RuntimeError as exc:

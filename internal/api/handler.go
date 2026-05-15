@@ -1103,19 +1103,22 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleRoomByID(w http.ResponseWriter, r *http.Request) {
-	channel, ok := h.requireLocalChannel(w)
-	if !ok {
-		return
-	}
-
 	id, membersPath := parseRoomMembersPath(r.URL.Path)
 	if id == "" {
 		http.NotFound(w, r)
 		return
 	}
+	h.handleLocalRoomByID(w, r, id, membersPath)
+}
 
+func (h *Handler) handleLocalRoomByID(w http.ResponseWriter, r *http.Request, id string, membersPath bool) {
 	if membersPath {
 		h.handleRoomMembersByID(w, r, id)
+		return
+	}
+
+	channel, ok := h.requireLocalChannel(w)
+	if !ok {
 		return
 	}
 
@@ -1167,14 +1170,17 @@ func (h *Handler) handleRoomMembersByID(w http.ResponseWriter, r *http.Request, 
 }
 
 func (h *Handler) handleUserByID(w http.ResponseWriter, r *http.Request) {
-	if h.im == nil {
-		http.Error(w, "im service is not configured", http.StatusServiceUnavailable)
+	id, ok := parseUserPath(r.URL.Path, "/api/v1/users/")
+	if !ok {
+		http.NotFound(w, r)
 		return
 	}
+	h.handleLocalUserByID(w, r, id)
+}
 
-	id := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/users/"))
-	if id == "" || strings.Contains(id, "/") {
-		http.NotFound(w, r)
+func (h *Handler) handleLocalUserByID(w http.ResponseWriter, r *http.Request, id string) {
+	if h.im == nil {
+		http.Error(w, "im service is not configured", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -1585,7 +1591,25 @@ func (r addRoomMembersRequest) toServiceRequest() (im.AddRoomMembersRequest, err
 }
 
 func parseRoomMembersPath(path string) (string, bool) {
-	rest := strings.Trim(strings.TrimPrefix(path, "/api/v1/rooms/"), "/")
+	return parseRoomPath(path, "/api/v1/rooms/")
+}
+
+func parseUserPath(path, prefix string) (string, bool) {
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	userID := strings.TrimSpace(strings.TrimPrefix(path, prefix))
+	if userID == "" || strings.Contains(userID, "/") {
+		return "", false
+	}
+	return userID, true
+}
+
+func parseRoomPath(path, prefix string) (string, bool) {
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	rest := strings.Trim(strings.TrimPrefix(path, prefix), "/")
 	if rest == "" {
 		return "", false
 	}
