@@ -109,6 +109,91 @@ func TestExecuteRejectsFullCsgclawCommands(t *testing.T) {
 	}
 }
 
+func TestExecuteBotIdentityHelpUsesBotIDSemantics(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "room create",
+			args: []string{"room", "create", "--help"},
+			want: []string{"creator bot id", "comma-separated member bot ids"},
+		},
+		{
+			name: "member create",
+			args: []string{"member", "create", "--help"},
+			want: []string{"bot id to add", "inviter bot id"},
+		},
+		{
+			name: "message create",
+			args: []string{"message", "create", "--help"},
+			want: []string{"sender bot id", "mentioned bot id"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			app := &App{
+				stdout: &bytes.Buffer{},
+				stderr: &stderr,
+				httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+					return nil, nil
+				}),
+			}
+
+			err := app.Execute(context.Background(), tt.args)
+			if err != flag.ErrHelp {
+				t.Fatalf("Execute() error = %v, want %v", err, flag.ErrHelp)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("help = %q, want substring %q", stderr.String(), want)
+				}
+			}
+		})
+	}
+}
+
+func TestExecuteBotIdentityRequiredErrorsUseBotIDSemantics(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "member create missing user id",
+			args: []string{"member", "create", "--room-id", "room-1", "--inviter-id", "u-manager"},
+			want: "--user-id bot id is required",
+		},
+		{
+			name: "message create missing sender id",
+			args: []string{"message", "create", "--room-id", "room-1", "--content", "hello"},
+			want: "--sender-id bot id is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := &App{
+				stdout: &bytes.Buffer{},
+				stderr: &bytes.Buffer{},
+				httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+					return nil, nil
+				}),
+			}
+
+			err := app.Execute(context.Background(), tt.args)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("Execute() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestExecuteBotListUsesAPIClient(t *testing.T) {
 	var stdout bytes.Buffer
 	app := &App{
