@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"strings"
 
 	"csgclaw/cli/command"
 	"csgclaw/internal/apitypes"
@@ -73,7 +74,10 @@ func (c cmd) runList(ctx context.Context, run *command.Context, args []string, g
 	if err != nil {
 		return err
 	}
-	return command.RenderBots(globals.Output, run.Stdout, bots)
+	if strings.TrimSpace(run.Program) == "csgclaw-cli" {
+		return command.RenderCompactBotList(globals.Output, run.Stdout, bots)
+	}
+	return command.RenderFullBotList(globals.Output, run.Stdout, bots)
 }
 
 func (c cmd) runCreate(ctx context.Context, run *command.Context, args []string, globals command.GlobalOptions) error {

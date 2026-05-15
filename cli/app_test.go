@@ -217,7 +217,7 @@ func TestExecuteBotListUsesDefaultChannel(t *testing.T) {
 	if err := app.Execute(context.Background(), []string{"--endpoint", "http://example.test", "bot", "list"}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	assertTableHasRow(t, stdout.String(), "bot-alice", "alice", "-", "worker", "csgclaw")
+	assertTableHasRow(t, stdout.String(), "bot-alice", "alice", "-", "worker", "csgclaw", "u-alice", "u-alice", "true", "codex", "2026-04-12T09:00:00Z")
 }
 
 func TestExecuteBotListFeishuUsesChannelQuery(t *testing.T) {
@@ -242,6 +242,11 @@ func TestExecuteBotListFeishuUsesChannelQuery(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"id": "bot-feishu"`) || !strings.Contains(stdout.String(), `"channel": "feishu"`) {
 		t.Fatalf("stdout = %q, want JSON bot payload", stdout.String())
 	}
+	for _, want := range []string{`"agent_id": "u-manager"`, `"user_id": "fsu-manager"`, `"created_at": "2026-04-12T09:00:00Z"`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want full csgclaw bot list field %s", stdout.String(), want)
+		}
+	}
 }
 
 func TestExecuteBotListUsesRoleQuery(t *testing.T) {
@@ -263,7 +268,7 @@ func TestExecuteBotListUsesRoleQuery(t *testing.T) {
 	if err := app.Execute(context.Background(), []string{"--endpoint", "http://example.test", "bot", "list", "--role", "worker"}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	assertTableHasRow(t, stdout.String(), "bot-alice", "alice", "abcdefghijklmnopqrstuvwxyz1234567890ABCD...", "worker", "csgclaw")
+	assertTableHasRow(t, stdout.String(), "bot-alice", "alice", "abcdefghijklmnopqrstuvwxyz1234567890ABCD...", "worker", "csgclaw", "u-alice", "u-alice", "true", "codex", "2026-04-12T09:00:00Z")
 }
 
 func TestExecuteBotCreateUsesDefaultChannel(t *testing.T) {

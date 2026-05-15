@@ -217,6 +217,11 @@ func TestExecuteBotListUsesAPIClient(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"id": "bot-feishu"`) || !strings.Contains(stdout.String(), `"channel": "feishu"`) {
 		t.Fatalf("stdout = %q, want JSON bot payload", stdout.String())
 	}
+	for _, unexpected := range []string{`"agent_id"`, `"user_id"`, `"created_at"`} {
+		if strings.Contains(stdout.String(), unexpected) {
+			t.Fatalf("stdout = %q, want compact csgclaw-cli bot list without %s", stdout.String(), unexpected)
+		}
+	}
 }
 
 func TestExecuteDefaultsToJSONOutputForNonTerminalStdout(t *testing.T) {
@@ -250,6 +255,11 @@ func TestExecuteDefaultsToJSONOutputForNonTerminalStdout(t *testing.T) {
 	if !strings.Contains(string(got), `"id": "bot-feishu"`) || !strings.Contains(string(got), `"channel": "feishu"`) {
 		t.Fatalf("stdout = %q, want JSON bot payload", string(got))
 	}
+	for _, unexpected := range []string{`"agent_id"`, `"user_id"`, `"created_at"`} {
+		if strings.Contains(string(got), unexpected) {
+			t.Fatalf("stdout = %q, want compact csgclaw-cli bot list without %s", string(got), unexpected)
+		}
+	}
 }
 
 func TestExecuteBotListUsesRoleQuery(t *testing.T) {
@@ -274,6 +284,11 @@ func TestExecuteBotListUsesRoleQuery(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"id": "bot-feishu"`) || !strings.Contains(stdout.String(), `"role": "manager"`) {
 		t.Fatalf("stdout = %q, want JSON bot payload", stdout.String())
+	}
+	for _, unexpected := range []string{`"agent_id"`, `"user_id"`, `"created_at"`} {
+		if strings.Contains(stdout.String(), unexpected) {
+			t.Fatalf("stdout = %q, want compact csgclaw-cli bot list without %s", stdout.String(), unexpected)
+		}
 	}
 }
 

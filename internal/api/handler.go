@@ -15,6 +15,7 @@ import (
 	"csgclaw/internal/agent"
 	"csgclaw/internal/apitypes"
 	"csgclaw/internal/bot"
+	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/config"
 	"csgclaw/internal/hub"
@@ -28,6 +29,7 @@ type Handler struct {
 	svc               *agent.Service
 	botSvc            *bot.Service
 	im                *im.Service
+	csgclaw           *csgclawchannel.Service
 	imBus             *im.Bus
 	imProvisioner     *im.Provisioner
 	botBridge         *im.BotBridge
@@ -268,6 +270,7 @@ func NewHandlerWithBotAndAuth(svc *agent.Service, botSvc *bot.Service, imSvc *im
 		svc:               svc,
 		botSvc:            botSvc,
 		im:                imSvc,
+		csgclaw:           csgclawchannel.NewService(imSvc),
 		imBus:             imBus,
 		imProvisioner:     im.NewProvisioner(imSvc, imBus),
 		botBridge:         botBridge,
@@ -278,6 +281,25 @@ func NewHandlerWithBotAndAuth(svc *agent.Service, botSvc *bot.Service, imSvc *im
 		upgradeApply:      upgrade.StartApplyHelper,
 	}
 	return h
+}
+
+func (h *Handler) localChannel() *csgclawchannel.Service {
+	if h == nil {
+		return nil
+	}
+	if h.csgclaw != nil {
+		return h.csgclaw
+	}
+	return csgclawchannel.NewService(h.im)
+}
+
+func (h *Handler) requireLocalChannel(w http.ResponseWriter) (*csgclawchannel.Service, bool) {
+	channel := h.localChannel()
+	if channel == nil {
+		http.Error(w, "im service is not configured", http.StatusServiceUnavailable)
+		return nil, false
+	}
+	return channel, true
 }
 
 func (h *Handler) SetUpgradeManager(manager *upgrade.Manager) {
@@ -1009,8 +1031,8 @@ func (h *Handler) handleIMBootstrap(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleRooms(w http.ResponseWriter, r *http.Request) {
-	if h.im == nil {
-		http.Error(w, "im service is not configured", http.StatusServiceUnavailable)
+	channel, ok := h.requireLocalChannel(w)
+	if !ok {
 		return
 	}
 	switch r.Method {
@@ -1019,7 +1041,7 @@ func (h *Handler) handleRooms(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, h.im.ListRooms())
+		writeJSON(w, http.StatusOK, channel.ListRooms())
 	case http.MethodPost:
 		h.handleCreateRoom(w, r)
 	default:
@@ -1047,8 +1069,8 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
-	if h.im == nil {
-		http.Error(w, "im service is not configured", http.StatusServiceUnavailable)
+	channel, ok := h.requireLocalChannel(w)
+	if !ok {
 		return
 	}
 	switch r.Method {
@@ -1063,7 +1085,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		messages, err := h.im.ListMessages(roomID)
+		messages, err := channel.ListMessages(roomID)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
 				http.Error(w, err.Error(), http.StatusNotFound)
@@ -1081,8 +1103,8 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleRoomByID(w http.ResponseWriter, r *http.Request) {
-	if h.im == nil {
-		http.Error(w, "im service is not configured", http.StatusServiceUnavailable)
+	channel, ok := h.requireLocalChannel(w)
+	if !ok {
 		return
 	}
 
@@ -1099,7 +1121,7 @@ func (h *Handler) handleRoomByID(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodDelete:
-		if err := h.im.DeleteRoom(id); err != nil {
+		if err := channel.DeleteRoom(id); err != nil {
 			if strings.Contains(err.Error(), "not found") {
 				http.Error(w, "room not found", http.StatusNotFound)
 				return
@@ -1114,6 +1136,10 @@ func (h *Handler) handleRoomByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleRoomMembersByID(w http.ResponseWriter, r *http.Request, roomID string) {
+	channel, ok := h.requireLocalChannel(w)
+	if !ok {
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		if err := h.reloadIM(); err != nil {
@@ -1128,7 +1154,7 @@ func (h *Handler) handleRoomMembersByID(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	members, err := h.im.ListMembers(roomID)
+	members, err := channel.ListRoomMembers(roomID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			http.Error(w, "room not found", http.StatusNotFound)
@@ -1255,6 +1281,10 @@ func shouldCreateWorkerForUser(id, role string) bool {
 }
 
 func (h *Handler) handleCreateMessage(w http.ResponseWriter, r *http.Request) {
+	channel, ok := h.requireLocalChannel(w)
+	if !ok {
+		return
+	}
 	var req createMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
@@ -1267,23 +1297,27 @@ func (h *Handler) handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	message, err := h.im.CreateMessage(serviceReq)
+	message, err := channel.SendMessage(serviceReq)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	h.publishMessageCreated(serviceReq.RoomID, serviceReq.SenderID, message)
+	h.publishMessageCreated(serviceReq.RoomID, message.SenderID, message)
 	writeJSON(w, http.StatusCreated, message)
 }
 
 func (h *Handler) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
+	channel, ok := h.requireLocalChannel(w)
+	if !ok {
+		return
+	}
 	var req apitypes.CreateRoomRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	room, err := h.im.CreateRoom(req)
+	room, err := channel.CreateRoom(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -1317,6 +1351,10 @@ func (h *Handler) handleIMRoomMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAddRoomMembers(w http.ResponseWriter, r *http.Request, pathRoomID string) {
+	channel, ok := h.requireLocalChannel(w)
+	if !ok {
+		return
+	}
 	var req addRoomMembersRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
@@ -1338,7 +1376,7 @@ func (h *Handler) handleAddRoomMembers(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 
-	room, err := h.im.AddRoomMembers(serviceReq)
+	room, err := channel.AddRoomMembers(serviceReq)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

@@ -46,6 +46,17 @@ func init() {
 	})
 }
 
+func testFeishuBotInfoResolver(t *testing.T, openIDsByAppID map[string]string) func(context.Context, feishu.AppConfig) (feishu.BotInfo, error) {
+	t.Helper()
+	return func(_ context.Context, app feishu.AppConfig) (feishu.BotInfo, error) {
+		openID, ok := openIDsByAppID[app.AppID]
+		if !ok {
+			t.Fatalf("unexpected Feishu app_id %q", app.AppID)
+		}
+		return feishu.BotInfo{OpenID: openID}, nil
+	}
+}
+
 func (f fakeCompatRuntime) Kind() string {
 	if strings.TrimSpace(f.kind) != "" {
 		return strings.TrimSpace(f.kind)
@@ -247,6 +258,10 @@ func TestHandleFeishuRoomsMembers(t *testing.T) {
 			}, nil
 		},
 	)
+	feishuSvc.SetBotOpenIDResolver(testFeishuBotInfoResolver(t, map[string]string{
+		"manager-app-id": "fsu-admin",
+		"alice-app-id":   "fsu-alice",
+	}))
 	if _, err := feishuSvc.CreateUser(feishu.CreateUserRequest{ID: "fsu-admin", Name: "Admin"}); err != nil {
 		t.Fatalf("CreateUser(admin) error = %v", err)
 	}
@@ -284,6 +299,9 @@ func TestHandleFeishuRoomsMembers(t *testing.T) {
 	}
 	if len(members) != 2 {
 		t.Fatalf("members = %+v, want two users", members)
+	}
+	if members[0].ID != "u-manager" || members[1].ID != "fsu-alice" {
+		t.Fatalf("members = %+v, want bot ids", members)
 	}
 }
 
@@ -2765,6 +2783,7 @@ func TestHandleFeishuMessagesGetListsRoomMessages(t *testing.T) {
 			return []im.Message{{ID: "om_1", SenderID: "ou_manager", Content: "hello", CreatedAt: time.Unix(1, 0).UTC()}}, nil
 		},
 	)
+	feishuSvc.SetBotOpenIDResolver(testFeishuBotInfoResolver(t, map[string]string{"cli_manager": "ou_manager"}))
 	if _, err := feishuSvc.CreateRoom(im.CreateRoomRequest{Title: "alpha", CreatorID: "u-manager"}); err != nil {
 		t.Fatalf("CreateRoom() error = %v", err)
 	}
@@ -2782,8 +2801,8 @@ func TestHandleFeishuMessagesGetListsRoomMessages(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != "om_1" {
-		t.Fatalf("messages = %+v, want listed feishu messages", got)
+	if len(got) != 1 || got[0].ID != "om_1" || got[0].SenderID != "u-manager" {
+		t.Fatalf("messages = %+v, want listed feishu messages with bot ids", got)
 	}
 }
 
@@ -2964,6 +2983,34 @@ func TestHandleRoomsPostCreatesRoom(t *testing.T) {
 	}
 	if !containsMember(got.Members, "u-admin") || !containsMember(got.Members, "u-alice") || !containsMember(got.Members, "u-manager") {
 		t.Fatalf("members = %+v, want admin, alice, and manager", got.Members)
+	}
+}
+
+func TestHandleRoomsPostUsesCsgclawChannelAdapter(t *testing.T) {
+	srv := &Handler{
+		im: im.NewServiceFromBootstrap(im.Bootstrap{
+			CurrentUserID: "u-admin",
+			Users: []im.User{
+				{ID: "u-admin", Name: "admin", Handle: "admin"},
+				{ID: "u-alice", Name: "Alice", Handle: "alice"},
+			},
+		}),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/rooms", strings.NewReader(`{"title":"Launch","creator_id":" u-admin ","member_ids":[" u-alice "]}`))
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	var got im.Room
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !containsMember(got.Members, "u-admin") || !containsMember(got.Members, "u-alice") {
+		t.Fatalf("members = %+v, want trimmed bot IDs", got.Members)
 	}
 }
 

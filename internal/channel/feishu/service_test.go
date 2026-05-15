@@ -33,6 +33,17 @@ func TestFeishuServiceInitializesMessageBus(t *testing.T) {
 	}
 }
 
+func testBotInfoResolver(t *testing.T, openIDsByAppID map[string]string) func(context.Context, AppConfig) (BotInfo, error) {
+	t.Helper()
+	return func(_ context.Context, app AppConfig) (BotInfo, error) {
+		openID, ok := openIDsByAppID[app.AppID]
+		if !ok {
+			t.Fatalf("unexpected app_id %q", app.AppID)
+		}
+		return BotInfo{OpenID: openID}, nil
+	}
+}
+
 func TestFeishuServiceKeepsNamedAppConfigs(t *testing.T) {
 	svc := NewService(map[string]AppConfig{
 		"manager": {
@@ -296,7 +307,7 @@ func TestFeishuBotMembersInChatWithResolversIncludesConfiguredBots(t *testing.T)
 	if len(members) != 1 {
 		t.Fatalf("members len = %d, want 1", len(members))
 	}
-	if got, want := members[0].ID, "ou_manager"; got != want {
+	if got, want := members[0].ID, "u-manager"; got != want {
 		t.Fatalf("member id = %q, want %q", got, want)
 	}
 	if got, want := members[0].Name, "u-manager"; got != want {
@@ -571,11 +582,15 @@ func TestFeishuListRoomsCallsConfiguredApp(t *testing.T) {
 		},
 		func(context.Context, AppConfig, AddChatMembersRequest) error { return nil },
 	)
+	svc.resolveBotInfo = testBotInfoResolver(t, map[string]string{
+		"cli_manager": "ou_manager",
+		"cli_dev":     "ou_dev",
+	})
 	svc.listChats = func(_ context.Context, app AppConfig) ([]im.Room, error) {
 		gotApp = app
 		return []im.Room{
-			{ID: "oc_beta", Title: "beta"},
-			{ID: "oc_alpha", Title: "alpha"},
+			{ID: "oc_beta", Title: "beta", Members: []string{"ou_manager", "ou_external"}},
+			{ID: "oc_alpha", Title: "alpha", Members: []string{"ou_manager", "ou_external"}},
 		}, nil
 	}
 
@@ -601,8 +616,11 @@ func TestFeishuListRoomsCallsConfiguredApp(t *testing.T) {
 	if got, want := rooms[0].ID, "oc_alpha"; got != want {
 		t.Fatalf("first room id = %q, want %q", got, want)
 	}
-	if len(rooms[0].Members) != 2 || rooms[0].Members[0] != "u-manager" || rooms[0].Members[1] != "u-dev" {
-		t.Fatalf("first room members = %+v, want local members", rooms[0].Members)
+	if got, want := strings.Join(rooms[0].Members, ","), "u-manager,ou_external"; got != want {
+		t.Fatalf("first room members = %+v, want realtime mapped members", rooms[0].Members)
+	}
+	if got, want := strings.Join(rooms[1].Members, ","), "u-manager,ou_external"; got != want {
+		t.Fatalf("uncached room members = %+v, want mapped bot ids and unmapped ids preserved", rooms[1].Members)
 	}
 }
 
@@ -611,16 +629,24 @@ func TestFeishuListRoomMessagesFetchesAllMessagesAndUpdatesCache(t *testing.T) {
 	var gotRoomID string
 	fetchedAt := time.Unix(5, 0).UTC()
 	svc := NewServiceWithListRoomMessages(
-		map[string]AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
+		map[string]AppConfig{
+			"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
+			"u-dev":     {AppID: "cli_dev", AppSecret: "dev-secret"},
+		},
 		func(_ context.Context, app AppConfig, roomID string) ([]im.Message, error) {
 			gotApp = app
 			gotRoomID = roomID
 			return []im.Message{
-				{ID: "om_1", SenderID: "ou_manager", Kind: im.MessageKindMessage, Content: "hello", CreatedAt: fetchedAt},
-				{ID: "om_2", SenderID: "ou_alice", Kind: im.MessageKindMessage, Content: "world", CreatedAt: fetchedAt.Add(time.Second)},
+				{ID: "om_1", SenderID: "ou_manager", Kind: im.MessageKindMessage, Content: "hello", CreatedAt: fetchedAt, Mentions: []im.Mention{{ID: "ou_dev", Name: "dev"}, {ID: "ou_external", Name: "External"}}},
+				{ID: "om_2", SenderID: "ou_dev", Kind: im.MessageKindMessage, Content: "world", CreatedAt: fetchedAt.Add(time.Second)},
+				{ID: "om_3", SenderID: "ou_external", Kind: im.MessageKindMessage, Content: "external", CreatedAt: fetchedAt.Add(2 * time.Second)},
 			}, nil
 		},
 	)
+	svc.resolveBotInfo = testBotInfoResolver(t, map[string]string{
+		"cli_manager": "ou_manager",
+		"cli_dev":     "ou_dev",
+	})
 	svc.rooms["oc_alpha"] = &im.Room{
 		ID:       "oc_alpha",
 		Title:    "alpha",
@@ -638,10 +664,16 @@ func TestFeishuListRoomMessagesFetchesAllMessagesAndUpdatesCache(t *testing.T) {
 	if gotRoomID != "oc_alpha" {
 		t.Fatalf("list messages room_id = %q, want oc_alpha", gotRoomID)
 	}
-	if len(messages) != 2 || messages[0].ID != "om_1" || messages[1].ID != "om_2" {
+	if len(messages) != 3 || messages[0].ID != "om_1" || messages[1].ID != "om_2" || messages[2].ID != "om_3" {
 		t.Fatalf("messages = %+v, want fetched messages", messages)
 	}
-	if len(svc.rooms["oc_alpha"].Messages) != 2 || svc.rooms["oc_alpha"].Messages[0].ID != "om_1" {
+	if messages[0].SenderID != "u-manager" || messages[1].SenderID != "u-dev" || messages[2].SenderID != "ou_external" {
+		t.Fatalf("message senders = %+v, want bot ids with unmapped sender preserved", messages)
+	}
+	if len(messages[0].Mentions) != 2 || messages[0].Mentions[0].ID != "u-dev" || messages[0].Mentions[1].ID != "ou_external" {
+		t.Fatalf("message mentions = %+v, want mapped bot ids and unmapped mentions preserved", messages[0].Mentions)
+	}
+	if len(svc.rooms["oc_alpha"].Messages) != 3 || svc.rooms["oc_alpha"].Messages[0].ID != "om_1" || svc.rooms["oc_alpha"].Messages[0].SenderID != "u-manager" {
 		t.Fatalf("cached messages = %+v, want fetched messages", svc.rooms["oc_alpha"].Messages)
 	}
 	messages[0].ID = "mutated"
@@ -659,6 +691,7 @@ func TestFeishuListRoomMessagesRequestsAPIWithoutLocalRoomValidation(t *testing.
 			return []im.Message{{ID: "om_1"}}, nil
 		},
 	)
+	svc.resolveBotInfo = testBotInfoResolver(t, map[string]string{"cli_manager": "ou_manager"})
 
 	if _, err := svc.ListRoomMessages(" "); err != nil {
 		t.Fatalf("ListRoomMessages() with blank room_id error = %v", err)
@@ -793,25 +826,32 @@ func TestFeishuListRoomMembersCallsConfiguredApp(t *testing.T) {
 	var gotApp AppConfig
 	var gotRoomID string
 	svc := NewServiceWithCreateChatAndAddMembers(
-		map[string]AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"}},
+		map[string]AppConfig{
+			"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"},
+			"u-alice":   {AppID: "cli_alice", AppSecret: "alice-secret"},
+		},
 		func(_ context.Context, _ AppConfig, req CreateChatRequest) (CreateChatResponse, error) {
 			return CreateChatResponse{ChatID: "oc_alpha", Name: req.Title, Description: req.Description}, nil
 		},
 		func(context.Context, AppConfig, AddChatMembersRequest) error { return nil },
 	)
+	svc.resolveBotInfo = testBotInfoResolver(t, map[string]string{
+		"cli_manager": "ou_manager",
+		"cli_alice":   "ou_alice",
+	})
 	svc.listChatMembers = func(_ context.Context, app AppConfig, apps map[string]AppConfig, roomID string) ([]im.User, error) {
 		gotApp = app
 		gotRoomID = roomID
 		if got, want := apps["u-manager"].AppID, "cli_manager"; got != want {
 			t.Fatalf("list members apps manager app_id = %q, want %q", got, want)
 		}
-		return []im.User{{ID: "ou_alice", Name: "Alice"}}, nil
+		return []im.User{{ID: "ou_alice", Name: "Alice"}, {ID: "ou_external", Name: "External"}}, nil
 	}
 
 	if _, err := svc.CreateUser(CreateUserRequest{ID: "u-manager", Name: "Manager"}); err != nil {
 		t.Fatalf("CreateUser(manager) error = %v", err)
 	}
-	if _, err := svc.CreateUser(CreateUserRequest{ID: "ou_alice", Name: "Alice Local", Handle: "alice-local", Role: "worker", Avatar: "AL"}); err != nil {
+	if _, err := svc.CreateUser(CreateUserRequest{ID: "u-alice", Name: "Alice Local", Handle: "alice-local", Role: "worker", Avatar: "AL"}); err != nil {
 		t.Fatalf("CreateUser(alice) error = %v", err)
 	}
 	if _, err := svc.CreateRoom(im.CreateRoomRequest{Title: "alpha", CreatorID: "u-manager"}); err != nil {
@@ -828,8 +868,11 @@ func TestFeishuListRoomMembersCallsConfiguredApp(t *testing.T) {
 	if got, want := gotRoomID, "oc_alpha"; got != want {
 		t.Fatalf("list members room_id = %q, want %q", got, want)
 	}
-	if len(members) != 1 {
-		t.Fatalf("members len = %d, want 1", len(members))
+	if len(members) != 2 {
+		t.Fatalf("members len = %d, want 2", len(members))
+	}
+	if got, want := members[0].ID, "u-alice"; got != want {
+		t.Fatalf("first member id = %q, want bot id %q", got, want)
 	}
 	if got, want := members[0].Name, "Alice"; got != want {
 		t.Fatalf("member name = %q, want %q", got, want)
@@ -840,19 +883,27 @@ func TestFeishuListRoomMembersCallsConfiguredApp(t *testing.T) {
 	if got, want := members[0].Role, "worker"; got != want {
 		t.Fatalf("member role = %q, want %q", got, want)
 	}
+	if got, want := members[1].ID, "ou_external"; got != want {
+		t.Fatalf("second member id = %q, want unmapped id %q", got, want)
+	}
 }
 
 func TestFeishuListRoomMembersLetsFeishuValidateExternalRoomID(t *testing.T) {
 	var gotRoomID string
 	svc := NewService(map[string]AppConfig{
 		"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"},
+		"u-alice":   {AppID: "cli_alice", AppSecret: "alice-secret"},
+	})
+	svc.resolveBotInfo = testBotInfoResolver(t, map[string]string{
+		"cli_manager": "ou_manager",
+		"cli_alice":   "ou_alice",
 	})
 	svc.listChatMembers = func(_ context.Context, app AppConfig, _ map[string]AppConfig, roomID string) ([]im.User, error) {
 		if got, want := app.AppID, "cli_manager"; got != want {
 			t.Fatalf("list members app_id = %q, want %q", got, want)
 		}
 		gotRoomID = roomID
-		return []im.User{{ID: "ou_alice", Name: "Alice"}}, nil
+		return []im.User{{ID: "ou_alice", Name: "Alice"}, {ID: "ou_external", Name: "External"}}, nil
 	}
 
 	members, err := svc.ListRoomMembers("oc_external")
@@ -862,7 +913,7 @@ func TestFeishuListRoomMembersLetsFeishuValidateExternalRoomID(t *testing.T) {
 	if got, want := gotRoomID, "oc_external"; got != want {
 		t.Fatalf("list members room_id = %q, want %q", got, want)
 	}
-	if len(members) != 1 || members[0].ID != "ou_alice" {
-		t.Fatalf("members = %+v, want ou_alice", members)
+	if len(members) != 2 || members[0].ID != "u-alice" || members[1].ID != "ou_external" {
+		t.Fatalf("members = %+v, want u-alice and preserved ou_external", members)
 	}
 }
