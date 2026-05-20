@@ -21,6 +21,9 @@ func (e *ExitError) Error() string {
 	if msg == "" {
 		msg = "command failed"
 	}
+	if hint := errorHint(msg); hint != "" {
+		msg += "\nHint: " + hint
+	}
 	if e.Op == "" {
 		return fmt.Sprintf("boxlite cli exited with code %d: %s", e.ExitCode, msg)
 	}
@@ -59,4 +62,12 @@ func wrapRunError(op string, result CommandResult, err error) error {
 func isNotFound(stderr string) bool {
 	text := strings.ToLower(stderr)
 	return strings.Contains(text, "no such box") || strings.Contains(text, "not found")
+}
+
+func errorHint(stderr string) string {
+	text := strings.ToLower(stderr)
+	if strings.Contains(text, "exec format error") || strings.Contains(text, "enoexec") {
+		return "BoxLite could not execute a binary inside the image. This usually means the image architecture does not match the BoxLite VM architecture; use a multi-arch image or an image built for this host."
+	}
+	return ""
 }

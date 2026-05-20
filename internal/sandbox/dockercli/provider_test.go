@@ -169,6 +169,30 @@ func TestStopForceUsesKill(t *testing.T) {
 	}
 }
 
+func TestCreateAddsExecFormatDiagnostic(t *testing.T) {
+	runner := &fakeRunner{
+		results: []fakeResult{{
+			result: CommandResult{
+				Stderr:   []byte(`exec /sbin/tini: exec format error`),
+				ExitCode: 1,
+			},
+			err: &exec.ExitError{},
+		}},
+	}
+	rt, err := NewProvider(WithRunner(runner)).Open(context.Background(), "/tmp/ignored")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	_, err = rt.Create(context.Background(), sandbox.CreateSpec{Image: "picoclaw:test"})
+	if err == nil {
+		t.Fatal("Create() error = nil, want exit error")
+	}
+	if got, want := err.Error(), "image architecture does not match the host/container platform"; !strings.Contains(got, want) {
+		t.Fatalf("Create() error = %v, want containing %q", err, want)
+	}
+}
+
 func TestRunForwardsOutputAndPreservesExitCode(t *testing.T) {
 	runner := &fakeRunner{
 		results: []fakeResult{{

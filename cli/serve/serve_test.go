@@ -1141,6 +1141,8 @@ func TestFormatEffectiveConfigIncludesDefaultHubRegistriesWhenOmitted(t *testing
 }
 
 func TestSandboxServiceOptionsSupportsConfiguredProvider(t *testing.T) {
+	stubBoxLiteAvailable(t)
+
 	opts, err := sandboxServiceOptions(config.SandboxConfig{
 		Provider:                 config.BoxLiteProvider,
 		DebianRegistriesOverride: []string{"registry.a"},
@@ -1199,6 +1201,8 @@ func TestNewAgentServiceExplainsMissingConfiguredBoxLite(t *testing.T) {
 }
 
 func TestNewAgentServiceRegistersCodexRuntime(t *testing.T) {
+	stubBoxLiteAvailable(t)
+
 	svc, err := newAgentService(config.Config{
 		Sandbox: config.SandboxConfig{
 			Provider: config.DefaultSandboxProvider,
@@ -1246,6 +1250,18 @@ func sandboxprovidersTestOnlyStatPath(t *testing.T, fn func(string) (os.FileInfo
 	t.Helper()
 	prev := sandboxproviders.StatPathForTest(fn)
 	return prev
+}
+
+func stubBoxLiteAvailable(t *testing.T) {
+	t.Helper()
+	restoreLookPath := sandboxprovidersTestOnlyLookPath(t, func(path string) (string, error) {
+		return path, nil
+	})
+	restoreStatPath := sandboxprovidersTestOnlyStatPath(t, func(string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	})
+	t.Cleanup(restoreLookPath)
+	t.Cleanup(restoreStatPath)
 }
 
 func stubServeDependencies(t *testing.T) func() {

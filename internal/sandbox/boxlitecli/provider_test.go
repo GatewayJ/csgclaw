@@ -179,6 +179,30 @@ func TestRunForwardsOutputAndPreservesExitCode(t *testing.T) {
 	}
 }
 
+func TestCreateAddsExecFormatDiagnostic(t *testing.T) {
+	runner := &fakeRunner{
+		results: []fakeResult{{
+			result: CommandResult{
+				Stderr:   []byte(`Error: failed to execvp err=ENOEXEC filename="/sbin/tini": Exec format error`),
+				ExitCode: 1,
+			},
+			err: &exec.ExitError{},
+		}},
+	}
+	rt, err := NewProvider(WithRunner(runner)).Open(context.Background(), "/tmp/boxlite-home")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	_, err = rt.Create(context.Background(), sandbox.CreateSpec{Image: "picoclaw:test"})
+	if err == nil {
+		t.Fatal("Create() error = nil, want exit error")
+	}
+	if got, want := err.Error(), "image architecture does not match the BoxLite VM architecture"; !strings.Contains(got, want) {
+		t.Fatalf("Create() error = %v, want containing %q", err, want)
+	}
+}
+
 func TestNotFoundErrorsMapToSandboxNotFound(t *testing.T) {
 	runner := &fakeRunner{
 		results: []fakeResult{{

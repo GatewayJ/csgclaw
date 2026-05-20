@@ -21,6 +21,9 @@ func (e *ExitError) Error() string {
 	if msg == "" {
 		msg = "command failed"
 	}
+	if hint := errorHint(msg); hint != "" {
+		msg += "\nHint: " + hint
+	}
 	if e.Op == "" {
 		return fmt.Sprintf("docker exited with code %d: %s", e.ExitCode, msg)
 	}
@@ -61,4 +64,12 @@ func isNotFound(stderr string) bool {
 	return strings.Contains(text, "no such container") ||
 		strings.Contains(text, "no such object") ||
 		strings.Contains(text, "not found")
+}
+
+func errorHint(stderr string) string {
+	text := strings.ToLower(stderr)
+	if strings.Contains(text, "exec format error") || strings.Contains(text, "enoexec") {
+		return "Docker could not execute a binary inside the image. This usually means the image architecture does not match the host/container platform; use a multi-arch image or an image built for this host."
+	}
+	return ""
 }
