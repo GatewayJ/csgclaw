@@ -469,20 +469,21 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 		return err
 	}
 	return RunServer(server.Options{
-		ListenAddr:  cfg.Server.ListenAddr,
-		Service:     svc,
-		Hub:         hubSvc,
-		Bot:         botSvc,
-		IM:          imSvc,
-		IMBus:       imBus,
-		BotBridge:   im.NewBotBridge(cfg.Server.AccessToken),
-		Feishu:      feishuSvc,
-		LLM:         llmSvc,
-		Upgrade:     upgradeManager,
-		ConfigPath:  configPath,
-		AccessToken: cfg.Server.AccessToken,
-		NoAuth:      cfg.Server.NoAuth,
-		Context:     ctx,
+		ListenAddr:       cfg.Server.ListenAddr,
+		Service:          svc,
+		Hub:              hubSvc,
+		Bot:              botSvc,
+		IM:               imSvc,
+		IMBus:            imBus,
+		BotBridge:        im.NewBotBridge(cfg.Server.AccessToken),
+		Feishu:           feishuSvc,
+		LLM:              llmSvc,
+		Upgrade:          upgradeManager,
+		CodexPermissions: codexPermissionDecider(codexBridgeMgr),
+		ConfigPath:       configPath,
+		AccessToken:      cfg.Server.AccessToken,
+		NoAuth:           cfg.Server.NoAuth,
+		Context:          ctx,
 		OnReady: func(handler *api.Handler, router chi.Router) {
 			deliver := channelwiring.WireNotificationBotPull(ctx, botSvc, imSvc, apiURL, cfg.Server.AccessToken)
 			handler.SetNotificationDeliver(deliver)
@@ -829,6 +830,16 @@ type codexBridgeManager interface {
 	Close()
 }
 
+func codexPermissionDecider(m codexBridgeManager) api.CodexPermissionDecider {
+	withPermissions, ok := m.(interface {
+		PermissionDecider() runtimecodex.PermissionDecider
+	})
+	if !ok {
+		return nil
+	}
+	return withPermissions.PermissionDecider()
+}
+
 type serveCodexBridgeManager struct {
 	svc     *agent.Service
 	runtime *runtimecodex.Runtime
@@ -954,6 +965,13 @@ func (m *serveCodexBridgeManager) Close() {
 		return
 	}
 	m.bridge.Close()
+}
+
+func (m *serveCodexBridgeManager) PermissionDecider() runtimecodex.PermissionDecider {
+	if m == nil || m.runtime == nil {
+		return nil
+	}
+	return m.runtime.PermissionBroker()
 }
 
 func (m *serveCodexBridgeManager) ensureSession(ctx context.Context, a agent.Agent) (*runtimecodex.Session, error) {

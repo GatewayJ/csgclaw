@@ -45,6 +45,7 @@ type Handler struct {
 	upgradeConfigPath   string
 	upgradeApply        func(upgrade.ApplyHelperOptions) error
 	notificationDeliver notification_bot.Fanouter
+	codexPermissions    CodexPermissionDecider
 }
 
 const (
@@ -284,6 +285,12 @@ func NewHandlerWithBotAndAuth(svc *agent.Service, botSvc *bot.Service, imSvc *im
 func (h *Handler) SetNotificationDeliver(d notification_bot.Fanouter) {
 	if h != nil {
 		h.notificationDeliver = d
+	}
+}
+
+func (h *Handler) SetCodexPermissionDecider(decider CodexPermissionDecider) {
+	if h != nil {
+		h.codexPermissions = decider
 	}
 }
 

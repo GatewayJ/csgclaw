@@ -1,4 +1,5 @@
 export * from "./ActionCard";
+export * from "./AgentActivityCard";
 export * from "./markdown";
 export * from "./mentions";
 export * from "./mermaid";

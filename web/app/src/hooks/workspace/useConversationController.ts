@@ -123,7 +123,7 @@ export function useConversationController({
     if (showToolCalls) {
       return activeConversation.messages;
     }
-    return activeConversation.messages.filter((message) => !isToolCallMessage(message.content));
+    return activeConversation.messages.filter((message) => !isToolCallMessage(message));
   }, [activeConversation, showToolCalls]);
   const channels = useMemo(() => rooms.filter((room) => !isDirectConversation(room)), [rooms]);
   const directMessages = useMemo(() => rooms.filter((room) => isDirectConversation(room)), [rooms]);

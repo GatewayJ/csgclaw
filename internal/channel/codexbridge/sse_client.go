@@ -21,8 +21,9 @@ type BotEvent struct {
 }
 
 type SendMessageRequest struct {
-	RoomID string `json:"room_id"`
-	Text   string `json:"text"`
+	RoomID    string `json:"room_id"`
+	Text      string `json:"text"`
+	MessageID string `json:"message_id,omitempty"`
 }
 
 type BotClient interface {

@@ -1,4 +1,5 @@
 import { flattenMentionText } from "@/components/business/MessageContent/mentions";
+import { isToolActivityMessage } from "@/models/agentActivity";
 
 export type LocaleCode = "zh" | "en" | string;
 export type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
@@ -58,10 +59,21 @@ export type IMServerEvent = {
 
 export type UsersById = Map<string, IMUser>;
 
-export function isToolCallMessage(content: unknown): boolean {
+export function isToolCallMessage(messageOrContent: IMMessage | unknown): boolean {
+  if (isMessageLike(messageOrContent)) {
+    return isLegacyToolCallContent(messageOrContent.content) || isToolActivityMessage(messageOrContent);
+  }
+  return isLegacyToolCallContent(messageOrContent);
+}
+
+function isLegacyToolCallContent(content: unknown): boolean {
   return String(content ?? "")
     .trimStart()
     .startsWith("🔧 ");
+}
+
+function isMessageLike(value: unknown): value is IMMessage {
+  return Boolean(value && typeof value === "object" && "content" in value);
 }
 
 export function isEventMessage(message: IMMessage | null | undefined): boolean {
@@ -294,8 +306,12 @@ export function appendMessageToData<T extends IMData | null | undefined>(
     if (room.id !== conversationID) {
       return room;
     }
-    if (room.messages.some((item) => item.id === message.id)) {
-      return room;
+    const existingIndex = room.messages.findIndex((item) => item.id === message.id);
+    if (existingIndex >= 0) {
+      return {
+        ...room,
+        messages: room.messages.map((item, index) => (index === existingIndex ? message : item)),
+      };
     }
     return { ...room, messages: [...room.messages, message] };
   });

@@ -257,6 +257,13 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 			if !matchesBinding(event, w.binding) {
 				continue
 			}
+			if renderer.ShouldRenderActivity(event) {
+				if activity, ok := renderActivity(event, w.binding, evt.RoomID, w.binding.BotID); ok {
+					if err := w.sendActivity(ctx, evt.RoomID, activity); err != nil {
+						return err
+					}
+				}
+			}
 			for _, text := range renderer.Apply(event) {
 				if err := w.sendMessage(ctx, evt.RoomID, text); err != nil {
 					return err
@@ -290,14 +297,27 @@ func (w *worker) flushTurn(ctx context.Context, roomID string, renderer *turnRen
 }
 
 func (w *worker) sendMessage(ctx context.Context, roomID, text string) error {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil
-	}
-	return w.service.client.SendMessage(ctx, w.binding.BotID, SendMessageRequest{
+	return w.sendMessageRequest(ctx, SendMessageRequest{
 		RoomID: roomID,
 		Text:   text,
 	})
+}
+
+func (w *worker) sendActivity(ctx context.Context, roomID string, activity renderedActivity) error {
+	return w.sendMessageRequest(ctx, SendMessageRequest{
+		RoomID:    roomID,
+		Text:      activity.Text,
+		MessageID: activity.MessageID,
+	})
+}
+
+func (w *worker) sendMessageRequest(ctx context.Context, req SendMessageRequest) error {
+	req.Text = strings.TrimSpace(req.Text)
+	req.MessageID = strings.TrimSpace(req.MessageID)
+	if req.Text == "" {
+		return nil
+	}
+	return w.service.client.SendMessage(ctx, w.binding.BotID, req)
 }
 
 func (w *worker) accept(messageID string) bool {

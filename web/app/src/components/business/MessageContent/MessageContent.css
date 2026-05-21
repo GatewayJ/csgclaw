@@ -394,3 +394,137 @@
 :root[data-theme="dark"] .message-row.own .message-bubble .message-content p > .message-mention {
   color: #ffffff;
 }
+
+.agent-activity-card {
+  display: grid;
+  gap: 10px;
+  min-width: min(100%, 280px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface);
+}
+
+.agent-activity-header {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.agent-activity-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--portal-brand-600) 12%, transparent);
+  color: var(--portal-brand-700);
+}
+
+.agent-activity-title-group {
+  min-width: 0;
+}
+
+.agent-activity-title {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.agent-activity-subtitle {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-activity-badge {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--portal-gray-100);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.2;
+  text-transform: capitalize;
+}
+
+.agent-activity-badge.status-running,
+.agent-activity-badge.status-pending {
+  background: color-mix(in oklab, var(--portal-brand-600) 12%, transparent);
+  color: var(--portal-brand-700);
+}
+
+.agent-activity-badge.status-completed,
+.agent-activity-badge.status-allowed {
+  background: var(--portal-success-50);
+  color: var(--portal-success-700);
+}
+
+.agent-activity-badge.status-failed,
+.agent-activity-badge.status-rejected,
+.agent-activity-badge.status-expired,
+.agent-activity-badge.status-canceled {
+  background: color-mix(in oklab, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.agent-activity-summary {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-activity-actions .btn {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.agent-activity-button-icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.agent-activity-allow-always {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--portal-brand-700) 24%, transparent);
+}
+
+.agent-activity-error {
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.message-row.own .agent-activity-card {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.message-row.own .agent-activity-icon,
+.message-row.own .agent-activity-badge {
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.message-row.own .agent-activity-subtitle {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+:root[data-theme="dark"] .agent-activity-card {
+  background: var(--panel-strong);
+}

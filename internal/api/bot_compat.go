@@ -359,9 +359,10 @@ func (h *Handler) handleBotSendMessage(w http.ResponseWriter, r *http.Request, b
 	}
 
 	message, err := h.im.DeliverMessage(im.DeliverMessageRequest{
-		RoomID:   req.RoomID,
-		SenderID: botID,
-		Content:  req.Text,
+		RoomID:    req.RoomID,
+		SenderID:  botID,
+		Content:   req.Text,
+		MessageID: req.MessageID,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

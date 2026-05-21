@@ -200,6 +200,48 @@ func TestCreateMessageWithMissingMentionIDFails(t *testing.T) {
 	}
 }
 
+func TestDeliverMessageReplacesExistingMessageWithSameIDAndSender(t *testing.T) {
+	svc := NewServiceFromBootstrap(Bootstrap{
+		CurrentUserID: "u-admin",
+		Users:         []User{{ID: "u-manager", Name: "manager", Handle: "manager"}},
+		Rooms: []Room{{
+			ID:      "room-1",
+			Title:   "Ops",
+			Members: []string{"u-manager"},
+		}},
+	})
+
+	first, err := svc.DeliverMessage(DeliverMessageRequest{
+		RoomID:    "room-1",
+		SenderID:  "u-manager",
+		MessageID: "act-1",
+		Content:   "pending",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage(first) error = %v", err)
+	}
+	second, err := svc.DeliverMessage(DeliverMessageRequest{
+		RoomID:    "room-1",
+		SenderID:  "u-manager",
+		MessageID: "act-1",
+		Content:   "allowed",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage(second) error = %v", err)
+	}
+
+	if second.ID != first.ID || !second.CreatedAt.Equal(first.CreatedAt) {
+		t.Fatalf("replacement metadata = %q/%s, want %q/%s", second.ID, second.CreatedAt, first.ID, first.CreatedAt)
+	}
+	messages, err := svc.ListMessages("room-1")
+	if err != nil {
+		t.Fatalf("ListMessages() error = %v", err)
+	}
+	if len(messages) != 1 || messages[0].Content != "allowed" {
+		t.Fatalf("messages = %+v, want one replaced message", messages)
+	}
+}
+
 func TestListRoomsUsersAndMessages(t *testing.T) {
 	earlier := time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC)
 	later := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)

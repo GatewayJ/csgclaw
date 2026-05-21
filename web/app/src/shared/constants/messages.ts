@@ -1,3 +1,10 @@
 export const CSGCLAW_ACTION_CARD_TYPE = "csgclaw.action_card";
 export const CSGCLAW_NOTIFY_CARD_TYPE = "csgclaw.notify_card";
 export const ACTION_REBUILD_MANAGER = "rebuild-manager";
+export const CSGCLAW_AGENT_ACTIVITY_TYPE = "com.opencsg.csgclaw.agent.activity";
+
+export const AgentActivityMsgTypes = {
+  notice: "com.opencsg.csgclaw.agent.notice",
+  permission: "com.opencsg.csgclaw.agent.permission",
+  tool: "com.opencsg.csgclaw.agent.tool",
+} as const;

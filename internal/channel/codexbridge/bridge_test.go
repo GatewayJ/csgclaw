@@ -2,6 +2,7 @@ package codexbridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -67,6 +68,14 @@ func (c *fakeBotClient) sentTexts() []string {
 	for _, req := range c.sendRecords {
 		out = append(out, req.Text)
 	}
+	return out
+}
+
+func (c *fakeBotClient) sentMessages() []SendMessageRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]SendMessageRequest, len(c.sendRecords))
+	copy(out, c.sendRecords)
 	return out
 }
 
@@ -366,6 +375,259 @@ func TestServiceFlushesAfterPromptSettlesWithoutTerminalEvent(t *testing.T) {
 	waitFor(t, func() bool {
 		return slices.Equal(client.sentTexts(), []string{"settled reply"})
 	})
+}
+
+func TestServiceProjectsToolEventsAsAgentActivity(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
+
+	sink := NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:        handle.RuntimeID,
+				SessionID:        string(req.SessionId),
+				Kind:             runtimecodex.SessionEventToolCallStart,
+				ReceivedAt:       time.Now().UTC(),
+				ToolCallID:       "tool-1",
+				ToolKind:         "execute",
+				ToolTitle:        "Run shell command",
+				ToolStatus:       "in_progress",
+				ToolInputSummary: `{"cmd":"go test ./internal/runtime/codex"}`,
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:  handle.RuntimeID,
+				SessionID:  string(req.SessionId),
+				Kind:       runtimecodex.SessionEventPromptCompleted,
+				ReceivedAt: time.Now().UTC(),
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		return len(client.sentTexts()) == 1
+	})
+	text := client.sentTexts()[0]
+	if strings.Contains(text, "Running tool:") {
+		t.Fatalf("tool event rendered as plain text: %s", text)
+	}
+	var payload struct {
+		Type    string `json:"type"`
+		RoomID  string `json:"room_id"`
+		Content struct {
+			MsgType string `json:"msgtype"`
+			Tool    struct {
+				ID           string `json:"id"`
+				Kind         string `json:"kind"`
+				Status       string `json:"status"`
+				InputSummary string `json:"input_summary"`
+			} `json:"tool"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("tool activity json decode: %v; text=%s", err, text)
+	}
+	if payload.Type != agentActivityType || payload.RoomID != "room-1" || payload.Content.MsgType != agentToolMsgType {
+		t.Fatalf("payload = %+v, want tool activity", payload)
+	}
+	if payload.Content.Tool.ID != "tool-1" || payload.Content.Tool.Kind != "execute" || payload.Content.Tool.Status != "running" {
+		t.Fatalf("tool payload = %+v", payload.Content.Tool)
+	}
+}
+
+func TestServiceProjectsPermissionEventsAsAgentActivity(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
+
+	now := time.Now().UTC()
+	sink := NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:           handle.RuntimeID,
+				SessionID:           string(req.SessionId),
+				Kind:                runtimecodex.SessionEventPermissionRequest,
+				ReceivedAt:          now,
+				ToolCallID:          "tool-1",
+				ToolTitle:           "Run shell command",
+				PermissionRequestID: "perm-1",
+				PermissionStatus:    string(runtimecodex.PermissionStatusPending),
+				Payload: runtimecodex.PermissionSnapshot{
+					ID:          "perm-1",
+					RuntimeID:   handle.RuntimeID,
+					SessionID:   string(req.SessionId),
+					ToolCallID:  "tool-1",
+					ToolTitle:   "Run shell command",
+					Status:      runtimecodex.PermissionStatusPending,
+					RequestedAt: now,
+					ExpiresAt:   now.Add(time.Minute),
+					Options: []runtimecodex.PermissionOptionSnapshot{
+						{ID: "once", Kind: "allow_once", Label: "Allow once"},
+						{ID: "reject", Kind: "reject_once", Label: "Reject"},
+					},
+				},
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:  handle.RuntimeID,
+				SessionID:  string(req.SessionId),
+				Kind:       runtimecodex.SessionEventPromptCompleted,
+				ReceivedAt: time.Now().UTC(),
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		return len(client.sentTexts()) == 1
+	})
+	var payload struct {
+		Type    string `json:"type"`
+		Content struct {
+			MsgType    string `json:"msgtype"`
+			Permission struct {
+				ID      string `json:"id"`
+				Status  string `json:"status"`
+				Options []struct {
+					ID string `json:"id"`
+				} `json:"options"`
+			} `json:"permission"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(client.sentTexts()[0]), &payload); err != nil {
+		t.Fatalf("permission activity json decode: %v", err)
+	}
+	if payload.Type != agentActivityType || payload.Content.MsgType != agentPermissionMsgType {
+		t.Fatalf("payload = %+v, want permission activity", payload)
+	}
+	if payload.Content.Permission.ID != "perm-1" || payload.Content.Permission.Status != "pending" || len(payload.Content.Permission.Options) != 2 {
+		t.Fatalf("permission payload = %+v", payload.Content.Permission)
+	}
+}
+
+func TestServiceUsesStableMessageIDForPermissionDecisionActivity(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
+
+	now := time.Now().UTC()
+	sink := NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
+			pending := runtimecodex.PermissionSnapshot{
+				ID:          "perm-1",
+				RuntimeID:   handle.RuntimeID,
+				SessionID:   string(req.SessionId),
+				ToolCallID:  "tool-1",
+				ToolTitle:   "Run shell command",
+				Status:      runtimecodex.PermissionStatusPending,
+				RequestedAt: now,
+				ExpiresAt:   now.Add(time.Minute),
+				Options: []runtimecodex.PermissionOptionSnapshot{
+					{ID: "once", Kind: "allow_once", Label: "Allow once"},
+				},
+			}
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:           handle.RuntimeID,
+				SessionID:           string(req.SessionId),
+				Kind:                runtimecodex.SessionEventPermissionRequest,
+				ReceivedAt:          now,
+				ToolCallID:          "tool-1",
+				ToolTitle:           "Run shell command",
+				PermissionRequestID: "perm-1",
+				PermissionStatus:    string(runtimecodex.PermissionStatusPending),
+				Payload:             pending,
+			})
+			decided := pending
+			decided.Status = runtimecodex.PermissionStatusAllowed
+			decided.Decision = &runtimecodex.PermissionDecisionSnapshot{
+				OptionID:  "once",
+				Kind:      "allow_once",
+				DecidedAt: now.Add(time.Second),
+			}
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:            handle.RuntimeID,
+				SessionID:            string(req.SessionId),
+				Kind:                 runtimecodex.SessionEventPermissionDecision,
+				ReceivedAt:           now.Add(time.Second),
+				ToolCallID:           "tool-1",
+				ToolTitle:            "Run shell command",
+				PermissionRequestID:  "perm-1",
+				PermissionStatus:     string(runtimecodex.PermissionStatusAllowed),
+				PermissionOptionID:   "once",
+				PermissionOptionKind: "allow_once",
+				Payload:              decided,
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:  handle.RuntimeID,
+				SessionID:  string(req.SessionId),
+				Kind:       runtimecodex.SessionEventPromptCompleted,
+				ReceivedAt: time.Now().UTC(),
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		return len(client.sentMessages()) == 2
+	})
+	sent := client.sentMessages()
+	if sent[0].MessageID == "" || sent[0].MessageID != sent[1].MessageID {
+		t.Fatalf("permission message ids = %q / %q, want stable non-empty id", sent[0].MessageID, sent[1].MessageID)
+	}
+	if !strings.Contains(sent[1].Text, `"status":"allowed"`) {
+		t.Fatalf("decision activity = %s, want allowed status", sent[1].Text)
+	}
 }
 
 func TestServiceIgnoresEventsFromOtherBindings(t *testing.T) {

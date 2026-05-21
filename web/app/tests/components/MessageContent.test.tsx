@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { MessageContent } from "@/components/business/MessageContent";
 import {
   ACTION_REBUILD_MANAGER,
+  AgentActivityMsgTypes,
+  CSGCLAW_AGENT_ACTIVITY_TYPE,
   CSGCLAW_ACTION_CARD_TYPE,
   CSGCLAW_NOTIFY_CARD_TYPE,
 } from "@/shared/constants/messages";
@@ -99,5 +101,76 @@ describe("MessageContent", () => {
     );
     expect(screen.getByText("Branch")).toBeInTheDocument();
     expect(screen.getByText("feature -> main")).toBeInTheDocument();
+  });
+
+  it("renders Codex tool activity in the structured tool output style", () => {
+    render(
+      <MessageContent
+        content={JSON.stringify({
+          type: CSGCLAW_AGENT_ACTIVITY_TYPE,
+          content: {
+            msgtype: AgentActivityMsgTypes.tool,
+            body: "Running tool",
+            tool: {
+              id: "tool-1",
+              input_summary: '{"cmd":"go test ./internal/runtime/codex"}',
+              kind: "execute",
+              status: "running",
+              title: "Run shell command",
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText("exec")).toBeInTheDocument();
+    expect(screen.queryByText("Run shell command")).not.toBeInTheDocument();
+    expect(screen.queryByText("Running")).not.toBeInTheDocument();
+    expect(screen.getByText(/go test/)).toBeInTheDocument();
+  });
+
+  it("renders Codex permission buttons and posts decisions", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "perm-1", status: "allowed" }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MessageContent
+        content={JSON.stringify({
+          type: CSGCLAW_AGENT_ACTIVITY_TYPE,
+          content: {
+            msgtype: AgentActivityMsgTypes.permission,
+            body: "Codex wants permission",
+            permission: {
+              id: "perm-1",
+              options: [
+                { id: "once", kind: "allow_once", label: "Allow once" },
+                { id: "reject", kind: "reject_once", label: "Reject" },
+              ],
+              status: "pending",
+              title: "Run shell command",
+              tool_call_id: "tool-1",
+            },
+          },
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Allow once/ }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "api/v1/codex/permissions/perm-1/decision",
+      expect.objectContaining({
+        body: JSON.stringify({ option_id: "once" }),
+        method: "POST",
+      }),
+    );
+    expect(await screen.findByText("Allowed")).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 });

@@ -900,6 +900,22 @@ func (s *Service) DeliverMessage(req DeliverMessageRequest) (Message, error) {
 	}
 
 	message := s.newMessage(req.MessageID, senderID, MessageKindMessage, content)
+	if strings.TrimSpace(req.MessageID) != "" {
+		for idx := range room.Messages {
+			if room.Messages[idx].ID != message.ID {
+				continue
+			}
+			if room.Messages[idx].SenderID != senderID {
+				return Message{}, fmt.Errorf("message id %q already exists for another sender", message.ID)
+			}
+			message.CreatedAt = room.Messages[idx].CreatedAt
+			room.Messages[idx] = message
+			if err := s.saveLocked(); err != nil {
+				return Message{}, err
+			}
+			return message, nil
+		}
+	}
 	room.Messages = append(room.Messages, message)
 	if err := s.saveLocked(); err != nil {
 		return Message{}, err

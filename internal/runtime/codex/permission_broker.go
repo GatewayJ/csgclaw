@@ -1,0 +1,372 @@
+package codex
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	acp "github.com/coder/acp-go-sdk"
+)
+
+const (
+	defaultPermissionTimeout  = time.Minute
+	defaultPermissionCacheTTL = 10 * time.Minute
+)
+
+var (
+	ErrPermissionNotFound       = errors.New("permission request not found")
+	ErrPermissionInvalidOption  = errors.New("permission option is invalid")
+	ErrPermissionAlreadyDecided = errors.New("permission request already decided")
+	ErrPermissionGone           = errors.New("permission request is no longer pending")
+)
+
+type PermissionStatus string
+
+const (
+	PermissionStatusPending  PermissionStatus = "pending"
+	PermissionStatusAllowed  PermissionStatus = "allowed"
+	PermissionStatusRejected PermissionStatus = "rejected"
+	PermissionStatusExpired  PermissionStatus = "expired"
+	PermissionStatusCanceled PermissionStatus = "canceled"
+)
+
+type PermissionOptionSnapshot struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
+}
+
+type PermissionDecisionSnapshot struct {
+	OptionID  string    `json:"option_id,omitempty"`
+	Kind      string    `json:"kind,omitempty"`
+	DecidedAt time.Time `json:"decided_at"`
+}
+
+type PermissionSnapshot struct {
+	ID          string                      `json:"id"`
+	RuntimeID   string                      `json:"runtime_id"`
+	SessionID   string                      `json:"session_id"`
+	ToolCallID  string                      `json:"tool_call_id"`
+	ToolTitle   string                      `json:"title"`
+	ToolKind    string                      `json:"tool_kind,omitempty"`
+	Status      PermissionStatus            `json:"status"`
+	RequestedAt time.Time                   `json:"requested_at"`
+	ExpiresAt   time.Time                   `json:"expires_at"`
+	Options     []PermissionOptionSnapshot  `json:"options,omitempty"`
+	Decision    *PermissionDecisionSnapshot `json:"decision,omitempty"`
+}
+
+type PendingPermissionRequest struct {
+	RuntimeID   string
+	SessionID   string
+	ToolCallID  string
+	ToolTitle   string
+	ToolKind    string
+	Options     []PermissionOptionSnapshot
+	RequestedAt time.Time
+	Timeout     time.Duration
+}
+
+type PermissionDecision struct {
+	Snapshot PermissionSnapshot
+}
+
+type PermissionBroker interface {
+	Request(ctx context.Context, req PendingPermissionRequest) (PermissionDecision, error)
+	Decide(ctx context.Context, requestID string, optionID string) (PermissionSnapshot, error)
+	Get(requestID string) (PermissionSnapshot, bool)
+	CancelSession(runtimeID string, sessionID string)
+}
+
+type PermissionDecider interface {
+	Decide(ctx context.Context, requestID string, optionID string) (PermissionSnapshot, error)
+}
+
+type MemoryPermissionBroker struct {
+	mu        sync.Mutex
+	nextID    int
+	idPrefix  string
+	timeout   time.Duration
+	cacheTTL  time.Duration
+	eventSink SessionEventSink
+	pending   map[string]*pendingPermission
+	completed map[string]completedPermission
+}
+
+type pendingPermission struct {
+	snapshot PermissionSnapshot
+	done     chan PermissionSnapshot
+}
+
+type completedPermission struct {
+	snapshot  PermissionSnapshot
+	expiresAt time.Time
+}
+
+func NewPermissionBroker(eventSink SessionEventSink) *MemoryPermissionBroker {
+	return &MemoryPermissionBroker{
+		idPrefix:  fmt.Sprintf("perm-%d-%d", os.Getpid(), time.Now().UTC().UnixNano()),
+		timeout:   defaultPermissionTimeout,
+		cacheTTL:  defaultPermissionCacheTTL,
+		eventSink: eventSink,
+		pending:   make(map[string]*pendingPermission),
+		completed: make(map[string]completedPermission),
+	}
+}
+
+func (b *MemoryPermissionBroker) Request(ctx context.Context, req PendingPermissionRequest) (PermissionDecision, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	now := req.RequestedAt.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	timeout := req.Timeout
+	if timeout <= 0 {
+		timeout = b.timeout
+	}
+	if timeout <= 0 {
+		timeout = defaultPermissionTimeout
+	}
+	snapshot := PermissionSnapshot{
+		ID:          b.nextRequestID(),
+		RuntimeID:   strings.TrimSpace(req.RuntimeID),
+		SessionID:   strings.TrimSpace(req.SessionID),
+		ToolCallID:  strings.TrimSpace(req.ToolCallID),
+		ToolTitle:   firstPermissionText(req.ToolTitle, "Run tool"),
+		ToolKind:    strings.TrimSpace(req.ToolKind),
+		Status:      PermissionStatusPending,
+		RequestedAt: now,
+		ExpiresAt:   now.Add(timeout),
+		Options:     normalizedPermissionOptions(req.Options),
+	}
+
+	pending := &pendingPermission{snapshot: snapshot, done: make(chan PermissionSnapshot, 1)}
+	b.mu.Lock()
+	b.pending[snapshot.ID] = pending
+	b.mu.Unlock()
+
+	b.publish(permissionRequestEvent(snapshot))
+
+	if len(snapshot.Options) == 0 {
+		decided := b.finish(snapshot.ID, PermissionStatusCanceled, nil)
+		b.publish(permissionDecisionEvent(decided))
+		return PermissionDecision{Snapshot: decided}, nil
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case decided := <-pending.done:
+		b.publish(permissionDecisionEvent(decided))
+		return PermissionDecision{Snapshot: decided}, nil
+	case <-timer.C:
+		decided := b.finish(snapshot.ID, PermissionStatusExpired, nil)
+		b.publish(permissionDecisionEvent(decided))
+		return PermissionDecision{Snapshot: decided}, nil
+	case <-ctx.Done():
+		decided := b.finish(snapshot.ID, PermissionStatusCanceled, nil)
+		b.publish(permissionDecisionEvent(decided))
+		return PermissionDecision{Snapshot: decided}, nil
+	}
+}
+
+func (b *MemoryPermissionBroker) Decide(_ context.Context, requestID string, optionID string) (PermissionSnapshot, error) {
+	requestID = strings.TrimSpace(requestID)
+	optionID = strings.TrimSpace(optionID)
+	if requestID == "" || optionID == "" {
+		return PermissionSnapshot{}, ErrPermissionInvalidOption
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now().UTC()
+	b.pruneCompletedLocked(now)
+
+	if snapshot, ok := b.completedSnapshotLocked(requestID, now); ok {
+		if snapshot.Status == PermissionStatusExpired || snapshot.Status == PermissionStatusCanceled {
+			return snapshot, ErrPermissionGone
+		}
+		return snapshot, ErrPermissionAlreadyDecided
+	}
+	pending := b.pending[requestID]
+	if pending == nil {
+		return PermissionSnapshot{}, ErrPermissionNotFound
+	}
+	if now.After(pending.snapshot.ExpiresAt) {
+		snapshot := b.finishLocked(requestID, PermissionStatusExpired, nil)
+		return snapshot, ErrPermissionGone
+	}
+
+	option, ok := findPermissionOption(pending.snapshot.Options, optionID)
+	if !ok {
+		return pending.snapshot, ErrPermissionInvalidOption
+	}
+	status := PermissionStatusRejected
+	if permissionOptionAllows(option.Kind) {
+		status = PermissionStatusAllowed
+	}
+	decision := &PermissionDecisionSnapshot{
+		OptionID:  option.ID,
+		Kind:      option.Kind,
+		DecidedAt: time.Now().UTC(),
+	}
+	return b.finishLocked(requestID, status, decision), nil
+}
+
+func (b *MemoryPermissionBroker) Get(requestID string) (PermissionSnapshot, bool) {
+	requestID = strings.TrimSpace(requestID)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now().UTC()
+	b.pruneCompletedLocked(now)
+	if pending := b.pending[requestID]; pending != nil {
+		return pending.snapshot, true
+	}
+	return b.completedSnapshotLocked(requestID, now)
+}
+
+func (b *MemoryPermissionBroker) CancelSession(runtimeID string, sessionID string) {
+	runtimeID = strings.TrimSpace(runtimeID)
+	sessionID = strings.TrimSpace(sessionID)
+	if runtimeID == "" && sessionID == "" {
+		return
+	}
+
+	b.mu.Lock()
+	for id, pending := range b.pending {
+		if runtimeID != "" && pending.snapshot.RuntimeID != runtimeID {
+			continue
+		}
+		if sessionID != "" && pending.snapshot.SessionID != sessionID {
+			continue
+		}
+		b.finishLocked(id, PermissionStatusCanceled, nil)
+	}
+	b.mu.Unlock()
+}
+
+func (b *MemoryPermissionBroker) nextRequestID() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.nextID++
+	return fmt.Sprintf("%s-%d", b.idPrefix, b.nextID)
+}
+
+func (b *MemoryPermissionBroker) finish(requestID string, status PermissionStatus, decision *PermissionDecisionSnapshot) PermissionSnapshot {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.finishLocked(requestID, status, decision)
+}
+
+func (b *MemoryPermissionBroker) finishLocked(requestID string, status PermissionStatus, decision *PermissionDecisionSnapshot) PermissionSnapshot {
+	now := time.Now().UTC()
+	b.pruneCompletedLocked(now)
+	pending := b.pending[requestID]
+	if pending == nil {
+		if snapshot, ok := b.completedSnapshotLocked(requestID, now); ok {
+			return snapshot
+		}
+		return PermissionSnapshot{ID: requestID, Status: status, Decision: decision}
+	}
+
+	snapshot := pending.snapshot
+	snapshot.Status = status
+	snapshot.Decision = decision
+	delete(b.pending, requestID)
+	b.completed[requestID] = completedPermission{
+		snapshot:  snapshot,
+		expiresAt: now.Add(b.cacheTTL),
+	}
+	pending.done <- snapshot
+	close(pending.done)
+	return snapshot
+}
+
+func (b *MemoryPermissionBroker) completedSnapshotLocked(requestID string, now time.Time) (PermissionSnapshot, bool) {
+	completed, ok := b.completed[requestID]
+	if !ok {
+		return PermissionSnapshot{}, false
+	}
+	if !completed.expiresAt.IsZero() && !now.Before(completed.expiresAt) {
+		delete(b.completed, requestID)
+		return PermissionSnapshot{}, false
+	}
+	return completed.snapshot, true
+}
+
+func (b *MemoryPermissionBroker) pruneCompletedLocked(now time.Time) {
+	for id, completed := range b.completed {
+		if !completed.expiresAt.IsZero() && !now.Before(completed.expiresAt) {
+			delete(b.completed, id)
+		}
+	}
+}
+
+func (b *MemoryPermissionBroker) publish(event SessionEvent) {
+	if b != nil && b.eventSink != nil {
+		b.eventSink.Publish(event)
+	}
+}
+
+func PermissionOptionsFromACP(options []acp.PermissionOption) []PermissionOptionSnapshot {
+	out := make([]PermissionOptionSnapshot, 0, len(options))
+	for _, option := range options {
+		out = append(out, PermissionOptionSnapshot{
+			ID:    strings.TrimSpace(string(option.OptionId)),
+			Kind:  strings.TrimSpace(string(option.Kind)),
+			Label: firstPermissionText(option.Name, string(option.Kind), string(option.OptionId)),
+		})
+	}
+	return normalizedPermissionOptions(out)
+}
+
+func normalizedPermissionOptions(options []PermissionOptionSnapshot) []PermissionOptionSnapshot {
+	out := make([]PermissionOptionSnapshot, 0, len(options))
+	for _, option := range options {
+		id := strings.TrimSpace(option.ID)
+		if id == "" {
+			continue
+		}
+		kind := strings.TrimSpace(option.Kind)
+		out = append(out, PermissionOptionSnapshot{
+			ID:    id,
+			Kind:  kind,
+			Label: firstPermissionText(option.Label, kind, id),
+		})
+	}
+	return out
+}
+
+func findPermissionOption(options []PermissionOptionSnapshot, optionID string) (PermissionOptionSnapshot, bool) {
+	for _, option := range options {
+		if option.ID == optionID {
+			return option, true
+		}
+	}
+	return PermissionOptionSnapshot{}, false
+}
+
+func permissionOptionAllows(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case string(acp.PermissionOptionKindAllowOnce), string(acp.PermissionOptionKindAllowAlways):
+		return true
+	default:
+		return false
+	}
+}
+
+func firstPermissionText(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}

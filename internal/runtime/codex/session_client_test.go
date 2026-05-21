@@ -30,6 +30,18 @@ func (s *recordingSink) snapshot() []SessionEvent {
 	return out
 }
 
+func waitForRuntime(t *testing.T, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("condition not satisfied before timeout")
+}
+
 func TestSessionClientPublishesNormalizedEvents(t *testing.T) {
 	t.Parallel()
 
@@ -87,38 +99,65 @@ func TestSessionClientPublishesNormalizedEvents(t *testing.T) {
 	}
 }
 
-func TestSessionClientRequestPermissionPrefersAllowOnce(t *testing.T) {
+func TestSessionClientRequestPermissionWaitsForBrokerDecision(t *testing.T) {
 	t.Parallel()
 
 	sink := &recordingSink{}
+	broker := NewPermissionBroker(sink)
 	client := &sessionClient{
-		runtimeID: "rt-worker",
-		eventSink: sink,
+		runtimeID:        "rt-worker",
+		eventSink:        sink,
+		permissionBroker: broker,
 	}
 
-	resp, err := client.RequestPermission(context.Background(), acp.RequestPermissionRequest{
-		SessionId: "sess-1",
-		ToolCall:  acp.ToolCallUpdate{ToolCallId: "tool-1"},
-		Options: []acp.PermissionOption{
-			{OptionId: "always", Kind: acp.PermissionOptionKindAllowAlways, Name: "Always"},
-			{OptionId: "once", Kind: acp.PermissionOptionKindAllowOnce, Name: "Once"},
-		},
+	respCh := make(chan acp.RequestPermissionResponse, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := client.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+			SessionId: "sess-1",
+			ToolCall:  acp.ToolCallUpdate{ToolCallId: "tool-1"},
+			Options: []acp.PermissionOption{
+				{OptionId: "always", Kind: acp.PermissionOptionKindAllowAlways, Name: "Always"},
+				{OptionId: "once", Kind: acp.PermissionOptionKindAllowOnce, Name: "Once"},
+			},
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		respCh <- resp
+	}()
+
+	waitForRuntime(t, func() bool {
+		events := sink.snapshot()
+		return len(events) == 1 && events[0].Kind == SessionEventPermissionRequest
 	})
+	events := sink.snapshot()
+	_, err := broker.Decide(context.Background(), events[0].PermissionRequestID, "once")
 	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+
+	var resp acp.RequestPermissionResponse
+	select {
+	case err := <-errCh:
 		t.Fatalf("RequestPermission() error = %v", err)
+	case resp = <-respCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("RequestPermission did not return after decision")
 	}
 	if resp.Outcome.Selected == nil || resp.Outcome.Selected.OptionId != "once" {
-		t.Fatalf("selected option = %#v, want allow once", resp.Outcome.Selected)
+		t.Fatalf("selected option = %#v, want selected once", resp.Outcome.Selected)
 	}
 
-	events := sink.snapshot()
+	events = sink.snapshot()
 	if len(events) != 2 {
 		t.Fatalf("published events = %d, want 2", len(events))
 	}
-	if events[0].Kind != SessionEventPermissionRequest {
+	if events[0].Kind != SessionEventPermissionRequest || events[0].PermissionStatus != string(PermissionStatusPending) {
 		t.Fatalf("event[0] = %#v", events[0])
 	}
-	if events[1].Kind != SessionEventPermissionDecision || events[1].PermissionOptionID != "once" {
+	if events[1].Kind != SessionEventPermissionDecision || events[1].PermissionOptionID != "once" || events[1].PermissionStatus != string(PermissionStatusAllowed) {
 		t.Fatalf("event[1] = %#v", events[1])
 	}
 }

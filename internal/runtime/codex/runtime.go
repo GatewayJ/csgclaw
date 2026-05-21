@@ -107,8 +107,13 @@ type SessionEvent struct {
 	MessageID            string
 	Text                 string
 	ToolCallID           string
+	ToolKind             string
 	ToolTitle            string
 	ToolStatus           string
+	ToolInputSummary     string
+	ToolOutputSummary    string
+	PermissionRequestID  string
+	PermissionStatus     string
 	PermissionOptionID   string
 	PermissionOptionKind string
 	StopReason           string
@@ -126,6 +131,7 @@ type Dependencies struct {
 	AgentHome      func(agentName string) (string, error)
 	Manager        Manager
 	EventSink      SessionEventSink
+	Permission     PermissionBroker
 
 	MkdirAll  func(string, os.FileMode) error
 	ReadFile  func(string) ([]byte, error)
@@ -158,6 +164,10 @@ func (r *Runtime) SessionManager() Manager {
 
 func (r *Runtime) EventSink() SessionEventSink {
 	return r.deps.EventSink
+}
+
+func (r *Runtime) PermissionBroker() PermissionBroker {
+	return r.permissionBroker()
 }
 
 func (r *Runtime) New(ctx context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
@@ -297,10 +307,11 @@ func (r *Runtime) sessionManager() Manager {
 		return r.deps.Manager
 	}
 	r.deps.Manager = newACPManager(acpManagerDeps{
-		EventSink: r.deps.EventSink,
-		OpenFile:  r.openFile,
-		WriteFile: r.writeFile,
-		ReadFile:  r.readFile,
+		EventSink:  r.deps.EventSink,
+		Permission: r.permissionBroker(),
+		OpenFile:   r.openFile,
+		WriteFile:  r.writeFile,
+		ReadFile:   r.readFile,
 		OnExit: func(session *Session, exitCode int) {
 			if session == nil {
 				return
@@ -318,6 +329,14 @@ func (r *Runtime) sessionManager() Manager {
 		},
 	})
 	return r.deps.Manager
+}
+
+func (r *Runtime) permissionBroker() PermissionBroker {
+	if r.deps.Permission != nil {
+		return r.deps.Permission
+	}
+	r.deps.Permission = NewPermissionBroker(r.deps.EventSink)
+	return r.deps.Permission
 }
 
 func (r *Runtime) ensureSession(ctx context.Context, spec SessionSpec) (*Session, error) {
@@ -759,11 +778,12 @@ func writeJSONFile(writeFile func(string, []byte, os.FileMode) error, path strin
 }
 
 type acpManagerDeps struct {
-	EventSink SessionEventSink
-	OpenFile  func(string, int, os.FileMode) (*os.File, error)
-	WriteFile func(string, []byte, os.FileMode) error
-	ReadFile  func(string) ([]byte, error)
-	OnExit    func(*Session, int)
+	EventSink  SessionEventSink
+	Permission PermissionBroker
+	OpenFile   func(string, int, os.FileMode) (*os.File, error)
+	WriteFile  func(string, []byte, os.FileMode) error
+	ReadFile   func(string) ([]byte, error)
+	OnExit     func(*Session, int)
 }
 
 type acpManager struct {

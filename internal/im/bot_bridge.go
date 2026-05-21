@@ -34,8 +34,9 @@ type BotSender struct {
 }
 
 type BotSendMessageRequest struct {
-	RoomID string `json:"room_id"`
-	Text   string `json:"text"`
+	RoomID    string `json:"room_id"`
+	Text      string `json:"text"`
+	MessageID string `json:"message_id,omitempty"`
 }
 
 func NewBotBridge(string) *BotBridge {
