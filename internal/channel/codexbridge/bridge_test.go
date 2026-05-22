@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -56,11 +57,11 @@ func (c *fakeBotClient) streamContexts() []context.Context {
 	return out
 }
 
-func (c *fakeBotClient) SendMessage(_ context.Context, _ string, req SendMessageRequest) error {
+func (c *fakeBotClient) SendMessage(_ context.Context, _ string, req SendMessageRequest) (SendMessageResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sendRecords = append(c.sendRecords, req)
-	return nil
+	return SendMessageResponse{MessageID: "sent-" + strconv.Itoa(len(c.sendRecords))}, nil
 }
 
 func (c *fakeBotClient) sentTexts() []string {
@@ -73,7 +74,7 @@ func (c *fakeBotClient) sentTexts() []string {
 	return out
 }
 
-func (c *fakeBotClient) sentMessages() []SendMessageRequest {
+func (c *fakeBotClient) sentRecords() []SendMessageRequest {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := make([]SendMessageRequest, len(c.sendRecords))
@@ -87,10 +88,17 @@ type promptCall struct {
 	text      string
 }
 
+type ensureCall struct {
+	runtimeID       string
+	conversationKey string
+}
+
 type fakePrompter struct {
-	mu     sync.Mutex
-	calls  []promptCall
-	prompt func(context.Context, runtimecodex.SessionHandle, acp.PromptRequest) error
+	mu      sync.Mutex
+	calls   []promptCall
+	ensures []ensureCall
+	prompt  func(context.Context, runtimecodex.SessionHandle, acp.PromptRequest) error
+	ensure  func(context.Context, runtimecodex.SessionHandle, string) (string, error)
 }
 
 func (p *fakePrompter) Prompt(ctx context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) (acp.PromptResponse, error) {
@@ -110,6 +118,16 @@ func (p *fakePrompter) Prompt(ctx context.Context, handle runtimecodex.SessionHa
 	return acp.PromptResponse{}, nil
 }
 
+func (p *fakePrompter) EnsureSession(ctx context.Context, handle runtimecodex.SessionHandle, conversationKey string) (string, error) {
+	p.mu.Lock()
+	p.ensures = append(p.ensures, ensureCall{runtimeID: handle.RuntimeID, conversationKey: conversationKey})
+	p.mu.Unlock()
+	if p.ensure != nil {
+		return p.ensure(ctx, handle, conversationKey)
+	}
+	return "", nil
+}
+
 func (p *fakePrompter) texts() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -117,6 +135,24 @@ func (p *fakePrompter) texts() []string {
 	for _, call := range p.calls {
 		out = append(out, call.text)
 	}
+	return out
+}
+
+func (p *fakePrompter) sessionIDs() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, 0, len(p.calls))
+	for _, call := range p.calls {
+		out = append(out, call.sessionID)
+	}
+	return out
+}
+
+func (p *fakePrompter) ensureCalls() []ensureCall {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]ensureCall, len(p.ensures))
+	copy(out, p.ensures)
 	return out
 }
 
@@ -161,6 +197,302 @@ func TestServiceRoundTrip(t *testing.T) {
 
 	waitFor(t, func() bool {
 		return slices.Equal(prompter.texts(), []string{"hello"}) && slices.Equal(client.sentTexts(), []string{"Hello back"})
+	})
+}
+
+func TestServiceEnsuresConversationSessionAndInjectsHiddenThreadContext(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{
+		MessageID:    "m-1",
+		RoomID:       "room-1",
+		ThreadRootID: "msg-root",
+		Text:         "hi",
+		ThreadContext: &BotThreadContext{
+			RootMessageID: "msg-root",
+			Context: []BotThreadContextMessage{
+				{ID: "msg-before", SenderID: "u-admin", Content: "Need help with deployment", CreatedAt: "2026-05-20T08:00:00Z"},
+				{ID: "msg-root", SenderID: "u-admin", Content: "Can you coordinate release?", CreatedAt: "2026-05-20T08:01:00Z"},
+			},
+		},
+	}
+
+	sink := runtimeactivity.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{
+		ensure: func(_ context.Context, _ runtimecodex.SessionHandle, key string) (string, error) {
+			if key != "room-1:msg-root" {
+				t.Fatalf("conversation key = %q, want room-1:msg-root", key)
+			}
+			return "acp-thread-session", nil
+		},
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventTextDelta,
+				Text:      "hello from thread",
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventPromptCompleted,
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		texts := prompter.texts()
+		return slices.Equal(prompter.sessionIDs(), []string{"acp-thread-session"}) &&
+			len(texts) == 1 &&
+			strings.Contains(texts[0], "Hidden thread context") &&
+			strings.Contains(texts[0], "Need help with deployment") &&
+			strings.Contains(texts[0], "Current thread message:\nhi") &&
+			slices.Equal(client.sentTexts(), []string{"hello from thread"})
+	})
+	if got := prompter.ensureCalls(); len(got) != 1 || got[0].conversationKey != "room-1:msg-root" {
+		t.Fatalf("EnsureSession calls = %+v, want one thread conversation key", got)
+	}
+}
+
+func TestServiceUsesConversationScopedSessionsAndThreadReplies(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", ThreadRootID: "msg-root", Text: "hello in thread"}
+
+	sink := runtimeactivity.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventTextDelta,
+				Text:      "thread reply",
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventPromptCompleted,
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		return slices.Equal(prompter.sessionIDs(), []string{"sess-1:room-1:msg-root"}) &&
+			len(client.sentRecords()) == 1 &&
+			client.sentRecords()[0].ThreadRootID == "msg-root"
+	})
+}
+
+func TestServiceProjectsToolCallsAsActivityCardsAlongsideResponse(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "run it"}
+
+	sink := runtimeactivity.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:  handle.RuntimeID,
+				SessionID:  string(req.SessionId),
+				Kind:       runtimecodex.SessionEventToolCallStart,
+				ToolCallID: "tool-1",
+				ToolTitle:  "Run shell command",
+				ToolStatus: string(acp.ToolCallStatusPending),
+				Payload:    acp.SessionUpdateToolCall{ToolCallId: "tool-1", Title: "Run shell command", Status: acp.ToolCallStatusPending},
+			})
+			completed := acp.ToolCallStatusCompleted
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:         handle.RuntimeID,
+				SessionID:         string(req.SessionId),
+				Kind:              runtimecodex.SessionEventToolCallUpdate,
+				ToolCallID:        "tool-1",
+				ToolStatus:        string(acp.ToolCallStatusCompleted),
+				ToolOutputSummary: "command output",
+				Payload:           acp.SessionToolCallUpdate{ToolCallId: "tool-1", Status: &completed, RawOutput: "command output"},
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventTextDelta,
+				Text:      "done",
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventPromptCompleted,
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		records := client.sentRecords()
+		return len(records) == 3 &&
+			records[0].RoomID == "room-1" &&
+			records[0].ThreadRootID == "" &&
+			strings.Contains(records[0].Text, runtimebridge.AgentToolMsgType) &&
+			records[1].RoomID == "room-1" &&
+			records[1].ThreadRootID == "" &&
+			strings.Contains(records[1].Text, runtimebridge.AgentToolMsgType) &&
+			strings.Contains(records[1].Text, "command output") &&
+			records[2].RoomID == "room-1" &&
+			records[2].ThreadRootID == "" &&
+			records[2].Text == "done"
+	})
+}
+
+func TestServiceKeepsToolActivityInsideExistingThread(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{MessageID: "m-thread-reply", RoomID: "room-1", ThreadRootID: "msg-root", Text: "run it"}
+
+	sink := runtimeactivity.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:  handle.RuntimeID,
+				SessionID:  string(req.SessionId),
+				Kind:       runtimecodex.SessionEventToolCallStart,
+				ToolCallID: "tool-1",
+				ToolTitle:  "Run shell command",
+				ToolStatus: string(acp.ToolCallStatusPending),
+				Payload:    acp.SessionUpdateToolCall{ToolCallId: "tool-1", Title: "Run shell command", Status: acp.ToolCallStatusPending},
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventTextDelta,
+				Text:      "thread done",
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventPromptCompleted,
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		records := client.sentRecords()
+		return len(records) == 2 &&
+			records[0].RoomID == "room-1" &&
+			records[0].ThreadRootID == "msg-root" &&
+			strings.Contains(records[0].Text, runtimebridge.AgentToolMsgType) &&
+			records[1].RoomID == "room-1" &&
+			records[1].ThreadRootID == "msg-root" &&
+			records[1].Text == "thread done"
+	})
+}
+
+func TestServiceDedupesMessagesWithinConversationScope(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 2)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", ThreadRootID: "msg-a", Text: "first thread"}
+	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", ThreadRootID: "msg-b", Text: "second thread"}
+
+	sink := runtimeactivity.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventTextDelta,
+				Text:      "reply",
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventPromptCompleted,
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		return slices.Equal(prompter.texts(), []string{"first thread", "second thread"})
 	})
 }
 
@@ -621,9 +953,9 @@ func TestServiceUsesStableMessageIDForPermissionDecisionActivity(t *testing.T) {
 	defer svc.Close()
 
 	waitFor(t, func() bool {
-		return len(client.sentMessages()) == 2
+		return len(client.sentRecords()) == 2
 	})
-	sent := client.sentMessages()
+	sent := client.sentRecords()
 	if sent[0].MessageID == "" || sent[0].MessageID != sent[1].MessageID {
 		t.Fatalf("permission message ids = %q / %q, want stable non-empty id", sent[0].MessageID, sent[1].MessageID)
 	}

@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	AgentActivityVersion   = 1
 	AgentActivityType      = "com.opencsg.csgclaw.agent.activity"
 	AgentToolMsgType       = "com.opencsg.csgclaw.agent.tool"
 	AgentPermissionMsgType = "com.opencsg.csgclaw.agent.permission"
@@ -149,6 +150,7 @@ func renderActivityPayload(event runtimeactivity.Event, roomID, senderID string,
 	eventID := activityEventID(event)
 	payload := agentActivityPayload{
 		Type:           AgentActivityType,
+		Version:        AgentActivityVersion,
 		EventID:        eventID,
 		RoomID:         strings.TrimSpace(roomID),
 		Sender:         strings.TrimSpace(senderID),
@@ -167,6 +169,7 @@ func renderActivityPayload(event runtimeactivity.Event, roomID, senderID string,
 
 type agentActivityPayload struct {
 	Type           string `json:"type"`
+	Version        int    `json:"version"`
 	EventID        string `json:"event_id"`
 	RoomID         string `json:"room_id"`
 	Sender         string `json:"sender"`

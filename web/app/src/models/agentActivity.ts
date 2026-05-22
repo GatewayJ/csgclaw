@@ -59,6 +59,7 @@ export type AgentActivityPayload = {
   room_id: string;
   sender: string;
   type: typeof CSGCLAW_AGENT_ACTIVITY_TYPE;
+  version: number;
 };
 
 export function parseAgentActivity(content: unknown): AgentActivityPayload | null {
@@ -86,6 +87,7 @@ export function parseAgentActivity(content: unknown): AgentActivityPayload | nul
     room_id: stringValue(parsed.room_id),
     sender: stringValue(parsed.sender),
     type: CSGCLAW_AGENT_ACTIVITY_TYPE,
+    version: numberValue(parsed.version, 1),
   };
 }
 
@@ -216,6 +218,6 @@ function stringValue(...values: unknown[]): string {
   return "";
 }
 
-function numberValue(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+function numberValue(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }

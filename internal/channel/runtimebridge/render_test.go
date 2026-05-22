@@ -43,6 +43,7 @@ func TestTurnRendererMergesToolUpdateDeltas(t *testing.T) {
 
 	var payload struct {
 		Type    string `json:"type"`
+		Version int    `json:"version"`
 		Content struct {
 			Tool struct {
 				Title         string `json:"title"`
@@ -57,6 +58,9 @@ func TestTurnRendererMergesToolUpdateDeltas(t *testing.T) {
 	}
 	if payload.Type != AgentActivityType {
 		t.Fatalf("type = %q, want %q", payload.Type, AgentActivityType)
+	}
+	if payload.Version != AgentActivityVersion {
+		t.Fatalf("version = %d, want %d", payload.Version, AgentActivityVersion)
 	}
 	if payload.Content.Tool.Title != "Run shell command" {
 		t.Fatalf("title = %q, want prior title", payload.Content.Tool.Title)

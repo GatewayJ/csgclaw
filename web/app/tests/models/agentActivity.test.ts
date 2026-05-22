@@ -9,6 +9,7 @@ describe("agent activity model", () => {
     const activity = parseAgentActivity(
       JSON.stringify({
         type: CSGCLAW_AGENT_ACTIVITY_TYPE,
+        version: 1,
         event_id: "act-1",
         room_id: "room-1",
         sender: "u-codex",
@@ -32,6 +33,22 @@ describe("agent activity model", () => {
       status: "running",
       title: "Run shell command",
     });
+    expect(activity?.version).toBe(1);
+  });
+
+  it("defaults legacy activity payloads to version 1", () => {
+    const activity = parseAgentActivity(
+      JSON.stringify({
+        type: CSGCLAW_AGENT_ACTIVITY_TYPE,
+        content: {
+          msgtype: AgentActivityMsgTypes.tool,
+          body: "Running tool",
+          tool: { id: "tool-1", status: "running", title: "Run shell command" },
+        },
+      }),
+    );
+
+    expect(activity?.version).toBe(1);
   });
 
   it("classifies tool messages", () => {
