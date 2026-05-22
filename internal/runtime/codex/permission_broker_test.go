@@ -43,9 +43,9 @@ func TestPermissionBrokerDecideSelectsOption(t *testing.T) {
 
 	waitForRuntime(t, func() bool {
 		events := sink.snapshot()
-		return len(events) == 1 && events[0].PermissionRequestID != ""
+		return len(events) == 1 && events[0].ActionID != ""
 	})
-	requestID := sink.snapshot()[0].PermissionRequestID
+	requestID := sink.snapshot()[0].ActionID
 	snapshot, err := broker.Decide(context.Background(), requestID, "reject")
 	if err != nil {
 		t.Fatalf("Decide() error = %v", err)
@@ -81,9 +81,9 @@ func TestPermissionBrokerDuplicateDecisionReturnsConflictSnapshot(t *testing.T) 
 
 	waitForRuntime(t, func() bool {
 		events := sink.snapshot()
-		return len(events) == 1 && events[0].PermissionRequestID != ""
+		return len(events) == 1 && events[0].ActionID != ""
 	})
-	requestID := sink.snapshot()[0].PermissionRequestID
+	requestID := sink.snapshot()[0].ActionID
 	if _, err := broker.Decide(context.Background(), requestID, "once"); err != nil {
 		t.Fatalf("first Decide() error = %v", err)
 	}
@@ -115,9 +115,9 @@ func TestPermissionBrokerCompletedCacheExpires(t *testing.T) {
 
 	waitForRuntime(t, func() bool {
 		events := sink.snapshot()
-		return len(events) == 1 && events[0].PermissionRequestID != ""
+		return len(events) == 1 && events[0].ActionID != ""
 	})
-	requestID := sink.snapshot()[0].PermissionRequestID
+	requestID := sink.snapshot()[0].ActionID
 	if _, err := broker.Decide(context.Background(), requestID, "once"); err != nil {
 		t.Fatalf("Decide() error = %v", err)
 	}

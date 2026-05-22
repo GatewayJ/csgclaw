@@ -4,6 +4,7 @@ export const ACTION_REBUILD_MANAGER = "rebuild-manager";
 export const CSGCLAW_AGENT_ACTIVITY_TYPE = "com.opencsg.csgclaw.agent.activity";
 
 export const AgentActivityMsgTypes = {
+  action: "com.opencsg.csgclaw.agent.action",
   notice: "com.opencsg.csgclaw.agent.notice",
   permission: "com.opencsg.csgclaw.agent.permission",
   tool: "com.opencsg.csgclaw.agent.tool",

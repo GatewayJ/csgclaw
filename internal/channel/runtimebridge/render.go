@@ -6,14 +6,14 @@ import (
 	"strings"
 	"time"
 
-	runtimeactivity "csgclaw/internal/runtime/activity"
+	"csgclaw/internal/activity"
 )
 
 const (
-	AgentActivityVersion   = 1
-	AgentActivityType      = "com.opencsg.csgclaw.agent.activity"
-	AgentToolMsgType       = "com.opencsg.csgclaw.agent.tool"
-	AgentPermissionMsgType = "com.opencsg.csgclaw.agent.permission"
+	AgentActivityVersion = 1
+	AgentActivityType    = "com.opencsg.csgclaw.agent.activity"
+	AgentToolMsgType     = "com.opencsg.csgclaw.agent.tool"
+	AgentActionMsgType   = "com.opencsg.csgclaw.agent.action"
 )
 
 type TurnRenderer struct {
@@ -30,17 +30,17 @@ func NewTurnRenderer() *TurnRenderer {
 	}
 }
 
-func (r *TurnRenderer) ApplyText(event runtimeactivity.Event) {
+func (r *TurnRenderer) ApplyText(event activity.Event) {
 	if r == nil {
 		return
 	}
 
 	switch event.Kind {
-	case runtimeactivity.EventTextDelta:
+	case activity.EventTextDelta:
 		if event.Text != "" {
 			_, _ = r.text.WriteString(event.Text)
 		}
-	case runtimeactivity.EventPromptFailed:
+	case activity.EventPromptFailed:
 		r.promptError = strings.TrimSpace(event.Error)
 	}
 }
@@ -65,35 +65,35 @@ func (r *TurnRenderer) SetPromptError(err string) {
 	}
 }
 
-func (r *TurnRenderer) RenderActivity(event runtimeactivity.Event, roomID, senderID string) (RenderedActivity, bool) {
+func (r *TurnRenderer) RenderActivity(event activity.Event, roomID, senderID string) (RenderedActivity, bool) {
 	if r == nil {
 		return RenderedActivity{}, false
 	}
 	switch event.Kind {
-	case runtimeactivity.EventToolCallStart:
+	case activity.EventToolCallStart:
 		tool, changed := r.mergeToolSnapshot(event)
 		if !changed {
 			return RenderedActivity{}, false
 		}
 		return renderActivityPayload(event, roomID, senderID, toolActivityContent(event, tool))
-	case runtimeactivity.EventToolCallUpdate:
+	case activity.EventToolCallUpdate:
 		tool, changed := r.mergeToolSnapshot(event)
 		if !changed {
 			return RenderedActivity{}, false
 		}
 		return renderActivityPayload(event, roomID, senderID, toolActivityContent(event, tool))
-	case runtimeactivity.EventPermissionRequest, runtimeactivity.EventPermissionDecision:
-		snapshot, ok := event.Payload.(runtimeactivity.PermissionSnapshot)
+	case activity.EventActionRequest, activity.EventActionDecision:
+		snapshot, ok := event.Payload.(activity.ActionRequestSnapshot)
 		if !ok {
 			return RenderedActivity{}, false
 		}
-		return renderActivityPayload(event, roomID, senderID, permissionActivityContent(event, snapshot))
+		return renderActivityPayload(event, roomID, senderID, actionActivityContent(event, snapshot))
 	default:
 		return RenderedActivity{}, false
 	}
 }
 
-func (r *TurnRenderer) mergeToolSnapshot(event runtimeactivity.Event) (activityTool, bool) {
+func (r *TurnRenderer) mergeToolSnapshot(event activity.Event) (activityTool, bool) {
 	toolID := strings.TrimSpace(event.ToolCallID)
 	if toolID == "" {
 		return activityTool{}, false
@@ -124,7 +124,7 @@ func (r *TurnRenderer) mergeToolSnapshot(event runtimeactivity.Event) (activityT
 	return tool, true
 }
 
-func displayToolTitle(event runtimeactivity.Event) string {
+func displayToolTitle(event activity.Event) string {
 	title := strings.TrimSpace(event.ToolTitle)
 	if title == "" {
 		title = "Run tool"
@@ -146,7 +146,7 @@ type RenderedActivity struct {
 	Text      string
 }
 
-func renderActivityPayload(event runtimeactivity.Event, roomID, senderID string, content any) (RenderedActivity, bool) {
+func renderActivityPayload(event activity.Event, roomID, senderID string, content any) (RenderedActivity, bool) {
 	eventID := activityEventID(event)
 	payload := agentActivityPayload{
 		Type:           AgentActivityType,
@@ -199,25 +199,26 @@ type activityTool struct {
 	OutputSummary string `json:"output_summary,omitempty"`
 }
 
-type permissionActivity struct {
-	MsgType    string             `json:"msgtype"`
-	Body       string             `json:"body"`
-	Runtime    activityRuntime    `json:"runtime"`
-	Permission activityPermission `json:"permission"`
+type actionActivity struct {
+	MsgType string          `json:"msgtype"`
+	Body    string          `json:"body"`
+	Runtime activityRuntime `json:"runtime"`
+	Action  activityAction  `json:"action"`
 }
 
-type activityPermission struct {
-	ID          string                                      `json:"id"`
-	ToolCallID  string                                      `json:"tool_call_id"`
-	Title       string                                      `json:"title"`
-	Status      string                                      `json:"status"`
-	RequestedAt string                                      `json:"requested_at,omitempty"`
-	ExpiresAt   string                                      `json:"expires_at,omitempty"`
-	Options     []runtimeactivity.PermissionOptionSnapshot  `json:"options,omitempty"`
-	Decision    *runtimeactivity.PermissionDecisionSnapshot `json:"decision,omitempty"`
+type activityAction struct {
+	ID          string                           `json:"id"`
+	Kind        string                           `json:"kind"`
+	ToolCallID  string                           `json:"tool_call_id"`
+	Title       string                           `json:"title"`
+	Status      string                           `json:"status"`
+	RequestedAt string                           `json:"requested_at,omitempty"`
+	ExpiresAt   string                           `json:"expires_at,omitempty"`
+	Options     []activity.ActionOptionSnapshot  `json:"options,omitempty"`
+	Decision    *activity.ActionDecisionSnapshot `json:"decision,omitempty"`
 }
 
-func toolActivityContent(event runtimeactivity.Event, tool activityTool) toolActivity {
+func toolActivityContent(event activity.Event, tool activityTool) toolActivity {
 	if tool.Status == "" {
 		tool.Status = "running"
 	}
@@ -236,29 +237,30 @@ func toolActivityContent(event runtimeactivity.Event, tool activityTool) toolAct
 	}
 }
 
-func permissionActivityContent(event runtimeactivity.Event, snapshot runtimeactivity.PermissionSnapshot) permissionActivity {
+func actionActivityContent(event activity.Event, snapshot activity.ActionRequestSnapshot) actionActivity {
 	status := string(snapshot.Status)
 	bodyStatus := "Permission required"
 	switch snapshot.Status {
-	case runtimeactivity.PermissionStatusAllowed:
+	case activity.ActionStatusAllowed:
 		bodyStatus = "Permission allowed"
-	case runtimeactivity.PermissionStatusRejected:
+	case activity.ActionStatusRejected:
 		bodyStatus = "Permission rejected"
-	case runtimeactivity.PermissionStatusExpired:
+	case activity.ActionStatusExpired:
 		bodyStatus = "Permission expired"
-	case runtimeactivity.PermissionStatusCanceled:
+	case activity.ActionStatusCanceled:
 		bodyStatus = "Permission canceled"
 	}
-	return permissionActivity{
-		MsgType: AgentPermissionMsgType,
+	return actionActivity{
+		MsgType: AgentActionMsgType,
 		Body:    fmt.Sprintf("%s: %s", bodyStatus, displayToolTitle(event)),
 		Runtime: activityRuntime{
 			Kind:      displayRuntimeKind(event),
 			RuntimeID: strings.TrimSpace(snapshot.RuntimeID),
 			SessionID: strings.TrimSpace(snapshot.SessionID),
 		},
-		Permission: activityPermission{
+		Action: activityAction{
 			ID:          strings.TrimSpace(snapshot.ID),
+			Kind:        firstActivityText(snapshot.Kind, activity.ActionKindPermission),
 			ToolCallID:  strings.TrimSpace(snapshot.ToolCallID),
 			Title:       firstActivityText(snapshot.ToolTitle, displayToolTitle(event)),
 			Status:      status,
@@ -288,16 +290,16 @@ func toolSignature(tool activityTool) string {
 	}, "\x00")
 }
 
-func activityEventID(event runtimeactivity.Event) string {
+func activityEventID(event activity.Event) string {
 	parts := []string{"act", strings.TrimSpace(event.RuntimeID), strings.TrimSpace(event.SessionID)}
-	if event.PermissionRequestID != "" {
-		parts = append(parts, event.PermissionRequestID)
+	if event.ActionID != "" {
+		parts = append(parts, event.ActionID)
 		return joinActivityIDParts(parts)
 	} else if event.ToolCallID != "" {
 		parts = append(parts, event.ToolCallID)
 	}
-	if event.PermissionStatus != "" {
-		parts = append(parts, event.PermissionStatus)
+	if event.ActionStatus != "" {
+		parts = append(parts, event.ActionStatus)
 	} else if event.ToolStatus != "" {
 		parts = append(parts, normalizedToolStatus(event.ToolStatus))
 	}
@@ -307,7 +309,7 @@ func activityEventID(event runtimeactivity.Event) string {
 	return joinActivityIDParts(parts)
 }
 
-func displayRuntimeKind(event runtimeactivity.Event) string {
+func displayRuntimeKind(event activity.Event) string {
 	if kind := strings.TrimSpace(event.RuntimeKind); kind != "" {
 		return kind
 	}

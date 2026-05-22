@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"csgclaw/cli/command"
+	"csgclaw/internal/activity"
 	"csgclaw/internal/agent"
 	"csgclaw/internal/api"
 	"csgclaw/internal/apitypes"
@@ -40,7 +41,6 @@ import (
 	"csgclaw/internal/modelprovider"
 	internalonboard "csgclaw/internal/onboard"
 	agentruntime "csgclaw/internal/runtime"
-	runtimeactivity "csgclaw/internal/runtime/activity"
 	runtimecodex "csgclaw/internal/runtime/codex"
 	"csgclaw/internal/sandboxproviders"
 	"csgclaw/internal/server"
@@ -470,21 +470,21 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 		return err
 	}
 	return RunServer(server.Options{
-		ListenAddr:         cfg.Server.ListenAddr,
-		Service:            svc,
-		Hub:                hubSvc,
-		Bot:                botSvc,
-		IM:                 imSvc,
-		IMBus:              imBus,
-		BotBridge:          im.NewBotBridge(cfg.Server.AccessToken),
-		Feishu:             feishuSvc,
-		LLM:                llmSvc,
-		Upgrade:            upgradeManager,
-		RuntimePermissions: runtimePermissionDecider(codexBridgeMgr),
-		ConfigPath:         configPath,
-		AccessToken:        cfg.Server.AccessToken,
-		NoAuth:             cfg.Server.NoAuth,
-		Context:            ctx,
+		ListenAddr:  cfg.Server.ListenAddr,
+		Service:     svc,
+		Hub:         hubSvc,
+		Bot:         botSvc,
+		IM:          imSvc,
+		IMBus:       imBus,
+		BotBridge:   im.NewBotBridge(cfg.Server.AccessToken),
+		Feishu:      feishuSvc,
+		LLM:         llmSvc,
+		Upgrade:     upgradeManager,
+		BotActions:  botActionDecider(codexBridgeMgr),
+		ConfigPath:  configPath,
+		AccessToken: cfg.Server.AccessToken,
+		NoAuth:      cfg.Server.NoAuth,
+		Context:     ctx,
 		OnReady: func(handler *api.Handler, router chi.Router) {
 			deliver := channelwiring.WireNotificationBotPull(ctx, botSvc, imSvc, apiURL, cfg.Server.AccessToken)
 			handler.SetNotificationDeliver(deliver)
@@ -831,14 +831,30 @@ type codexBridgeManager interface {
 	Close()
 }
 
-func runtimePermissionDecider(m codexBridgeManager) api.RuntimePermissionDecider {
+func botActionDecider(m codexBridgeManager) api.BotActionDecider {
 	withPermissions, ok := m.(interface {
-		PermissionDecider() runtimeactivity.PermissionDecider
+		PermissionDecider() runtimecodex.PermissionDecider
 	})
 	if !ok {
 		return nil
 	}
-	return withPermissions.PermissionDecider()
+	decider := withPermissions.PermissionDecider()
+	if decider == nil {
+		return nil
+	}
+	return botScopedActionDecider{permission: decider}
+}
+
+type botScopedActionDecider struct {
+	permission runtimecodex.PermissionDecider
+}
+
+func (d botScopedActionDecider) Decide(ctx context.Context, botID string, actionID string, optionID string) (activity.ActionRequestSnapshot, error) {
+	snapshot, err := d.permission.Decide(ctx, actionID, optionID)
+	if snapshot.BotID == "" {
+		snapshot.BotID = strings.TrimSpace(botID)
+	}
+	return snapshot, err
 }
 
 type serveCodexBridgeManager struct {
@@ -861,7 +877,7 @@ func newCodexBridgeManager(cfg config.Config, svc *agent.Service) (codexBridgeMa
 	if !ok {
 		return nil, fmt.Errorf("runtime %q has unexpected type %T", agentruntime.KindCodex, rt)
 	}
-	events, ok := codexRuntime.EventSink().(*runtimeactivity.EventSink)
+	events, ok := codexRuntime.EventSink().(*activity.EventSink)
 	if !ok || events == nil {
 		return nil, fmt.Errorf("runtime %q is missing codex event sink", agentruntime.KindCodex)
 	}
@@ -968,7 +984,7 @@ func (m *serveCodexBridgeManager) Close() {
 	m.bridge.Close()
 }
 
-func (m *serveCodexBridgeManager) PermissionDecider() runtimeactivity.PermissionDecider {
+func (m *serveCodexBridgeManager) PermissionDecider() runtimecodex.PermissionDecider {
 	if m == nil || m.runtime == nil {
 		return nil
 	}

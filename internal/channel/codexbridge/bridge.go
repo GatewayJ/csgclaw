@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"csgclaw/internal/activity"
 	"csgclaw/internal/channel/runtimebridge"
-	runtimeactivity "csgclaw/internal/runtime/activity"
 	runtimecodex "csgclaw/internal/runtime/codex"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -38,7 +38,7 @@ type ConversationSessionEnsurer interface {
 type Service struct {
 	client         BotClient
 	prompter       SessionPrompter
-	events         runtimeactivity.Subscriber
+	events         activity.Subscriber
 	reconnectDelay time.Duration
 	queueSize      int
 	seenWindow     int
@@ -48,7 +48,7 @@ type Service struct {
 	workers map[string]*worker
 }
 
-func NewService(client BotClient, prompter SessionPrompter, events runtimeactivity.Subscriber) *Service {
+func NewService(client BotClient, prompter SessionPrompter, events activity.Subscriber) *Service {
 	return &Service{
 		client:         client,
 		prompter:       prompter,
@@ -227,7 +227,7 @@ func (w *worker) enqueue(ctx context.Context, evt BotEvent) {
 	}
 }
 
-func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-chan runtimeactivity.Event) error {
+func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-chan activity.Event) error {
 	sessionID, err := w.sessionID(ctx, evt)
 	if err != nil {
 		renderer := runtimebridge.NewTurnRenderer()
@@ -441,7 +441,7 @@ func (w *worker) setLastEventID(messageID string) {
 	w.mu.Unlock()
 }
 
-func matchesSession(event runtimeactivity.Event, runtimeID, sessionID string) bool {
+func matchesSession(event activity.Event, runtimeID, sessionID string) bool {
 	if strings.TrimSpace(event.RuntimeID) != strings.TrimSpace(runtimeID) {
 		return false
 	}
@@ -521,8 +521,8 @@ func eventDedupKey(evt BotEvent) string {
 	return key + ":" + messageID
 }
 
-func isTerminalEvent(kind runtimeactivity.EventKind) bool {
-	return kind == runtimeactivity.EventPromptCompleted || kind == runtimeactivity.EventPromptFailed
+func isTerminalEvent(kind activity.EventKind) bool {
+	return kind == activity.EventPromptCompleted || kind == activity.EventPromptFailed
 }
 
 func cloneMeta(src map[string]any) map[string]any {

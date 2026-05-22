@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
-import { decideRuntimePermissionRequest } from "@/api/runtimePermissions";
+import { decideBotAction } from "@/api/botActions";
 import { errorMessage } from "@/api/client";
 import { AgentActivityMsgTypes } from "@/shared/constants/messages";
-import { permissionOptionLabel, statusLabel } from "@/models/agentActivity";
+import { actionOptionLabel, statusLabel } from "@/models/agentActivity";
 import { renderMarkdown } from "./markdown";
 import type {
+  AgentActivityAction,
+  AgentActivityActionOption,
   AgentActivityPayload,
-  AgentActivityPermission,
-  AgentActivityPermissionOption,
 } from "@/models/agentActivity";
 import { Button } from "@/components/ui";
 
@@ -20,8 +20,11 @@ export function AgentActivityCard({ activity }: AgentActivityCardProps) {
   if (activity.content.msgtype === AgentActivityMsgTypes.tool && activity.content.tool) {
     return <ToolActivityCard activity={activity} />;
   }
+  if (activity.content.msgtype === AgentActivityMsgTypes.action && activity.content.action?.kind === "permission") {
+    return <PermissionActivityCard activity={activity} action={activity.content.action} />;
+  }
   if (activity.content.msgtype === AgentActivityMsgTypes.permission && activity.content.permission) {
-    return <PermissionActivityCard permission={activity.content.permission} />;
+    return <PermissionActivityCard activity={activity} action={activity.content.permission} />;
   }
   return <NoticeActivityCard body={activity.content.body} />;
 }
@@ -34,25 +37,31 @@ function ToolActivityCard({ activity }: AgentActivityCardProps) {
   return <div className="message-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown) }} />;
 }
 
-function PermissionActivityCard({ permission }: { permission: AgentActivityPermission }) {
+function PermissionActivityCard({
+  action,
+  activity,
+}: {
+  action: AgentActivityAction;
+  activity: AgentActivityPayload;
+}) {
   const [busyOption, setBusyOption] = useState("");
-  const [localStatus, setLocalStatus] = useState(permission.status);
+  const [localStatus, setLocalStatus] = useState(action.status);
   const [error, setError] = useState("");
   const isPending = localStatus === "pending";
   const icon = useMemo(() => permissionIcon(localStatus), [localStatus]);
 
   useEffect(() => {
-    setLocalStatus(permission.status);
-  }, [permission.status]);
+    setLocalStatus(action.status);
+  }, [action.status]);
 
-  async function decide(option: AgentActivityPermissionOption) {
-    if (!permission.id || busyOption || !isPending) {
+  async function decide(option: AgentActivityActionOption) {
+    if (!action.id || busyOption || !isPending) {
       return;
     }
     setBusyOption(option.id);
     setError("");
     try {
-      const snapshot = await decideRuntimePermissionRequest(permission.id, option.id);
+      const snapshot = await decideBotAction(activity.sender, action.id, option.id);
       setLocalStatus(snapshot.status || optionStatus(option));
     } catch (err) {
       setError(errorMessage(err, "Permission decision failed"));
@@ -68,14 +77,14 @@ function PermissionActivityCard({ permission }: { permission: AgentActivityPermi
           {icon}
         </span>
         <div className="agent-activity-title-group">
-          <div className="agent-activity-title">{permission.title}</div>
+          <div className="agent-activity-title">{action.title}</div>
           <div className="agent-activity-subtitle">Permission request</div>
         </div>
         <span className={`agent-activity-badge status-${localStatus}`}>{statusLabel(localStatus)}</span>
       </div>
       {isPending ? (
         <div className="agent-activity-actions">
-          {(permission.options || []).map((option) => (
+          {(action.options || []).map((option) => (
             <Button
               key={option.id}
               className={option.kind === "allow_always" ? "agent-activity-allow-always" : ""}
@@ -87,7 +96,7 @@ function PermissionActivityCard({ permission }: { permission: AgentActivityPermi
               <span className="agent-activity-button-icon" aria-hidden="true">
                 {option.kind.startsWith("reject") ? <X size={14} /> : <Check size={14} />}
               </span>
-              <span>{busyOption === option.id ? "..." : permissionOptionLabel(option)}</span>
+              <span>{busyOption === option.id ? "..." : actionOptionLabel(option)}</span>
             </Button>
           ))}
         </div>
@@ -105,7 +114,7 @@ function NoticeActivityCard({ body }: { body: string }) {
           <ShieldAlert size={16} />
         </span>
         <div className="agent-activity-title-group">
-          <div className="agent-activity-title">Runtime notice</div>
+          <div className="agent-activity-title">Agent notice</div>
           <div className="agent-activity-subtitle">{body}</div>
         </div>
       </div>
@@ -123,7 +132,7 @@ function permissionIcon(status: string) {
   return <ShieldAlert size={16} />;
 }
 
-function optionStatus(option: AgentActivityPermissionOption): string {
+function optionStatus(option: AgentActivityActionOption): string {
   return option.kind.startsWith("reject") ? "rejected" : "allowed";
 }
 

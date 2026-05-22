@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	runtimeactivity "csgclaw/internal/runtime/activity"
+	"csgclaw/internal/activity"
 )
 
 func TestTurnRendererMergesToolUpdateDeltas(t *testing.T) {
@@ -13,10 +13,10 @@ func TestTurnRendererMergesToolUpdateDeltas(t *testing.T) {
 
 	renderer := NewTurnRenderer()
 	now := time.Now().UTC()
-	start := runtimeactivity.Event{
+	start := activity.Event{
 		RuntimeID:        "rt-1",
 		SessionID:        "sess-1",
-		Kind:             runtimeactivity.EventToolCallStart,
+		Kind:             activity.EventToolCallStart,
 		ReceivedAt:       now,
 		ToolCallID:       "tool-1",
 		ToolKind:         "execute",
@@ -28,10 +28,10 @@ func TestTurnRendererMergesToolUpdateDeltas(t *testing.T) {
 		t.Fatal("tool start was not rendered")
 	}
 
-	update := runtimeactivity.Event{
+	update := activity.Event{
 		RuntimeID:         "rt-1",
 		SessionID:         "sess-1",
-		Kind:              runtimeactivity.EventToolCallUpdate,
+		Kind:              activity.EventToolCallUpdate,
 		ReceivedAt:        now.Add(time.Second),
 		ToolCallID:        "tool-1",
 		ToolOutputSummary: `{"output":"ok"}`,
@@ -72,10 +72,10 @@ func TestTurnRendererMergesToolUpdateDeltas(t *testing.T) {
 		t.Fatalf("tool summaries = input %q output %q, want both retained", payload.Content.Tool.InputSummary, payload.Content.Tool.OutputSummary)
 	}
 
-	completed := runtimeactivity.Event{
+	completed := activity.Event{
 		RuntimeID:  "rt-1",
 		SessionID:  "sess-1",
-		Kind:       runtimeactivity.EventToolCallUpdate,
+		Kind:       activity.EventToolCallUpdate,
 		ReceivedAt: now.Add(2 * time.Second),
 		ToolCallID: "tool-1",
 		ToolStatus: "completed",
@@ -84,10 +84,10 @@ func TestTurnRendererMergesToolUpdateDeltas(t *testing.T) {
 		t.Fatal("tool completed delta was not rendered")
 	}
 
-	laterOutput := runtimeactivity.Event{
+	laterOutput := activity.Event{
 		RuntimeID:         "rt-1",
 		SessionID:         "sess-1",
-		Kind:              runtimeactivity.EventToolCallUpdate,
+		Kind:              activity.EventToolCallUpdate,
 		ReceivedAt:        now.Add(3 * time.Second),
 		ToolCallID:        "tool-1",
 		ToolOutputSummary: `{"output":"done"}`,

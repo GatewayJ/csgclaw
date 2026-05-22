@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	runtimeactivity "csgclaw/internal/runtime/activity"
+	"csgclaw/internal/activity"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -19,27 +19,27 @@ const (
 )
 
 var (
-	ErrPermissionNotFound       = runtimeactivity.ErrPermissionNotFound
-	ErrPermissionInvalidOption  = runtimeactivity.ErrPermissionInvalidOption
-	ErrPermissionAlreadyDecided = runtimeactivity.ErrPermissionAlreadyDecided
-	ErrPermissionGone           = runtimeactivity.ErrPermissionGone
+	ErrPermissionNotFound       = activity.ErrActionNotFound
+	ErrPermissionInvalidOption  = activity.ErrActionInvalidOption
+	ErrPermissionAlreadyDecided = activity.ErrActionAlreadyDecided
+	ErrPermissionGone           = activity.ErrActionGone
 )
 
-type PermissionStatus = runtimeactivity.PermissionStatus
+type PermissionStatus = activity.ActionStatus
 
 const (
-	PermissionStatusPending  = runtimeactivity.PermissionStatusPending
-	PermissionStatusAllowed  = runtimeactivity.PermissionStatusAllowed
-	PermissionStatusRejected = runtimeactivity.PermissionStatusRejected
-	PermissionStatusExpired  = runtimeactivity.PermissionStatusExpired
-	PermissionStatusCanceled = runtimeactivity.PermissionStatusCanceled
+	PermissionStatusPending  = activity.ActionStatusPending
+	PermissionStatusAllowed  = activity.ActionStatusAllowed
+	PermissionStatusRejected = activity.ActionStatusRejected
+	PermissionStatusExpired  = activity.ActionStatusExpired
+	PermissionStatusCanceled = activity.ActionStatusCanceled
 )
 
-type PermissionOptionSnapshot = runtimeactivity.PermissionOptionSnapshot
+type PermissionOptionSnapshot = activity.ActionOptionSnapshot
 
-type PermissionDecisionSnapshot = runtimeactivity.PermissionDecisionSnapshot
+type PermissionDecisionSnapshot = activity.ActionDecisionSnapshot
 
-type PermissionSnapshot = runtimeactivity.PermissionSnapshot
+type PermissionSnapshot = activity.ActionRequestSnapshot
 
 type PendingPermissionRequest struct {
 	RuntimeID   string
@@ -63,7 +63,9 @@ type PermissionBroker interface {
 	CancelSession(runtimeID string, sessionID string)
 }
 
-type PermissionDecider = runtimeactivity.PermissionDecider
+type PermissionDecider interface {
+	Decide(ctx context.Context, requestID string, optionID string) (PermissionSnapshot, error)
+}
 
 type MemoryPermissionBroker struct {
 	mu        sync.Mutex
@@ -114,6 +116,7 @@ func (b *MemoryPermissionBroker) Request(ctx context.Context, req PendingPermiss
 	}
 	snapshot := PermissionSnapshot{
 		ID:          b.nextRequestID(),
+		Kind:        activity.ActionKindPermission,
 		RuntimeID:   strings.TrimSpace(req.RuntimeID),
 		SessionID:   strings.TrimSpace(req.SessionID),
 		ToolCallID:  strings.TrimSpace(req.ToolCallID),

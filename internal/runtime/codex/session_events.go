@@ -67,37 +67,37 @@ func eventFromSessionUpdate(runtimeID string, note acp.SessionNotification) Sess
 
 func permissionRequestEvent(snapshot PermissionSnapshot) SessionEvent {
 	return SessionEvent{
-		RuntimeKind:         agentruntime.KindCodex,
-		RuntimeID:           strings.TrimSpace(snapshot.RuntimeID),
-		SessionID:           strings.TrimSpace(snapshot.SessionID),
-		Kind:                SessionEventPermissionRequest,
-		ReceivedAt:          time.Now().UTC(),
-		ToolCallID:          strings.TrimSpace(snapshot.ToolCallID),
-		ToolKind:            strings.TrimSpace(snapshot.ToolKind),
-		ToolTitle:           strings.TrimSpace(snapshot.ToolTitle),
-		PermissionRequestID: strings.TrimSpace(snapshot.ID),
-		PermissionStatus:    string(snapshot.Status),
-		Payload:             snapshot,
+		RuntimeKind:  agentruntime.KindCodex,
+		RuntimeID:    strings.TrimSpace(snapshot.RuntimeID),
+		SessionID:    strings.TrimSpace(snapshot.SessionID),
+		Kind:         SessionEventPermissionRequest,
+		ReceivedAt:   time.Now().UTC(),
+		ToolCallID:   strings.TrimSpace(snapshot.ToolCallID),
+		ToolKind:     strings.TrimSpace(snapshot.ToolKind),
+		ToolTitle:    strings.TrimSpace(snapshot.ToolTitle),
+		ActionID:     strings.TrimSpace(snapshot.ID),
+		ActionStatus: string(snapshot.Status),
+		Payload:      snapshot,
 	}
 }
 
 func permissionDecisionEvent(snapshot PermissionSnapshot) SessionEvent {
 	event := SessionEvent{
-		RuntimeKind:         agentruntime.KindCodex,
-		RuntimeID:           strings.TrimSpace(snapshot.RuntimeID),
-		SessionID:           strings.TrimSpace(snapshot.SessionID),
-		Kind:                SessionEventPermissionDecision,
-		ReceivedAt:          time.Now().UTC(),
-		ToolCallID:          strings.TrimSpace(snapshot.ToolCallID),
-		ToolKind:            strings.TrimSpace(snapshot.ToolKind),
-		ToolTitle:           strings.TrimSpace(snapshot.ToolTitle),
-		PermissionRequestID: strings.TrimSpace(snapshot.ID),
-		PermissionStatus:    string(snapshot.Status),
-		Payload:             snapshot,
+		RuntimeKind:  agentruntime.KindCodex,
+		RuntimeID:    strings.TrimSpace(snapshot.RuntimeID),
+		SessionID:    strings.TrimSpace(snapshot.SessionID),
+		Kind:         SessionEventPermissionDecision,
+		ReceivedAt:   time.Now().UTC(),
+		ToolCallID:   strings.TrimSpace(snapshot.ToolCallID),
+		ToolKind:     strings.TrimSpace(snapshot.ToolKind),
+		ToolTitle:    strings.TrimSpace(snapshot.ToolTitle),
+		ActionID:     strings.TrimSpace(snapshot.ID),
+		ActionStatus: string(snapshot.Status),
+		Payload:      snapshot,
 	}
 	if snapshot.Decision != nil {
-		event.PermissionOptionID = strings.TrimSpace(snapshot.Decision.OptionID)
-		event.PermissionOptionKind = strings.TrimSpace(snapshot.Decision.Kind)
+		event.ActionOptionID = strings.TrimSpace(snapshot.Decision.OptionID)
+		event.ActionOptionKind = strings.TrimSpace(snapshot.Decision.Kind)
 	}
 	return event
 }

@@ -14,10 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"csgclaw/internal/activity"
 	"csgclaw/internal/codexacp"
 	"csgclaw/internal/codexmodel"
 	agentruntime "csgclaw/internal/runtime"
-	runtimeactivity "csgclaw/internal/runtime/activity"
 	"csgclaw/internal/sandbox"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -85,24 +85,24 @@ type Manager interface {
 	Prompt(ctx context.Context, handle SessionHandle, req acp.PromptRequest) (acp.PromptResponse, error)
 }
 
-type SessionEventKind = runtimeactivity.EventKind
+type SessionEventKind = activity.EventKind
 
 const (
-	SessionEventUserMessageDelta   = runtimeactivity.EventUserMessageDelta
-	SessionEventTextDelta          = runtimeactivity.EventTextDelta
-	SessionEventThoughtDelta       = runtimeactivity.EventThoughtDelta
-	SessionEventToolCallStart      = runtimeactivity.EventToolCallStart
-	SessionEventToolCallUpdate     = runtimeactivity.EventToolCallUpdate
-	SessionEventPlanUpdate         = runtimeactivity.EventPlanUpdate
-	SessionEventPermissionRequest  = runtimeactivity.EventPermissionRequest
-	SessionEventPermissionDecision = runtimeactivity.EventPermissionDecision
-	SessionEventPromptCompleted    = runtimeactivity.EventPromptCompleted
-	SessionEventPromptFailed       = runtimeactivity.EventPromptFailed
+	SessionEventUserMessageDelta   = activity.EventUserMessageDelta
+	SessionEventTextDelta          = activity.EventTextDelta
+	SessionEventThoughtDelta       = activity.EventThoughtDelta
+	SessionEventToolCallStart      = activity.EventToolCallStart
+	SessionEventToolCallUpdate     = activity.EventToolCallUpdate
+	SessionEventPlanUpdate         = activity.EventPlanUpdate
+	SessionEventPermissionRequest  = activity.EventActionRequest
+	SessionEventPermissionDecision = activity.EventActionDecision
+	SessionEventPromptCompleted    = activity.EventPromptCompleted
+	SessionEventPromptFailed       = activity.EventPromptFailed
 )
 
-type SessionEvent = runtimeactivity.Event
+type SessionEvent = activity.Event
 
-type SessionEventSink = runtimeactivity.Sink
+type SessionEventSink = activity.Sink
 
 type Dependencies struct {
 	BinaryProvider codexacp.BinaryProvider

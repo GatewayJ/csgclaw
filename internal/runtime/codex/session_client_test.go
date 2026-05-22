@@ -133,7 +133,7 @@ func TestSessionClientRequestPermissionWaitsForBrokerDecision(t *testing.T) {
 		return len(events) == 1 && events[0].Kind == SessionEventPermissionRequest
 	})
 	events := sink.snapshot()
-	_, err := broker.Decide(context.Background(), events[0].PermissionRequestID, "once")
+	_, err := broker.Decide(context.Background(), events[0].ActionID, "once")
 	if err != nil {
 		t.Fatalf("Decide() error = %v", err)
 	}
@@ -154,10 +154,10 @@ func TestSessionClientRequestPermissionWaitsForBrokerDecision(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("published events = %d, want 2", len(events))
 	}
-	if events[0].Kind != SessionEventPermissionRequest || events[0].PermissionStatus != string(PermissionStatusPending) {
+	if events[0].Kind != SessionEventPermissionRequest || events[0].ActionStatus != string(PermissionStatusPending) {
 		t.Fatalf("event[0] = %#v", events[0])
 	}
-	if events[1].Kind != SessionEventPermissionDecision || events[1].PermissionOptionID != "once" || events[1].PermissionStatus != string(PermissionStatusAllowed) {
+	if events[1].Kind != SessionEventPermissionDecision || events[1].ActionOptionID != "once" || events[1].ActionStatus != string(PermissionStatusAllowed) {
 		t.Fatalf("event[1] = %#v", events[1])
 	}
 }

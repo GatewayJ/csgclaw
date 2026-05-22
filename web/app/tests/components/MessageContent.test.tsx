@@ -108,6 +108,7 @@ describe("MessageContent", () => {
       <MessageContent
         content={JSON.stringify({
           type: CSGCLAW_AGENT_ACTIVITY_TYPE,
+          sender: "u-codex",
           content: {
             msgtype: AgentActivityMsgTypes.tool,
             body: "Running tool",
@@ -143,11 +144,13 @@ describe("MessageContent", () => {
       <MessageContent
         content={JSON.stringify({
           type: CSGCLAW_AGENT_ACTIVITY_TYPE,
+          sender: "u-codex",
           content: {
-            msgtype: AgentActivityMsgTypes.permission,
+            msgtype: AgentActivityMsgTypes.action,
             body: "Codex wants permission",
-            permission: {
+            action: {
               id: "perm-1",
+              kind: "permission",
               options: [
                 { id: "once", kind: "allow_once", label: "Allow once" },
                 { id: "reject", kind: "reject_once", label: "Reject" },
@@ -167,7 +170,7 @@ describe("MessageContent", () => {
     await user.click(screen.getByRole("button", { name: /Allow once/ }));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "api/v1/runtime/permissions/perm-1/decision",
+      "api/v1/bots/u-codex/actions/perm-1/decision",
       expect.objectContaining({
         body: JSON.stringify({ option_id: "once" }),
         method: "POST",

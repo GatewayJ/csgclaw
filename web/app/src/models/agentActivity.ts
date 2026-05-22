@@ -21,23 +21,24 @@ export type AgentActivityTool = {
   title: string;
 };
 
-export type AgentActivityPermissionOption = {
+export type AgentActivityActionOption = {
   id: string;
   kind: string;
   label: string;
 };
 
-export type AgentActivityPermissionDecision = {
+export type AgentActivityActionDecision = {
   decided_at?: string;
   kind?: string;
   option_id?: string;
 };
 
-export type AgentActivityPermission = {
-  decision?: AgentActivityPermissionDecision | null;
+export type AgentActivityAction = {
+  decision?: AgentActivityActionDecision | null;
   expires_at?: string;
   id: string;
-  options?: AgentActivityPermissionOption[];
+  kind?: string;
+  options?: AgentActivityActionOption[];
   requested_at?: string;
   status: string;
   title: string;
@@ -45,9 +46,10 @@ export type AgentActivityPermission = {
 };
 
 export type AgentActivityContent = {
+  action?: AgentActivityAction;
   body: string;
   msgtype: string;
-  permission?: AgentActivityPermission;
+  permission?: AgentActivityAction;
   runtime?: AgentActivityRuntime;
   tool?: AgentActivityTool;
 };
@@ -76,9 +78,10 @@ export function parseAgentActivity(content: unknown): AgentActivityPayload | nul
 
   return {
     content: {
+      action: parseAction(activityContent.action),
       body: stringValue(activityContent.body, "Agent activity"),
       msgtype,
-      permission: parsePermission(activityContent.permission),
+      permission: parseAction(activityContent.permission),
       runtime: parseRuntime(activityContent.runtime),
       tool: parseTool(activityContent.tool),
     },
@@ -96,7 +99,7 @@ export function isToolActivityMessage(message: IMMessage | null | undefined): bo
   return activity?.content.msgtype === AgentActivityMsgTypes.tool;
 }
 
-export function permissionOptionLabel(option: AgentActivityPermissionOption): string {
+export function actionOptionLabel(option: AgentActivityActionOption): string {
   return stringValue(option.label, option.kind, option.id);
 }
 
@@ -148,7 +151,7 @@ function parseTool(value: unknown): AgentActivityTool | undefined {
   };
 }
 
-function parsePermission(value: unknown): AgentActivityPermission | undefined {
+function parseAction(value: unknown): AgentActivityAction | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
@@ -156,7 +159,8 @@ function parsePermission(value: unknown): AgentActivityPermission | undefined {
     decision: parseDecision(value.decision),
     expires_at: stringValue(value.expires_at),
     id: stringValue(value.id),
-    options: Array.isArray(value.options) ? value.options.map(parseOption).filter(isPermissionOption) : [],
+    kind: stringValue(value.kind, "permission"),
+    options: Array.isArray(value.options) ? value.options.map(parseOption).filter(isActionOption) : [],
     requested_at: stringValue(value.requested_at),
     status: stringValue(value.status, "pending"),
     title: stringValue(value.title, "Run tool"),
@@ -164,7 +168,7 @@ function parsePermission(value: unknown): AgentActivityPermission | undefined {
   };
 }
 
-function parseOption(value: unknown): AgentActivityPermissionOption | null {
+function parseOption(value: unknown): AgentActivityActionOption | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -179,11 +183,11 @@ function parseOption(value: unknown): AgentActivityPermissionOption | null {
   };
 }
 
-function isPermissionOption(value: AgentActivityPermissionOption | null): value is AgentActivityPermissionOption {
+function isActionOption(value: AgentActivityActionOption | null): value is AgentActivityActionOption {
   return value !== null;
 }
 
-function parseDecision(value: unknown): AgentActivityPermissionDecision | null {
+function parseDecision(value: unknown): AgentActivityActionDecision | null {
   if (!isRecord(value)) {
     return null;
   }

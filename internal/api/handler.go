@@ -46,7 +46,7 @@ type Handler struct {
 	upgradeConfigPath   string
 	upgradeApply        func(upgrade.ApplyHelperOptions) error
 	notificationDeliver notification_bot.Fanouter
-	runtimePermissions  RuntimePermissionDecider
+	botActions          BotActionDecider
 }
 
 const (
@@ -291,9 +291,9 @@ func (h *Handler) SetNotificationDeliver(d notification_bot.Fanouter) {
 	}
 }
 
-func (h *Handler) SetRuntimePermissionDecider(decider RuntimePermissionDecider) {
+func (h *Handler) SetBotActionDecider(decider BotActionDecider) {
 	if h != nil {
-		h.runtimePermissions = decider
+		h.botActions = decider
 	}
 }
 
