@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/runtimebridge"
 	runtimecodex "csgclaw/internal/runtime/codex"
 
@@ -869,8 +870,8 @@ func TestServiceProjectsPermissionEventsAsAgentActivity(t *testing.T) {
 	if payload.Type != runtimebridge.AgentActivityType || payload.Content.MsgType != runtimebridge.AgentActionMsgType {
 		t.Fatalf("payload = %+v, want permission activity", payload)
 	}
-	if payload.Channel != "csgclaw" {
-		t.Fatalf("channel = %q, want csgclaw", payload.Channel)
+	if payload.Channel != csgclawchannel.ChannelID {
+		t.Fatalf("channel = %q, want %s", payload.Channel, csgclawchannel.ChannelID)
 	}
 	if payload.Content.Action.ID != "perm-1" || payload.Content.Action.Kind != "permission" || payload.Content.Action.Status != "pending" || len(payload.Content.Action.Options) != 2 {
 		t.Fatalf("permission payload = %+v", payload.Content.Action)

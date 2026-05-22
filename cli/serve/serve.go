@@ -24,7 +24,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"csgclaw/cli/command"
-	"csgclaw/internal/activity"
 	"csgclaw/internal/agent"
 	"csgclaw/internal/api"
 	"csgclaw/internal/apitypes"
@@ -32,6 +31,7 @@ import (
 	"csgclaw/internal/app/runtimewiring"
 	"csgclaw/internal/bot"
 	"csgclaw/internal/channel/codexbridge"
+	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/cliproxy"
 	"csgclaw/internal/config"
@@ -831,8 +831,6 @@ type codexBridgeManager interface {
 	Close()
 }
 
-const localActivityChannel = "csgclaw"
-
 func channelActivityDecider(m codexBridgeManager) api.ActivityDecider {
 	withPermissions, ok := m.(interface {
 		PermissionDecider() runtimecodex.PermissionDecider
@@ -844,23 +842,7 @@ func channelActivityDecider(m codexBridgeManager) api.ActivityDecider {
 	if decider == nil {
 		return nil
 	}
-	return codexPermissionActivityDecider{permission: decider}
-}
-
-type codexPermissionActivityDecider struct {
-	permission runtimecodex.PermissionDecider
-}
-
-func (d codexPermissionActivityDecider) Decide(ctx context.Context, req activity.ActivityDecisionRequest) (activity.ActivitySnapshot, error) {
-	channel := strings.TrimSpace(req.Channel)
-	activityID := strings.TrimSpace(req.ActivityID)
-	if channel == "" || activityID == "" {
-		return activity.ActivitySnapshot{}, activity.ErrActionNotFound
-	}
-	if channel != localActivityChannel {
-		return activity.ActivitySnapshot{}, activity.ErrActionNotFound
-	}
-	return d.permission.Decide(ctx, activityID, req.OptionID)
+	return runtimecodex.NewPermissionActivityDecider(csgclawchannel.ChannelID, decider)
 }
 
 type serveCodexBridgeManager struct {

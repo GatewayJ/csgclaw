@@ -1,4 +1,4 @@
-package serve
+package codex
 
 import (
 	"context"
@@ -7,26 +7,25 @@ import (
 	"time"
 
 	"csgclaw/internal/activity"
-	runtimecodex "csgclaw/internal/runtime/codex"
 )
 
-func TestCodexPermissionActivityDeciderRequiresLocalChannel(t *testing.T) {
+func TestPermissionActivityDeciderUsesConfiguredChannel(t *testing.T) {
 	t.Parallel()
 
-	events := runtimecodex.NewEventSink()
+	events := NewEventSink()
 	eventCh, cancel := events.Subscribe("rt-1")
 	defer cancel()
-	broker := runtimecodex.NewPermissionBroker(events)
+	broker := NewPermissionBroker(events)
 
-	resultCh := make(chan runtimecodex.PermissionDecision, 1)
+	resultCh := make(chan PermissionDecision, 1)
 	go func() {
-		decision, _ := broker.Request(context.Background(), runtimecodex.PendingPermissionRequest{
+		decision, _ := broker.Request(context.Background(), PendingPermissionRequest{
 			ExecutionRef: activity.ExecutionRef{
 				RuntimeKind: "codex",
 				RuntimeID:   "rt-1",
 				SessionID:   "sess-1",
 			},
-			Options: []runtimecodex.PermissionOptionSnapshot{
+			Options: []PermissionOptionSnapshot{
 				{ID: "once", Kind: "allow_once", Label: "Allow once"},
 			},
 		})
@@ -41,9 +40,9 @@ func TestCodexPermissionActivityDeciderRequiresLocalChannel(t *testing.T) {
 		t.Fatal("permission request event was not published")
 	}
 
-	decider := codexPermissionActivityDecider{permission: broker}
+	decider := NewPermissionActivityDecider("local-ui", broker)
 	if _, err := decider.Decide(context.Background(), activity.ActivityDecisionRequest{
-		Channel:    "feishu",
+		Channel:    "csgclaw",
 		ActivityID: requestID,
 		OptionID:   "once",
 	}); !errors.Is(err, activity.ErrActionNotFound) {
@@ -51,7 +50,7 @@ func TestCodexPermissionActivityDeciderRequiresLocalChannel(t *testing.T) {
 	}
 
 	snapshot, err := decider.Decide(context.Background(), activity.ActivityDecisionRequest{
-		Channel:    "csgclaw",
+		Channel:    "local-ui",
 		ActivityID: requestID,
 		OptionID:   "once",
 	})
@@ -64,10 +63,22 @@ func TestCodexPermissionActivityDeciderRequiresLocalChannel(t *testing.T) {
 
 	select {
 	case decision := <-resultCh:
-		if decision.Snapshot.Status != runtimecodex.PermissionStatusAllowed {
+		if decision.Snapshot.Status != PermissionStatusAllowed {
 			t.Fatalf("decision status = %s, want allowed", decision.Snapshot.Status)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("permission request did not finish")
+	}
+}
+
+func TestNewPermissionActivityDeciderRejectsMissingInputs(t *testing.T) {
+	t.Parallel()
+
+	broker := NewPermissionBroker(nil)
+	if got := NewPermissionActivityDecider("", broker); got != nil {
+		t.Fatalf("NewPermissionActivityDecider(empty channel) = %#v, want nil", got)
+	}
+	if got := NewPermissionActivityDecider("local-ui", nil); got != nil {
+		t.Fatalf("NewPermissionActivityDecider(nil permission) = %#v, want nil", got)
 	}
 }

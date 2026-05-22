@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/runtimebridge"
 	runtimecodex "csgclaw/internal/runtime/codex"
 
@@ -17,7 +18,7 @@ const (
 	defaultQueueSize    = 32
 	defaultSeenWindow   = 256
 	defaultPromptSettle = 150 * time.Millisecond
-	localChannel        = "csgclaw"
+	localChannel        = csgclawchannel.ChannelID
 )
 
 type Binding struct {
