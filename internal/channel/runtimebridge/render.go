@@ -1,6 +1,7 @@
 package runtimebridge
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -30,17 +31,17 @@ func NewTurnRenderer() *TurnRenderer {
 	}
 }
 
-func (r *TurnRenderer) ApplyText(event activity.Event) {
+func (r *TurnRenderer) ApplyText(event activity.RuntimeEvent) {
 	if r == nil {
 		return
 	}
 
 	switch event.Kind {
-	case activity.EventTextDelta:
+	case activity.RuntimeEventTextDelta:
 		if event.Text != "" {
 			_, _ = r.text.WriteString(event.Text)
 		}
-	case activity.EventPromptFailed:
+	case activity.RuntimeEventPromptFailed:
 		r.promptError = strings.TrimSpace(event.Error)
 	}
 }
@@ -65,42 +66,45 @@ func (r *TurnRenderer) SetPromptError(err string) {
 	}
 }
 
-func (r *TurnRenderer) RenderActivity(event activity.Event, roomID, senderID string) (RenderedActivity, bool) {
+func (r *TurnRenderer) RenderActivity(event activity.RuntimeEvent, channel, roomID, senderID string) (RenderedActivity, bool) {
 	if r == nil {
 		return RenderedActivity{}, false
 	}
 	switch event.Kind {
-	case activity.EventToolCallStart:
+	case activity.RuntimeEventToolCallStart:
 		tool, changed := r.mergeToolSnapshot(event)
 		if !changed {
 			return RenderedActivity{}, false
 		}
-		return renderActivityPayload(event, roomID, senderID, toolActivityContent(event, tool))
-	case activity.EventToolCallUpdate:
+		return renderActivityPayload(event, channel, roomID, senderID, toolActivityContent(event, tool))
+	case activity.RuntimeEventToolCallUpdate:
 		tool, changed := r.mergeToolSnapshot(event)
 		if !changed {
 			return RenderedActivity{}, false
 		}
-		return renderActivityPayload(event, roomID, senderID, toolActivityContent(event, tool))
-	case activity.EventActionRequest, activity.EventActionDecision:
-		snapshot, ok := event.Payload.(activity.ActionRequestSnapshot)
+		return renderActivityPayload(event, channel, roomID, senderID, toolActivityContent(event, tool))
+	case activity.RuntimeEventActionRequest, activity.RuntimeEventActionDecision:
+		snapshot, ok := event.Payload.(activity.ActivitySnapshot)
 		if !ok {
 			return RenderedActivity{}, false
 		}
-		return renderActivityPayload(event, roomID, senderID, actionActivityContent(event, snapshot))
+		if event.ActionID == "" {
+			event.ActionID = snapshot.ID
+		}
+		return renderActivityPayload(event, channel, roomID, senderID, actionActivityContent(event, snapshot))
 	default:
 		return RenderedActivity{}, false
 	}
 }
 
-func (r *TurnRenderer) mergeToolSnapshot(event activity.Event) (activityTool, bool) {
+func (r *TurnRenderer) mergeToolSnapshot(event activity.RuntimeEvent) (activityTool, bool) {
 	toolID := strings.TrimSpace(event.ToolCallID)
 	if toolID == "" {
 		return activityTool{}, false
 	}
 
 	tool := r.toolSnapshots[toolID]
-	tool.ID = toolID
+	tool.ID = publicToolActivityID(event)
 	mergeString(&tool.Kind, event.ToolKind)
 	mergeString(&tool.Title, event.ToolTitle)
 	mergeString(&tool.InputSummary, event.ToolInputSummary)
@@ -124,7 +128,7 @@ func (r *TurnRenderer) mergeToolSnapshot(event activity.Event) (activityTool, bo
 	return tool, true
 }
 
-func displayToolTitle(event activity.Event) string {
+func displayToolTitle(event activity.RuntimeEvent) string {
 	title := strings.TrimSpace(event.ToolTitle)
 	if title == "" {
 		title = "Run tool"
@@ -146,19 +150,21 @@ type RenderedActivity struct {
 	Text      string
 }
 
-func renderActivityPayload(event activity.Event, roomID, senderID string, content any) (RenderedActivity, bool) {
+func renderActivityPayload(event activity.RuntimeEvent, channel, roomID, senderID string, content any) (RenderedActivity, bool) {
 	eventID := activityEventID(event)
+	originServerTS := time.Now().UTC().UnixMilli()
+	if !event.ReceivedAt.IsZero() {
+		originServerTS = event.ReceivedAt.UnixMilli()
+	}
 	payload := agentActivityPayload{
 		Type:           AgentActivityType,
 		Version:        AgentActivityVersion,
+		Channel:        strings.TrimSpace(channel),
 		EventID:        eventID,
 		RoomID:         strings.TrimSpace(roomID),
 		Sender:         strings.TrimSpace(senderID),
-		OriginServerTS: event.ReceivedAt.UnixMilli(),
+		OriginServerTS: originServerTS,
 		Content:        content,
-	}
-	if payload.OriginServerTS == 0 {
-		payload.OriginServerTS = time.Now().UTC().UnixMilli()
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -170,6 +176,7 @@ func renderActivityPayload(event activity.Event, roomID, senderID string, conten
 type agentActivityPayload struct {
 	Type           string `json:"type"`
 	Version        int    `json:"version"`
+	Channel        string `json:"channel,omitempty"`
 	EventID        string `json:"event_id"`
 	RoomID         string `json:"room_id"`
 	Sender         string `json:"sender"`
@@ -177,17 +184,10 @@ type agentActivityPayload struct {
 	Content        any    `json:"content"`
 }
 
-type activityRuntime struct {
-	Kind      string `json:"kind"`
-	RuntimeID string `json:"runtime_id"`
-	SessionID string `json:"session_id"`
-}
-
 type toolActivity struct {
-	MsgType string          `json:"msgtype"`
-	Body    string          `json:"body"`
-	Runtime activityRuntime `json:"runtime"`
-	Tool    activityTool    `json:"tool"`
+	MsgType string       `json:"msgtype"`
+	Body    string       `json:"body"`
+	Tool    activityTool `json:"tool"`
 }
 
 type activityTool struct {
@@ -200,16 +200,14 @@ type activityTool struct {
 }
 
 type actionActivity struct {
-	MsgType string          `json:"msgtype"`
-	Body    string          `json:"body"`
-	Runtime activityRuntime `json:"runtime"`
-	Action  activityAction  `json:"action"`
+	MsgType string         `json:"msgtype"`
+	Body    string         `json:"body"`
+	Action  activityAction `json:"action"`
 }
 
 type activityAction struct {
 	ID          string                           `json:"id"`
 	Kind        string                           `json:"kind"`
-	ToolCallID  string                           `json:"tool_call_id"`
 	Title       string                           `json:"title"`
 	Status      string                           `json:"status"`
 	RequestedAt string                           `json:"requested_at,omitempty"`
@@ -218,7 +216,7 @@ type activityAction struct {
 	Decision    *activity.ActionDecisionSnapshot `json:"decision,omitempty"`
 }
 
-func toolActivityContent(event activity.Event, tool activityTool) toolActivity {
+func toolActivityContent(event activity.RuntimeEvent, tool activityTool) toolActivity {
 	if tool.Status == "" {
 		tool.Status = "running"
 	}
@@ -228,16 +226,11 @@ func toolActivityContent(event activity.Event, tool activityTool) toolActivity {
 	return toolActivity{
 		MsgType: AgentToolMsgType,
 		Body:    fmt.Sprintf("Tool %s: %s", tool.Status, tool.Title),
-		Runtime: activityRuntime{
-			Kind:      displayRuntimeKind(event),
-			RuntimeID: strings.TrimSpace(event.RuntimeID),
-			SessionID: strings.TrimSpace(event.SessionID),
-		},
-		Tool: tool,
+		Tool:    tool,
 	}
 }
 
-func actionActivityContent(event activity.Event, snapshot activity.ActionRequestSnapshot) actionActivity {
+func actionActivityContent(event activity.RuntimeEvent, snapshot activity.ActivitySnapshot) actionActivity {
 	status := string(snapshot.Status)
 	bodyStatus := "Permission required"
 	switch snapshot.Status {
@@ -253,16 +246,10 @@ func actionActivityContent(event activity.Event, snapshot activity.ActionRequest
 	return actionActivity{
 		MsgType: AgentActionMsgType,
 		Body:    fmt.Sprintf("%s: %s", bodyStatus, displayToolTitle(event)),
-		Runtime: activityRuntime{
-			Kind:      displayRuntimeKind(event),
-			RuntimeID: strings.TrimSpace(snapshot.RuntimeID),
-			SessionID: strings.TrimSpace(snapshot.SessionID),
-		},
 		Action: activityAction{
 			ID:          strings.TrimSpace(snapshot.ID),
 			Kind:        firstActivityText(snapshot.Kind, activity.ActionKindPermission),
-			ToolCallID:  strings.TrimSpace(snapshot.ToolCallID),
-			Title:       firstActivityText(snapshot.ToolTitle, displayToolTitle(event)),
+			Title:       firstActivityText(snapshot.Title, displayToolTitle(event)),
 			Status:      status,
 			RequestedAt: formatActivityTime(snapshot.RequestedAt),
 			ExpiresAt:   formatActivityTime(snapshot.ExpiresAt),
@@ -290,30 +277,21 @@ func toolSignature(tool activityTool) string {
 	}, "\x00")
 }
 
-func activityEventID(event activity.Event) string {
-	parts := []string{"act", strings.TrimSpace(event.RuntimeID), strings.TrimSpace(event.SessionID)}
+func activityEventID(event activity.RuntimeEvent) string {
 	if event.ActionID != "" {
-		parts = append(parts, event.ActionID)
-		return joinActivityIDParts(parts)
-	} else if event.ToolCallID != "" {
-		parts = append(parts, event.ToolCallID)
+		return joinActivityIDParts([]string{"act", strings.TrimSpace(event.ActionID)})
 	}
-	if event.ActionStatus != "" {
-		parts = append(parts, event.ActionStatus)
-	} else if event.ToolStatus != "" {
-		parts = append(parts, normalizedToolStatus(event.ToolStatus))
+	if event.ToolCallID != "" {
+		return joinActivityIDParts([]string{"tool", publicToolActivityID(event)})
+	}
+	parts := []string{"evt", string(event.Kind)}
+	if event.MessageID != "" {
+		parts = append(parts, event.MessageID)
 	}
 	if !event.ReceivedAt.IsZero() {
 		parts = append(parts, fmt.Sprintf("%d", event.ReceivedAt.UnixNano()))
 	}
 	return joinActivityIDParts(parts)
-}
-
-func displayRuntimeKind(event activity.Event) string {
-	if kind := strings.TrimSpace(event.RuntimeKind); kind != "" {
-		return kind
-	}
-	return "runtime"
 }
 
 func joinActivityIDParts(parts []string) string {
@@ -324,6 +302,19 @@ func joinActivityIDParts(parts []string) string {
 		}
 	}
 	return strings.Join(out, "-")
+}
+
+func publicToolActivityID(event activity.RuntimeEvent) string {
+	return opaqueActivityIDPart(event.RuntimeKind, event.RuntimeID, event.SessionID, event.ToolCallID)
+}
+
+func opaqueActivityIDPart(parts ...string) string {
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		normalized = append(normalized, strings.TrimSpace(part))
+	}
+	sum := sha256.Sum256([]byte(strings.Join(normalized, "\x00")))
+	return fmt.Sprintf("%x", sum[:12])
 }
 
 func formatActivityTime(value time.Time) string {

@@ -6,12 +6,6 @@ import type { IMMessage } from "@/models/conversations";
 
 type UnknownRecord = Record<string, unknown>;
 
-export type AgentActivityRuntime = {
-  kind: string;
-  runtime_id: string;
-  session_id: string;
-};
-
 export type AgentActivityTool = {
   id: string;
   input_summary?: string;
@@ -25,6 +19,7 @@ export type AgentActivityActionOption = {
   id: string;
   kind: string;
   label: string;
+  scope?: string;
 };
 
 export type AgentActivityActionDecision = {
@@ -42,19 +37,17 @@ export type AgentActivityAction = {
   requested_at?: string;
   status: string;
   title: string;
-  tool_call_id?: string;
 };
 
 export type AgentActivityContent = {
   action?: AgentActivityAction;
   body: string;
   msgtype: string;
-  permission?: AgentActivityAction;
-  runtime?: AgentActivityRuntime;
   tool?: AgentActivityTool;
 };
 
 export type AgentActivityPayload = {
+  channel: string;
   content: AgentActivityContent;
   event_id: string;
   origin_server_ts: number;
@@ -81,10 +74,9 @@ export function parseAgentActivity(content: unknown): AgentActivityPayload | nul
       action: parseAction(activityContent.action),
       body: stringValue(activityContent.body, "Agent activity"),
       msgtype,
-      permission: parseAction(activityContent.permission),
-      runtime: parseRuntime(activityContent.runtime),
       tool: parseTool(activityContent.tool),
     },
+    channel: stringValue(parsed.channel),
     event_id: stringValue(parsed.event_id),
     origin_server_ts: numberValue(parsed.origin_server_ts),
     room_id: stringValue(parsed.room_id),
@@ -100,7 +92,11 @@ export function isToolActivityMessage(message: IMMessage | null | undefined): bo
 }
 
 export function actionOptionLabel(option: AgentActivityActionOption): string {
-  return stringValue(option.label, option.kind, option.id);
+  const label = stringValue(option.label, option.kind, option.id);
+  if (optionScope(option) === "agent" && !/\bagent\b/i.test(label)) {
+    return `${label} (this agent)`;
+  }
+  return label;
 }
 
 export function statusLabel(status: string): string {
@@ -124,17 +120,6 @@ export function statusLabel(status: string): string {
     default:
       return stringValue(status, "Status");
   }
-}
-
-function parseRuntime(value: unknown): AgentActivityRuntime | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  return {
-    kind: stringValue(value.kind),
-    runtime_id: stringValue(value.runtime_id),
-    session_id: stringValue(value.session_id),
-  };
 }
 
 function parseTool(value: unknown): AgentActivityTool | undefined {
@@ -164,7 +149,6 @@ function parseAction(value: unknown): AgentActivityAction | undefined {
     requested_at: stringValue(value.requested_at),
     status: stringValue(value.status, "pending"),
     title: stringValue(value.title, "Run tool"),
-    tool_call_id: stringValue(value.tool_call_id),
   };
 }
 
@@ -180,6 +164,7 @@ function parseOption(value: unknown): AgentActivityActionOption | null {
     id,
     kind: stringValue(value.kind),
     label: stringValue(value.label, value.kind, id),
+    scope: stringValue(value.scope, defaultOptionScope(stringValue(value.kind))) || undefined,
   };
 }
 
@@ -207,6 +192,14 @@ function parseJSON(input: string): unknown {
   } catch {
     return null;
   }
+}
+
+function optionScope(option: AgentActivityActionOption): string {
+  return stringValue(option.scope, defaultOptionScope(option.kind));
+}
+
+function defaultOptionScope(kind: string): string {
+  return kind === "allow_always" ? "agent" : "";
 }
 
 function isRecord(value: unknown): value is UnknownRecord {

@@ -6,6 +6,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"csgclaw/internal/activity"
+
+	acp "github.com/coder/acp-go-sdk"
 )
 
 func TestPermissionBrokerRequestIDUsesProcessPrefix(t *testing.T) {
@@ -29,10 +33,12 @@ func TestPermissionBrokerDecideSelectsOption(t *testing.T) {
 	resultCh := make(chan PermissionDecision, 1)
 	go func() {
 		decision, _ := broker.Request(context.Background(), PendingPermissionRequest{
-			RuntimeID:  "rt-1",
-			SessionID:  "sess-1",
-			ToolCallID: "tool-1",
-			ToolTitle:  "Run shell command",
+			ExecutionRef: activity.ExecutionRef{
+				RuntimeID:  "rt-1",
+				SessionID:  "sess-1",
+				ToolCallID: "tool-1",
+			},
+			ToolTitle: "Run shell command",
 			Options: []PermissionOptionSnapshot{
 				{ID: "once", Kind: "allow_once", Label: "Allow once"},
 				{ID: "reject", Kind: "reject_once", Label: "Reject"},
@@ -64,6 +70,30 @@ func TestPermissionBrokerDecideSelectsOption(t *testing.T) {
 	}
 }
 
+func TestPermissionOptionsFromACPMarksRememberedDecisionsAsAgentScoped(t *testing.T) {
+	t.Parallel()
+
+	options := PermissionOptionsFromACP([]acp.PermissionOption{
+		{
+			OptionId: "always",
+			Kind:     acp.PermissionOptionKindAllowAlways,
+			Name:     "Allow always",
+		},
+		{
+			OptionId: "once",
+			Kind:     acp.PermissionOptionKindAllowOnce,
+			Name:     "Allow once",
+		},
+	})
+
+	if options[0].Scope != activity.ActionOptionScopeAgent {
+		t.Fatalf("allow_always scope = %q, want %q", options[0].Scope, activity.ActionOptionScopeAgent)
+	}
+	if options[1].Scope != "" {
+		t.Fatalf("allow_once scope = %q, want empty", options[1].Scope)
+	}
+}
+
 func TestPermissionBrokerDuplicateDecisionReturnsConflictSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -72,9 +102,8 @@ func TestPermissionBrokerDuplicateDecisionReturnsConflictSnapshot(t *testing.T) 
 	resultCh := make(chan PermissionDecision, 1)
 	go func() {
 		decision, _ := broker.Request(context.Background(), PendingPermissionRequest{
-			RuntimeID: "rt-1",
-			SessionID: "sess-1",
-			Options:   []PermissionOptionSnapshot{{ID: "once", Kind: "allow_once", Label: "Allow once"}},
+			ExecutionRef: activity.ExecutionRef{RuntimeID: "rt-1", SessionID: "sess-1"},
+			Options:      []PermissionOptionSnapshot{{ID: "once", Kind: "allow_once", Label: "Allow once"}},
 		})
 		resultCh <- decision
 	}()
@@ -106,9 +135,8 @@ func TestPermissionBrokerCompletedCacheExpires(t *testing.T) {
 	resultCh := make(chan PermissionDecision, 1)
 	go func() {
 		decision, _ := broker.Request(context.Background(), PendingPermissionRequest{
-			RuntimeID: "rt-1",
-			SessionID: "sess-1",
-			Options:   []PermissionOptionSnapshot{{ID: "once", Kind: "allow_once", Label: "Allow once"}},
+			ExecutionRef: activity.ExecutionRef{RuntimeID: "rt-1", SessionID: "sess-1"},
+			Options:      []PermissionOptionSnapshot{{ID: "once", Kind: "allow_once", Label: "Allow once"}},
 		})
 		resultCh <- decision
 	}()
@@ -141,9 +169,8 @@ func TestPermissionBrokerTimeoutCancelsACP(t *testing.T) {
 	broker := NewPermissionBroker(sink)
 	broker.timeout = 25 * time.Millisecond
 	decision, err := broker.Request(context.Background(), PendingPermissionRequest{
-		RuntimeID: "rt-1",
-		SessionID: "sess-1",
-		Options:   []PermissionOptionSnapshot{{ID: "once", Kind: "allow_once", Label: "Allow once"}},
+		ExecutionRef: activity.ExecutionRef{RuntimeID: "rt-1", SessionID: "sess-1"},
+		Options:      []PermissionOptionSnapshot{{ID: "once", Kind: "allow_once", Label: "Allow once"}},
 	})
 	if err != nil {
 		t.Fatalf("Request() error = %v", err)
@@ -161,9 +188,8 @@ func TestPermissionBrokerCancelSessionCancelsPendingRequests(t *testing.T) {
 	resultCh := make(chan PermissionDecision, 1)
 	go func() {
 		decision, _ := broker.Request(context.Background(), PendingPermissionRequest{
-			RuntimeID: "rt-1",
-			SessionID: "sess-1",
-			Options:   []PermissionOptionSnapshot{{ID: "once", Kind: "allow_once", Label: "Allow once"}},
+			ExecutionRef: activity.ExecutionRef{RuntimeID: "rt-1", SessionID: "sess-1"},
+			Options:      []PermissionOptionSnapshot{{ID: "once", Kind: "allow_once", Label: "Allow once"}},
 		})
 		resultCh <- decision
 	}()

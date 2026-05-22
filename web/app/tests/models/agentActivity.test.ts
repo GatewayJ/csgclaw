@@ -10,6 +10,7 @@ describe("agent activity model", () => {
       JSON.stringify({
         type: CSGCLAW_AGENT_ACTIVITY_TYPE,
         version: 1,
+        channel: "csgclaw",
         event_id: "act-1",
         room_id: "room-1",
         sender: "u-codex",
@@ -33,6 +34,7 @@ describe("agent activity model", () => {
       status: "running",
       title: "Run shell command",
     });
+    expect(activity?.channel).toBe("csgclaw");
     expect(activity?.version).toBe(1);
   });
 
@@ -49,6 +51,7 @@ describe("agent activity model", () => {
     );
 
     expect(activity?.version).toBe(1);
+    expect(activity?.channel).toBe("");
   });
 
   it("classifies tool messages", () => {

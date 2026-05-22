@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"csgclaw/internal/activity"
 	"csgclaw/internal/channel/runtimebridge"
 	runtimecodex "csgclaw/internal/runtime/codex"
 
@@ -164,7 +163,7 @@ func TestServiceRoundTrip(t *testing.T) {
 	close(errs)
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -220,7 +219,7 @@ func TestServiceEnsuresConversationSessionAndInjectsHiddenThreadContext(t *testi
 		},
 	}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -279,7 +278,7 @@ func TestServiceUsesConversationScopedSessionsAndThreadReplies(t *testing.T) {
 	close(errs)
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", ThreadRootID: "msg-root", Text: "hello in thread"}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -325,7 +324,7 @@ func TestServiceProjectsToolCallsAsActivityCardsAlongsideResponse(t *testing.T) 
 	close(errs)
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "run it"}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -399,7 +398,7 @@ func TestServiceKeepsToolActivityInsideExistingThread(t *testing.T) {
 	close(errs)
 	stream <- BotEvent{MessageID: "m-thread-reply", RoomID: "room-1", ThreadRootID: "msg-root", Text: "run it"}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -460,7 +459,7 @@ func TestServiceDedupesMessagesWithinConversationScope(t *testing.T) {
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", ThreadRootID: "msg-a", Text: "first thread"}
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", ThreadRootID: "msg-b", Text: "second thread"}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -510,7 +509,7 @@ func TestServiceDedupesReplayAcrossReconnect(t *testing.T) {
 	close(firstErrs)
 	close(secondErrs)
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {
@@ -556,7 +555,7 @@ func TestServiceWorkerOutlivesStartContext(t *testing.T) {
 	errs := make(chan error)
 	close(errs)
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -611,7 +610,7 @@ func TestServiceQueuesWhileBusy(t *testing.T) {
 	stream <- BotEvent{MessageID: "m-2", RoomID: "room-1", Text: "second"}
 	close(errs)
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	firstRelease := make(chan struct{})
 	firstStarted := make(chan struct{})
 	client := &fakeBotClient{
@@ -679,7 +678,7 @@ func TestServiceFlushesAfterPromptSettlesWithoutTerminalEvent(t *testing.T) {
 	close(errs)
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -719,7 +718,7 @@ func TestServiceProjectsToolEventsAsAgentActivity(t *testing.T) {
 	close(errs)
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -782,8 +781,11 @@ func TestServiceProjectsToolEventsAsAgentActivity(t *testing.T) {
 	if payload.Type != runtimebridge.AgentActivityType || payload.RoomID != "room-1" || payload.Content.MsgType != runtimebridge.AgentToolMsgType {
 		t.Fatalf("payload = %+v, want tool activity", payload)
 	}
-	if payload.Content.Tool.ID != "tool-1" || payload.Content.Tool.Kind != "execute" || payload.Content.Tool.Status != "running" {
+	if payload.Content.Tool.ID == "" || payload.Content.Tool.ID == "tool-1" || payload.Content.Tool.Kind != "execute" || payload.Content.Tool.Status != "running" {
 		t.Fatalf("tool payload = %+v", payload.Content.Tool)
+	}
+	if strings.Contains(text, "rt-1") || strings.Contains(text, "sess-1") || strings.Contains(text, "tool-1") {
+		t.Fatalf("tool activity leaked execution identity: %s", text)
 	}
 }
 
@@ -796,7 +798,7 @@ func TestServiceProjectsPermissionEventsAsAgentActivity(t *testing.T) {
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
 
 	now := time.Now().UTC()
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -815,10 +817,7 @@ func TestServiceProjectsPermissionEventsAsAgentActivity(t *testing.T) {
 				ActionStatus: string(runtimecodex.PermissionStatusPending),
 				Payload: runtimecodex.PermissionSnapshot{
 					ID:          "perm-1",
-					RuntimeID:   handle.RuntimeID,
-					SessionID:   string(req.SessionId),
-					ToolCallID:  "tool-1",
-					ToolTitle:   "Run shell command",
+					Title:       "Run shell command",
 					Status:      runtimecodex.PermissionStatusPending,
 					RequestedAt: now,
 					ExpiresAt:   now.Add(time.Minute),
@@ -851,6 +850,7 @@ func TestServiceProjectsPermissionEventsAsAgentActivity(t *testing.T) {
 	})
 	var payload struct {
 		Type    string `json:"type"`
+		Channel string `json:"channel"`
 		Content struct {
 			MsgType string `json:"msgtype"`
 			Action  struct {
@@ -869,6 +869,9 @@ func TestServiceProjectsPermissionEventsAsAgentActivity(t *testing.T) {
 	if payload.Type != runtimebridge.AgentActivityType || payload.Content.MsgType != runtimebridge.AgentActionMsgType {
 		t.Fatalf("payload = %+v, want permission activity", payload)
 	}
+	if payload.Channel != "csgclaw" {
+		t.Fatalf("channel = %q, want csgclaw", payload.Channel)
+	}
 	if payload.Content.Action.ID != "perm-1" || payload.Content.Action.Kind != "permission" || payload.Content.Action.Status != "pending" || len(payload.Content.Action.Options) != 2 {
 		t.Fatalf("permission payload = %+v", payload.Content.Action)
 	}
@@ -883,7 +886,7 @@ func TestServiceUsesStableMessageIDForPermissionDecisionActivity(t *testing.T) {
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
 
 	now := time.Now().UTC()
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -893,10 +896,7 @@ func TestServiceUsesStableMessageIDForPermissionDecisionActivity(t *testing.T) {
 		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
 			pending := runtimecodex.PermissionSnapshot{
 				ID:          "perm-1",
-				RuntimeID:   handle.RuntimeID,
-				SessionID:   string(req.SessionId),
-				ToolCallID:  "tool-1",
-				ToolTitle:   "Run shell command",
+				Title:       "Run shell command",
 				Status:      runtimecodex.PermissionStatusPending,
 				RequestedAt: now,
 				ExpiresAt:   now.Add(time.Minute),
@@ -973,7 +973,7 @@ func TestServiceIgnoresEventsFromOtherBindings(t *testing.T) {
 	close(errs)
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},
@@ -1147,7 +1147,7 @@ func TestWorkerReturnsPromptError(t *testing.T) {
 	close(errs)
 	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
 
-	sink := activity.NewEventSink()
+	sink := runtimecodex.NewEventSink()
 	client := &fakeBotClient{
 		streams: map[string][]streamResult{
 			"u-codex": {{events: stream, errs: errs}},

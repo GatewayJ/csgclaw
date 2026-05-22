@@ -243,9 +243,9 @@ describe("conversation model helpers", () => {
         content: JSON.stringify({
           type: CSGCLAW_AGENT_ACTIVITY_TYPE,
           content: {
-            msgtype: AgentActivityMsgTypes.permission,
+            msgtype: AgentActivityMsgTypes.action,
             body: "Codex wants permission",
-            permission: { id: "perm-1", status: "pending", title: "Run shell command" },
+            action: { id: "perm-1", status: "pending", title: "Run shell command" },
           },
         }),
       }),

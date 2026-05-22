@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
-import { decideBotAction } from "@/api/botActions";
+import { decideChannelActivity } from "@/api/agentActivities";
 import { errorMessage } from "@/api/client";
 import { AgentActivityMsgTypes } from "@/shared/constants/messages";
 import { actionOptionLabel, statusLabel } from "@/models/agentActivity";
@@ -22,9 +22,6 @@ export function AgentActivityCard({ activity }: AgentActivityCardProps) {
   }
   if (activity.content.msgtype === AgentActivityMsgTypes.action && activity.content.action?.kind === "permission") {
     return <PermissionActivityCard activity={activity} action={activity.content.action} />;
-  }
-  if (activity.content.msgtype === AgentActivityMsgTypes.permission && activity.content.permission) {
-    return <PermissionActivityCard activity={activity} action={activity.content.permission} />;
   }
   return <NoticeActivityCard body={activity.content.body} />;
 }
@@ -61,7 +58,7 @@ function PermissionActivityCard({
     setBusyOption(option.id);
     setError("");
     try {
-      const snapshot = await decideBotAction(activity.sender, action.id, option.id);
+      const snapshot = await decideChannelActivity(activity.channel, action.id, option.id);
       setLocalStatus(snapshot.status || optionStatus(option));
     } catch (err) {
       setError(errorMessage(err, "Permission decision failed"));

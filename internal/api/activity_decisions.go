@@ -8,43 +8,45 @@ import (
 	"strings"
 
 	"csgclaw/internal/activity"
-
-	"github.com/go-chi/chi/v5"
 )
 
-type botActionDecisionRequest struct {
+type activityDecisionRequest struct {
 	OptionID string `json:"option_id"`
 }
 
-type BotActionDecider = activity.ActionDecider
+type ActivityDecider = activity.ActivityDecider
 
-func (h *Handler) handleBotActionDecision(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleChannelActivityDecision(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.botActions == nil {
-		http.Error(w, "bot actions are not configured", http.StatusServiceUnavailable)
+	if h.activityDecider == nil {
+		http.Error(w, "activity decisions are not configured", http.StatusServiceUnavailable)
 		return
 	}
 
-	botID := strings.TrimSpace(chi.URLParam(r, "bot_id"))
-	if botID == "" {
-		http.Error(w, "bot id is required", http.StatusBadRequest)
+	channel := strings.TrimSpace(pathValue(r, "channel"))
+	if channel == "" {
+		http.Error(w, "channel is required", http.StatusBadRequest)
 		return
 	}
-	actionID := strings.TrimSpace(chi.URLParam(r, "id"))
-	if actionID == "" {
-		http.Error(w, "action id is required", http.StatusBadRequest)
+	activityID := strings.TrimSpace(pathValue(r, "activity_id"))
+	if activityID == "" {
+		http.Error(w, "activity id is required", http.StatusBadRequest)
 		return
 	}
 
-	var req botActionDecisionRequest
+	var req activityDecisionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 		return
 	}
-	snapshot, err := h.botActions.Decide(r.Context(), botID, actionID, strings.TrimSpace(req.OptionID))
+	snapshot, err := h.activityDecider.Decide(r.Context(), activity.ActivityDecisionRequest{
+		Channel:    channel,
+		ActivityID: activityID,
+		OptionID:   strings.TrimSpace(req.OptionID),
+	})
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, snapshot)

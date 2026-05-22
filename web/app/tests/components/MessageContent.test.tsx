@@ -108,6 +108,7 @@ describe("MessageContent", () => {
       <MessageContent
         content={JSON.stringify({
           type: CSGCLAW_AGENT_ACTIVITY_TYPE,
+          channel: "csgclaw",
           sender: "u-codex",
           content: {
             msgtype: AgentActivityMsgTypes.tool,
@@ -144,6 +145,7 @@ describe("MessageContent", () => {
       <MessageContent
         content={JSON.stringify({
           type: CSGCLAW_AGENT_ACTIVITY_TYPE,
+          channel: "csgclaw",
           sender: "u-codex",
           content: {
             msgtype: AgentActivityMsgTypes.action,
@@ -153,11 +155,11 @@ describe("MessageContent", () => {
               kind: "permission",
               options: [
                 { id: "once", kind: "allow_once", label: "Allow once" },
+                { id: "always", kind: "allow_always", label: "Allow always" },
                 { id: "reject", kind: "reject_once", label: "Reject" },
               ],
               status: "pending",
               title: "Run shell command",
-              tool_call_id: "call_WukaSS6FdffdmOndVugBkoRW",
             },
           },
         })}
@@ -165,12 +167,12 @@ describe("MessageContent", () => {
     );
 
     expect(screen.getByText("Permission request")).toBeInTheDocument();
-    expect(screen.queryByText("call_WukaSS6FdffdmOndVugBkoRW")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Allow always \(this agent\)/ })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Allow once/ }));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "api/v1/bots/u-codex/actions/perm-1/decision",
+      "api/v1/channels/csgclaw/activities/perm-1:decide",
       expect.objectContaining({
         body: JSON.stringify({ option_id: "once" }),
         method: "POST",

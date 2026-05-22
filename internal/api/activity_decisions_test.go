@@ -12,26 +12,26 @@ import (
 	"csgclaw/internal/activity"
 )
 
-type fakeActionDecider struct {
-	snapshot activity.ActionRequestSnapshot
+type fakeActivityDecider struct {
+	snapshot activity.ActivitySnapshot
 	err      error
-	gotBot   string
+	gotChan  string
 	gotID    string
 	gotOpt   string
 }
 
-func (d *fakeActionDecider) Decide(_ context.Context, botID string, actionID string, optionID string) (activity.ActionRequestSnapshot, error) {
-	d.gotBot = botID
-	d.gotID = actionID
-	d.gotOpt = optionID
+func (d *fakeActivityDecider) Decide(_ context.Context, req activity.ActivityDecisionRequest) (activity.ActivitySnapshot, error) {
+	d.gotChan = req.Channel
+	d.gotID = req.ActivityID
+	d.gotOpt = req.OptionID
 	return d.snapshot, d.err
 }
 
-func TestBotActionDecisionEndpoint(t *testing.T) {
+func TestChannelActivityDecisionEndpoint(t *testing.T) {
 	t.Parallel()
 
-	decider := &fakeActionDecider{
-		snapshot: activity.ActionRequestSnapshot{
+	decider := &fakeActivityDecider{
+		snapshot: activity.ActivitySnapshot{
 			ID:     "perm-1",
 			Status: activity.ActionStatusAllowed,
 			Decision: &activity.ActionDecisionSnapshot{
@@ -41,19 +41,19 @@ func TestBotActionDecisionEndpoint(t *testing.T) {
 		},
 	}
 	h := &Handler{}
-	h.SetBotActionDecider(decider)
+	h.SetActivityDecider(decider)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/bots/u-codex/actions/perm-1/decision", strings.NewReader(`{"option_id":"once"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/csgclaw/activities/perm-1:decide", strings.NewReader(`{"option_id":"once"}`))
 	h.Routes().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if decider.gotBot != "u-codex" || decider.gotID != "perm-1" || decider.gotOpt != "once" {
-		t.Fatalf("decider got bot=%q id=%q option=%q", decider.gotBot, decider.gotID, decider.gotOpt)
+	if decider.gotChan != "csgclaw" || decider.gotID != "perm-1" || decider.gotOpt != "once" {
+		t.Fatalf("decider got channel=%q id=%q option=%q", decider.gotChan, decider.gotID, decider.gotOpt)
 	}
-	var got activity.ActionRequestSnapshot
+	var got activity.ActivitySnapshot
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -62,17 +62,17 @@ func TestBotActionDecisionEndpoint(t *testing.T) {
 	}
 }
 
-func TestBotActionDecisionEndpointConflictReturnsSnapshot(t *testing.T) {
+func TestChannelActivityDecisionEndpointConflictReturnsSnapshot(t *testing.T) {
 	t.Parallel()
 
 	h := &Handler{}
-	h.SetBotActionDecider(&fakeActionDecider{
-		snapshot: activity.ActionRequestSnapshot{ID: "perm-1", Status: activity.ActionStatusRejected},
+	h.SetActivityDecider(&fakeActivityDecider{
+		snapshot: activity.ActivitySnapshot{ID: "perm-1", Status: activity.ActionStatusRejected},
 		err:      activity.ErrActionAlreadyDecided,
 	})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/bots/u-codex/actions/perm-1/decision", strings.NewReader(`{"option_id":"reject"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/csgclaw/activities/perm-1:decide", strings.NewReader(`{"option_id":"reject"}`))
 	h.Routes().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusConflict {
@@ -83,7 +83,7 @@ func TestBotActionDecisionEndpointConflictReturnsSnapshot(t *testing.T) {
 	}
 }
 
-func TestBotActionDecisionEndpointErrorMapping(t *testing.T) {
+func TestChannelActivityDecisionEndpointErrorMapping(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -102,12 +102,12 @@ func TestBotActionDecisionEndpointErrorMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			h := &Handler{}
-			h.SetBotActionDecider(&fakeActionDecider{
-				snapshot: activity.ActionRequestSnapshot{ID: "perm-1", Status: activity.ActionStatusExpired},
+			h.SetActivityDecider(&fakeActivityDecider{
+				snapshot: activity.ActivitySnapshot{ID: "perm-1", Status: activity.ActionStatusExpired},
 				err:      tc.err,
 			})
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/bots/u-codex/actions/perm-1/decision", strings.NewReader(`{"option_id":"once"}`))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/csgclaw/activities/perm-1:decide", strings.NewReader(`{"option_id":"once"}`))
 			h.Routes().ServeHTTP(rec, req)
 			if rec.Code != tc.want {
 				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.want, rec.Body.String())

@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"csgclaw/internal/activity"
 	"csgclaw/internal/channel/runtimebridge"
 	runtimecodex "csgclaw/internal/runtime/codex"
 
@@ -18,6 +17,7 @@ const (
 	defaultQueueSize    = 32
 	defaultSeenWindow   = 256
 	defaultPromptSettle = 150 * time.Millisecond
+	localChannel        = "csgclaw"
 )
 
 type Binding struct {
@@ -38,7 +38,7 @@ type ConversationSessionEnsurer interface {
 type Service struct {
 	client         BotClient
 	prompter       SessionPrompter
-	events         activity.Subscriber
+	events         runtimecodex.SessionEventSubscriber
 	reconnectDelay time.Duration
 	queueSize      int
 	seenWindow     int
@@ -48,7 +48,7 @@ type Service struct {
 	workers map[string]*worker
 }
 
-func NewService(client BotClient, prompter SessionPrompter, events activity.Subscriber) *Service {
+func NewService(client BotClient, prompter SessionPrompter, events runtimecodex.SessionEventSubscriber) *Service {
 	return &Service{
 		client:         client,
 		prompter:       prompter,
@@ -227,7 +227,7 @@ func (w *worker) enqueue(ctx context.Context, evt BotEvent) {
 	}
 }
 
-func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-chan activity.Event) error {
+func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-chan runtimecodex.SessionEvent) error {
 	sessionID, err := w.sessionID(ctx, evt)
 	if err != nil {
 		renderer := runtimebridge.NewTurnRenderer()
@@ -272,8 +272,8 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 			if !matchesSession(event, w.binding.RuntimeID, sessionID) {
 				continue
 			}
-			if activity, ok := renderer.RenderActivity(event, evt.RoomID, w.binding.BotID); ok {
-				if err := w.sendActivity(ctx, evt.RoomID, evt.ThreadRootID, activity); err != nil {
+			if renderedActivity, ok := renderer.RenderActivity(event, localChannel, evt.RoomID, w.binding.BotID); ok {
+				if err := w.sendActivity(ctx, evt.RoomID, evt.ThreadRootID, renderedActivity); err != nil {
 					return err
 				}
 			}
@@ -441,7 +441,7 @@ func (w *worker) setLastEventID(messageID string) {
 	w.mu.Unlock()
 }
 
-func matchesSession(event activity.Event, runtimeID, sessionID string) bool {
+func matchesSession(event runtimecodex.SessionEvent, runtimeID, sessionID string) bool {
 	if strings.TrimSpace(event.RuntimeID) != strings.TrimSpace(runtimeID) {
 		return false
 	}
@@ -521,8 +521,8 @@ func eventDedupKey(evt BotEvent) string {
 	return key + ":" + messageID
 }
 
-func isTerminalEvent(kind activity.EventKind) bool {
-	return kind == activity.EventPromptCompleted || kind == activity.EventPromptFailed
+func isTerminalEvent(kind runtimecodex.SessionEventKind) bool {
+	return kind == runtimecodex.SessionEventPromptCompleted || kind == runtimecodex.SessionEventPromptFailed
 }
 
 func cloneMeta(src map[string]any) map[string]any {

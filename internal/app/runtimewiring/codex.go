@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"csgclaw/internal/activity"
 	"csgclaw/internal/agent"
 	"csgclaw/internal/codexacp"
 	agentruntime "csgclaw/internal/runtime"
@@ -18,7 +17,7 @@ func WithCodexRuntime() agent.ServiceOption {
 		}
 
 		host := s.PicoClawRuntimeHost()
-		events := activity.NewEventSink()
+		events := runtimecodex.NewEventSink()
 		permissions := runtimecodex.NewPermissionBroker(events)
 		rt := runtimecodex.New(runtimecodex.Dependencies{
 			BinaryProvider: codexacp.Installer{

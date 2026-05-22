@@ -85,24 +85,26 @@ type Manager interface {
 	Prompt(ctx context.Context, handle SessionHandle, req acp.PromptRequest) (acp.PromptResponse, error)
 }
 
-type SessionEventKind = activity.EventKind
+type SessionEventKind = activity.RuntimeEventKind
 
 const (
-	SessionEventUserMessageDelta   = activity.EventUserMessageDelta
-	SessionEventTextDelta          = activity.EventTextDelta
-	SessionEventThoughtDelta       = activity.EventThoughtDelta
-	SessionEventToolCallStart      = activity.EventToolCallStart
-	SessionEventToolCallUpdate     = activity.EventToolCallUpdate
-	SessionEventPlanUpdate         = activity.EventPlanUpdate
-	SessionEventPermissionRequest  = activity.EventActionRequest
-	SessionEventPermissionDecision = activity.EventActionDecision
-	SessionEventPromptCompleted    = activity.EventPromptCompleted
-	SessionEventPromptFailed       = activity.EventPromptFailed
+	SessionEventUserMessageDelta   = activity.RuntimeEventUserMessageDelta
+	SessionEventTextDelta          = activity.RuntimeEventTextDelta
+	SessionEventThoughtDelta       = activity.RuntimeEventThoughtDelta
+	SessionEventToolCallStart      = activity.RuntimeEventToolCallStart
+	SessionEventToolCallUpdate     = activity.RuntimeEventToolCallUpdate
+	SessionEventPlanUpdate         = activity.RuntimeEventPlanUpdate
+	SessionEventPermissionRequest  = activity.RuntimeEventActionRequest
+	SessionEventPermissionDecision = activity.RuntimeEventActionDecision
+	SessionEventPromptCompleted    = activity.RuntimeEventPromptCompleted
+	SessionEventPromptFailed       = activity.RuntimeEventPromptFailed
 )
 
-type SessionEvent = activity.Event
+type SessionEvent = activity.RuntimeEvent
 
-type SessionEventSink = activity.Sink
+type SessionEventSink = activity.RuntimeEventSink
+
+type SessionEventSubscriber = activity.RuntimeEventSubscriber
 
 type Dependencies struct {
 	BinaryProvider codexacp.BinaryProvider

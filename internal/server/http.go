@@ -20,29 +20,29 @@ import (
 )
 
 type Options struct {
-	ListenAddr  string
-	Service     *agent.Service
-	Hub         *hub.Service
-	Bot         *bot.Service
-	IM          *im.Service
-	IMBus       *im.Bus
-	BotBridge   *im.BotBridge
-	Feishu      *feishu.Service
-	LLM         *llm.Service
-	Upgrade     *upgrade.Manager
-	BotActions  api.BotActionDecider
-	ConfigPath  string
-	AccessToken string
-	NoAuth      bool
-	Context     context.Context
-	OnReady     func(h *api.Handler, router chi.Router)
+	ListenAddr      string
+	Service         *agent.Service
+	Hub             *hub.Service
+	Bot             *bot.Service
+	IM              *im.Service
+	IMBus           *im.Bus
+	BotBridge       *im.BotBridge
+	Feishu          *feishu.Service
+	LLM             *llm.Service
+	Upgrade         *upgrade.Manager
+	ActivityDecider api.ActivityDecider
+	ConfigPath      string
+	AccessToken     string
+	NoAuth          bool
+	Context         context.Context
+	OnReady         func(h *api.Handler, router chi.Router)
 }
 
 func newHandler(opts Options) *api.Handler {
 	handler := api.NewHandlerWithBotAndAuth(opts.Service, opts.Bot, opts.IM, opts.IMBus, opts.BotBridge, opts.Feishu, opts.LLM, opts.AccessToken, opts.NoAuth)
 	handler.SetHubService(opts.Hub)
 	handler.SetUpgradeManager(opts.Upgrade)
-	handler.SetBotActionDecider(opts.BotActions)
+	handler.SetActivityDecider(opts.ActivityDecider)
 	handler.SetUpgradeConfigPath(opts.ConfigPath)
 	handler.SetConfigPath(opts.ConfigPath)
 	return handler

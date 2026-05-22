@@ -3,31 +3,92 @@ package activity
 import (
 	"context"
 	"errors"
-	"strings"
-	"sync"
 	"time"
 )
 
-type EventKind string
-
-const (
-	EventUserMessageDelta EventKind = "user_message_delta"
-	EventTextDelta        EventKind = "text_delta"
-	EventThoughtDelta     EventKind = "thought_delta"
-	EventToolCallStart    EventKind = "tool_call_start"
-	EventToolCallUpdate   EventKind = "tool_call_update"
-	EventPlanUpdate       EventKind = "plan_update"
-	EventActionRequest    EventKind = "action_request"
-	EventActionDecision   EventKind = "action_decision"
-	EventPromptCompleted  EventKind = "prompt_completed"
-	EventPromptFailed     EventKind = "prompt_failed"
+var (
+	ErrActionNotFound       = errors.New("action request not found")
+	ErrActionInvalidOption  = errors.New("action option is invalid")
+	ErrActionAlreadyDecided = errors.New("action request already decided")
+	ErrActionGone           = errors.New("action request is no longer pending")
 )
 
-type Event struct {
+type ActionStatus string
+
+const (
+	ActionKindPermission = "permission"
+
+	ActionOptionScopeAgent = "agent"
+
+	ActionStatusPending  ActionStatus = "pending"
+	ActionStatusAllowed  ActionStatus = "allowed"
+	ActionStatusRejected ActionStatus = "rejected"
+	ActionStatusExpired  ActionStatus = "expired"
+	ActionStatusCanceled ActionStatus = "canceled"
+)
+
+type ActionOptionSnapshot struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
+	Scope string `json:"scope,omitempty"`
+}
+
+type ActionDecisionSnapshot struct {
+	OptionID  string    `json:"option_id,omitempty"`
+	Kind      string    `json:"kind,omitempty"`
+	DecidedAt time.Time `json:"decided_at"`
+}
+
+type ActivitySnapshot struct {
+	ID          string                  `json:"id"`
+	Kind        string                  `json:"kind"`
+	Title       string                  `json:"title"`
+	Status      ActionStatus            `json:"status"`
+	RequestedAt time.Time               `json:"requested_at"`
+	ExpiresAt   time.Time               `json:"expires_at"`
+	Options     []ActionOptionSnapshot  `json:"options,omitempty"`
+	Decision    *ActionDecisionSnapshot `json:"decision,omitempty"`
+}
+
+type ExecutionRef struct {
+	RuntimeKind string
+	RuntimeID   string
+	SessionID   string
+	ToolCallID  string
+	ToolKind    string
+}
+
+type ActivityDecisionRequest struct {
+	Channel    string
+	ActivityID string
+	OptionID   string
+}
+
+type ActivityDecider interface {
+	Decide(ctx context.Context, req ActivityDecisionRequest) (ActivitySnapshot, error)
+}
+
+type RuntimeEventKind string
+
+const (
+	RuntimeEventUserMessageDelta RuntimeEventKind = "user_message_delta"
+	RuntimeEventTextDelta        RuntimeEventKind = "text_delta"
+	RuntimeEventThoughtDelta     RuntimeEventKind = "thought_delta"
+	RuntimeEventToolCallStart    RuntimeEventKind = "tool_call_start"
+	RuntimeEventToolCallUpdate   RuntimeEventKind = "tool_call_update"
+	RuntimeEventPlanUpdate       RuntimeEventKind = "plan_update"
+	RuntimeEventActionRequest    RuntimeEventKind = "action_request"
+	RuntimeEventActionDecision   RuntimeEventKind = "action_decision"
+	RuntimeEventPromptCompleted  RuntimeEventKind = "prompt_completed"
+	RuntimeEventPromptFailed     RuntimeEventKind = "prompt_failed"
+)
+
+type RuntimeEvent struct {
 	RuntimeKind       string
 	RuntimeID         string
 	SessionID         string
-	Kind              EventKind
+	Kind              RuntimeEventKind
 	ReceivedAt        time.Time
 	MessageID         string
 	Text              string
@@ -46,136 +107,19 @@ type Event struct {
 	Payload           any
 }
 
-type Sink interface {
-	Publish(Event)
+type RuntimeEventSink interface {
+	Publish(RuntimeEvent)
 }
 
-type Subscriber interface {
-	Subscribe(runtimeID string) (<-chan Event, func())
+type RuntimeEventSubscriber interface {
+	Subscribe(runtimeID string) (<-chan RuntimeEvent, func())
 }
 
-const DefaultEventBuffer = 64
-
-// EventSink fans out normalized runtime activity events to bridge workers.
-type EventSink struct {
-	mu          sync.Mutex
-	nextID      int
-	subscribers map[int]subscription
-}
-
-type subscription struct {
-	runtimeID string
-	ch        chan Event
-}
-
-func NewEventSink() *EventSink {
-	return &EventSink{
-		subscribers: make(map[int]subscription),
+func RuntimeEventRequiresReliableDelivery(event RuntimeEvent) bool {
+	switch event.Kind {
+	case RuntimeEventActionRequest, RuntimeEventActionDecision:
+		return true
+	default:
+		return false
 	}
-}
-
-func (s *EventSink) Publish(event Event) {
-	if s == nil {
-		return
-	}
-
-	runtimeID := strings.TrimSpace(event.RuntimeID)
-
-	s.mu.Lock()
-	targets := make([]chan Event, 0, len(s.subscribers))
-	for _, sub := range s.subscribers {
-		if sub.runtimeID != "" && sub.runtimeID != runtimeID {
-			continue
-		}
-		targets = append(targets, sub.ch)
-	}
-	s.mu.Unlock()
-
-	for _, ch := range targets {
-		select {
-		case ch <- event:
-		default:
-		}
-	}
-}
-
-func (s *EventSink) Subscribe(runtimeID string) (<-chan Event, func()) {
-	ch := make(chan Event, DefaultEventBuffer)
-	if s == nil {
-		close(ch)
-		return ch, func() {}
-	}
-
-	s.mu.Lock()
-	id := s.nextID
-	s.nextID++
-	s.subscribers[id] = subscription{
-		runtimeID: strings.TrimSpace(runtimeID),
-		ch:        ch,
-	}
-	s.mu.Unlock()
-
-	var once sync.Once
-	cancel := func() {
-		once.Do(func() {
-			s.mu.Lock()
-			if sub, ok := s.subscribers[id]; ok {
-				delete(s.subscribers, id)
-				close(sub.ch)
-			}
-			s.mu.Unlock()
-		})
-	}
-	return ch, cancel
-}
-
-var (
-	ErrActionNotFound       = errors.New("action request not found")
-	ErrActionInvalidOption  = errors.New("action option is invalid")
-	ErrActionAlreadyDecided = errors.New("action request already decided")
-	ErrActionGone           = errors.New("action request is no longer pending")
-)
-
-type ActionStatus string
-
-const (
-	ActionKindPermission = "permission"
-
-	ActionStatusPending  ActionStatus = "pending"
-	ActionStatusAllowed  ActionStatus = "allowed"
-	ActionStatusRejected ActionStatus = "rejected"
-	ActionStatusExpired  ActionStatus = "expired"
-	ActionStatusCanceled ActionStatus = "canceled"
-)
-
-type ActionOptionSnapshot struct {
-	ID    string `json:"id"`
-	Kind  string `json:"kind"`
-	Label string `json:"label"`
-}
-
-type ActionDecisionSnapshot struct {
-	OptionID  string    `json:"option_id,omitempty"`
-	Kind      string    `json:"kind,omitempty"`
-	DecidedAt time.Time `json:"decided_at"`
-}
-
-type ActionRequestSnapshot struct {
-	ID          string                  `json:"id"`
-	Kind        string                  `json:"kind"`
-	BotID       string                  `json:"bot_id,omitempty"`
-	RuntimeID   string                  `json:"runtime_id"`
-	SessionID   string                  `json:"session_id"`
-	ToolCallID  string                  `json:"tool_call_id"`
-	ToolTitle   string                  `json:"title"`
-	ToolKind    string                  `json:"tool_kind,omitempty"`
-	Status      ActionStatus            `json:"status"`
-	RequestedAt time.Time               `json:"requested_at"`
-	ExpiresAt   time.Time               `json:"expires_at"`
-	Options     []ActionOptionSnapshot  `json:"options,omitempty"`
-	Decision    *ActionDecisionSnapshot `json:"decision,omitempty"`
-}
-
-type ActionDecider interface {
-	Decide(ctx context.Context, botID string, actionID string, optionID string) (ActionRequestSnapshot, error)
 }

@@ -14,6 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"csgclaw/internal/activity"
+	agentruntime "csgclaw/internal/runtime"
+
 	acp "github.com/coder/acp-go-sdk"
 )
 
@@ -191,7 +194,7 @@ func (m *acpManager) Stop(ctx context.Context, handle SessionHandle) error {
 		}
 	}
 	if m.deps.Permission != nil && live.session != nil {
-		m.deps.Permission.CancelSession(runtimeID, live.session.SessionID)
+		m.deps.Permission.CancelSession(runtimeID, "")
 	}
 	if live.client != nil {
 		live.client.shutdownTerminals()
@@ -300,7 +303,7 @@ func (m *acpManager) waitSession(runtimeID string, live *liveSession) {
 		live.client.shutdownTerminals()
 	}
 	if m.deps.Permission != nil && live.session != nil {
-		m.deps.Permission.CancelSession(runtimeID, live.session.SessionID)
+		m.deps.Permission.CancelSession(runtimeID, "")
 	}
 	if live.stderr != nil {
 		_ = live.stderr.Close()
@@ -462,12 +465,15 @@ func (c *sessionClient) RequestPermission(ctx context.Context, params acp.Reques
 	}
 
 	decision, err := c.permissionBroker.Request(ctx, PendingPermissionRequest{
-		RuntimeID:  c.runtimeID,
-		SessionID:  strings.TrimSpace(string(params.SessionId)),
-		ToolCallID: strings.TrimSpace(string(params.ToolCall.ToolCallId)),
-		ToolTitle:  stringValue(params.ToolCall.Title),
-		ToolKind:   permissionToolKind(params.ToolCall),
-		Options:    PermissionOptionsFromACP(params.Options),
+		ExecutionRef: activity.ExecutionRef{
+			RuntimeKind: agentruntime.KindCodex,
+			RuntimeID:   c.runtimeID,
+			SessionID:   strings.TrimSpace(string(params.SessionId)),
+			ToolCallID:  strings.TrimSpace(string(params.ToolCall.ToolCallId)),
+			ToolKind:    permissionToolKind(params.ToolCall),
+		},
+		ToolTitle: stringValue(params.ToolCall.Title),
+		Options:   PermissionOptionsFromACP(params.Options),
 	})
 	if err != nil {
 		return acp.RequestPermissionResponse{}, err
