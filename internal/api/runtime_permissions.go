@@ -18,11 +18,6 @@ type runtimePermissionDecisionRequest struct {
 
 type RuntimePermissionDecider = runtimeactivity.PermissionDecider
 
-// Deprecated compatibility route for older Codex permission clients.
-func (h *Handler) handleCodexPermissionDecision(w http.ResponseWriter, r *http.Request) {
-	h.handleRuntimePermissionDecision(w, r)
-}
-
 func (h *Handler) handleRuntimePermissionDecision(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

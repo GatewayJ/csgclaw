@@ -60,24 +60,6 @@ func TestRuntimePermissionDecisionEndpoint(t *testing.T) {
 	}
 }
 
-func TestCodexPermissionDecisionEndpointCompatibility(t *testing.T) {
-	t.Parallel()
-
-	decider := &fakePermissionDecider{
-		snapshot: runtimeactivity.PermissionSnapshot{ID: "perm-1", Status: runtimeactivity.PermissionStatusAllowed},
-	}
-	h := &Handler{}
-	h.SetRuntimePermissionDecider(decider)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/codex/permissions/perm-1/decision", strings.NewReader(`{"option_id":"once"}`))
-	h.Routes().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestRuntimePermissionDecisionEndpointConflictReturnsSnapshot(t *testing.T) {
 	t.Parallel()
 

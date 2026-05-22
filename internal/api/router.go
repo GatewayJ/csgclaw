@@ -46,7 +46,6 @@ func (h *Handler) registerCoreRoutes(router chi.Router) {
 			r.Post("/login", h.handleCLIProxyAuthLogin)
 		})
 		r.Post("/runtime/permissions/{request_id}/decision", h.handleRuntimePermissionDecision)
-		r.Post("/codex/permissions/{request_id}/decision", h.handleCodexPermissionDecision)
 		r.Post("/agent-profiles/models", h.handleAgentProfileModels)
 		r.Get("/agent-profile-defaults", h.handleAgentProfileDefaults)
 		r.Route("/config/bootstrap", func(r chi.Router) {
