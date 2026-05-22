@@ -1,33 +1,35 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
-	runtimecodex "csgclaw/internal/runtime/codex"
+	runtimeactivity "csgclaw/internal/runtime/activity"
 
 	"github.com/go-chi/chi/v5"
 )
 
-type codexPermissionDecisionRequest struct {
+type runtimePermissionDecisionRequest struct {
 	OptionID string `json:"option_id"`
 }
 
-type CodexPermissionDecider interface {
-	Decide(ctx context.Context, requestID string, optionID string) (runtimecodex.PermissionSnapshot, error)
+type RuntimePermissionDecider = runtimeactivity.PermissionDecider
+
+// Deprecated compatibility route for older Codex permission clients.
+func (h *Handler) handleCodexPermissionDecision(w http.ResponseWriter, r *http.Request) {
+	h.handleRuntimePermissionDecision(w, r)
 }
 
-func (h *Handler) handleCodexPermissionDecision(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleRuntimePermissionDecision(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.codexPermissions == nil {
-		http.Error(w, "codex permissions are not configured", http.StatusServiceUnavailable)
+	if h.runtimePermissions == nil {
+		http.Error(w, "runtime permissions are not configured", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -37,22 +39,22 @@ func (h *Handler) handleCodexPermissionDecision(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var req codexPermissionDecisionRequest
+	var req runtimePermissionDecisionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 		return
 	}
-	snapshot, err := h.codexPermissions.Decide(r.Context(), requestID, strings.TrimSpace(req.OptionID))
+	snapshot, err := h.runtimePermissions.Decide(r.Context(), requestID, strings.TrimSpace(req.OptionID))
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, snapshot)
-	case errors.Is(err, runtimecodex.ErrPermissionInvalidOption):
+	case errors.Is(err, runtimeactivity.ErrPermissionInvalidOption):
 		http.Error(w, err.Error(), http.StatusBadRequest)
-	case errors.Is(err, runtimecodex.ErrPermissionNotFound):
+	case errors.Is(err, runtimeactivity.ErrPermissionNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
-	case errors.Is(err, runtimecodex.ErrPermissionAlreadyDecided):
+	case errors.Is(err, runtimeactivity.ErrPermissionAlreadyDecided):
 		writeJSON(w, http.StatusConflict, snapshot)
-	case errors.Is(err, runtimecodex.ErrPermissionGone):
+	case errors.Is(err, runtimeactivity.ErrPermissionGone):
 		writeJSON(w, http.StatusGone, snapshot)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)

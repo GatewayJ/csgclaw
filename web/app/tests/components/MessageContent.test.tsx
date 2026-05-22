@@ -154,17 +154,20 @@ describe("MessageContent", () => {
               ],
               status: "pending",
               title: "Run shell command",
-              tool_call_id: "tool-1",
+              tool_call_id: "call_WukaSS6FdffdmOndVugBkoRW",
             },
           },
         })}
       />,
     );
 
+    expect(screen.getByText("Permission request")).toBeInTheDocument();
+    expect(screen.queryByText("call_WukaSS6FdffdmOndVugBkoRW")).not.toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: /Allow once/ }));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "api/v1/codex/permissions/perm-1/decision",
+      "api/v1/runtime/permissions/perm-1/decision",
       expect.objectContaining({
         body: JSON.stringify({ option_id: "once" }),
         method: "POST",

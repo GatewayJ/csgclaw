@@ -1,14 +1,14 @@
 import { post } from "@/api/client";
 import type { ApiError } from "@/api/client";
 
-export type CodexPermissionDecision = {
+export type RuntimePermissionDecision = {
   decided_at?: string;
   kind?: string;
   option_id?: string;
 };
 
-export type CodexPermissionSnapshot = {
-  decision?: CodexPermissionDecision | null;
+export type RuntimePermissionSnapshot = {
+  decision?: RuntimePermissionDecision | null;
   expires_at?: string;
   id: string;
   options?: Array<{ id: string; kind: string; label: string }>;
@@ -20,13 +20,13 @@ export type CodexPermissionSnapshot = {
   tool_call_id?: string;
 };
 
-export async function decideCodexPermissionRequest(
+export async function decideRuntimePermissionRequest(
   requestID: string,
   optionID: string,
-): Promise<CodexPermissionSnapshot> {
+): Promise<RuntimePermissionSnapshot> {
   try {
-    return await post<CodexPermissionSnapshot>(
-      `api/v1/codex/permissions/${encodeURIComponent(requestID)}/decision`,
+    return await post<RuntimePermissionSnapshot>(
+      `api/v1/runtime/permissions/${encodeURIComponent(requestID)}/decision`,
       { option_id: optionID },
     );
   } catch (error) {
@@ -38,15 +38,15 @@ export async function decideCodexPermissionRequest(
   }
 }
 
-function snapshotFromAPIError(error: unknown): CodexPermissionSnapshot | null {
+function snapshotFromAPIError(error: unknown): RuntimePermissionSnapshot | null {
   const apiError = error as ApiError | null;
   if (!apiError || (apiError.status !== 409 && apiError.status !== 410)) {
     return null;
   }
   try {
-    const parsed = JSON.parse(apiError.message) as Partial<CodexPermissionSnapshot>;
+    const parsed = JSON.parse(apiError.message) as Partial<RuntimePermissionSnapshot>;
     if (typeof parsed?.id === "string" && typeof parsed?.status === "string") {
-      return parsed as CodexPermissionSnapshot;
+      return parsed as RuntimePermissionSnapshot;
     }
   } catch {
     return null;

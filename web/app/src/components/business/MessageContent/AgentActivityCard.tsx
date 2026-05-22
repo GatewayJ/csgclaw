@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
-import { decideCodexPermissionRequest } from "@/api/codex";
+import { decideRuntimePermissionRequest } from "@/api/runtimePermissions";
 import { errorMessage } from "@/api/client";
 import { AgentActivityMsgTypes } from "@/shared/constants/messages";
 import { permissionOptionLabel, statusLabel } from "@/models/agentActivity";
@@ -52,7 +52,7 @@ function PermissionActivityCard({ permission }: { permission: AgentActivityPermi
     setBusyOption(option.id);
     setError("");
     try {
-      const snapshot = await decideCodexPermissionRequest(permission.id, option.id);
+      const snapshot = await decideRuntimePermissionRequest(permission.id, option.id);
       setLocalStatus(snapshot.status || optionStatus(option));
     } catch (err) {
       setError(errorMessage(err, "Permission decision failed"));
@@ -69,7 +69,7 @@ function PermissionActivityCard({ permission }: { permission: AgentActivityPermi
         </span>
         <div className="agent-activity-title-group">
           <div className="agent-activity-title">{permission.title}</div>
-          <div className="agent-activity-subtitle">{permission.tool_call_id || "Codex permission"}</div>
+          <div className="agent-activity-subtitle">Permission request</div>
         </div>
         <span className={`agent-activity-badge status-${localStatus}`}>{statusLabel(localStatus)}</span>
       </div>
@@ -105,7 +105,7 @@ function NoticeActivityCard({ body }: { body: string }) {
           <ShieldAlert size={16} />
         </span>
         <div className="agent-activity-title-group">
-          <div className="agent-activity-title">Codex notice</div>
+          <div className="agent-activity-title">Runtime notice</div>
           <div className="agent-activity-subtitle">{body}</div>
         </div>
       </div>

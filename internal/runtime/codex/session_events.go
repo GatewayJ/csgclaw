@@ -6,15 +6,18 @@ import (
 	"strings"
 	"time"
 
+	agentruntime "csgclaw/internal/runtime"
+
 	acp "github.com/coder/acp-go-sdk"
 )
 
 func eventFromSessionUpdate(runtimeID string, note acp.SessionNotification) SessionEvent {
 	base := SessionEvent{
-		RuntimeID:  strings.TrimSpace(runtimeID),
-		SessionID:  strings.TrimSpace(string(note.SessionId)),
-		ReceivedAt: time.Now().UTC(),
-		Payload:    note.Update,
+		RuntimeKind: agentruntime.KindCodex,
+		RuntimeID:   strings.TrimSpace(runtimeID),
+		SessionID:   strings.TrimSpace(string(note.SessionId)),
+		ReceivedAt:  time.Now().UTC(),
+		Payload:     note.Update,
 	}
 
 	switch update := note.Update; {
@@ -64,6 +67,7 @@ func eventFromSessionUpdate(runtimeID string, note acp.SessionNotification) Sess
 
 func permissionRequestEvent(snapshot PermissionSnapshot) SessionEvent {
 	return SessionEvent{
+		RuntimeKind:         agentruntime.KindCodex,
 		RuntimeID:           strings.TrimSpace(snapshot.RuntimeID),
 		SessionID:           strings.TrimSpace(snapshot.SessionID),
 		Kind:                SessionEventPermissionRequest,
@@ -79,6 +83,7 @@ func permissionRequestEvent(snapshot PermissionSnapshot) SessionEvent {
 
 func permissionDecisionEvent(snapshot PermissionSnapshot) SessionEvent {
 	event := SessionEvent{
+		RuntimeKind:         agentruntime.KindCodex,
 		RuntimeID:           strings.TrimSpace(snapshot.RuntimeID),
 		SessionID:           strings.TrimSpace(snapshot.SessionID),
 		Kind:                SessionEventPermissionDecision,
@@ -99,24 +104,26 @@ func permissionDecisionEvent(snapshot PermissionSnapshot) SessionEvent {
 
 func promptCompletedEvent(runtimeID string, sessionID string, resp acp.PromptResponse) SessionEvent {
 	return SessionEvent{
-		RuntimeID:  strings.TrimSpace(runtimeID),
-		SessionID:  strings.TrimSpace(sessionID),
-		Kind:       SessionEventPromptCompleted,
-		ReceivedAt: time.Now().UTC(),
-		MessageID:  stringValue(resp.UserMessageId),
-		StopReason: strings.TrimSpace(string(resp.StopReason)),
-		Payload:    resp,
+		RuntimeKind: agentruntime.KindCodex,
+		RuntimeID:   strings.TrimSpace(runtimeID),
+		SessionID:   strings.TrimSpace(sessionID),
+		Kind:        SessionEventPromptCompleted,
+		ReceivedAt:  time.Now().UTC(),
+		MessageID:   stringValue(resp.UserMessageId),
+		StopReason:  strings.TrimSpace(string(resp.StopReason)),
+		Payload:     resp,
 	}
 }
 
 func promptFailedEvent(runtimeID string, sessionID string, err error) SessionEvent {
 	return SessionEvent{
-		RuntimeID:  strings.TrimSpace(runtimeID),
-		SessionID:  strings.TrimSpace(sessionID),
-		Kind:       SessionEventPromptFailed,
-		ReceivedAt: time.Now().UTC(),
-		Error:      errorString(err),
-		Payload:    err,
+		RuntimeKind: agentruntime.KindCodex,
+		RuntimeID:   strings.TrimSpace(runtimeID),
+		SessionID:   strings.TrimSpace(sessionID),
+		Kind:        SessionEventPromptFailed,
+		ReceivedAt:  time.Now().UTC(),
+		Error:       errorString(err),
+		Payload:     err,
 	}
 }
 

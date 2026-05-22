@@ -17,6 +17,7 @@ import (
 	"csgclaw/internal/codexacp"
 	"csgclaw/internal/codexmodel"
 	agentruntime "csgclaw/internal/runtime"
+	runtimeactivity "csgclaw/internal/runtime/activity"
 	"csgclaw/internal/sandbox"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -84,46 +85,24 @@ type Manager interface {
 	Prompt(ctx context.Context, handle SessionHandle, req acp.PromptRequest) (acp.PromptResponse, error)
 }
 
-type SessionEventKind string
+type SessionEventKind = runtimeactivity.EventKind
 
 const (
-	SessionEventUserMessageDelta   SessionEventKind = "user_message_delta"
-	SessionEventTextDelta          SessionEventKind = "text_delta"
-	SessionEventThoughtDelta       SessionEventKind = "thought_delta"
-	SessionEventToolCallStart      SessionEventKind = "tool_call_start"
-	SessionEventToolCallUpdate     SessionEventKind = "tool_call_update"
-	SessionEventPlanUpdate         SessionEventKind = "plan_update"
-	SessionEventPermissionRequest  SessionEventKind = "permission_request"
-	SessionEventPermissionDecision SessionEventKind = "permission_decision"
-	SessionEventPromptCompleted    SessionEventKind = "prompt_completed"
-	SessionEventPromptFailed       SessionEventKind = "prompt_failed"
+	SessionEventUserMessageDelta   = runtimeactivity.EventUserMessageDelta
+	SessionEventTextDelta          = runtimeactivity.EventTextDelta
+	SessionEventThoughtDelta       = runtimeactivity.EventThoughtDelta
+	SessionEventToolCallStart      = runtimeactivity.EventToolCallStart
+	SessionEventToolCallUpdate     = runtimeactivity.EventToolCallUpdate
+	SessionEventPlanUpdate         = runtimeactivity.EventPlanUpdate
+	SessionEventPermissionRequest  = runtimeactivity.EventPermissionRequest
+	SessionEventPermissionDecision = runtimeactivity.EventPermissionDecision
+	SessionEventPromptCompleted    = runtimeactivity.EventPromptCompleted
+	SessionEventPromptFailed       = runtimeactivity.EventPromptFailed
 )
 
-type SessionEvent struct {
-	RuntimeID            string
-	SessionID            string
-	Kind                 SessionEventKind
-	ReceivedAt           time.Time
-	MessageID            string
-	Text                 string
-	ToolCallID           string
-	ToolKind             string
-	ToolTitle            string
-	ToolStatus           string
-	ToolInputSummary     string
-	ToolOutputSummary    string
-	PermissionRequestID  string
-	PermissionStatus     string
-	PermissionOptionID   string
-	PermissionOptionKind string
-	StopReason           string
-	Error                string
-	Payload              any
-}
+type SessionEvent = runtimeactivity.Event
 
-type SessionEventSink interface {
-	Publish(SessionEvent)
-}
+type SessionEventSink = runtimeactivity.Sink
 
 type Dependencies struct {
 	BinaryProvider codexacp.BinaryProvider

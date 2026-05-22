@@ -63,11 +63,6 @@ export type AgentLike = AgentProfileLike & {
   template_name?: string | null;
 };
 
-export type AgentDraftInput = AgentLike & {
-  bot_type?: BotType | null;
-  notifier_delivery_mode?: string | null;
-};
-
 export type AgentDraft = {
   agent_id?: string;
   api_key: string;
@@ -582,16 +577,10 @@ export function notifierDeliveryConfiguredInProfile(
   return notifierConfiguredFromFlatDetails(notifierFlatFromSources(profile, agent));
 }
 
-<<<<<<< HEAD
 export function agentToDraft(agent: AgentDraftSource | null | undefined): AgentDraft {
-  const profile = agent?.agent_profile || agent || {};
-  const botType = normalizeBotType(agent?.type ?? agent?.bot_type);
-=======
-export function agentToDraft(agent: AgentDraftInput | null | undefined): AgentDraft {
   const profile = agent?.agent_profile || agent || {};
   const botType = normalizeBotType(agent?.bot_type ?? agent?.type);
   const base = profileToDraft(profile, agent);
->>>>>>> 8a85886 (feat: add Codex permission approval UI)
   return {
     agent_id: agent?.id || "",
     name: agent?.name || "",

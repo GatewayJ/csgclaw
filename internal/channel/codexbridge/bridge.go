@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"csgclaw/internal/channel/runtimebridge"
+	runtimeactivity "csgclaw/internal/runtime/activity"
 	runtimecodex "csgclaw/internal/runtime/codex"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -32,7 +34,7 @@ type SessionPrompter interface {
 type Service struct {
 	client         BotClient
 	prompter       SessionPrompter
-	events         *EventSink
+	events         runtimeactivity.Subscriber
 	reconnectDelay time.Duration
 	queueSize      int
 	seenWindow     int
@@ -42,7 +44,7 @@ type Service struct {
 	workers map[string]*worker
 }
 
-func NewService(client BotClient, prompter SessionPrompter, events *EventSink) *Service {
+func NewService(client BotClient, prompter SessionPrompter, events runtimeactivity.Subscriber) *Service {
 	return &Service{
 		client:         client,
 		prompter:       prompter,
@@ -219,13 +221,13 @@ func (w *worker) enqueue(ctx context.Context, evt BotEvent) {
 	}
 }
 
-func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-chan runtimecodex.SessionEvent) error {
+func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-chan runtimeactivity.Event) error {
 	req := acp.PromptRequest{
 		SessionId: acp.SessionId(w.binding.SessionID),
 		Prompt:    []acp.ContentBlock{acp.TextBlock(evt.Text)},
 		Meta:      cloneMeta(w.binding.PromptMeta),
 	}
-	renderer := newTurnRenderer()
+	renderer := runtimebridge.NewTurnRenderer()
 
 	type promptResult struct {
 		err error
@@ -252,30 +254,24 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 			return ctx.Err()
 		case event, ok := <-runtimeEvents:
 			if !ok {
-				return fmt.Errorf("codex event sink closed")
+				return fmt.Errorf("runtime event sink closed")
 			}
 			if !matchesBinding(event, w.binding) {
 				continue
 			}
-			if renderer.ShouldRenderActivity(event) {
-				if activity, ok := renderActivity(event, w.binding, evt.RoomID, w.binding.BotID); ok {
-					if err := w.sendActivity(ctx, evt.RoomID, activity); err != nil {
-						return err
-					}
-				}
-			}
-			for _, text := range renderer.Apply(event) {
-				if err := w.sendMessage(ctx, evt.RoomID, text); err != nil {
+			if activity, ok := renderer.RenderActivity(event, evt.RoomID, w.binding.BotID); ok {
+				if err := w.sendActivity(ctx, evt.RoomID, activity); err != nil {
 					return err
 				}
 			}
+			renderer.ApplyText(event)
 			if isTerminalEvent(event.Kind) && promptReturned {
 				return w.flushTurn(ctx, evt.RoomID, renderer)
 			}
 		case result := <-promptDone:
 			promptReturned = true
 			if result.err != nil {
-				renderer.promptError = strings.TrimSpace(result.err.Error())
+				renderer.SetPromptError(result.err.Error())
 				return w.flushTurn(ctx, evt.RoomID, renderer)
 			}
 			settleTimer.Reset(w.service.promptSettle)
@@ -287,7 +283,7 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 	}
 }
 
-func (w *worker) flushTurn(ctx context.Context, roomID string, renderer *turnRenderer) error {
+func (w *worker) flushTurn(ctx context.Context, roomID string, renderer *runtimebridge.TurnRenderer) error {
 	for _, text := range renderer.FinalMessages() {
 		if err := w.sendMessage(ctx, roomID, text); err != nil {
 			return err
@@ -303,7 +299,7 @@ func (w *worker) sendMessage(ctx context.Context, roomID, text string) error {
 	})
 }
 
-func (w *worker) sendActivity(ctx context.Context, roomID string, activity renderedActivity) error {
+func (w *worker) sendActivity(ctx context.Context, roomID string, activity runtimebridge.RenderedActivity) error {
 	return w.sendMessageRequest(ctx, SendMessageRequest{
 		RoomID:    roomID,
 		Text:      activity.Text,
@@ -373,7 +369,7 @@ func (w *worker) setLastEventID(messageID string) {
 	w.mu.Unlock()
 }
 
-func matchesBinding(event runtimecodex.SessionEvent, binding Binding) bool {
+func matchesBinding(event runtimeactivity.Event, binding Binding) bool {
 	if strings.TrimSpace(event.RuntimeID) != strings.TrimSpace(binding.RuntimeID) {
 		return false
 	}
@@ -383,8 +379,8 @@ func matchesBinding(event runtimecodex.SessionEvent, binding Binding) bool {
 	return strings.TrimSpace(event.SessionID) == strings.TrimSpace(binding.SessionID)
 }
 
-func isTerminalEvent(kind runtimecodex.SessionEventKind) bool {
-	return kind == runtimecodex.SessionEventPromptCompleted || kind == runtimecodex.SessionEventPromptFailed
+func isTerminalEvent(kind runtimeactivity.EventKind) bool {
+	return kind == runtimeactivity.EventPromptCompleted || kind == runtimeactivity.EventPromptFailed
 }
 
 func cloneMeta(src map[string]any) map[string]any {

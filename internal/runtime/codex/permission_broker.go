@@ -2,12 +2,13 @@ package codex
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	runtimeactivity "csgclaw/internal/runtime/activity"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -18,47 +19,27 @@ const (
 )
 
 var (
-	ErrPermissionNotFound       = errors.New("permission request not found")
-	ErrPermissionInvalidOption  = errors.New("permission option is invalid")
-	ErrPermissionAlreadyDecided = errors.New("permission request already decided")
-	ErrPermissionGone           = errors.New("permission request is no longer pending")
+	ErrPermissionNotFound       = runtimeactivity.ErrPermissionNotFound
+	ErrPermissionInvalidOption  = runtimeactivity.ErrPermissionInvalidOption
+	ErrPermissionAlreadyDecided = runtimeactivity.ErrPermissionAlreadyDecided
+	ErrPermissionGone           = runtimeactivity.ErrPermissionGone
 )
 
-type PermissionStatus string
+type PermissionStatus = runtimeactivity.PermissionStatus
 
 const (
-	PermissionStatusPending  PermissionStatus = "pending"
-	PermissionStatusAllowed  PermissionStatus = "allowed"
-	PermissionStatusRejected PermissionStatus = "rejected"
-	PermissionStatusExpired  PermissionStatus = "expired"
-	PermissionStatusCanceled PermissionStatus = "canceled"
+	PermissionStatusPending  = runtimeactivity.PermissionStatusPending
+	PermissionStatusAllowed  = runtimeactivity.PermissionStatusAllowed
+	PermissionStatusRejected = runtimeactivity.PermissionStatusRejected
+	PermissionStatusExpired  = runtimeactivity.PermissionStatusExpired
+	PermissionStatusCanceled = runtimeactivity.PermissionStatusCanceled
 )
 
-type PermissionOptionSnapshot struct {
-	ID    string `json:"id"`
-	Kind  string `json:"kind"`
-	Label string `json:"label"`
-}
+type PermissionOptionSnapshot = runtimeactivity.PermissionOptionSnapshot
 
-type PermissionDecisionSnapshot struct {
-	OptionID  string    `json:"option_id,omitempty"`
-	Kind      string    `json:"kind,omitempty"`
-	DecidedAt time.Time `json:"decided_at"`
-}
+type PermissionDecisionSnapshot = runtimeactivity.PermissionDecisionSnapshot
 
-type PermissionSnapshot struct {
-	ID          string                      `json:"id"`
-	RuntimeID   string                      `json:"runtime_id"`
-	SessionID   string                      `json:"session_id"`
-	ToolCallID  string                      `json:"tool_call_id"`
-	ToolTitle   string                      `json:"title"`
-	ToolKind    string                      `json:"tool_kind,omitempty"`
-	Status      PermissionStatus            `json:"status"`
-	RequestedAt time.Time                   `json:"requested_at"`
-	ExpiresAt   time.Time                   `json:"expires_at"`
-	Options     []PermissionOptionSnapshot  `json:"options,omitempty"`
-	Decision    *PermissionDecisionSnapshot `json:"decision,omitempty"`
-}
+type PermissionSnapshot = runtimeactivity.PermissionSnapshot
 
 type PendingPermissionRequest struct {
 	RuntimeID   string
@@ -82,9 +63,7 @@ type PermissionBroker interface {
 	CancelSession(runtimeID string, sessionID string)
 }
 
-type PermissionDecider interface {
-	Decide(ctx context.Context, requestID string, optionID string) (PermissionSnapshot, error)
-}
+type PermissionDecider = runtimeactivity.PermissionDecider
 
 type MemoryPermissionBroker struct {
 	mu        sync.Mutex
