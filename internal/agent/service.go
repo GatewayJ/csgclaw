@@ -462,21 +462,6 @@ func (s *Service) ensureManager(ctx context.Context, forceRecreate bool, imageOv
 		managerImage = s.managerImage
 	}
 	startProfile, detectionResults := s.managerStartupProfile(ctx)
-	if startProfile.ProfileComplete {
-		runtimeImpl, err := s.runtimeForKind(runtimeKind)
-		if err != nil {
-			return Agent{}, err
-		}
-		if err := s.provisionRuntime(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
-			RuntimeID: runtimeIDForAgentID(ManagerUserID),
-			AgentID:   ManagerUserID,
-			AgentName: ManagerName,
-			Profile:   s.runtimeProfileForKind(runtimeKind, ManagerUserID, ManagerName, "", startProfile),
-		}); err != nil {
-			return Agent{}, fmt.Errorf("provision bootstrap manager runtime: %w", err)
-		}
-	}
-
 	rt, box, err := s.lookupBootstrapManager(ctx)
 	if err != nil {
 		return Agent{}, err
@@ -522,6 +507,20 @@ func (s *Service) ensureManager(ctx context.Context, forceRecreate bool, imageOv
 			return Agent{}, err
 		}
 		box = nil
+	}
+	if startProfile.ProfileComplete {
+		runtimeImpl, err := s.runtimeForKind(runtimeKind)
+		if err != nil {
+			return Agent{}, err
+		}
+		if err := s.provisionRuntime(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
+			RuntimeID: runtimeIDForAgentID(ManagerUserID),
+			AgentID:   ManagerUserID,
+			AgentName: ManagerName,
+			Profile:   s.runtimeProfileForKind(runtimeKind, ManagerUserID, ManagerName, "", startProfile),
+		}); err != nil {
+			return Agent{}, fmt.Errorf("provision bootstrap manager runtime: %w", err)
+		}
 	}
 	if !startProfile.ProfileComplete {
 		now := time.Now().UTC()

@@ -3909,6 +3909,9 @@ func TestEnsureBootstrapStateForceRecreateResetsManagerHomeBeforeCreate(t *testi
 		if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
 			t.Fatalf("stale manager file still exists before recreate: err=%v", err)
 		}
+		if _, err := os.Stat(filepath.Join(managerHome, hostWorkspaceDir)); err != nil {
+			t.Fatalf("manager workspace was not reprovisioned before recreate: %v", err)
+		}
 		return &fakeInstance{}, sandbox.Info{
 			ID:        "box-new",
 			Name:      name,
