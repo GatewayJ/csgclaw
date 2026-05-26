@@ -20,9 +20,9 @@ flowchart LR
     AgentLoop[PicoClaw AgentLoop]
     CSGClaw[CSGClaw LLM/API]
 
-    Feishu <-->|WebSocket 入站 / REST 出站| FeishuChannel
-    FeishuChannel <-->|InboundMessage / OutboundMessage| MessageBus
-    MessageBus <-->|消费 / 发布| AgentLoop
+    Feishu <-->|WebSocket 入站和 REST 出站| FeishuChannel
+    FeishuChannel <-->|InboundMessage 和 OutboundMessage| MessageBus
+    MessageBus <-->|消费和发布| AgentLoop
     AgentLoop <-->|LLM API| CSGClaw
 ```
 
@@ -30,17 +30,17 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-    participant Feishu as 飞书平台<br/>群聊/私聊
-    participant Channel as PicoClaw 程序<br/>FeishuChannel
-    participant Bus as PicoClaw 程序<br/>MessageBus
-    participant Agent as PicoClaw 程序<br/>AgentLoop
+    participant Feishu as 飞书平台 群聊私聊
+    participant Channel as PicoClaw FeishuChannel
+    participant Bus as PicoClaw MessageBus
+    participant Agent as PicoClaw AgentLoop
 
-    Feishu->>Channel: WebSocket: im.message.receive_v1
-    Channel->>Channel: handleMessageReceive(event)
-    Channel->>Channel: 解析 text / mention / chat_id
-    Channel->>Bus: PublishInbound(bus.InboundMessage)
-    Bus-->>Agent: InboundChan()
-    Agent->>Agent: processMessage(ctx, msg)
+    Feishu->>Channel: WebSocket im.message.receive_v1
+    Channel->>Channel: handleMessageReceive event
+    Channel->>Channel: 解析 text mention chat_id
+    Channel->>Bus: PublishInbound InboundMessage
+    Bus-->>Agent: InboundChan
+    Agent->>Agent: processMessage ctx msg
 ```
 
 关键模块：
@@ -58,17 +58,17 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Agent as PicoClaw 程序<br/>AgentLoop
-    participant Bus as PicoClaw 程序<br/>MessageBus
-    participant Manager as PicoClaw 程序<br/>ChannelManager
-    participant Channel as PicoClaw 程序<br/>FeishuChannel
-    participant Feishu as 飞书平台<br/>群聊/私聊
+    participant Agent as PicoClaw AgentLoop
+    participant Bus as PicoClaw MessageBus
+    participant Manager as PicoClaw ChannelManager
+    participant Channel as PicoClaw FeishuChannel
+    participant Feishu as 飞书平台 群聊私聊
 
-    Agent->>Bus: PublishOutbound(bus.OutboundMessage)
-    Bus-->>Manager: OutboundChan()
-    Manager->>Channel: dispatchOutbound(msg)
-    Channel->>Channel: Send(ctx, msg)
-    Channel->>Feishu: REST: message create(chat_id, content)
+    Agent->>Bus: PublishOutbound OutboundMessage
+    Bus-->>Manager: OutboundChan
+    Manager->>Channel: dispatchOutbound msg
+    Channel->>Channel: Send ctx msg
+    Channel->>Feishu: REST message create chat_id content
     Feishu-->>Channel: message_id
 ```
 
@@ -134,7 +134,9 @@ CSGClaw server
 
 ```mermaid
 flowchart LR
-    Feishu[飞书 WebSocket] -. 当前缺少 .-> CSGClaw[CSGClaw server]
+    Feishu[飞书 WebSocket]
+    CSGClaw[CSGClaw server 当前缺少入口]
+    Feishu -.-> CSGClaw
 ```
 
 也就是说，CSGClaw server 当前不是飞书实时群聊消息入口。
@@ -150,46 +152,46 @@ flowchart LR
     CodexBridge[CSGClaw codexbridge]
     CodexRuntime[Codex ACP runtime]
 
-    Feishu <-->|WebSocket 入站 / REST 出站| FeishuClient
-    FeishuClient <-->|BotEvent / SendMessageRequest| CodexBridge
-    CodexBridge <-->|ACP Prompt / session events| CodexRuntime
+    Feishu <-->|WebSocket 入站和 REST 出站| FeishuClient
+    FeishuClient <-->|BotEvent 和 SendMessageRequest| CodexBridge
+    CodexBridge <-->|ACP Prompt 和 session events| CodexRuntime
 ```
 
 ### 入站消息流
 
 ```mermaid
 sequenceDiagram
-    participant Feishu as 飞书平台<br/>群聊/私聊
-    participant Client as CSGClaw server<br/>FeishuCodexClient
-    participant Bridge as CSGClaw server<br/>codexbridge.Service
-    participant Session as CSGClaw server<br/>Codex SessionManager
-    participant Codex as Codex 进程<br/>ACP runtime
+    participant Feishu as 飞书平台 群聊私聊
+    participant Client as CSGClaw FeishuCodexClient
+    participant Bridge as CSGClaw codexbridge Service
+    participant Session as CSGClaw Codex SessionManager
+    participant Codex as Codex ACP runtime
 
-    Feishu->>Client: WebSocket: im.message.receive_v1
-    Client->>Client: mapMessageEvent(event)
-    Client->>Bridge: StreamEvents(botID) -> BotEvent
-    Bridge->>Bridge: enqueue / dedupe
-    Bridge->>Session: EnsureSession(runtimeID, conversationKey)
+    Feishu->>Client: WebSocket im.message.receive_v1
+    Client->>Client: mapMessageEvent event
+    Client->>Bridge: StreamEvents botID returns BotEvent
+    Bridge->>Bridge: enqueue dedupe
+    Bridge->>Session: EnsureSession runtimeID conversationKey
     Session-->>Bridge: sessionID
-    Bridge->>Codex: ACP PromptRequest(sessionID, text)
-    Codex-->>Bridge: ACP PromptResponse / session events
+    Bridge->>Codex: ACP PromptRequest sessionID text
+    Codex-->>Bridge: ACP PromptResponse session events
 ```
 
 ### 出站消息流
 
 ```mermaid
 sequenceDiagram
-    participant Codex as Codex 进程<br/>ACP runtime
-    participant Sink as CSGClaw server<br/>Codex EventSink
-    participant Bridge as CSGClaw server<br/>codexbridge.Service
-    participant Client as CSGClaw server<br/>FeishuCodexClient
-    participant Feishu as 飞书平台<br/>群聊/私聊
+    participant Codex as Codex ACP runtime
+    participant Sink as CSGClaw Codex EventSink
+    participant Bridge as CSGClaw codexbridge Service
+    participant Client as CSGClaw FeishuCodexClient
+    participant Feishu as 飞书平台 群聊私聊
 
     Codex->>Sink: ACP session events
-    Sink-->>Bridge: Subscribe(runtimeID)
+    Sink-->>Bridge: Subscribe runtimeID
     Bridge->>Bridge: TurnRenderer 汇总文本
-    Bridge->>Client: SendMessage(botID, SendMessageRequest)
-    Client->>Feishu: REST: message create(chat_id, text)
+    Bridge->>Client: SendMessage botID request
+    Client->>Feishu: REST message create chat_id text
     Feishu-->>Client: message_id
     Client-->>Bridge: SendMessageResponse
 ```
@@ -393,18 +395,18 @@ sequenceDiagram
     participant Bridge as codexbridge.Service
     participant Agent as agent.Service
 
-    Serve->>Feishu: buildFeishuComponents(configPath)
-    Feishu->>Feishu: feishu.NewProvider(store)
-    Feishu->>Feishu: feishu.NewServiceWithProvider(provider)
-    Serve->>Manager: newCodexBridgeManager(cfg, agentService)
-    Manager->>Runtime: Runtime(KindCodex)
-    Manager->>Runtime: EventSink()
-    Manager->>Manager: New HTTPClient / FeishuCodexClient / RoutingClient
-    Manager->>Bridge: NewService(RoutingClient, SessionManager, EventSink)
-    Serve->>Bridge: Start()
-    Bridge->>Agent: List()
-    Bridge->>Runtime: ensureSession(agent)
-    Bridge->>Bridge: StartBot(Binding)
+    Serve->>Feishu: buildFeishuComponents configPath
+    Feishu->>Feishu: feishu.NewProvider store
+    Feishu->>Feishu: feishu.NewServiceWithProvider provider
+    Serve->>Manager: newCodexBridgeManager cfg agentService
+    Manager->>Runtime: Runtime KindCodex
+    Manager->>Runtime: EventSink
+    Manager->>Manager: New HTTPClient FeishuCodexClient RoutingClient
+    Manager->>Bridge: NewService RoutingClient SessionManager EventSink
+    Serve->>Bridge: Start
+    Bridge->>Agent: List
+    Bridge->>Runtime: ensureSession agent
+    Bridge->>Bridge: StartBot Binding
 ```
 
 `Binding` 参数：
@@ -426,29 +428,29 @@ codexbridge.Binding{
 
 ```mermaid
 sequenceDiagram
-    participant Bridge as CSGClaw server<br/>codexbridge.Service
-    participant Worker as CSGClaw server<br/>bridge worker
-    participant Router as CSGClaw server<br/>RoutingClient
-    participant Client as CSGClaw server<br/>FeishuCodexClient
-    participant Provider as CSGClaw server<br/>feishu.Provider
-    participant LarkWS as CSGClaw server<br/>larkws.Client
-    participant Session as CSGClaw server<br/>SessionManager
-    participant Codex as Codex 进程<br/>ACP runtime
+    participant Bridge as CSGClaw codexbridge Service
+    participant Worker as CSGClaw bridge worker
+    participant Router as CSGClaw RoutingClient
+    participant Client as CSGClaw FeishuCodexClient
+    participant Provider as CSGClaw feishu Provider
+    participant LarkWS as CSGClaw larkws Client
+    participant Session as CSGClaw SessionManager
+    participant Codex as Codex ACP runtime
 
-    Bridge->>Worker: StartBot(Binding)
-    Worker->>Router: StreamEvents(botID, lastEventID)
-    Router->>Client: StreamEvents(botID, lastEventID)
-    Client->>Provider: BotConfig(botID)
-    Provider-->>Client: AppConfig(app_id, app_secret)
-    Client->>Client: resolveBotOpenID(app)
-    Client->>LarkWS: NewClient(app_id, app_secret, handler)
-    LarkWS-->>Client: OnP2MessageReceiveV1(event)
-    Client->>Client: mapMessageEvent(event)
+    Bridge->>Worker: StartBot Binding
+    Worker->>Router: StreamEvents botID lastEventID
+    Router->>Client: StreamEvents botID lastEventID
+    Client->>Provider: BotConfig botID
+    Provider-->>Client: AppConfig app_id app_secret
+    Client->>Client: resolveBotOpenID app
+    Client->>LarkWS: NewClient app_id app_secret handler
+    LarkWS-->>Client: OnP2MessageReceiveV1 event
+    Client->>Client: mapMessageEvent event
     Client-->>Worker: BotEvent
-    Worker->>Worker: enqueue / accept / dedupe
-    Worker->>Session: EnsureSession(runtimeID, conversationKey)
+    Worker->>Worker: enqueue accept dedupe
+    Worker->>Session: EnsureSession runtimeID conversationKey
     Session-->>Worker: sessionID
-    Worker->>Codex: Prompt(acp.PromptRequest)
+    Worker->>Codex: Prompt acp PromptRequest
 ```
 
 `acp.PromptRequest` 的关键参数：
@@ -510,23 +512,23 @@ resolveBotOpenID(app)
 
 ```mermaid
 sequenceDiagram
-    participant Codex as Codex 进程<br/>ACP runtime
-    participant Events as CSGClaw server<br/>EventSink
-    participant Worker as CSGClaw server<br/>bridge worker
-    participant Router as CSGClaw server<br/>RoutingClient
-    participant Client as CSGClaw server<br/>FeishuCodexClient
-    participant Provider as CSGClaw server<br/>feishu.Provider
-    participant Feishu as 飞书平台<br/>REST API
+    participant Codex as Codex ACP runtime
+    participant Events as CSGClaw EventSink
+    participant Worker as CSGClaw bridge worker
+    participant Router as CSGClaw RoutingClient
+    participant Client as CSGClaw FeishuCodexClient
+    participant Provider as CSGClaw feishu Provider
+    participant Feishu as 飞书平台 REST API
 
     Codex->>Events: ACP session events
-    Events-->>Worker: Subscribe(runtimeID)
-    Worker->>Worker: TurnRenderer.RenderActivity / ApplyText
+    Events-->>Worker: Subscribe runtimeID
+    Worker->>Worker: TurnRenderer RenderActivity ApplyText
     Worker->>Worker: flushTurn
-    Worker->>Router: SendMessage(botID, req)
-    Router->>Client: SendMessage(botID, req)
-    Client->>Provider: BotConfig(botID)
-    Provider-->>Client: AppConfig(app_id, app_secret)
-    Client->>Feishu: message create(chat_id, text)
+    Worker->>Router: SendMessage botID req
+    Router->>Client: SendMessage botID req
+    Client->>Provider: BotConfig botID
+    Provider-->>Client: AppConfig app_id app_secret
+    Client->>Feishu: message create chat_id text
     Feishu-->>Client: message_id
     Client-->>Worker: SendMessageResponse
 ```
@@ -602,7 +604,7 @@ flowchart LR
         PChannel[PicoClaw Feishu Channel]
         PBus[MessageBus]
         PAgent[AgentLoop]
-        PFeishu <-->|WS / REST| PChannel
+        PFeishu <-->|WS 和 REST| PChannel
         PChannel <--> PBus
         PBus <--> PAgent
     end
@@ -612,7 +614,7 @@ flowchart LR
         CClient[CSGClaw FeishuCodexClient]
         CBridge[CodexBridge]
         CACP[Codex ACP runtime]
-        CFeishu <-->|WS / REST| CClient
+        CFeishu <-->|WS 和 REST| CClient
         CClient <--> CBridge
         CBridge <-->|ACP| CACP
     end
