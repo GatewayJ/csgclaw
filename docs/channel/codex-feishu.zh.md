@@ -147,9 +147,9 @@ Codex runtime
   -> 飞书群聊 / 私聊
 ```
 
-### 推荐新增模块
+### 新增模块
 
-建议新增：
+新增：
 
 ```text
 internal/channel/feishu/codexclient
@@ -176,7 +176,7 @@ SendMessage
   = codexbridge.SendMessageRequest -> 飞书 message create
 ```
 
-如果需要同时支持 CSGClaw 本地 IM 和 Feishu 两种 Codex bot，可以再加一个轻量路由 client：
+为同时支持 CSGClaw 本地 IM 和 Feishu 两种 Codex bot，增加一个轻量路由 client：
 
 ```text
 internal/channel/codexbridge/routing_client.go
@@ -195,7 +195,7 @@ func (c *RoutingClient) StreamEvents(ctx context.Context, botID, lastEventID str
 func (c *RoutingClient) SendMessage(ctx context.Context, botID string, req codexbridge.SendMessageRequest) (codexbridge.SendMessageResponse, error)
 ```
 
-第一版路由规则可以很简单：
+路由规则：
 
 ```text
 如果 feishu.Provider.BotConfig(botID) 存在 -> 使用 FeishuCodexClient
@@ -224,7 +224,18 @@ type AppConfig struct {
 
 `FeishuCodexClient` 通过 `BotConfig(botID)` 获取该 bot 对应的飞书凭证。
 
-第一版只需要 `app_id` 和 `app_secret`。如果飞书应用开启事件加密，后续需要在 `channels/feishu.toml` 中补充 `encrypt_key` 和 `verification_token`，并扩展 `AppConfig` 或新增运行时选项。
+当前 `channels/feishu.toml` 中与 Codex 飞书桥接相关的字段是：
+
+```toml
+[global]
+admin_open_id = "ou_xxx"
+
+[bots.u-dev]
+app_id = "cli_xxx"
+app_secret = "xxx"
+```
+
+`app_id` 和 `app_secret` 用于创建飞书 SDK client、WebSocket client，以及调用飞书 REST API。`admin_open_id` 保持现有管理语义，Codex 飞书消息桥接不依赖该字段处理普通群聊收发。
 
 ### 现有 Codex bridge 入站模型
 
@@ -275,18 +286,17 @@ type SendMessageResponse struct {
 | --- | --- |
 | `RoomID` | 目标会话；飞书中对应 `chat_id` |
 | `Text` | Codex 要发送的内容 |
-| `MessageID` | activity/update 场景中的消息 ID；第一版可忽略 |
-| `ThreadRootID` | thread/reply 目标；第一版可按普通群消息处理 |
+| `MessageID` | activity/update 场景中的消息 ID |
+| `ThreadRootID` | thread/reply 目标 |
 
 ### 新增 FeishuCodexClient 模型
 
-建议模型：
+模型：
 
 ```go
 type Options struct {
     Provider    feishu.BotCredentialProvider
     MentionOnly bool
-    IsLark      bool
     QueueSize   int
     Logger      *slog.Logger
 }
@@ -294,7 +304,6 @@ type Options struct {
 type Client struct {
     provider    feishu.BotCredentialProvider
     mentionOnly bool
-    isLark      bool
     queueSize   int
     logger      *slog.Logger
 }
@@ -359,7 +368,7 @@ codexbridge.Binding{
 }
 ```
 
-其中 `PromptMeta` 第一版可以不填；如果后续希望 Codex 知道消息来自飞书，可以注入 `channel`、`chat_type`、`bot_id` 等元信息。
+`PromptMeta` 用于给 Codex prompt 附加来源信息。Feishu 路径可以注入 `channel=feishu`，并在需要时加入 `chat_type`、`bot_id` 等元信息。
 
 ### 入站函数调用链
 
@@ -402,11 +411,8 @@ acp.PromptRequest{
 | --- | --- | --- |
 | `app_id` | `feishu.AppConfig.AppID` | 创建飞书 WS client |
 | `app_secret` | `feishu.AppConfig.AppSecret` | 创建飞书 WS client |
-| `domain` | `Options.IsLark` | 选择飞书或 Lark 域名 |
-| `verification_token` | 后续可扩展 | 事件校验 |
-| `encrypt_key` | 后续可扩展 | 事件解密 |
 
-启动 WebSocket 前建议先调用 bot info API 获取当前 bot 的 `open_id`，并在内存中缓存：
+启动 WebSocket 前调用 bot info API 获取当前 bot 的 `open_id`，并在内存中缓存：
 
 ```text
 resolveBotOpenID(app)
@@ -426,12 +432,12 @@ resolveBotOpenID(app)
 | `event.message.message_id` | 映射为 `BotEvent.MessageID` |
 | `event.message.chat_id` | 映射为 `BotEvent.RoomID` |
 | `event.message.chat_type` | 映射为 `BotEvent.ChatType` |
-| `event.message.message_type` | 判断是否支持，第一版建议只处理 `text` |
+| `event.message.message_type` | 判断消息类型 |
 | `event.message.content` | 解析文本内容 |
 | `event.message.mentions` | mention 判断和 `BotEvent.Mentions` |
 | `event.sender.sender_id.open_id` | 忽略 bot 自己发出的消息，记录用户来源 |
 
-群聊过滤建议：
+群聊过滤：
 
 ```text
 如果 chat_type != group -> 接收
@@ -463,9 +469,9 @@ codex runtime 输出 session events
 | `receive_id` | `req.RoomID` |
 | `msg_type` | `text` |
 | `content` | `{"text": req.Text}` |
-| `uuid` | 可选，建议使用稳定请求 ID 做幂等 |
+| `uuid` | 使用稳定请求 ID 做幂等 |
 
-第一版 `SendMessage` 示例：
+`SendMessage` 示例：
 
 ```go
 req := larkim.NewCreateMessageReqBuilder().
@@ -499,7 +505,7 @@ codexbridge.SendMessageResponse{
 | mentions | `Mentions` |
 | thread/root message | `ThreadRootID` / `ThreadContext` |
 
-群聊中建议沿用 PicoClaw 的处理语义：
+群聊中沿用 PicoClaw 的处理语义：
 
 - 支持只响应 @bot 的消息
 - 收到消息后去除 bot mention
@@ -514,10 +520,8 @@ codexbridge.SendMessageResponse{
 | --- | --- |
 | `RoomID` | `receive_id`，类型为 `chat_id` |
 | `Text` | message content |
-| `ThreadRootID` | thread/reply 目标，按飞书能力补齐 |
-| `MessageID` | activity/update 场景可映射为编辑或补充消息 |
-
-第一版可以只支持文本回复；后续再补 interactive card、消息编辑、占位消息和 reasoning/activity 消息。
+| `ThreadRootID` | thread/reply 目标 |
+| `MessageID` | activity/update 场景中的消息 ID |
 
 ## 与 PicoClaw 方案的对齐关系
 
@@ -545,12 +549,11 @@ Codex:
 
 Codex 插件或 MCP server 更适合作为会话内工具，例如查询飞书消息、发送飞书消息、查询用户信息等。它们不适合作为飞书 WebSocket 的常驻入站网关，因为飞书事件到达时仍然需要有一个外部进程接住事件并触发 Codex turn。
 
-因此，推荐：
+因此，设计为：
 
 ```text
 飞书入站和出站适配：放在 CSGClaw server
 Codex 推理和执行：继续走 ACP
-可选飞书工具能力：后续再通过 MCP/插件暴露给 Codex
 ```
 
 ## 实施步骤
@@ -561,10 +564,10 @@ Codex 推理和执行：继续走 ACP
 4. 将飞书消息事件转换为 `codexbridge.BotEvent`。
 5. 在 `SendMessage` 中调用飞书 REST message create API。
 6. 修改 Codex bridge manager，根据 agent/channel 选择 bot client。
-7. 为配置 reload、WebSocket 重连、消息去重和群聊 mention 过滤补测试。
+7. 为配置 reload、WebSocket 重连、消息去重和群聊 mention 过滤增加测试。
 
 ## 最终结论
 
-PicoClaw 飞书接入是 runtime 自己连飞书；Codex 飞书接入建议由 CSGClaw server 代 Codex 连飞书。
+PicoClaw 飞书接入是 runtime 自己连飞书；Codex 飞书接入由 CSGClaw server 代 Codex 连飞书。
 
 这样可以复用现有 Codex ACP bridge，不需要修改 Codex runtime，也不需要新增一套 Codex 专用 HTTP API。CSGClaw server 内部新增 Feishu-backed `BotClient` 即可完成协议适配。
