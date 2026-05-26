@@ -927,15 +927,19 @@ func defaultSendMessage(ctx context.Context, app AppConfig, req SendMessageReque
 	mentionID := strings.TrimSpace(req.MentionID)
 	mentionOpenID := ""
 	if mentionID != "" {
-		mentionApp, err := validateAppConfig(req.MentionAppConfig, mentionID)
-		if err != nil {
-			return SendMessageResponse{}, err
+		if isFeishuOpenID(mentionID) {
+			mentionOpenID = mentionID
+		} else {
+			mentionApp, err := validateAppConfig(req.MentionAppConfig, mentionID)
+			if err != nil {
+				return SendMessageResponse{}, err
+			}
+			botInfo, err := fetchBotInfo(ctx, mentionApp)
+			if err != nil {
+				return SendMessageResponse{}, err
+			}
+			mentionOpenID = botInfo.OpenID
 		}
-		botInfo, err := fetchBotInfo(ctx, mentionApp)
-		if err != nil {
-			return SendMessageResponse{}, err
-		}
-		mentionOpenID = botInfo.OpenID
 		text = fmt.Sprintf("<at user_id=\"%s\">%s</at> %s", mentionOpenID, mentionID, req.Content)
 	}
 
@@ -1025,7 +1029,7 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 	app, err := s.appConfigForSenderLocked(senderID)
 	mentionID := strings.TrimSpace(req.MentionID)
 	var mentionApp AppConfig
-	if err == nil && mentionID != "" {
+	if err == nil && mentionID != "" && !isFeishuOpenID(mentionID) {
 		mentionApp, err = s.appConfigForMentionLocked(mentionID)
 	}
 	s.mu.RUnlock()
@@ -1508,7 +1512,12 @@ func (s *Service) appConfigForMentionLocked(mention string) (AppConfig, error) {
 	if app, ok := s.apps[mention]; ok {
 		return validateAppConfig(app, mention)
 	}
-	return AppConfig{}, fmt.Errorf("feishu app is not configured for mention %q", mention)
+	return AppConfig{}, fmt.Errorf("mention_id %q is neither a configured CSGClaw bot id nor a Feishu open_id; use csgclaw-cli member list --room-id <room> --channel feishu and pass the id field", mention)
+}
+
+func isFeishuOpenID(id string) bool {
+	id = strings.TrimSpace(id)
+	return strings.HasPrefix(id, "ou_") && len(id) > len("ou_")
 }
 
 func (s *Service) managerAppConfigLocked() (AppConfig, error) {

@@ -78,7 +78,7 @@ func (c cmd) runCreate(ctx context.Context, run *command.Context, args []string,
 	roomID := fs.String("room-id", "", "target room id")
 	senderID := fs.String("sender-id", "", "sender bot id")
 	content := fs.String("content", "", "message content")
-	mentionID := fs.String("mention-id", "", "mentioned bot id")
+	mentionID := fs.String("mention-id", "", "mentioned target id from member list")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

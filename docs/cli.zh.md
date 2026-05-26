@@ -562,7 +562,9 @@ csgclaw message <subcommand> [flags]
 - `--room-id string`：必填。
 - `--sender-id string`：必填，发送方 bot ID。
 - `--content string`：必填。
-- `--mention-id string`：可选，被提及 bot ID。
+- `--mention-id string`：可选，被提及目标 ID，来自 `member list` 输出。
+  对飞书房间，可以是 `u-dev` 这类 CSGClaw bot ID，也可以是 `ou_xxx`
+  这类真人飞书 open_id。
 
 `message list` 行为说明：
 
@@ -640,6 +642,7 @@ csgclaw-cli room create --channel feishu --title "ops-room" --creator-id u-manag
 csgclaw-cli member list --channel feishu --room-id oc_x
 csgclaw-cli member create --channel feishu --room-id oc_x --user-id u-dev --inviter-id u-manager
 csgclaw-cli message create --channel feishu --room-id oc_x --sender-id u-manager --mention-id u-dev --content hello
+csgclaw-cli message create --channel feishu --room-id oc_x --sender-id u-manager --mention-id ou_xxx --content hello
 ```
 
-`csgclaw-cli` 是面向 bot 的 CLI。room、member、message 命令不应要求调用方理解或传入 agent ID、飞书 open_id、飞书 app_id、App ID/App Secret 或其他渠道凭证。各 channel adapter 负责把 bot ID 转换成目标渠道需要的标识。
+`csgclaw-cli` 是面向 bot 的 CLI。room、member、message 命令不应要求调用方理解或传入 agent ID、飞书 app_id、App ID/App Secret 或其他渠道凭证。飞书真人 @ 是例外：先用 `member list`，再传返回结果中的 `id` 字段；真人成员是 `ou_xxx` open_id，CSGClaw bot 成员是 `u-*` bot ID。

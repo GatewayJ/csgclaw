@@ -562,7 +562,9 @@ Subcommands:
 - `--room-id string`: required.
 - `--sender-id string`: required sender bot ID.
 - `--content string`: required.
-- `--mention-id string`: optional mentioned bot ID.
+- `--mention-id string`: optional mentioned target ID from `member list`.
+  For Feishu rooms this can be a CSGClaw bot ID such as `u-dev` or a human
+  Feishu open_id such as `ou_xxx`.
 
 `message list` behavior:
 
@@ -640,6 +642,7 @@ csgclaw-cli room create --channel feishu --title "ops-room" --creator-id u-manag
 csgclaw-cli member list --channel feishu --room-id oc_x
 csgclaw-cli member create --channel feishu --room-id oc_x --user-id u-dev --inviter-id u-manager
 csgclaw-cli message create --channel feishu --room-id oc_x --sender-id u-manager --mention-id u-dev --content hello
+csgclaw-cli message create --channel feishu --room-id oc_x --sender-id u-manager --mention-id ou_xxx --content hello
 ```
 
-`csgclaw-cli` is the bot-facing CLI. It should not require callers to know or pass agent IDs, Feishu open IDs, Feishu app IDs, App ID/App Secret, or other channel credentials in room, member, or message commands. Channel-specific adapters are responsible for exchanging bot IDs for the identifiers required by the target channel.
+`csgclaw-cli` is the bot-facing CLI. It should not require callers to know or pass agent IDs, Feishu app IDs, App ID/App Secret, or other channel credentials in room, member, or message commands. Feishu human mentions are the exception: use `member list` and pass the returned `id` field, which is an `ou_xxx` open_id for human members and a `u-*` bot ID for CSGClaw bots.

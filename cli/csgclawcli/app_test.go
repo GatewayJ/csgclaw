@@ -128,7 +128,7 @@ func TestExecuteBotIdentityHelpUsesBotIDSemantics(t *testing.T) {
 		{
 			name: "message create",
 			args: []string{"message", "create", "--help"},
-			want: []string{"sender bot id", "mentioned bot id"},
+			want: []string{"sender bot id", "mentioned target id from member list"},
 		},
 	}
 

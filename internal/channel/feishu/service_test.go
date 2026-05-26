@@ -457,6 +457,38 @@ func TestFeishuSendMessageResolvesMentionApp(t *testing.T) {
 	}
 }
 
+func TestFeishuSendMessageAcceptsOpenIDMention(t *testing.T) {
+	var gotReq SendMessageRequest
+	svc := NewServiceWithSendMessage(
+		map[string]AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
+		func(_ context.Context, _ AppConfig, req SendMessageRequest) (SendMessageResponse, error) {
+			gotReq = req
+			return SendMessageResponse{MessageID: "om_mention", SenderOpenID: "ou_manager", MentionOpenID: "ou_human"}, nil
+		},
+	)
+	svc.rooms["oc_alpha"] = &im.Room{ID: "oc_alpha", Title: "alpha", Members: []string{"u-manager", "ou_human"}}
+
+	message, err := svc.SendMessage(im.CreateMessageRequest{
+		RoomID:    "oc_alpha",
+		SenderID:  "u-manager",
+		Content:   "hello",
+		MentionID: "ou_human",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+
+	if gotReq.MentionID != "ou_human" {
+		t.Fatalf("send request mention id = %q, want ou_human", gotReq.MentionID)
+	}
+	if gotReq.MentionAppConfig.AppID != "" || gotReq.MentionAppConfig.AppSecret != "" {
+		t.Fatalf("send request mention app config = %+v, want empty for open_id mention", gotReq.MentionAppConfig)
+	}
+	if len(message.Mentions) != 1 || message.Mentions[0].ID != "ou_human" || message.Mentions[0].Name != "ou_human" {
+		t.Fatalf("message mentions = %+v, want ou_human", message.Mentions)
+	}
+}
+
 func TestFeishuSendMessageWithMentionPublishesMessageEvent(t *testing.T) {
 	svc := NewServiceWithSendMessage(
 		map[string]AppConfig{
@@ -544,7 +576,7 @@ func TestFeishuSendMessageRequiresMentionApp(t *testing.T) {
 		Content:   "hello",
 		MentionID: "u-dev",
 	})
-	if err == nil || !strings.Contains(err.Error(), `feishu app is not configured for mention "u-dev"`) {
+	if err == nil || !strings.Contains(err.Error(), `mention_id "u-dev" is neither a configured CSGClaw bot id nor a Feishu open_id`) {
 		t.Fatalf("SendMessage() error = %v, want mention app config error", err)
 	}
 }
