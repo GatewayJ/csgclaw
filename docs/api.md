@@ -1010,6 +1010,9 @@ Example send-message request:
 }
 ```
 
+For Feishu mentions, `mention_id` can be a configured CSGClaw bot ID such as
+`u-worker`, or a human Feishu open_id such as `ou_xxx` returned by member list.
+
 ## Bot Compatibility API
 
 These endpoints live under `/api/bots/{id}` and exist for compatibility with the older PicoClaw bot integration.

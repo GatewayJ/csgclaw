@@ -1004,6 +1004,9 @@ context 不会被渲染成 thread 内消息；它是给 LLM-backed agent 使用�
 }
 ```
 
+飞书消息的 `mention_id` 可以是 `u-worker` 这类已配置的 CSGClaw bot ID，
+也可以是 member list 返回的 `ou_xxx` 这类真人飞书 open_id。
+
 ## Bot 兼容 API
 
 这组接口位于 `/api/bots/{id}`，用于兼容旧的 PicoClaw Bot 接入方式。
