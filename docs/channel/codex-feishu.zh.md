@@ -87,7 +87,7 @@ flowchart LR
     Pico[PicoClaw Feishu Channel]
 
     Config --> Provider
-    Provider -->|BotConfig(botID)| RuntimeWiring
+    Provider -->|BotConfig by botID| RuntimeWiring
     RuntimeWiring -->|PICOCLAW_CHANNELS_FEISHU_APP_ID| Env
     RuntimeWiring -->|PICOCLAW_CHANNELS_FEISHU_APP_SECRET| Env
     Env --> Pico
