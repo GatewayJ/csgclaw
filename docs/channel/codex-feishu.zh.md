@@ -12,24 +12,35 @@ CSGClaw 目前同时支持 PicoClaw runtime 和 Codex runtime。PicoClaw 已经�
 
 PicoClaw 的飞书接入是 runtime 自己完成的：
 
-```text
-飞书
-  <-> PicoClaw Feishu Channel
-  <-> PicoClaw MessageBus
-  <-> PicoClaw AgentLoop
-  <-> CSGClaw LLM/API
+```mermaid
+flowchart LR
+    Feishu[飞书]
+    FeishuChannel[PicoClaw Feishu Channel]
+    MessageBus[PicoClaw MessageBus]
+    AgentLoop[PicoClaw AgentLoop]
+    CSGClaw[CSGClaw LLM/API]
+
+    Feishu <-->|WebSocket 入站 / REST 出站| FeishuChannel
+    FeishuChannel <-->|InboundMessage / OutboundMessage| MessageBus
+    MessageBus <-->|消费 / 发布| AgentLoop
+    AgentLoop <-->|LLM API| CSGClaw
 ```
 
 ### 入站消息流
 
-```text
-飞书群聊 / 私聊
-  -> 飞书 WebSocket 推送 message event
-  -> picoclaw/pkg/channels/feishu
-  -> 转成 bus.InboundMessage
-  -> MessageBus.PublishInbound
-  -> AgentLoop 消费 InboundChan
-  -> AgentLoop 处理消息
+```mermaid
+sequenceDiagram
+    participant Feishu as 飞书群聊/私聊
+    participant Channel as PicoClaw Feishu Channel
+    participant Bus as PicoClaw MessageBus
+    participant Agent as PicoClaw AgentLoop
+
+    Feishu->>Channel: WebSocket 推送 message event
+    Channel->>Channel: handleMessageReceive
+    Channel->>Channel: 解析文本、mention、chat_id
+    Channel->>Bus: PublishInbound(bus.InboundMessage)
+    Bus-->>Agent: InboundChan()
+    Agent->>Agent: processMessage
 ```
 
 关键模块：
@@ -45,13 +56,19 @@ PicoClaw 的飞书接入是 runtime 自己完成的：
 
 ### 出站消息流
 
-```text
-AgentLoop
-  -> MessageBus.PublishOutbound
-  -> ChannelManager.dispatchOutbound
-  -> FeishuChannel.Send
-  -> 飞书 REST API message create
-  -> 飞书群聊 / 私聊
+```mermaid
+sequenceDiagram
+    participant Agent as PicoClaw AgentLoop
+    participant Bus as PicoClaw MessageBus
+    participant Manager as PicoClaw ChannelManager
+    participant Channel as PicoClaw Feishu Channel
+    participant Feishu as 飞书群聊/私聊
+
+    Agent->>Bus: PublishOutbound(bus.OutboundMessage)
+    Bus-->>Manager: OutboundChan()
+    Manager->>Channel: dispatchOutbound -> Send
+    Channel->>Feishu: REST message create
+    Feishu-->>Channel: message_id
 ```
 
 PicoClaw 的 `FeishuChannel.Send` 会优先发送 interactive card，失败时回退为文本消息。
@@ -60,11 +77,19 @@ PicoClaw 的 `FeishuChannel.Send` 会优先发送 interactive card，失败时�
 
 飞书凭证由 CSGClaw 管理，然后在启动 PicoClaw sandbox runtime 时注入环境变量：
 
-```text
-CSGClaw channels/feishu.toml
-  -> feishu.Provider.BotConfig(botID)
-  -> runtimewiring.addFeishuBoxEnvVars
-  -> PicoClaw env
+```mermaid
+flowchart LR
+    Config[channels/feishu.toml]
+    Provider[feishu.Provider]
+    RuntimeWiring[runtimewiring.addFeishuBoxEnvVars]
+    Env[PicoClaw env]
+    Pico[PicoClaw Feishu Channel]
+
+    Config --> Provider
+    Provider -->|BotConfig(botID)| RuntimeWiring
+    RuntimeWiring -->|PICOCLAW_CHANNELS_FEISHU_APP_ID| Env
+    RuntimeWiring -->|PICOCLAW_CHANNELS_FEISHU_APP_SECRET| Env
+    Env --> Pico
 ```
 
 注入的关键环境变量：
@@ -106,9 +131,9 @@ CSGClaw server
 
 当前缺少的是：
 
-```text
-飞书 WebSocket
-  -> CSGClaw server
+```mermaid
+flowchart LR
+    Feishu[飞书 WebSocket] -. 当前缺少 .-> CSGClaw[CSGClaw server]
 ```
 
 也就是说，CSGClaw server 当前不是飞书实时群聊消息入口。
@@ -117,34 +142,55 @@ CSGClaw server
 
 Codex 不直接连接飞书。推荐由 CSGClaw server 代表 Codex 连接飞书：
 
-```text
-飞书
-  <-> CSGClaw FeishuCodexClient
-  <-> CSGClaw codexbridge
-  <-> Codex ACP runtime
+```mermaid
+flowchart LR
+    Feishu[飞书]
+    FeishuClient[CSGClaw FeishuCodexClient]
+    CodexBridge[CSGClaw codexbridge]
+    CodexRuntime[Codex ACP runtime]
+
+    Feishu <-->|WebSocket 入站 / REST 出站| FeishuClient
+    FeishuClient <-->|BotEvent / SendMessageRequest| CodexBridge
+    CodexBridge <-->|ACP Prompt / session events| CodexRuntime
 ```
 
 ### 入站消息流
 
-```text
-飞书群聊 / 私聊
-  -> 飞书 WebSocket 推送 message event
-  -> CSGClaw FeishuCodexClient.StreamEvents
-  -> 转成 codexbridge.BotEvent
-  -> codexbridge.Service
-  -> 转成 ACP PromptRequest
-  -> Codex runtime
+```mermaid
+sequenceDiagram
+    participant Feishu as 飞书群聊/私聊
+    participant Client as FeishuCodexClient
+    participant Bridge as codexbridge.Service
+    participant Session as Codex SessionManager
+    participant Codex as Codex ACP runtime
+
+    Feishu->>Client: WebSocket message event
+    Client->>Client: mapMessageEvent
+    Client->>Bridge: StreamEvents -> BotEvent
+    Bridge->>Bridge: enqueue / dedupe
+    Bridge->>Session: EnsureSession(runtimeID, conversationKey)
+    Session-->>Bridge: sessionID
+    Bridge->>Codex: ACP PromptRequest(sessionID, Text)
+    Codex-->>Bridge: ACP PromptResponse / session events
 ```
 
 ### 出站消息流
 
-```text
-Codex runtime
-  -> ACP session events
-  -> codexbridge.Service
-  -> FeishuCodexClient.SendMessage
-  -> 飞书 REST API message create
-  -> 飞书群聊 / 私聊
+```mermaid
+sequenceDiagram
+    participant Codex as Codex ACP runtime
+    participant Sink as Codex EventSink
+    participant Bridge as codexbridge.Service
+    participant Client as FeishuCodexClient
+    participant Feishu as 飞书群聊/私聊
+
+    Codex->>Sink: session events
+    Sink-->>Bridge: Subscribe(runtimeID)
+    Bridge->>Bridge: TurnRenderer 汇总文本
+    Bridge->>Client: SendMessage(botID, SendMessageRequest)
+    Client->>Feishu: REST message create(chat_id, text)
+    Feishu-->>Client: message_id
+    Client-->>Bridge: SendMessageResponse
 ```
 
 ### 新增模块
@@ -337,22 +383,27 @@ func (c *Client) stripBotMention(text string, botOpenID string) string
 
 当前 Codex bridge manager 在 `newCodexBridgeManager` 中创建 `codexbridge.Service`。接入飞书后，推荐流程如下：
 
-```text
-serve.Start
-  -> buildFeishuComponents
-      -> feishu.NewProvider
-      -> feishu.NewServiceWithProvider
-  -> newCodexBridgeManager
-      -> 获取 codex runtime
-      -> 获取 codex runtime EventSink
-      -> 创建 local HTTPClient
-      -> 创建 FeishuCodexClient
-      -> 创建 RoutingClient
-      -> codexbridge.NewService(RoutingClient, SessionManager, EventSink)
-  -> codexBridgeMgr.Start
-      -> 遍历 runtime_kind=codex 的 agent
-      -> ensureSession
-      -> bridge.StartBot(Binding)
+```mermaid
+sequenceDiagram
+    participant Serve as serve.Start
+    participant Feishu as buildFeishuComponents
+    participant Manager as newCodexBridgeManager
+    participant Runtime as Codex runtime
+    participant Bridge as codexbridge.Service
+    participant Agent as agent.Service
+
+    Serve->>Feishu: buildFeishuComponents(configPath)
+    Feishu->>Feishu: feishu.NewProvider(store)
+    Feishu->>Feishu: feishu.NewServiceWithProvider(provider)
+    Serve->>Manager: newCodexBridgeManager(cfg, agentService)
+    Manager->>Runtime: Runtime(KindCodex)
+    Manager->>Runtime: EventSink()
+    Manager->>Manager: New HTTPClient / FeishuCodexClient / RoutingClient
+    Manager->>Bridge: NewService(RoutingClient, SessionManager, EventSink)
+    Serve->>Bridge: Start()
+    Bridge->>Agent: List()
+    Bridge->>Runtime: ensureSession(agent)
+    Bridge->>Bridge: StartBot(Binding)
 ```
 
 `Binding` 参数：
@@ -372,23 +423,31 @@ codexbridge.Binding{
 
 ### 入站函数调用链
 
-```text
-codexbridge.Service.StartBot
-  -> worker.run
-  -> worker.pumpEvents
-  -> RoutingClient.StreamEvents(botID, lastEventID)
-  -> FeishuCodexClient.StreamEvents(botID, lastEventID)
-  -> provider.BotConfig(botID)
-  -> resolveBotOpenID(app)
-  -> larkws.NewClient(appID, appSecret, WithEventHandler(dispatcher))
-  -> dispatcher.OnP2MessageReceiveV1(handleMessageReceive)
-  -> mapMessageEvent
-  -> events <- codexbridge.BotEvent
-  -> worker.enqueue
-  -> worker.handleEvent
-  -> SessionManager.EnsureSession
-  -> acp.PromptRequest
-  -> codex runtime Prompt
+```mermaid
+sequenceDiagram
+    participant Bridge as codexbridge.Service
+    participant Worker as bridge worker
+    participant Router as RoutingClient
+    participant Client as FeishuCodexClient
+    participant Provider as feishu.Provider
+    participant LarkWS as larkws.Client
+    participant Session as SessionManager
+    participant Codex as Codex runtime
+
+    Bridge->>Worker: StartBot(Binding)
+    Worker->>Router: StreamEvents(botID, lastEventID)
+    Router->>Client: StreamEvents(botID, lastEventID)
+    Client->>Provider: BotConfig(botID)
+    Provider-->>Client: AppConfig(app_id, app_secret)
+    Client->>Client: resolveBotOpenID(app)
+    Client->>LarkWS: NewClient(app_id, app_secret, handler)
+    LarkWS-->>Client: OnP2MessageReceiveV1(event)
+    Client->>Client: mapMessageEvent(event)
+    Client-->>Worker: BotEvent
+    Worker->>Worker: enqueue / accept / dedupe
+    Worker->>Session: EnsureSession(runtimeID, conversationKey)
+    Session-->>Worker: sessionID
+    Worker->>Codex: Prompt(acp.PromptRequest)
 ```
 
 `acp.PromptRequest` 的关键参数：
@@ -448,17 +507,27 @@ resolveBotOpenID(app)
 
 ### 出站函数调用链
 
-```text
-codex runtime 输出 session events
-  -> codexbridge worker 监听 EventSink
-  -> runtimebridge.TurnRenderer 汇总文本
-  -> worker.flushTurn
-  -> worker.sendMessageRequest
-  -> RoutingClient.SendMessage(botID, req)
-  -> FeishuCodexClient.SendMessage(botID, req)
-  -> provider.BotConfig(botID)
-  -> 飞书 REST API message create
-  -> 返回飞书 message_id
+```mermaid
+sequenceDiagram
+    participant Codex as Codex runtime
+    participant Events as EventSink
+    participant Worker as bridge worker
+    participant Router as RoutingClient
+    participant Client as FeishuCodexClient
+    participant Provider as feishu.Provider
+    participant Feishu as 飞书 REST API
+
+    Codex->>Events: session events
+    Events-->>Worker: Subscribe(runtimeID)
+    Worker->>Worker: TurnRenderer.RenderActivity / ApplyText
+    Worker->>Worker: flushTurn
+    Worker->>Router: SendMessage(botID, req)
+    Router->>Client: SendMessage(botID, req)
+    Client->>Provider: BotConfig(botID)
+    Provider-->>Client: AppConfig(app_id, app_secret)
+    Client->>Feishu: message create(chat_id, text)
+    Feishu-->>Client: message_id
+    Client-->>Worker: SendMessageResponse
 ```
 
 飞书 REST 发送参数：
@@ -525,12 +594,27 @@ codexbridge.SendMessageResponse{
 
 ## 与 PicoClaw 方案的对齐关系
 
-```text
-PicoClaw:
-飞书 WS -> PicoClaw Feishu Channel -> MessageBus -> AgentLoop -> 飞书 REST
+```mermaid
+flowchart LR
+    subgraph PicoClawPath[PicoClaw 路径]
+        PFeishu[飞书]
+        PChannel[PicoClaw Feishu Channel]
+        PBus[MessageBus]
+        PAgent[AgentLoop]
+        PFeishu <-->|WS / REST| PChannel
+        PChannel <--> PBus
+        PBus <--> PAgent
+    end
 
-Codex:
-飞书 WS -> CSGClaw FeishuCodexClient -> CodexBridge -> ACP -> 飞书 REST
+    subgraph CodexPath[Codex 路径]
+        CFeishu[飞书]
+        CClient[CSGClaw FeishuCodexClient]
+        CBridge[CodexBridge]
+        CACP[Codex ACP runtime]
+        CFeishu <-->|WS / REST| CClient
+        CClient <--> CBridge
+        CBridge <-->|ACP| CACP
+    end
 ```
 
 | 层面 | PicoClaw | Codex 推荐方案 |
