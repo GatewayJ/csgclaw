@@ -176,6 +176,316 @@ SendMessage
   = codexbridge.SendMessageRequest -> 飞书 message create
 ```
 
+如果需要同时支持 CSGClaw 本地 IM 和 Feishu 两种 Codex bot，可以再加一个轻量路由 client：
+
+```text
+internal/channel/codexbridge/routing_client.go
+```
+
+它仍然实现 `codexbridge.BotClient`，按 `botID` 选择真实 client：
+
+```go
+type RoutingClient struct {
+    Local  codexbridge.BotClient
+    Feishu codexbridge.BotClient
+    Route  func(botID string) string
+}
+
+func (c *RoutingClient) StreamEvents(ctx context.Context, botID, lastEventID string) (<-chan codexbridge.BotEvent, <-chan error)
+func (c *RoutingClient) SendMessage(ctx context.Context, botID string, req codexbridge.SendMessageRequest) (codexbridge.SendMessageResponse, error)
+```
+
+第一版路由规则可以很简单：
+
+```text
+如果 feishu.Provider.BotConfig(botID) 存在 -> 使用 FeishuCodexClient
+否则 -> 使用现有 codexbridge.HTTPClient
+```
+
+这样 `codexbridge.Service` 仍然只依赖一个 `BotClient`，不用改动 Codex ACP 主流程。
+
+## 核心字段模型
+
+### 现有 Feishu 配置模型
+
+CSGClaw 已有飞书配置 provider：
+
+```go
+type BotCredentialProvider interface {
+    BotConfig(botID string) (AppConfig, bool)
+}
+
+type AppConfig struct {
+    AppID       string
+    AppSecret   string
+    AdminOpenID string
+}
+```
+
+`FeishuCodexClient` 通过 `BotConfig(botID)` 获取该 bot 对应的飞书凭证。
+
+第一版只需要 `app_id` 和 `app_secret`。如果飞书应用开启事件加密，后续需要在 `channels/feishu.toml` 中补充 `encrypt_key` 和 `verification_token`，并扩展 `AppConfig` 或新增运行时选项。
+
+### 现有 Codex bridge 入站模型
+
+Codex bridge 已经定义了入站事件：
+
+```go
+type BotEvent struct {
+    MessageID     string
+    RoomID        string
+    ChatType      string
+    Text          string
+    Mentions      []string
+    ThreadRootID  string
+    ThreadContext *BotThreadContext
+}
+```
+
+字段含义：
+
+| 字段 | 含义 |
+| --- | --- |
+| `MessageID` | 外部平台消息 ID，用于去重和 `Last-Event-ID` |
+| `RoomID` | 会话 ID；飞书中对应 `chat_id` |
+| `ChatType` | `p2p` 或 `group` |
+| `Text` | 送给 Codex 的用户文本，群聊中应去掉 bot mention |
+| `Mentions` | 被 mention 的用户或 bot ID 列表 |
+| `ThreadRootID` | thread/reply 根消息 ID |
+| `ThreadContext` | 首次进入 thread 时注入给 Codex 的上下文 |
+
+### 现有 Codex bridge 出站模型
+
+```go
+type SendMessageRequest struct {
+    RoomID       string
+    Text         string
+    MessageID    string
+    ThreadRootID string
+}
+
+type SendMessageResponse struct {
+    MessageID string
+}
+```
+
+字段含义：
+
+| 字段 | 含义 |
+| --- | --- |
+| `RoomID` | 目标会话；飞书中对应 `chat_id` |
+| `Text` | Codex 要发送的内容 |
+| `MessageID` | activity/update 场景中的消息 ID；第一版可忽略 |
+| `ThreadRootID` | thread/reply 目标；第一版可按普通群消息处理 |
+
+### 新增 FeishuCodexClient 模型
+
+建议模型：
+
+```go
+type Options struct {
+    Provider    feishu.BotCredentialProvider
+    MentionOnly bool
+    IsLark      bool
+    QueueSize   int
+    Logger      *slog.Logger
+}
+
+type Client struct {
+    provider    feishu.BotCredentialProvider
+    mentionOnly bool
+    isLark      bool
+    queueSize   int
+    logger      *slog.Logger
+}
+
+func New(options Options) *Client
+```
+
+`Client` 实现：
+
+```go
+func (c *Client) StreamEvents(ctx context.Context, botID, lastEventID string) (<-chan codexbridge.BotEvent, <-chan error)
+
+func (c *Client) SendMessage(ctx context.Context, botID string, req codexbridge.SendMessageRequest) (codexbridge.SendMessageResponse, error)
+```
+
+内部可以拆成几个小函数，便于测试：
+
+```go
+func (c *Client) appConfig(botID string) (feishu.AppConfig, error)
+func (c *Client) resolveBotOpenID(ctx context.Context, app feishu.AppConfig) (string, error)
+func (c *Client) startWebSocket(ctx context.Context, botID string, app feishu.AppConfig, events chan<- codexbridge.BotEvent) error
+func (c *Client) handleMessageReceive(botID string, botOpenID string, events chan<- codexbridge.BotEvent) func(context.Context, *larkim.P2MessageReceiveV1) error
+func (c *Client) mapMessageEvent(botID string, botOpenID string, event *larkim.P2MessageReceiveV1) (codexbridge.BotEvent, bool)
+func (c *Client) shouldAccept(event codexbridge.BotEvent, botOpenID string) bool
+func (c *Client) stripBotMention(text string, botOpenID string) string
+```
+
+## 函数流程设计
+
+### Server 启动流程
+
+当前 Codex bridge manager 在 `newCodexBridgeManager` 中创建 `codexbridge.Service`。接入飞书后，推荐流程如下：
+
+```text
+serve.Start
+  -> buildFeishuComponents
+      -> feishu.NewProvider
+      -> feishu.NewServiceWithProvider
+  -> newCodexBridgeManager
+      -> 获取 codex runtime
+      -> 获取 codex runtime EventSink
+      -> 创建 local HTTPClient
+      -> 创建 FeishuCodexClient
+      -> 创建 RoutingClient
+      -> codexbridge.NewService(RoutingClient, SessionManager, EventSink)
+  -> codexBridgeMgr.Start
+      -> 遍历 runtime_kind=codex 的 agent
+      -> ensureSession
+      -> bridge.StartBot(Binding)
+```
+
+`Binding` 参数：
+
+```go
+codexbridge.Binding{
+    BotID:     a.ID,
+    RuntimeID: strings.TrimSpace(a.RuntimeID),
+    SessionID: session.SessionID,
+    PromptMeta: map[string]any{
+        "channel": "feishu",
+    },
+}
+```
+
+其中 `PromptMeta` 第一版可以不填；如果后续希望 Codex 知道消息来自飞书，可以注入 `channel`、`chat_type`、`bot_id` 等元信息。
+
+### 入站函数调用链
+
+```text
+codexbridge.Service.StartBot
+  -> worker.run
+  -> worker.pumpEvents
+  -> RoutingClient.StreamEvents(botID, lastEventID)
+  -> FeishuCodexClient.StreamEvents(botID, lastEventID)
+  -> provider.BotConfig(botID)
+  -> resolveBotOpenID(app)
+  -> larkws.NewClient(appID, appSecret, WithEventHandler(dispatcher))
+  -> dispatcher.OnP2MessageReceiveV1(handleMessageReceive)
+  -> mapMessageEvent
+  -> events <- codexbridge.BotEvent
+  -> worker.enqueue
+  -> worker.handleEvent
+  -> SessionManager.EnsureSession
+  -> acp.PromptRequest
+  -> codex runtime Prompt
+```
+
+`acp.PromptRequest` 的关键参数：
+
+```go
+acp.PromptRequest{
+    SessionId: acp.SessionId(sessionID),
+    Prompt: []acp.ContentBlock{
+        acp.TextBlock(event.Text),
+    },
+    Meta: binding.PromptMeta,
+}
+```
+
+### 飞书入站接口参数
+
+飞书 WebSocket client 参数：
+
+| 参数 | 来源 | 用途 |
+| --- | --- | --- |
+| `app_id` | `feishu.AppConfig.AppID` | 创建飞书 WS client |
+| `app_secret` | `feishu.AppConfig.AppSecret` | 创建飞书 WS client |
+| `domain` | `Options.IsLark` | 选择飞书或 Lark 域名 |
+| `verification_token` | 后续可扩展 | 事件校验 |
+| `encrypt_key` | 后续可扩展 | 事件解密 |
+
+启动 WebSocket 前建议先调用 bot info API 获取当前 bot 的 `open_id`，并在内存中缓存：
+
+```text
+resolveBotOpenID(app)
+  -> 飞书 bot info API
+  -> botOpenID
+```
+
+`botOpenID` 用于两件事：
+
+- 群聊 mention 判断
+- 忽略 bot 自己发送的消息，避免自触发循环
+
+飞书消息事件中需要读取的字段：
+
+| Feishu 事件字段 | 用途 |
+| --- | --- |
+| `event.message.message_id` | 映射为 `BotEvent.MessageID` |
+| `event.message.chat_id` | 映射为 `BotEvent.RoomID` |
+| `event.message.chat_type` | 映射为 `BotEvent.ChatType` |
+| `event.message.message_type` | 判断是否支持，第一版建议只处理 `text` |
+| `event.message.content` | 解析文本内容 |
+| `event.message.mentions` | mention 判断和 `BotEvent.Mentions` |
+| `event.sender.sender_id.open_id` | 忽略 bot 自己发出的消息，记录用户来源 |
+
+群聊过滤建议：
+
+```text
+如果 chat_type != group -> 接收
+如果 MentionOnly=false -> 接收
+如果 mentions 包含 bot open_id -> 接收
+否则忽略
+```
+
+### 出站函数调用链
+
+```text
+codex runtime 输出 session events
+  -> codexbridge worker 监听 EventSink
+  -> runtimebridge.TurnRenderer 汇总文本
+  -> worker.flushTurn
+  -> worker.sendMessageRequest
+  -> RoutingClient.SendMessage(botID, req)
+  -> FeishuCodexClient.SendMessage(botID, req)
+  -> provider.BotConfig(botID)
+  -> 飞书 REST API message create
+  -> 返回飞书 message_id
+```
+
+飞书 REST 发送参数：
+
+| 参数 | 值 |
+| --- | --- |
+| `receive_id_type` | `chat_id` |
+| `receive_id` | `req.RoomID` |
+| `msg_type` | `text` |
+| `content` | `{"text": req.Text}` |
+| `uuid` | 可选，建议使用稳定请求 ID 做幂等 |
+
+第一版 `SendMessage` 示例：
+
+```go
+req := larkim.NewCreateMessageReqBuilder().
+    ReceiveIdType(larkim.ReceiveIdTypeChatId).
+    Body(larkim.NewCreateMessageReqBodyBuilder().
+        ReceiveId(sendReq.RoomID).
+        MsgType(larkim.MsgTypeText).
+        Content(`{"text": "...escaped text..."}`).
+        Build()).
+    Build()
+```
+
+返回值：
+
+```go
+codexbridge.SendMessageResponse{
+    MessageID: feishuMessageID,
+}
+```
+
 ### 事件映射
 
 飞书事件应映射为 `codexbridge.BotEvent`：
