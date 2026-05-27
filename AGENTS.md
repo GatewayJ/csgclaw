@@ -52,7 +52,10 @@ make release
 
 - Base feature branches on the latest `origin/main` unless the user asks for a different base.
 - Use Conventional Commits for commit messages, such as `fix(feishu): allow open_id mentions`.
-- Keep PR titles and descriptions focused on the technical change, tests run, and known limitations.
+- Use `.github/pull_request_template.md` when creating or updating PR descriptions.
+- PR titles must use Conventional Commit format: `<type>[optional scope][optional !]: <description>`.
+- PR descriptions must follow `.github/workflows/pr-message.yml`: every non-empty body line starts with `- `, blank lines are not allowed, and `Co-authored-by:` trailers must not appear in the body.
+- Keep PR descriptions focused on the technical change, tests run, impact, related issues, and known limitations.
 - Before asking for review or merge, inspect PR CI checks and address failing checks when possible.
 
 ## Verification
