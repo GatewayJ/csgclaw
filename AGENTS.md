@@ -48,15 +48,12 @@ make release
 - When changing config fields or defaults, update loader, saver, onboard flow, tests, and docs together.
 - Never hardcode or print real secrets; startup and logs must keep tokens redacted.
 
-## Git And PR Workflow
+## Git And PRs
 
-- Base feature branches on the latest `origin/main` unless the user asks for a different base.
-- Use Conventional Commits for commit messages, such as `fix(feishu): allow open_id mentions`.
-- Use `.github/pull_request_template.md` when creating or updating PR descriptions.
-- PR titles must use Conventional Commit format: `<type>[optional scope][optional !]: <description>`.
-- PR descriptions must follow `.github/workflows/pr-message.yml`: every non-empty body line starts with `- `, blank lines are not allowed, and `Co-authored-by:` trailers must not appear in the body.
-- Keep PR descriptions focused on the technical change, tests run, impact, related issues, and known limitations.
-- Before asking for review or merge, inspect PR CI checks and address failing checks when possible.
+- Use Conventional Commits for commit messages and PR titles.
+- Keep PR bodies compatible with `.github/workflows/pr-message.yml`: each line starts with `- `, no blank lines, no `Co-authored-by:` trailers.
+- Use `.github/pull_request_template.md`; keep entries short and focused on summary, validation, impact, related issues, and notes.
+- Check PR CI before requesting review or merge.
 
 ## Verification
 

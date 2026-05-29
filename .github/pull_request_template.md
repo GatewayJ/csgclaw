@@ -1,7 +1,5 @@
-- Title format: `<type>[optional scope][optional !]: <description>`; allowed types are feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.
-- Summary: describe the behavior change and why reviewers should accept it.
-- Validation: list commands or checks you ran, or say N/A when verification is not applicable.
-- Impact: describe user-facing, compatibility, API, deployment, configuration, or documentation impact, or say N/A.
-- Related issues: link issues with Fixes #123, Closes #123, or say N/A.
-- Notes: add review context, migration notes, or say N/A.
-- Do not add `Co-authored-by:` trailers in the PR body.
+- Summary:
+- Validation:
+- Impact:
+- Related issues: N/A
+- Notes: N/A
