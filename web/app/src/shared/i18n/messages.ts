@@ -292,6 +292,7 @@ export const messages = {
     upgradeStatusDone: "升级完成",
     upgradeStatusError: "升级失败",
     upgradeStatusLocal: "本地构建，不检查更新",
+    upgradeLocalBuild: "本地构建",
     upgradeConfirmBody: "点击更新后会运行 csgclaw upgrade，并在完成后重启本地服务。",
     upgradeRestartingBody: "升级 helper 已启动。页面会自动等待服务恢复，期间连接短暂中断是正常现象。",
     upgradeManualRestartBody:
@@ -621,6 +622,7 @@ export const messages = {
     upgradeStatusDone: "Upgrade complete",
     upgradeStatusError: "Upgrade failed",
     upgradeStatusLocal: "Local build, update check skipped",
+    upgradeLocalBuild: "Local build",
     upgradeConfirmBody: "Updating runs csgclaw upgrade and restarts the local service when it finishes.",
     upgradeRestartingBody:
       "The upgrade helper has started. This page will wait for the service to come back; a brief disconnect is normal.",

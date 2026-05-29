@@ -11,11 +11,7 @@ const labels: Record<string, string> = {
   themeLight: "Light",
   themeSwitcher: "Theme",
   upgradeAction: "Update & Restart",
-  upgradeCurrentVersion: "Current version",
-  upgradeLatestVersion: "Latest version",
-  upgradeNoLatest: "Unknown",
-  upgradeStatus: "Status",
-  upgradeUpToDate: "Up to date",
+  upgradeLocalBuild: "Local build",
   versionInfo: "Version",
   versionSettings: "Version and updates",
 };
@@ -56,13 +52,64 @@ describe("SidebarUserButton", () => {
 
     await user.click(screen.getByRole("button", { name: "Settings" }));
 
-    expect(screen.getByText("Current version")).toBeInTheDocument();
     expect(screen.getByText("v0.3.0")).toBeInTheDocument();
     expect(screen.getByText("Version")).toBeInTheDocument();
     expect(screen.queryByText("Version and updates")).not.toBeInTheDocument();
-    expect(screen.queryByText("Latest version")).not.toBeInTheDocument();
-    expect(screen.queryByText("Status")).not.toBeInTheDocument();
     expect(screen.queryByText("Update & Restart")).not.toBeInTheDocument();
     expect(onOpenUpgrade).not.toHaveBeenCalled();
+  });
+
+  it("shows a compact version summary when updates are available", async () => {
+    const user = userEvent.setup();
+    const onOpenUpgrade = vi.fn();
+
+    render(
+      <SidebarUserButton
+        appVersion="v0.3.0"
+        showUpgradeControls={true}
+        locale="en"
+        onOpenUpgrade={onOpenUpgrade}
+        onLocaleChange={() => {}}
+        onThemeChange={() => {}}
+        t={t}
+        theme="light"
+        upgradeStatus={updateAvailableStatus}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(screen.getByText("v0.3.0 -> v0.3.1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Update & Restart" }));
+    expect(onOpenUpgrade).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows local build state without upgrade actions", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SidebarUserButton
+        appVersion="v0.3.5+local"
+        showUpgradeControls={true}
+        locale="en"
+        onOpenUpgrade={() => {}}
+        onLocaleChange={() => {}}
+        onThemeChange={() => {}}
+        t={t}
+        theme="light"
+        upgradeStatus={{
+          ...updateAvailableStatus,
+          current_version: "v0.3.5+local",
+          latest_version: "",
+          update_available: false,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(screen.getByText("Local build")).toBeInTheDocument();
+    expect(screen.getByText("v0.3.5+local")).toBeInTheDocument();
+    expect(screen.queryByText("Update & Restart")).not.toBeInTheDocument();
   });
 });
