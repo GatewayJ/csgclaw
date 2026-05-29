@@ -52,7 +52,7 @@ make release
 
 - Use Conventional Commits for commit messages and PR titles.
 - Keep PR bodies compatible with `.github/workflows/pr-message.yml`: each line starts with `- `, no blank lines, no `Co-authored-by:` trailers.
-- Use `.github/pull_request_template.md`; keep entries short and focused on summary, validation, impact, related issues, and notes.
+- Keep PR bodies short and focused on summary, validation, impact, related issues, and notes.
 - Check PR CI before requesting review or merge.
 
 ## Verification
