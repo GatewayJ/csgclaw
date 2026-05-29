@@ -261,6 +261,7 @@ export function useWorkspaceController() {
       currentUserID: displayData.current_user_id,
       usersById: conversation.usersById,
       collapsedWorkspaceGroups,
+      showUpgradeControls: bootstrapConfig?.show_upgrade !== false,
       onToggleWorkspaceGroup: shell.toggleWorkspaceGroup,
       onCreateRoom: () => conversation.openCreateRoomModal(),
       onCreateAgent: agent.openCreateAgentModal,

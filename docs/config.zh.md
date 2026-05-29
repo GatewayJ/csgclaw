@@ -16,6 +16,8 @@
 
 `no_auth` 控制 CSGClaw 是否跳过 bearer token 检查，默认值是 `false`。仅建议在可信的本地或开发环境中设置为 `true`。
 
+`show_upgrade` 控制 Web UI 是否展示升级操作。默认值是 `true`；仅在当前部署不能自升级时设置为 `false`，例如托管的 Kubernetes 环境。
+
 `config.toml` 中的字符串值可以通过 `${NAME}` 或 `$NAME` 引用环境变量。CSGClaw 读取配置时会展开这些变量；后续重写同一个值时，会尽量保留占位符形式。如果环境变量未设置，会展开为空字符串。
 
 ```toml
@@ -24,6 +26,7 @@ listen_addr = "0.0.0.0:${PORT}"
 advertise_base_url = "http://${IP}:${PORT}"
 access_token = "${ACCESS_TOKEN}"
 no_auth = false
+show_upgrade = true
 ```
 
 ## Model Provider 配置示例
@@ -36,6 +39,7 @@ listen_addr = "0.0.0.0:18080"
 advertise_base_url = "http://127.0.0.1:18080"
 access_token = "your_access_token"
 no_auth = false
+show_upgrade = true
 
 [models]
 default = "csghub-lite.Qwen/Qwen3-0.6B-GGUF"
@@ -61,6 +65,7 @@ listen_addr = "0.0.0.0:18080"
 advertise_base_url = "http://127.0.0.1:18080"
 access_token = "your_access_token"
 no_auth = false
+show_upgrade = true
 
 [models]
 default = "remote.gpt-5.4"
@@ -86,6 +91,7 @@ listen_addr = "0.0.0.0:18080"
 advertise_base_url = "http://127.0.0.1:18080"
 access_token = "your_access_token"
 no_auth = false
+show_upgrade = true
 
 [bootstrap]
 manager_image_override = ""

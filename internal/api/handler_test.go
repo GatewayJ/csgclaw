@@ -242,6 +242,29 @@ func TestHandleVersionMethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestBootstrapConfigViewUsesServerUpgradeVisibility(t *testing.T) {
+	tests := []struct {
+		name        string
+		configValue bool
+		showUpgrade bool
+	}{
+		{name: "shown", configValue: true, showUpgrade: true},
+		{name: "hidden", configValue: false, showUpgrade: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := bootstrapConfigView(context.Background(), config.Config{
+				Server: config.ServerConfig{ShowUpgrade: tt.configValue},
+			}, nil)
+
+			if got.ShowUpgrade != tt.showUpgrade {
+				t.Fatalf("ShowUpgrade = %t, want %t", got.ShowUpgrade, tt.showUpgrade)
+			}
+		})
+	}
+}
+
 func TestHandleFeishuRoomsMembers(t *testing.T) {
 	feishuSvc := feishu.NewServiceWithCreateChatAndAddMembers(
 		map[string]feishu.AppConfig{

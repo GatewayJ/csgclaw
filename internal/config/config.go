@@ -30,6 +30,7 @@ type ServerConfig struct {
 	AdvertiseBaseURL string
 	AccessToken      string
 	NoAuth           bool
+	ShowUpgrade      bool
 }
 
 type ModelConfig struct {
@@ -415,6 +416,9 @@ func Load(path string) (Config, error) {
 
 	modelsCfg := newLLMConfig()
 	cfg := Config{
+		Server: ServerConfig{
+			ShowUpgrade: true,
+		},
 		Models: modelsCfg,
 		LLM:    newLLMConfig(),
 		raw: rawConfigValues{
@@ -477,6 +481,12 @@ func Load(path string) (Config, error) {
 					return Config{}, fmt.Errorf("parse server.no_auth: %w", err)
 				}
 				cfg.Server.NoAuth = noAuth
+			case "show_upgrade":
+				showUpgrade, err := parseBoolValue(rawValue)
+				if err != nil {
+					return Config{}, fmt.Errorf("parse server.show_upgrade: %w", err)
+				}
+				cfg.Server.ShowUpgrade = showUpgrade
 			}
 		case section == "models":
 			switch key {
@@ -667,11 +677,12 @@ listen_addr = %q
 advertise_base_url = %q
 access_token = %q
 no_auth = %t
+show_upgrade = %t
 
 [bootstrap]
 default_manager_template = %q
 default_worker_template = %q
-`, cfg.rawOrResolvedString(cfg.raw.server.ListenAddr, loadedRaw.server.ListenAddr, cfg.Server.ListenAddr), cfg.rawOrResolvedString(cfg.raw.server.AdvertiseBaseURL, loadedRaw.server.AdvertiseBaseURL, cfg.Server.AdvertiseBaseURL), cfg.rawOrResolvedString(cfg.raw.server.AccessToken, loadedRaw.server.AccessToken, cfg.Server.AccessToken), cfg.Server.NoAuth, cfg.rawOrResolvedString(cfg.raw.bootstrap.DefaultManagerTemplate, loadedRaw.bootstrap.DefaultManagerTemplate, cfg.Bootstrap.ResolvedDefaultManagerTemplate()), cfg.rawOrResolvedString(cfg.raw.bootstrap.DefaultWorkerTemplate, loadedRaw.bootstrap.DefaultWorkerTemplate, cfg.Bootstrap.ResolvedDefaultWorkerTemplate()))
+`, cfg.rawOrResolvedString(cfg.raw.server.ListenAddr, loadedRaw.server.ListenAddr, cfg.Server.ListenAddr), cfg.rawOrResolvedString(cfg.raw.server.AdvertiseBaseURL, loadedRaw.server.AdvertiseBaseURL, cfg.Server.AdvertiseBaseURL), cfg.rawOrResolvedString(cfg.raw.server.AccessToken, loadedRaw.server.AccessToken, cfg.Server.AccessToken), cfg.Server.NoAuth, cfg.Server.ShowUpgrade, cfg.rawOrResolvedString(cfg.raw.bootstrap.DefaultManagerTemplate, loadedRaw.bootstrap.DefaultManagerTemplate, cfg.Bootstrap.ResolvedDefaultManagerTemplate()), cfg.rawOrResolvedString(cfg.raw.bootstrap.DefaultWorkerTemplate, loadedRaw.bootstrap.DefaultWorkerTemplate, cfg.Bootstrap.ResolvedDefaultWorkerTemplate()))
 	sandboxSection := fmt.Sprintf(`
 [sandbox]
 provider = %q

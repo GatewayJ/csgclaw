@@ -18,6 +18,7 @@ type SidebarUserButtonProps = {
   upgradeBusy?: boolean;
   upgradePhase?: UpgradePhase;
   upgradeError?: string;
+  showUpgradeControls?: boolean;
   onOpenUpgrade?: () => void;
   t: TranslateFn;
 };
@@ -32,32 +33,39 @@ export function SidebarUserButton({
   upgradeBusy = false,
   upgradePhase = "idle",
   upgradeError = "",
+  showUpgradeControls = true,
   onOpenUpgrade,
   t,
 }: SidebarUserButtonProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const upgradeAttention = hasUpgradeAttention(upgradeStatus, upgradePhase, upgradeBusy);
-  const upgradeRunning = upgradeBusy || Boolean(upgradeStatus?.upgrading);
-  const upgradeIssue = upgradeError || upgradeStatus?.last_error || "";
-  const latestVersion = upgradeStatus?.latest_version || t("upgradeNoLatest");
-  const upgradeMenuStatus = upgradeStatusText({
-    phase: upgradePhase,
-    running: upgradeRunning,
-    issue: upgradeIssue,
-    known: Boolean(upgradeStatus),
-    currentVersion: upgradeStatus?.current_version || appVersion,
-    manualRestartRequired: Boolean(upgradeStatus?.manual_restart_required),
-    updateAvailable: Boolean(upgradeStatus?.update_available),
-    t,
-  });
-  const upgradeActionLabel = upgradeMenuActionText({
-    phase: upgradePhase,
-    running: upgradeRunning,
-    issue: upgradeIssue,
-    manualRestartRequired: Boolean(upgradeStatus?.manual_restart_required),
-    t,
-  });
+  const upgradeAttention = showUpgradeControls && hasUpgradeAttention(upgradeStatus, upgradePhase, upgradeBusy);
+  const upgradeRunning = showUpgradeControls ? upgradeBusy || Boolean(upgradeStatus?.upgrading) : false;
+  const upgradeIssue = showUpgradeControls ? upgradeError || upgradeStatus?.last_error || "" : "";
+  const upgradeView = showUpgradeControls
+    ? {
+        actionLabel: upgradeMenuActionText({
+          phase: upgradePhase,
+          running: upgradeRunning,
+          issue: upgradeIssue,
+          manualRestartRequired: Boolean(upgradeStatus?.manual_restart_required),
+          t,
+        }),
+        issue: upgradeIssue,
+        latestVersion: upgradeStatus?.latest_version || t("upgradeNoLatest"),
+        running: upgradeRunning,
+        status: upgradeStatusText({
+          phase: upgradePhase,
+          running: upgradeRunning,
+          issue: upgradeIssue,
+          known: Boolean(upgradeStatus),
+          currentVersion: upgradeStatus?.current_version || appVersion,
+          manualRestartRequired: Boolean(upgradeStatus?.manual_restart_required),
+          updateAvailable: Boolean(upgradeStatus?.update_available),
+          t,
+        }),
+      }
+    : null;
 
   function handleOpenUpgrade() {
     setOpen(false);
@@ -154,35 +162,39 @@ export function SidebarUserButton({
           <div className="sidebar-menu-divider"></div>
           <div className="sidebar-version-panel">
             <div className="sidebar-version-heading">
-              <span className="sidebar-menu-label">{t("versionSettings")}</span>
+              <span className="sidebar-menu-label">{showUpgradeControls ? t("versionSettings") : t("versionInfo")}</span>
               {upgradeAttention ? <span className="sidebar-version-alert-dot" aria-hidden="true"></span> : null}
             </div>
             <div className="sidebar-version-row">
               <span>{t("upgradeCurrentVersion")}</span>
               <strong>{formatSidebarVersionLabel(appVersion)}</strong>
             </div>
-            <div className="sidebar-version-row">
-              <span>{t("upgradeLatestVersion")}</span>
-              <strong>{latestVersion}</strong>
-            </div>
-            <div className="sidebar-version-row">
-              <span>{t("upgradeStatus")}</span>
-              <strong>{upgradeMenuStatus}</strong>
-            </div>
-            {upgradeIssue ? <div className="sidebar-version-error">{upgradeIssue}</div> : null}
-            {upgradeAttention ? (
-              <Button
-                variant={upgradePhase === "done" ? "secondaryColor" : "secondaryGray"}
-                className={classNames(
-                  "sidebar-upgrade-menu-button",
-                  upgradeRunning && "is-running",
-                  upgradePhase === "done" && "is-done",
-                )}
-                onClick={handleOpenUpgrade}
-              >
-                <span className="sidebar-upgrade-menu-dot" aria-hidden="true"></span>
-                <span>{upgradeActionLabel}</span>
-              </Button>
+            {upgradeView ? (
+              <>
+                <div className="sidebar-version-row">
+                  <span>{t("upgradeLatestVersion")}</span>
+                  <strong>{upgradeView.latestVersion}</strong>
+                </div>
+                <div className="sidebar-version-row">
+                  <span>{t("upgradeStatus")}</span>
+                  <strong>{upgradeView.status}</strong>
+                </div>
+                {upgradeView.issue ? <div className="sidebar-version-error">{upgradeView.issue}</div> : null}
+                {upgradeAttention ? (
+                  <Button
+                    variant={upgradePhase === "done" ? "secondaryColor" : "secondaryGray"}
+                    className={classNames(
+                      "sidebar-upgrade-menu-button",
+                      upgradeView.running && "is-running",
+                      upgradePhase === "done" && "is-done",
+                    )}
+                    onClick={handleOpenUpgrade}
+                  >
+                    <span className="sidebar-upgrade-menu-dot" aria-hidden="true"></span>
+                    <span>{upgradeView.actionLabel}</span>
+                  </Button>
+                ) : null}
+              </>
             ) : null}
           </div>
         </div>

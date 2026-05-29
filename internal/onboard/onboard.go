@@ -159,6 +159,7 @@ func defaultConfig() config.Config {
 			ListenAddr:  config.DefaultListenAddr(),
 			AccessToken: config.DefaultAccessToken,
 			NoAuth:      false,
+			ShowUpgrade: true,
 		},
 		Bootstrap: config.BootstrapConfig{},
 		Sandbox:   config.SandboxConfig{},

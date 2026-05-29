@@ -84,6 +84,9 @@ models = ["minimax-m2.7"]
 	if cfg.Server.NoAuth {
 		t.Fatal("cfg.Server.NoAuth = true, want false")
 	}
+	if !cfg.Server.ShowUpgrade {
+		t.Fatal("cfg.Server.ShowUpgrade = false, want true")
+	}
 	if got, want := cfg.Sandbox.Provider, DockerProvider; got != want {
 		t.Fatalf("cfg.Sandbox.Provider = %q, want %q", got, want)
 	}
@@ -95,6 +98,34 @@ models = ["minimax-m2.7"]
 	}
 	if got, want := cfg.Models.Default, "default.minimax-m2.7"; got != want {
 		t.Fatalf("cfg.Models.Default = %q, want %q", got, want)
+	}
+}
+
+func TestLoadReadsServerShowUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `[server]
+listen_addr = "127.0.0.1:18080"
+show_upgrade = false
+
+[models]
+default = "default.minimax-m2.7"
+
+[models.providers.default]
+base_url = "http://127.0.0.1:4000"
+api_key = "sk"
+models = ["minimax-m2.7"]
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Server.ShowUpgrade {
+		t.Fatal("cfg.Server.ShowUpgrade = true, want false")
 	}
 }
 
@@ -735,6 +766,7 @@ func TestSaveWritesModelsSection(t *testing.T) {
 			ListenAddr:       "127.0.0.1:18080",
 			AdvertiseBaseURL: "http://127.0.0.1:18080",
 			AccessToken:      "shared-token",
+			ShowUpgrade:      true,
 		},
 		Models: models,
 		LLM:    models,
@@ -763,6 +795,9 @@ func TestSaveWritesModelsSection(t *testing.T) {
 	}
 	if !strings.Contains(content, "no_auth = false") {
 		t.Fatalf("saved config missing server no_auth:\n%s", content)
+	}
+	if !strings.Contains(content, "show_upgrade = true") {
+		t.Fatalf("saved config missing server show_upgrade:\n%s", content)
 	}
 	if !strings.Contains(content, "[models]") || !strings.Contains(content, "[models.providers.default]") {
 		t.Fatalf("saved config missing models sections:\n%s", content)
@@ -820,6 +855,7 @@ func TestSaveWritesCSGHubLiteProvider(t *testing.T) {
 		Server: ServerConfig{
 			ListenAddr:  "127.0.0.1:18080",
 			AccessToken: "shared-token",
+			ShowUpgrade: true,
 		},
 		Models: models,
 		LLM:    models,
@@ -866,6 +902,7 @@ func TestSaveFormatsTopLevelSectionsWithoutExtraWhitespace(t *testing.T) {
 			AdvertiseBaseURL: "http://192.168.2.52:18080",
 			AccessToken:      "your_access_token",
 			NoAuth:           true,
+			ShowUpgrade:      true,
 		},
 		Models: models,
 		LLM:    models,
@@ -894,6 +931,7 @@ listen_addr = "0.0.0.0:18080"
 advertise_base_url = "http://192.168.2.52:18080"
 access_token = "your_access_token"
 no_auth = true
+show_upgrade = true
 
 [bootstrap]
 default_manager_template = "builtin/picoclaw-manager"
@@ -945,6 +983,7 @@ func TestSaveWritesHubConfig(t *testing.T) {
 			ListenAddr:       "127.0.0.1:18080",
 			AdvertiseBaseURL: "http://127.0.0.1:18080",
 			AccessToken:      "shared-token",
+			ShowUpgrade:      true,
 		},
 		Hub: HubConfig{
 			DefaultRegistry:        "builtin",
@@ -1002,6 +1041,7 @@ func TestSaveWritesEmptySandboxDebianRegistriesOverride(t *testing.T) {
 			ListenAddr:       "127.0.0.1:18080",
 			AdvertiseBaseURL: "http://127.0.0.1:18080",
 			AccessToken:      "shared-token",
+			ShowUpgrade:      true,
 		},
 		Sandbox: SandboxConfig{
 			Provider: BoxLiteProvider,

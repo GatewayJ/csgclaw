@@ -558,6 +558,7 @@ func TestServeForegroundPassesContextToServer(t *testing.T) {
 			AdvertiseBaseURL: "http://example.test",
 			AccessToken:      "pc-secret",
 			NoAuth:           true,
+			ShowUpgrade:      true,
 		},
 		Model: config.ModelConfig{
 			Provider: "llm-api",
@@ -619,6 +620,7 @@ func TestServeForegroundPassesContextToServer(t *testing.T) {
 		`api_key = "sk*****et"`,
 		`access_token = "pc*****et"`,
 		`no_auth = true`,
+		`show_upgrade = true`,
 		`[sandbox]`,
 		fmt.Sprintf(`provider = %q`, config.DockerProvider),
 		`debian_registries_override = []`,
@@ -1015,6 +1017,7 @@ func TestFormatEffectiveConfigFormatsSectionsWithoutExtraWhitespace(t *testing.T
 			AdvertiseBaseURL: "http://192.168.2.52:18080",
 			AccessToken:      "your_access_token",
 			NoAuth:           true,
+			ShowUpgrade:      true,
 		},
 		Models: config.SingleProfileLLM(config.ModelConfig{
 			BaseURL: "http://127.0.0.1:4000",
@@ -1054,6 +1057,7 @@ listen_addr = "0.0.0.0:18080"
 advertise_base_url = "http://192.168.2.52:18080"
 access_token = "yo*************en"
 no_auth = true
+show_upgrade = true
 
 [bootstrap]
 default_manager_template = "builtin/picoclaw-manager"
@@ -1111,6 +1115,7 @@ func TestFormatEffectiveConfigIncludesDefaultHubRegistriesWhenOmitted(t *testing
 			ListenAddr:       "127.0.0.1:18080",
 			AdvertiseBaseURL: "http://127.0.0.1:18080",
 			AccessToken:      "your_access_token",
+			ShowUpgrade:      true,
 		},
 		Bootstrap: config.BootstrapConfig{
 			DefaultManagerTemplate: "builtin/picoclaw-manager",
@@ -1217,6 +1222,7 @@ func csgHubLiteServeConfig(baseURL string) config.Config {
 		Server: config.ServerConfig{
 			ListenAddr:  "127.0.0.1:18080",
 			AccessToken: "pc-secret",
+			ShowUpgrade: true,
 		},
 		Models: config.LLMConfig{
 			Default:        "csghub-lite.Qwen/Qwen3-0.6B-GGUF",

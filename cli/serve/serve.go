@@ -677,6 +677,7 @@ listen_addr = %q
 advertise_base_url = %q
 access_token = %q
 no_auth = %t
+show_upgrade = %t
 
 [bootstrap]
 default_manager_template = %q
@@ -684,7 +685,7 @@ default_worker_template = %q
 
 [sandbox]
 provider = %q
-`, cfg.Server.ListenAddr, cfg.Server.AdvertiseBaseURL, partiallyMaskSecret(cfg.Server.AccessToken), cfg.Server.NoAuth, cfg.Bootstrap.ResolvedDefaultManagerTemplate(), cfg.Bootstrap.ResolvedDefaultWorkerTemplate(), cfg.Sandbox.Resolved().Provider)
+`, cfg.Server.ListenAddr, cfg.Server.AdvertiseBaseURL, partiallyMaskSecret(cfg.Server.AccessToken), cfg.Server.NoAuth, cfg.Server.ShowUpgrade, cfg.Bootstrap.ResolvedDefaultManagerTemplate(), cfg.Bootstrap.ResolvedDefaultWorkerTemplate(), cfg.Sandbox.Resolved().Provider)
 	if len(cfg.Sandbox.Resolved().DebianRegistriesOverride) > 0 {
 		content += fmt.Sprintf("debian_registries_override = %s\n", formatModelList(cfg.Sandbox.Resolved().DebianRegistriesOverride))
 	} else {

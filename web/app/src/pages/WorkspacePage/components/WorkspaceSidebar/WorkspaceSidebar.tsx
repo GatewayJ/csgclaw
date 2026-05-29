@@ -24,6 +24,7 @@ export function WorkspaceSidebar({
   currentUserID,
   usersById,
   collapsedWorkspaceGroups,
+  showUpgradeControls,
   onToggleWorkspaceGroup,
   onCreateRoom,
   onCreateAgent,
@@ -72,6 +73,7 @@ export function WorkspaceSidebar({
             upgradeBusy={upgradeBusy}
             upgradePhase={upgradePhase}
             upgradeError={upgradeError}
+            showUpgradeControls={showUpgradeControls}
             onOpenUpgrade={onOpenUpgrade}
             t={t}
           />

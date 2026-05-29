@@ -83,6 +83,7 @@ type bootstrapConfigResponse struct {
 	DefaultManagerTemplate string            `json:"default_manager_template"`
 	DefaultWorkerTemplate  string            `json:"default_worker_template"`
 	RuntimeKind            string            `json:"runtime_kind"`
+	ShowUpgrade            bool              `json:"show_upgrade"`
 	EffectiveManagerImage  string            `json:"effective_manager_image"`
 	AdvertiseBaseURL       string            `json:"advertise_base_url,omitempty"`
 	SupportedRuntimeKinds  []string          `json:"supported_runtime_kinds"`
@@ -184,6 +185,7 @@ func (h *Handler) loadBootstrapConfig() (config.Config, string, error) {
 				ListenAddr:  config.DefaultListenAddr(),
 				AccessToken: config.DefaultAccessToken,
 				NoAuth:      false,
+				ShowUpgrade: true,
 			},
 			Bootstrap: config.BootstrapConfig{},
 			Sandbox: config.SandboxConfig{
@@ -203,6 +205,7 @@ func bootstrapConfigView(ctx context.Context, cfg config.Config, hubSvc *hub.Ser
 	resp := bootstrapConfigResponse{
 		DefaultManagerTemplate: cfg.Bootstrap.ResolvedDefaultManagerTemplate(),
 		DefaultWorkerTemplate:  cfg.Bootstrap.ResolvedDefaultWorkerTemplate(),
+		ShowUpgrade:            cfg.Server.ShowUpgrade,
 		AdvertiseBaseURL:       config.ResolveAdvertiseBaseURL(cfg.Server),
 		SupportedRuntimeKinds: []string{
 			agent.RuntimeKindPicoClawSandbox,

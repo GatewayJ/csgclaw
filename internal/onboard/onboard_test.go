@@ -78,6 +78,7 @@ func TestEnsureStateCreatesConfigAndBootstrapsManagerState(t *testing.T) {
 	}
 	for _, want := range []string{
 		`[server]`,
+		`show_upgrade = true`,
 		`[bootstrap]`,
 		`[sandbox]`,
 		`provider = ""`,
@@ -340,6 +341,7 @@ access_token = "your_access_token"
 	content := string(data)
 	for _, want := range []string{
 		`no_auth = false`,
+		`show_upgrade = true`,
 		`[bootstrap]`,
 		`default_manager_template = "builtin/picoclaw-manager"`,
 		`default_worker_template = "builtin/picoclaw-worker"`,

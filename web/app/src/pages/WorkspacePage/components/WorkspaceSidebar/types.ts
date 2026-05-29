@@ -25,6 +25,7 @@ export type WorkspaceSidebarProps = {
   currentUserID: string;
   currentWorkspaceLabel: string;
   directMessages: IMConversation[];
+  showUpgradeControls: boolean;
   hub: WorkspaceHubController["hub"];
   isSidebarCollapsed: boolean;
   locale: LocaleCode;
