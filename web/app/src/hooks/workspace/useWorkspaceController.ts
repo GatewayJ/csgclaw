@@ -261,6 +261,7 @@ export function useWorkspaceController() {
       currentUserID: displayData.current_user_id,
       usersById: conversation.usersById,
       collapsedWorkspaceGroups,
+      hideUpgradeControls: String(bootstrapConfig?.sandbox_provider ?? "").trim().toLowerCase() === "csghub",
       onToggleWorkspaceGroup: shell.toggleWorkspaceGroup,
       onCreateRoom: () => conversation.openCreateRoomModal(),
       onCreateAgent: agent.openCreateAgentModal,

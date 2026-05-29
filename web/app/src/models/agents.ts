@@ -137,6 +137,7 @@ export type RuntimeBootstrapConfig = {
   effective_manager_image?: string | null;
   runtime_default_images?: unknown;
   runtime_kind?: string | null;
+  sandbox_provider?: string | null;
   supported_runtime_kinds?: unknown;
 };
 

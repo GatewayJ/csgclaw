@@ -18,6 +18,7 @@ type SidebarUserButtonProps = {
   upgradeBusy?: boolean;
   upgradePhase?: UpgradePhase;
   upgradeError?: string;
+  hideUpgradeControls?: boolean;
   onOpenUpgrade?: () => void;
   t: TranslateFn;
 };
@@ -32,12 +33,13 @@ export function SidebarUserButton({
   upgradeBusy = false,
   upgradePhase = "idle",
   upgradeError = "",
+  hideUpgradeControls = false,
   onOpenUpgrade,
   t,
 }: SidebarUserButtonProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const upgradeAttention = hasUpgradeAttention(upgradeStatus, upgradePhase, upgradeBusy);
+  const upgradeAttention = !hideUpgradeControls && hasUpgradeAttention(upgradeStatus, upgradePhase, upgradeBusy);
   const upgradeRunning = upgradeBusy || Boolean(upgradeStatus?.upgrading);
   const upgradeIssue = upgradeError || upgradeStatus?.last_error || "";
   const latestVersion = upgradeStatus?.latest_version || t("upgradeNoLatest");
@@ -154,35 +156,39 @@ export function SidebarUserButton({
           <div className="sidebar-menu-divider"></div>
           <div className="sidebar-version-panel">
             <div className="sidebar-version-heading">
-              <span className="sidebar-menu-label">{t("versionSettings")}</span>
+              <span className="sidebar-menu-label">{hideUpgradeControls ? t("versionInfo") : t("versionSettings")}</span>
               {upgradeAttention ? <span className="sidebar-version-alert-dot" aria-hidden="true"></span> : null}
             </div>
             <div className="sidebar-version-row">
               <span>{t("upgradeCurrentVersion")}</span>
               <strong>{formatSidebarVersionLabel(appVersion)}</strong>
             </div>
-            <div className="sidebar-version-row">
-              <span>{t("upgradeLatestVersion")}</span>
-              <strong>{latestVersion}</strong>
-            </div>
-            <div className="sidebar-version-row">
-              <span>{t("upgradeStatus")}</span>
-              <strong>{upgradeMenuStatus}</strong>
-            </div>
-            {upgradeIssue ? <div className="sidebar-version-error">{upgradeIssue}</div> : null}
-            {upgradeAttention ? (
-              <Button
-                variant={upgradePhase === "done" ? "secondaryColor" : "secondaryGray"}
-                className={classNames(
-                  "sidebar-upgrade-menu-button",
-                  upgradeRunning && "is-running",
-                  upgradePhase === "done" && "is-done",
-                )}
-                onClick={handleOpenUpgrade}
-              >
-                <span className="sidebar-upgrade-menu-dot" aria-hidden="true"></span>
-                <span>{upgradeActionLabel}</span>
-              </Button>
+            {!hideUpgradeControls ? (
+              <>
+                <div className="sidebar-version-row">
+                  <span>{t("upgradeLatestVersion")}</span>
+                  <strong>{latestVersion}</strong>
+                </div>
+                <div className="sidebar-version-row">
+                  <span>{t("upgradeStatus")}</span>
+                  <strong>{upgradeMenuStatus}</strong>
+                </div>
+                {upgradeIssue ? <div className="sidebar-version-error">{upgradeIssue}</div> : null}
+                {upgradeAttention ? (
+                  <Button
+                    variant={upgradePhase === "done" ? "secondaryColor" : "secondaryGray"}
+                    className={classNames(
+                      "sidebar-upgrade-menu-button",
+                      upgradeRunning && "is-running",
+                      upgradePhase === "done" && "is-done",
+                    )}
+                    onClick={handleOpenUpgrade}
+                  >
+                    <span className="sidebar-upgrade-menu-dot" aria-hidden="true"></span>
+                    <span>{upgradeActionLabel}</span>
+                  </Button>
+                ) : null}
+              </>
             ) : null}
           </div>
         </div>

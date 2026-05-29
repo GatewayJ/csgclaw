@@ -83,6 +83,7 @@ type bootstrapConfigResponse struct {
 	DefaultManagerTemplate string            `json:"default_manager_template"`
 	DefaultWorkerTemplate  string            `json:"default_worker_template"`
 	RuntimeKind            string            `json:"runtime_kind"`
+	SandboxProvider        string            `json:"sandbox_provider"`
 	EffectiveManagerImage  string            `json:"effective_manager_image"`
 	AdvertiseBaseURL       string            `json:"advertise_base_url,omitempty"`
 	SupportedRuntimeKinds  []string          `json:"supported_runtime_kinds"`
@@ -203,6 +204,7 @@ func bootstrapConfigView(ctx context.Context, cfg config.Config, hubSvc *hub.Ser
 	resp := bootstrapConfigResponse{
 		DefaultManagerTemplate: cfg.Bootstrap.ResolvedDefaultManagerTemplate(),
 		DefaultWorkerTemplate:  cfg.Bootstrap.ResolvedDefaultWorkerTemplate(),
+		SandboxProvider:        cfg.Sandbox.Resolved().Provider,
 		AdvertiseBaseURL:       config.ResolveAdvertiseBaseURL(cfg.Server),
 		SupportedRuntimeKinds: []string{
 			agent.RuntimeKindPicoClawSandbox,
