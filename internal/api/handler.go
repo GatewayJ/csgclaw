@@ -1491,6 +1491,11 @@ func (h *Handler) handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	serviceReq, err = h.attachSkillInvocation(serviceReq)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	message, err := channel.SendMessage(serviceReq)
 	if err != nil {

@@ -1971,6 +1971,114 @@ func TestHandleAgentWorkspaceFileReturnsContent(t *testing.T) {
 	}
 }
 
+func TestAttachSkillInvocationExpandsDirectRoomMessage(t *testing.T) {
+	svc := mustNewService(t)
+	created, err := svc.Create(context.Background(), agent.CreateRequest{
+		Spec: agent.CreateAgentSpec{
+			Name:        "alice",
+			Role:        agent.RoleWorker,
+			RuntimeKind: agent.RuntimeKindPicoClawSandbox,
+			Image:       "worker-image:test",
+			AgentProfile: agent.AgentProfile{
+				ProfileComplete: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	workspaceRoot, err := agent.WorkspaceRoot(created.Name, created.RuntimeKind)
+	if err != nil {
+		t.Fatalf("WorkspaceRoot() error = %v", err)
+	}
+	skillDir := filepath.Join(workspaceRoot, "skills", "custom")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("create skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Custom\nFollow custom rules.\n"), 0o644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+
+	imSvc := im.NewServiceFromBootstrap(im.Bootstrap{
+		CurrentUserID: "u-admin",
+		Users: []im.User{
+			{ID: "u-admin", Name: "admin", Handle: "admin"},
+			{ID: created.ID, Name: created.Name, Handle: created.Name},
+		},
+		Rooms: []im.Room{{
+			ID:       "room-1",
+			IsDirect: true,
+			Members:  []string{"u-admin", created.ID},
+		}},
+	})
+	srv := &Handler{svc: svc, im: imSvc}
+
+	got, err := srv.attachSkillInvocation(im.CreateMessageRequest{
+		RoomID:   "room-1",
+		SenderID: "u-admin",
+		Content:  "/custom do this",
+	})
+	if err != nil {
+		t.Fatalf("attachSkillInvocation() error = %v", err)
+	}
+	if got.Content != "/custom do this" {
+		t.Fatalf("Content = %q, want original slash text", got.Content)
+	}
+	for _, want := range []string{
+		`invoked the "custom" skill`,
+		"# Custom\nFollow custom rules.",
+		"[Skill directory: skills/custom]",
+		"do this",
+	} {
+		if !strings.Contains(got.AgentContent, want) {
+			t.Fatalf("AgentContent missing %q in:\n%s", want, got.AgentContent)
+		}
+	}
+}
+
+func TestAttachSkillInvocationSkipsGroupRoom(t *testing.T) {
+	svc := mustNewService(t)
+	created, err := svc.Create(context.Background(), agent.CreateRequest{
+		Spec: agent.CreateAgentSpec{
+			Name:        "alice",
+			Role:        agent.RoleWorker,
+			RuntimeKind: agent.RuntimeKindPicoClawSandbox,
+			Image:       "worker-image:test",
+			AgentProfile: agent.AgentProfile{
+				ProfileComplete: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	imSvc := im.NewServiceFromBootstrap(im.Bootstrap{
+		CurrentUserID: "u-admin",
+		Users: []im.User{
+			{ID: "u-admin", Name: "admin", Handle: "admin"},
+			{ID: created.ID, Name: created.Name, Handle: created.Name},
+		},
+		Rooms: []im.Room{{
+			ID:       "room-1",
+			IsDirect: false,
+			Members:  []string{"u-admin", created.ID},
+		}},
+	})
+	srv := &Handler{svc: svc, im: imSvc}
+
+	got, err := srv.attachSkillInvocation(im.CreateMessageRequest{
+		RoomID:   "room-1",
+		SenderID: "u-admin",
+		Content:  "/custom do this",
+	})
+	if err != nil {
+		t.Fatalf("attachSkillInvocation() error = %v", err)
+	}
+	if got.AgentContent != "" {
+		t.Fatalf("AgentContent = %q, want empty for group room", got.AgentContent)
+	}
+}
+
 func TestHandleHubTemplateWithoutWorkspaceOmitsEntriesAndFilePreview(t *testing.T) {
 	hubSvc := mustNewLocalTemplateHubServiceWithoutWorkspace(t, "review-bot", hub.Template{
 		ID:          "review-bot",

@@ -71,23 +71,25 @@ type Mention struct {
 }
 
 type Message struct {
-	ID        string           `json:"id"`
-	SenderID  string           `json:"sender_id"`
-	Kind      string           `json:"kind,omitempty"`
-	Content   string           `json:"content"`
-	Event     *EventPayload    `json:"event,omitempty"`
-	CreatedAt time.Time        `json:"created_at"`
-	Mentions  []Mention        `json:"mentions"`
-	RelatesTo *MessageRelation `json:"relates_to,omitempty"`
-	Thread    *ThreadSummary   `json:"thread,omitempty"`
+	ID           string           `json:"id"`
+	SenderID     string           `json:"sender_id"`
+	Kind         string           `json:"kind,omitempty"`
+	Content      string           `json:"content"`
+	AgentContent string           `json:"-"`
+	Event        *EventPayload    `json:"event,omitempty"`
+	CreatedAt    time.Time        `json:"created_at"`
+	Mentions     []Mention        `json:"mentions"`
+	RelatesTo    *MessageRelation `json:"relates_to,omitempty"`
+	Thread       *ThreadSummary   `json:"thread,omitempty"`
 }
 
 type CreateMessageRequest struct {
-	RoomID    string           `json:"room_id"`
-	SenderID  string           `json:"sender_id"`
-	Content   string           `json:"content"`
-	MentionID string           `json:"mention_id,omitempty"`
-	RelatesTo *MessageRelation `json:"relates_to,omitempty"`
+	RoomID       string           `json:"room_id"`
+	SenderID     string           `json:"sender_id"`
+	Content      string           `json:"content"`
+	AgentContent string           `json:"-"`
+	MentionID    string           `json:"mention_id,omitempty"`
+	RelatesTo    *MessageRelation `json:"relates_to,omitempty"`
 }
 
 type MessageRelation struct {

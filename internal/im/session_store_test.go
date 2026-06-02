@@ -23,11 +23,12 @@ func TestSaveLargeMessageSpillsToBlob(t *testing.T) {
 			Title:   "large",
 			Members: []string{"u-admin"},
 			Messages: []Message{{
-				ID:        "msg-large-1",
-				SenderID:  "u-admin",
-				Kind:      MessageKindMessage,
-				Content:   large,
-				CreatedAt: time.Date(2026, 5, 25, 3, 0, 0, 0, time.UTC),
+				ID:           "msg-large-1",
+				SenderID:     "u-admin",
+				Kind:         MessageKindMessage,
+				Content:      large,
+				AgentContent: "internal skill payload",
+				CreatedAt:    time.Date(2026, 5, 25, 3, 0, 0, 0, time.UTC),
 			}},
 		}},
 	}
@@ -71,6 +72,9 @@ func TestSaveLargeMessageSpillsToBlob(t *testing.T) {
 	if blob.Content != large {
 		t.Fatalf("blob content len = %d, want %d", len(blob.Content), len(large))
 	}
+	if blob.AgentContent != "internal skill payload" {
+		t.Fatalf("blob agent_content = %q, want internal skill payload", blob.AgentContent)
+	}
 
 	loaded, err := LoadBootstrap(statePath)
 	if err != nil {
@@ -81,6 +85,63 @@ func TestSaveLargeMessageSpillsToBlob(t *testing.T) {
 	}
 	if loaded.Rooms[0].Messages[0].Content != large {
 		t.Fatalf("loaded content len = %d, want %d", len(loaded.Rooms[0].Messages[0].Content), len(large))
+	}
+	if loaded.Rooms[0].Messages[0].AgentContent != "internal skill payload" {
+		t.Fatalf("loaded agent content = %q, want internal skill payload", loaded.Rooms[0].Messages[0].AgentContent)
+	}
+}
+
+func TestSaveMessagePersistsInlineAgentContent(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	roomID := "room-skill"
+
+	state := Bootstrap{
+		CurrentUserID: "u-admin",
+		Users:         []User{{ID: "u-admin", Name: "admin", Handle: "admin"}},
+		Rooms: []Room{{
+			ID:      roomID,
+			Title:   "skill",
+			Members: []string{"u-admin"},
+			Messages: []Message{{
+				ID:           "msg-skill-1",
+				SenderID:     "u-admin",
+				Kind:         MessageKindMessage,
+				Content:      "/custom do it",
+				AgentContent: "expanded skill payload",
+				CreatedAt:    time.Date(2026, 5, 25, 3, 30, 0, 0, time.UTC),
+			}},
+		}},
+	}
+	if err := SaveBootstrap(statePath, state); err != nil {
+		t.Fatalf("SaveBootstrap() error = %v", err)
+	}
+
+	sessionPath := filepath.Join(dir, "sessions", roomID+".jsonl")
+	sessionData, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("ReadFile(session) error = %v", err)
+	}
+	var record sessionMessageLine
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(sessionData))), &record); err != nil {
+		t.Fatalf("Unmarshal(session line) error = %v", err)
+	}
+	if record.BlobRef != "" {
+		t.Fatalf("blob_ref = %q, want inline message", record.BlobRef)
+	}
+	if record.AgentContent != "expanded skill payload" {
+		t.Fatalf("agent_content = %q, want expanded skill payload", record.AgentContent)
+	}
+
+	loaded, err := LoadBootstrap(statePath)
+	if err != nil {
+		t.Fatalf("LoadBootstrap() error = %v", err)
+	}
+	if loaded.Rooms[0].Messages[0].Content != "/custom do it" {
+		t.Fatalf("loaded content = %q, want visible slash text", loaded.Rooms[0].Messages[0].Content)
+	}
+	if loaded.Rooms[0].Messages[0].AgentContent != "expanded skill payload" {
+		t.Fatalf("loaded agent content = %q, want expanded skill payload", loaded.Rooms[0].Messages[0].AgentContent)
 	}
 }
 

@@ -1034,6 +1034,7 @@ func (s *Service) CreateMessage(req CreateMessageRequest) (Message, error) {
 	}
 
 	message := s.newMessage("", req.SenderID, MessageKindMessage, content)
+	message.AgentContent = strings.TrimSpace(req.AgentContent)
 	message.RelatesTo = relatesTo
 	room.Messages = append(room.Messages, message)
 	if err := s.saveLocked(); err != nil {

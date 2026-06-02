@@ -230,16 +230,13 @@ export function useConversationController({
     [draftsByConversationId, activeConversationId],
   );
   const draftText = useMemo(() => segmentsToPlainText(draftSegments), [draftSegments]);
-  const slashSkillQuery = useMemo(() => {
-    const trimmed = draftText.trimStart();
-    return logAgent && trimmed.startsWith("/") ? trimmed.slice(1).trim().toLowerCase() : "";
-  }, [draftText, logAgent]);
-  const slashSkillActive = Boolean(logAgent && draftText.trimStart().startsWith("/") && !skillPickerDismissed);
+  const slashSkillQuery = useMemo(() => slashSkillQueryForDraft(draftText), [draftText]);
+  const slashSkillActive = Boolean(logAgent && slashSkillQuery !== null && !skillPickerDismissed);
   const skillCandidates = useMemo(() => {
     if (!slashSkillActive) {
       return [];
     }
-    return skillNames.filter((name) => fuzzySkillMatch(name, slashSkillQuery));
+    return skillNames.filter((name) => fuzzySkillMatch(name, slashSkillQuery ?? ""));
   }, [skillNames, slashSkillActive, slashSkillQuery]);
   const activeThreadDraftKey = activeThreadRootID ? threadKey(activeConversationId, activeThreadRootID) : "";
   const activeThreadDraft = activeThreadDraftKey ? (threadDraftsByKey[activeThreadDraftKey] ?? "") : "";
@@ -737,7 +734,7 @@ export function useConversationController({
     if (!skillName || !editor || !activeConversationId) {
       return;
     }
-    const nextText = `使用 ${skillName} `;
+    const nextText = `/${skillName} `;
     editor.textContent = nextText;
     placeCaretAtEnd(editor);
     setDraftsByConversationId((current) =>
@@ -1003,6 +1000,15 @@ function skillNamesFromWorkspace(entries: readonly { name?: string; path?: strin
     .map((path) => path.split("/").pop() || "")
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right));
+}
+
+export function slashSkillQueryForDraft(draftText: string): string | null {
+  const trimmed = draftText.trimStart();
+  if (!trimmed.startsWith("/")) {
+    return null;
+  }
+  const query = trimmed.slice(1);
+  return /\s/.test(query) ? null : query.toLowerCase();
 }
 
 function fuzzySkillMatch(name: string, query: string): boolean {
