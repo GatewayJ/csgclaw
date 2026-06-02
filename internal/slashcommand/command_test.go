@@ -1,11 +1,6 @@
 package slashcommand
 
-import (
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestParseCanonicalSlashCommandPrefix(t *testing.T) {
 	cmd, ok, err := Parse(`<slash-command name="use-skill" arg="skill-creator"></slash-command> create a review skill`)
@@ -108,37 +103,5 @@ func TestParseRejectsPromptInsideSlashCommandElement(t *testing.T) {
 	_, ok, err := Parse(`<slash-command name="use-skill" arg="skill-creator">prompt</slash-command>`)
 	if err == nil || ok {
 		t.Fatalf("Parse(inline prompt) ok=%v err=%v, want prompt outside command element error", ok, err)
-	}
-}
-
-func TestExpandUseSkillPromptLoadsSkillFile(t *testing.T) {
-	root := t.TempDir()
-	skillDir := filepath.Join(root, "skills", "reviewer")
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Reviewer\nRead code carefully.\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
-	}
-
-	got, ok, err := ExpandUseSkillPrompt(
-		`<slash-command name="use-skill" arg="reviewer"></slash-command> check this bug`,
-		root,
-	)
-	if err != nil {
-		t.Fatalf("ExpandUseSkillPrompt() error = %v", err)
-	}
-	if !ok {
-		t.Fatal("ExpandUseSkillPrompt() ok = false, want true")
-	}
-	for _, want := range []string{
-		`invoked the "reviewer" skill`,
-		"# Reviewer\nRead code carefully.",
-		"[Skill directory: skills/reviewer]",
-		"check this bug",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("ExpandUseSkillPrompt() missing %q in:\n%s", want, got)
-		}
 	}
 }

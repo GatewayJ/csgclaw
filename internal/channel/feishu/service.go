@@ -861,7 +861,7 @@ func feishuSDKMessageToIMMessage(item *larkim.Message) (im.Message, bool) {
 	content := ""
 	if item.Body != nil {
 		content = feishuMessageContentText(larkcore.StringValue(item.Body.Content))
-		if normalized, ok, err := slashcommand.NormalizeFeishuInput(content); err == nil && ok {
+		if normalized, ok, err := normalizeInboundSlashContent(content); err == nil && ok {
 			content = normalized
 		}
 	}
@@ -1015,6 +1015,13 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 	roomID := strings.TrimSpace(req.RoomID)
 	senderID := strings.TrimSpace(req.SenderID)
 	content := strings.TrimSpace(req.Content)
+	normalized, ok, err := normalizeInboundSlashContent(content)
+	if err != nil {
+		return im.Message{}, err
+	}
+	if ok {
+		content = normalized
+	}
 	if roomID == "" {
 		return im.Message{}, fmt.Errorf("room_id is required")
 	}
@@ -1089,6 +1096,17 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 		})
 	}
 	return message, nil
+}
+
+func normalizeInboundSlashContent(content string) (string, bool, error) {
+	normalized, ok, err := slashcommand.Normalize(content)
+	if err != nil {
+		return "", false, err
+	}
+	if ok {
+		return normalized, true, nil
+	}
+	return slashcommand.NormalizeFeishuInput(content)
 }
 
 func (s *Service) ResolveBotOpenID(ctx context.Context, botID string) (string, string, error) {

@@ -10,7 +10,6 @@ import (
 	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/runtimebridge"
 	runtimecodex "csgclaw/internal/runtime/codex"
-	"csgclaw/internal/slashcommand"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -23,11 +22,10 @@ const (
 )
 
 type Binding struct {
-	BotID         string
-	RuntimeID     string
-	SessionID     string
-	WorkspaceRoot string
-	PromptMeta    map[string]any
+	BotID      string
+	RuntimeID  string
+	SessionID  string
+	PromptMeta map[string]any
 }
 
 type SessionPrompter interface {
@@ -366,7 +364,6 @@ func (w *worker) sessionID(ctx context.Context, evt BotEvent) (string, error) {
 
 func (w *worker) promptText(evt BotEvent) string {
 	text := strings.TrimSpace(evt.Text)
-	text = w.expandSlashPromptText(text)
 	key := conversationKey(evt)
 	if key == "" || evt.ThreadContext == nil {
 		return text
@@ -390,20 +387,6 @@ func (w *worker) promptText(evt BotEvent) string {
 		return contextText
 	}
 	return contextText + "\n\nCurrent thread message:\n" + text
-}
-
-func (w *worker) expandSlashPromptText(text string) string {
-	expanded, ok, err := slashcommand.ExpandUseSkillPrompt(text, w.binding.WorkspaceRoot)
-	if err != nil {
-		if ok {
-			return fmt.Sprintf("[Slash command error: %s]\n\nOriginal message:\n%s", err, text)
-		}
-		return text
-	}
-	if ok {
-		return expanded
-	}
-	return text
 }
 
 func (w *worker) accept(evt BotEvent) bool {
@@ -557,8 +540,7 @@ func cloneMeta(src map[string]any) map[string]any {
 func sameBinding(left, right Binding) bool {
 	return strings.TrimSpace(left.BotID) == strings.TrimSpace(right.BotID) &&
 		strings.TrimSpace(left.RuntimeID) == strings.TrimSpace(right.RuntimeID) &&
-		strings.TrimSpace(left.SessionID) == strings.TrimSpace(right.SessionID) &&
-		strings.TrimSpace(left.WorkspaceRoot) == strings.TrimSpace(right.WorkspaceRoot)
+		strings.TrimSpace(left.SessionID) == strings.TrimSpace(right.SessionID)
 }
 
 type recentSet struct {

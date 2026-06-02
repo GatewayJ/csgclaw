@@ -897,16 +897,10 @@ func (m *serveCodexBridgeManager) Start(ctx context.Context) error {
 			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", a.Name, err))
 			continue
 		}
-		workspaceRoot, err := agent.WorkspaceRoot(a.Name, a.RuntimeKind)
-		if err != nil {
-			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", a.Name, err))
-			continue
-		}
 		if err := m.bridge.StartBot(ctx, codexbridge.Binding{
-			BotID:         a.ID,
-			RuntimeID:     strings.TrimSpace(a.RuntimeID),
-			SessionID:     session.SessionID,
-			WorkspaceRoot: workspaceRoot,
+			BotID:     a.ID,
+			RuntimeID: strings.TrimSpace(a.RuntimeID),
+			SessionID: session.SessionID,
 		}); err != nil {
 			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", a.Name, err))
 		}
@@ -930,19 +924,14 @@ func (m *serveCodexBridgeManager) EnsureAgent(ctx context.Context, a agent.Agent
 	if err != nil {
 		return err
 	}
-	workspaceRoot, err := agent.WorkspaceRoot(a.Name, a.RuntimeKind)
-	if err != nil {
-		return err
-	}
 	// Force a fresh bot-event subscription even when the binding is unchanged.
 	// This repairs cases where the bridge worker exists but missed its initial
 	// subscription window and would otherwise be treated as a no-op restart.
 	m.bridge.StopBot(a.ID)
 	return m.bridge.StartBot(ctx, codexbridge.Binding{
-		BotID:         a.ID,
-		RuntimeID:     strings.TrimSpace(a.RuntimeID),
-		SessionID:     session.SessionID,
-		WorkspaceRoot: workspaceRoot,
+		BotID:     a.ID,
+		RuntimeID: strings.TrimSpace(a.RuntimeID),
+		SessionID: session.SessionID,
 	})
 }
 

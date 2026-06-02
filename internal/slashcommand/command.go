@@ -4,14 +4,9 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
-	"io"
-	"os"
-	"path"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
 const ElementName = "slash-command"
@@ -20,8 +15,7 @@ var commandNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 var skillSlugPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 const (
-	UseSkillCommandName  = "use-skill"
-	maxSkillContentBytes = 256 * 1024
+	UseSkillCommandName = "use-skill"
 )
 
 type Command struct {
@@ -139,67 +133,6 @@ func RenderFeishuFallback(content string) string {
 	return "/" + strings.TrimSpace(cmd.Arg)
 }
 
-func ExpandUseSkillPrompt(content, workspaceRoot string) (string, bool, error) {
-	cmd, ok, err := Parse(content)
-	if err != nil {
-		return "", true, err
-	}
-	if !ok {
-		return "", false, nil
-	}
-	if strings.TrimSpace(cmd.Name) != UseSkillCommandName {
-		return "", false, nil
-	}
-	prompt, err := BuildUseSkillPrompt(BuildUseSkillPromptOptions{
-		WorkspaceRoot: strings.TrimSpace(workspaceRoot),
-		Slug:          strings.TrimSpace(cmd.Arg),
-		Instruction:   strings.TrimSpace(cmd.Body),
-	})
-	if err != nil {
-		return "", true, err
-	}
-	return prompt, true, nil
-}
-
-type BuildUseSkillPromptOptions struct {
-	WorkspaceRoot string
-	Slug          string
-	Instruction   string
-}
-
-func BuildUseSkillPrompt(opts BuildUseSkillPromptOptions) (string, error) {
-	root := strings.TrimSpace(opts.WorkspaceRoot)
-	if root == "" {
-		return "", fmt.Errorf("workspace root is required")
-	}
-	slug := strings.TrimSpace(opts.Slug)
-	if !validSkillSlug(slug) {
-		return "", fmt.Errorf("invalid skill slug %q", opts.Slug)
-	}
-	skillRel := path.Join("skills", slug)
-	skillFile := filepath.Join(root, filepath.FromSlash(skillRel), "SKILL.md")
-	skillContent, err := readSkillFile(skillFile)
-	if err != nil {
-		return "", err
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "[IMPORTANT: The user has invoked the %q skill. Follow the skill instructions below.]\n\n", slug)
-	b.WriteString(skillContent)
-	if !strings.HasSuffix(skillContent, "\n") {
-		b.WriteString("\n")
-	}
-	fmt.Fprintf(&b, "\n[Skill directory: %s]\n", skillRel)
-	b.WriteString("Resolve relative paths in this skill against that directory in the agent workspace.\n")
-
-	instruction := strings.TrimSpace(opts.Instruction)
-	if instruction == "" {
-		instruction = "(no additional instruction)"
-	}
-	fmt.Fprintf(&b, "\nThe user has provided the following instruction alongside the skill invocation: %s", instruction)
-	return b.String(), nil
-}
-
 func Render(cmd Command) (string, error) {
 	cmd.Name = strings.TrimSpace(cmd.Name)
 	cmd.Arg = strings.TrimSpace(cmd.Arg)
@@ -292,37 +225,6 @@ func validate(cmd Command) error {
 func validSkillSlug(slug string) bool {
 	slug = strings.TrimSpace(slug)
 	return slug != "" && slug != "." && slug != ".." && !strings.ContainsAny(slug, `/\`) && skillSlugPattern.MatchString(slug)
-}
-
-func readSkillFile(filePath string) (string, error) {
-	info, err := os.Lstat(filePath)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("SKILL.md is a symlink")
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("SKILL.md is a directory")
-	}
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(io.LimitReader(file, maxSkillContentBytes+1))
-	if err != nil {
-		return "", fmt.Errorf("read SKILL.md: %w", err)
-	}
-	if len(data) > maxSkillContentBytes {
-		return "", fmt.Errorf("SKILL.md exceeds %d bytes", maxSkillContentBytes)
-	}
-	if !utf8.Valid(data) {
-		return "", fmt.Errorf("SKILL.md must be utf-8 text")
-	}
-	return string(data), nil
 }
 
 func escapeXML(value string) string {

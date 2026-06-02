@@ -38,6 +38,8 @@ execution is the right path. Stay practical, accurate, and concise.
 - Local skills live under `skills/<skill-name>/SKILL.md`.
 - Before using a skill, check the local `skills/` directory and read the
   matching `SKILL.md`.
+- If a task begins with `<slash-command name="use-skill" arg="<slug>"></slash-command>`,
+  treat `<slug>` as the required skill slug and the remaining text as the task instruction.
 - Prefer local workspace skills over external discovery.
 - For CSGClaw room, bot, member, Feishu group/chat creation, or adding bots to
   Feishu groups, read and use `skills/basics/SKILL.md` first and run
