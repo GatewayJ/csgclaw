@@ -3,6 +3,7 @@ export * from "./AgentActivityCard";
 export * from "./markdown";
 export * from "./mentions";
 export * from "./mermaid";
+export * from "./MessagePreviewText";
 export * from "./MessageContent";
 export * from "./SlashCommandCard";
 export * from "./slashCommands";

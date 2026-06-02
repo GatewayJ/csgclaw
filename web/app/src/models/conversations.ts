@@ -1,5 +1,6 @@
 import { flattenMentionText } from "@/components/business/MessageContent/mentions";
 import { isToolActivityMessage } from "@/models/agentActivity";
+import { renderSlashCommandPreviewText } from "@/models/slashCommands";
 
 export type LocaleCode = "zh" | "en" | string;
 export type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
@@ -153,104 +154,37 @@ export function formatConversationPreview(
 }
 
 export function formatMessagePreviewText(content: unknown): string {
-  return collapsePreviewWhitespace(stripPreviewCodeFence(flattenMentionText(renderSlashCommandPreview(content))));
+  return collapsePreviewWhitespace(stripPreviewCodeFence(flattenMentionText(renderSlashCommandPreviewText(content))));
 }
 
-const slashCommandPreviewOpenPattern = /^<slash-command(?:\s|>|\/)/;
-const slashCommandPreviewCloseTag = "</slash-command>";
-const slashCommandPreviewNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+export type MessagePreviewTextToken = {
+  text: string;
+  type: "text" | "mention" | "slash";
+};
 
-function renderSlashCommandPreview(content: unknown): string {
-  const raw = String(content ?? "").trim();
-  if (!slashCommandPreviewOpenPattern.test(raw) || typeof DOMParser === "undefined") {
-    return raw;
+const previewTokenPattern = /@[\w.-]+|\/[\w.-]+/g;
+
+export function splitMessagePreviewText(content: unknown): MessagePreviewTextToken[] {
+  const text = formatMessagePreviewText(content);
+  if (!text) {
+    return [];
   }
-
-  const elementEnd = findSlashCommandElementEnd(raw);
-  if (elementEnd === null) {
-    return raw;
-  }
-
-  const elementSource = raw.slice(0, elementEnd);
-  const body = raw.slice(elementEnd).trim();
-  const doc = new DOMParser().parseFromString(elementSource, "application/xml");
-  if (doc.querySelector("parsererror")) {
-    return raw;
-  }
-
-  const root = doc.documentElement;
-  if (!root || root.localName !== "slash-command" || root.namespaceURI) {
-    return raw;
-  }
-
-  const allowedAttributes = new Set(["name", "arg"]);
-  for (const attr of Array.from(root.attributes)) {
-    if (attr.namespaceURI || !allowedAttributes.has(attr.name)) {
-      return raw;
+  const tokens: MessagePreviewTextToken[] = [];
+  let last = 0;
+  for (const match of text.matchAll(previewTokenPattern)) {
+    const matchText = match[0] || "";
+    const start = match.index || 0;
+    if (start > last) {
+      tokens.push({ text: text.slice(last, start), type: "text" });
     }
+    const type = matchText.startsWith("/") ? "slash" : "mention";
+    tokens.push({ text: matchText, type });
+    last = start + matchText.length;
   }
-
-  const name = (root.getAttribute("name") ?? "").trim();
-  const arg = (root.getAttribute("arg") ?? "").trim();
-  if (name !== "use-skill" || !slashCommandPreviewNamePattern.test(name) || !arg || /[\r\n\t]/.test(arg) || arg.length > 256) {
-    return raw;
+  if (last < text.length) {
+    tokens.push({ text: text.slice(last), type: "text" });
   }
-
-  for (const child of Array.from(root.childNodes)) {
-    if (child.nodeType !== Node.TEXT_NODE && child.nodeType !== Node.CDATA_SECTION_NODE) {
-      return raw;
-    }
-  }
-  if ((root.textContent ?? "").trim() !== "") {
-    return raw;
-  }
-
-  return body ? `/${arg} ${body}` : `/${arg}`;
-}
-
-function findSlashCommandElementEnd(content: string): number | null {
-  const openEnd = findTagEndOutsideQuotes(content, 0);
-  if (openEnd === null) {
-    return null;
-  }
-
-  const openTag = content.slice(0, openEnd + 1);
-  if (/\/\s*>$/.test(openTag)) {
-    return openEnd + 1;
-  }
-
-  const closeStart = content.indexOf(slashCommandPreviewCloseTag, openEnd + 1);
-  if (closeStart < 0) {
-    return null;
-  }
-
-  const elementBody = content.slice(openEnd + 1, closeStart);
-  if (elementBody.trim() !== "") {
-    return null;
-  }
-
-  return closeStart + slashCommandPreviewCloseTag.length;
-}
-
-function findTagEndOutsideQuotes(content: string, start: number): number | null {
-  let quote: '"' | "'" | null = null;
-  for (let idx = start; idx < content.length; idx += 1) {
-    const char = content[idx];
-    if (quote) {
-      if (char === quote) {
-        quote = null;
-      }
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === ">") {
-      return idx;
-    }
-  }
-  return null;
+  return tokens.length > 0 ? tokens : [{ text, type: "text" }];
 }
 
 function stripPreviewCodeFence(content: string): string {

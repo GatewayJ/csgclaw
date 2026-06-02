@@ -8,6 +8,7 @@ import { parseSlashCommand } from "./slashCommands";
 import { StructuredMessageCard } from "./StructuredMessageCard";
 import { parseStructuredMessage } from "./structuredMessages";
 import type { ActionCardPayload, MessageContentProps } from "./types";
+import { mentionMarkupPattern, escapeHTML } from "./mentions";
 import { parseAgentActivity } from "@/models/agentActivity";
 import "./MessageContent.css";
 
@@ -15,13 +16,14 @@ export function MessageContent({ content, message, actionBusy, actionError, onAc
   const containerRef = useRef<HTMLDivElement | null>(null);
   const activity = useMemo(() => parseAgentActivity(content), [content]);
   const slashCommand = useMemo(() => (activity ? null : parseSlashCommand(content)), [activity, content]);
+  const slashCommandText = useMemo(() => renderSlashCommandText(slashCommand), [slashCommand]);
   const structured = useMemo(
-    () => (activity || slashCommand ? null : parseStructuredMessage(content)),
-    [activity, content, slashCommand],
+    () => (activity || slashCommandText ? null : parseStructuredMessage(content)),
+    [activity, content, slashCommandText],
   );
   const markup = useMemo(
-    () => (activity || slashCommand || structured ? "" : renderMarkdown(content)),
-    [activity, content, slashCommand, structured],
+    () => (activity || slashCommandText || structured ? "" : renderMarkdown(content)),
+    [activity, content, slashCommandText, structured],
   );
 
   useEffect(() => {
@@ -47,6 +49,10 @@ export function MessageContent({ content, message, actionBusy, actionError, onAc
     return <AgentActivityCard activity={activity} />;
   }
 
+  if (slashCommandText) {
+    return <div className="message-content" dangerouslySetInnerHTML={{ __html: slashCommandText }} />;
+  }
+
   if (slashCommand) {
     return <SlashCommandCard command={slashCommand} />;
   }
@@ -67,4 +73,34 @@ export function MessageContent({ content, message, actionBusy, actionError, onAc
   }
 
   return <div ref={containerRef} className="message-content" dangerouslySetInnerHTML={{ __html: markup }} />;
+}
+
+function renderSlashCommandText(command: ReturnType<typeof parseSlashCommand>): string {
+  if (!command || command.name !== "use-skill") {
+    return "";
+  }
+
+  const prefix = `<span class="message-slash-token">/${escapeHTML(command.arg)}</span>`;
+  const body = renderSlashCommandBodyMarkup(command.body);
+  return body ? `${prefix} ${body}` : prefix;
+}
+
+function renderSlashCommandBodyMarkup(body: string): string {
+  if (!body) {
+    return "";
+  }
+
+  let result = "";
+  let cursor = 0;
+  for (const match of body.matchAll(mentionMarkupPattern)) {
+    const index = match.index || 0;
+    result += escapeHTML(body.slice(cursor, index));
+    const userID = match[1] || "";
+    const userName = match[2] || "";
+    result += `<span class="message-mention" data-user-id="${escapeHTML(userID)}">@${escapeHTML(userName)}</span>`;
+    cursor = index + match[0].length;
+  }
+
+  const safeBody = `${result}${escapeHTML(body.slice(cursor)).replace(/\n/g, "<br />")}`;
+  return `<span class="slash-command-body">${safeBody}</span>`;
 }

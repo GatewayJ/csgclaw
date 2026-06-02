@@ -47,10 +47,15 @@
 
 .slash-command-body {
   color: inherit;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: inherit;
+  line-height: inherit;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.message-slash-token {
+  color: var(--mention);
+  font-weight: 600;
 }
 
 :root[data-theme="dark"] .slash-command-card {
@@ -480,7 +485,9 @@
 }
 
 .message-row.own .message-bubble .message-content .message-mention,
+.message-row.own .message-bubble .message-content .message-slash-token,
 .message-row.own .message-bubble .message-content p > .message-mention,
+.message-row.own .message-bubble .message-content p > .message-slash-token,
 .message-row.admin.own .message-bubble .message-content .message-mention {
   color: var(--portal-brand-700);
 }
@@ -491,7 +498,9 @@
 
 :root[data-theme="dark"] .message-row.own .message-bubble .message-content p,
 :root[data-theme="dark"] .message-row.own .message-bubble .message-content .message-mention,
-:root[data-theme="dark"] .message-row.own .message-bubble .message-content p > .message-mention {
+:root[data-theme="dark"] .message-row.own .message-bubble .message-content .message-slash-token,
+:root[data-theme="dark"] .message-row.own .message-bubble .message-content p > .message-mention,
+:root[data-theme="dark"] .message-row.own .message-bubble .message-content p > .message-slash-token {
   color: var(--on-primary);
 }
 

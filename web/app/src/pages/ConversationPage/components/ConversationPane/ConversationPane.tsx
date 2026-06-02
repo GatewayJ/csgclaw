@@ -3,7 +3,7 @@ import { Logs, RefreshCw, X } from "lucide-react";
 import { fetchAgentLogsRequest } from "@/api/agents";
 import { errorMessage } from "@/api/client";
 import { CLIProxyAuthControl } from "@/components/business/ProfileControls";
-import { MessageContent } from "@/components/business/MessageContent";
+import { MessageContent, MessagePreviewText } from "@/components/business/MessageContent";
 import {
   Button,
   DialogBody,
@@ -16,16 +16,25 @@ import {
 } from "@/components/ui";
 import { AddUserIcon, IconImage, TrashIcon, UsersIcon, WrenchIcon } from "@/components/ui/Icons";
 import {
+  type ComposerSegment,
   insertComposerSegmentsAtSelection,
+  areComposerSegmentsEqual,
+  removeAdjacentMentionToken,
+  getComposerMentionState,
+  insertComposerLineBreak,
+  parseComposerSegments,
+  renderComposerSegments,
   insertPlainTextAtSelection,
+  replaceMentionQueryWithToken,
   getMentionCandidates,
+  normalizeComposerSegmentsForDisplay,
+  segmentsToPlainText,
   normalizeTextMentions,
 } from "@/models/composer";
 import { isAgentRunning, normalizeAuthProviderName, providerNeedsAuth } from "@/models/agents";
 import {
   agentMatchesUser,
   formatEventMessage,
-  formatMessagePreviewText,
   formatThreadReplyCount,
   formatTime,
   getConversationDescription,
@@ -36,9 +45,12 @@ import {
 import { localizeRole } from "@/shared/i18n";
 
 type ThreadMentionState = {
+  endOffset: number;
   end: number;
   query: string;
+  startOffset: number;
   start: number;
+  textNode?: Node;
 };
 
 export function ConversationPane({
@@ -75,6 +87,13 @@ export function ConversationPane({
   skillLoading = false,
   skillPickerOpen = false,
   onApplySkillCandidate = (_name) => {},
+  threadSkillCandidates = [],
+  threadSkillIndex = 0,
+  threadSkillLoading = false,
+  threadSkillPickerOpen = false,
+  onApplyThreadSkillCandidate = (_name) => {},
+  onDismissThreadSkillPicker = () => {},
+  onSetThreadSkillIndex = (_index) => {},
   managerProfile,
   managerProfileIncomplete,
   authStatuses,
@@ -96,7 +115,7 @@ export function ConversationPane({
   activeThreadView,
   threadLoading,
   threadError,
-  threadDraft,
+  threadDraftSegments,
   onOpenThread,
   onCloseThread,
   onThreadDraftChange,
@@ -117,6 +136,17 @@ export function ConversationPane({
     setLogError("");
     setLogLoading(false);
   }, [conversation.id, logAgentID]);
+
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    const currentSegments = parseComposerSegments(editor);
+    if (!areComposerSegmentsEqual(currentSegments, draftSegments)) {
+      renderComposerSegments(editor, draftSegments);
+    }
+  }, [draftSegments]);
 
   async function refreshAgentLogs() {
     if (!logAgentID) {
@@ -360,7 +390,9 @@ export function ConversationPane({
                     {latestThreadReply ? (
                       <button type="button" className="thread-latest-reply" onClick={() => onOpenThread(message)}>
                         <span>{t("latestThreadReply")}</span>
-                        <strong className="truncate">{formatMessagePreviewText(latestThreadReply.content)}</strong>
+                        <strong className="truncate">
+                          <MessagePreviewText content={latestThreadReply.content} />
+                        </strong>
                       </button>
                     ) : (
                       <button type="button" className="thread-latest-reply" onClick={() => onOpenThread(message)}>
@@ -383,7 +415,7 @@ export function ConversationPane({
             activeIndex={skillIndex}
             loading={skillLoading}
             t={t}
-            onSelect={(name) => onApplySkillCandidate?.(name)}
+            onSelect={(name) => onApplySkillCandidate?.(name, editorRef.current)}
           />
         ) : null}
         {mentionCandidates.length > 0 ? (
@@ -453,7 +485,7 @@ export function ConversationPane({
           thread={activeThreadView}
           loading={threadLoading}
           error={threadError}
-          draft={threadDraft}
+          draftSegments={threadDraftSegments}
           disabled={managerProfileIncomplete}
           usersById={usersById}
           locale={locale}
@@ -462,6 +494,13 @@ export function ConversationPane({
           t={t}
           onClose={onCloseThread}
           onDraftChange={onThreadDraftChange}
+          threadSkillCandidates={threadSkillCandidates}
+          threadSkillIndex={threadSkillIndex}
+          threadSkillLoading={threadSkillLoading}
+          threadSkillPickerOpen={threadSkillPickerOpen}
+          onApplyThreadSkillCandidate={onApplyThreadSkillCandidate}
+          onDismissThreadSkillPicker={onDismissThreadSkillPicker}
+          onSetThreadSkillIndex={onSetThreadSkillIndex}
           mentionableUsers={conversationMembers}
           onPreviewUser={onPreviewUser}
           onSend={onSendThreadReply}
@@ -480,6 +519,55 @@ export function ConversationPane({
       ) : null}
     </>
   );
+}
+
+type SlashPickerNavigationInput = {
+  event: ReactKeyboardEvent<HTMLElement>;
+  candidates: string[];
+  activeIndex: number;
+  pickerOpen: boolean;
+  onIndexChange: (index: number) => void;
+  onApply: (value: string) => void;
+  onDismiss: () => void;
+  onPrepareNavigation?: () => void;
+};
+
+function handleSlashPickerNavigation({
+  event,
+  candidates,
+  activeIndex,
+  pickerOpen,
+  onIndexChange,
+  onApply,
+  onDismiss,
+  onPrepareNavigation,
+}: SlashPickerNavigationInput): boolean {
+  if (!pickerOpen) {
+    return false;
+  }
+  if (event.key === "ArrowDown" && candidates.length > 0) {
+    event.preventDefault();
+    onPrepareNavigation?.();
+    onIndexChange((activeIndex + 1) % candidates.length);
+    return true;
+  }
+  if (event.key === "ArrowUp" && candidates.length > 0) {
+    event.preventDefault();
+    onPrepareNavigation?.();
+    onIndexChange((activeIndex - 1 + candidates.length) % candidates.length);
+    return true;
+  }
+  if (event.key === "Enter" && !event.shiftKey && candidates.length > 0) {
+    event.preventDefault();
+    onApply(candidates[activeIndex] ?? candidates[0]);
+    return true;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    onDismiss();
+    return true;
+  }
+  return false;
 }
 
 function MentionPicker({ users = [], activeIndex = 0, className = "", showRole = true, t, onSelect }) {
@@ -518,7 +606,7 @@ function MentionPicker({ users = [], activeIndex = 0, className = "", showRole =
   );
 }
 
-function SkillPicker({ candidates = [], activeIndex = 0, loading = false, t, onSelect }) {
+function SkillPicker({ candidates = [], activeIndex = 0, loading = false, className = "", t, onSelect }) {
   const activeOptionRef = useRef<HTMLButtonElement | null>(null);
   const activeSkill = candidates[activeIndex] || "";
 
@@ -527,7 +615,7 @@ function SkillPicker({ candidates = [], activeIndex = 0, loading = false, t, onS
   }, [activeIndex, activeSkill, candidates.length]);
 
   return (
-    <div className="mention-picker skill-picker">
+    <div className={`mention-picker skill-picker ${className}`.trim()}>
       {loading ? <div className="skill-picker-empty">{t("agentWorkspaceLoading")}</div> : null}
       {!loading && candidates.length === 0 ? <div className="skill-picker-empty">{t("skillPickerEmpty")}</div> : null}
       {candidates.map((name, index) => (
@@ -610,7 +698,7 @@ function ThreadPanel({
   thread,
   loading,
   error,
-  draft,
+  draftSegments,
   disabled,
   usersById,
   locale,
@@ -619,12 +707,19 @@ function ThreadPanel({
   t,
   onClose,
   onDraftChange,
+  threadSkillCandidates = [],
+  threadSkillIndex = 0,
+  threadSkillLoading = false,
+  threadSkillPickerOpen = false,
+  onApplyThreadSkillCandidate = (_name) => {},
+  onDismissThreadSkillPicker = () => {},
+  onSetThreadSkillIndex = (_index) => {},
   onPreviewUser,
   mentionableUsers = [],
   onSend,
 }) {
   const threadBodyRef = useRef<HTMLDivElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const threadEditorRef = useRef<HTMLDivElement | null>(null);
   const [mentionState, setMentionState] = useState<ThreadMentionState | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const root = thread?.root ?? null;
@@ -632,6 +727,23 @@ function ThreadPanel({
   const visibleRoot = showToolCalls || !isToolCallMessage(root) ? root : null;
   const visibleReplies = showToolCalls ? replies : replies.filter((message) => !isToolCallMessage(message));
   const latestReplyID = visibleReplies[visibleReplies.length - 1]?.id || "";
+  const mentionableUsersByHandle = useMemo(() => {
+    const result = new Map<string, (typeof mentionableUsers)[number]>();
+    mentionableUsers.forEach((user) => {
+      const handle = String(user.handle || user.name || user.id || "").trim().toLowerCase();
+      if (!handle) {
+        return;
+      }
+      if (!result.has(handle)) {
+        result.set(handle, user);
+      }
+    });
+    return result;
+  }, [mentionableUsers]);
+  const displayDraftSegments = useMemo(
+    () => normalizeComposerSegmentsForDisplay(draftSegments || []),
+    [draftSegments],
+  );
   const threadMentionCandidates = useMemo(() => {
     if (!mentionState) {
       return [];
@@ -652,57 +764,72 @@ function ThreadPanel({
     return () => window.cancelAnimationFrame(frame);
   }, [root, visibleReplies.length, latestReplyID, loading]);
 
-  function syncThreadMentionState(target = textareaRef.current) {
+  useLayoutEffect(() => {
+    const editor = threadEditorRef.current;
+    if (!editor) {
+      return;
+    }
+    const currentSegments = parseComposerSegments(editor);
+    if (!areComposerSegmentsEqual(currentSegments, displayDraftSegments)) {
+      renderComposerSegments(editor, displayDraftSegments);
+    }
+  }, [displayDraftSegments]);
+
+  function syncThreadDraft(target = threadEditorRef.current) {
+    if (!target) {
+      return;
+    }
+    const segments = normalizeComposerSegmentsForDisplay(parseComposerSegments(target) as ComposerSegment[]);
+    onDraftChange(segments);
+    syncThreadMentionState(target);
+  }
+
+  function syncThreadMentionState(target = threadEditorRef.current) {
     if (!target) {
       setMentionState(null);
       return;
     }
-    const cursor = target.selectionStart ?? 0;
-    const beforeCursor = target.value.slice(0, cursor);
-    const match = beforeCursor.match(/(^|\s)@([a-zA-Z0-9._-]*)$/);
-    if (!match) {
+    const nextMentionState = getComposerMentionState(target);
+    if (!nextMentionState) {
       setMentionState(null);
       setMentionIndex(0);
       return;
     }
-    const nextMentionState = {
-      end: cursor,
-      query: match[2] || "",
-      start: cursor - (match[2] || "").length - 1,
+    const normalized: ThreadMentionState = {
+      end: nextMentionState.endOffset,
+      endOffset: nextMentionState.endOffset,
+      query: nextMentionState.query,
+      start: nextMentionState.startOffset,
+      startOffset: nextMentionState.startOffset,
+      textNode: nextMentionState.textNode,
     };
     const mentionChanged =
       !mentionState ||
-      mentionState.start !== nextMentionState.start ||
-      mentionState.end !== nextMentionState.end ||
-      mentionState.query !== nextMentionState.query;
-    setMentionState(nextMentionState);
+      mentionState.start !== normalized.start ||
+      mentionState.end !== normalized.end ||
+      mentionState.query !== normalized.query;
+    setMentionState(normalized);
     if (mentionChanged) {
       setMentionIndex(0);
     }
   }
 
   function insertThreadMention(user) {
-    const target = textareaRef.current;
+    const target = threadEditorRef.current;
     if (!target || !mentionState || !user) {
       return;
     }
-    const handle = String(user.handle || user.name || user.id || "").trim();
-    if (!handle) {
+    if (!replaceMentionQueryWithToken(target, mentionState, user)) {
       return;
     }
-    const text = String(draft || "");
-    const mentionText = `@${handle} `;
-    const next = text.slice(0, mentionState.start) + mentionText + text.slice(mentionState.end);
-    const caret = mentionState.start + mentionText.length;
-    onDraftChange(next);
+    syncThreadDraft(target);
     setMentionState(null);
     setMentionIndex(0);
     requestAnimationFrame(() => {
-      if (textareaRef.current !== target) {
+      if (threadEditorRef.current !== target) {
         return;
       }
       target.focus();
-      target.setSelectionRange(caret, caret);
     });
   }
 
@@ -712,9 +839,11 @@ function ThreadPanel({
         <div>
           <div className="thread-panel-kicker">{t("threadPanelTitle")}</div>
           <div className="thread-panel-title truncate">
-            {visibleRoot
-              ? formatMessagePreviewText(thread?.summary?.context_summary?.root_excerpt || visibleRoot.content || "")
-              : t("noVisibleMessages")}
+            {visibleRoot ? (
+              <MessagePreviewText content={thread?.summary?.context_summary?.root_excerpt || visibleRoot.content || ""} />
+            ) : (
+              t("noVisibleMessages")
+            )}
           </div>
         </div>
         <Button className="icon-button" aria-label={t("close")} title={t("close")} onClick={onClose}>
@@ -758,6 +887,16 @@ function ThreadPanel({
         </div>
       </div>
       <div className="thread-composer">
+        {threadSkillPickerOpen ? (
+          <SkillPicker
+            candidates={threadSkillCandidates}
+            activeIndex={threadSkillIndex}
+            loading={threadSkillLoading}
+            className="thread-skill-picker"
+            t={t}
+            onSelect={(name) => onApplyThreadSkillCandidate(name, threadEditorRef.current)}
+          />
+        ) : null}
         {threadMentionCandidates.length > 0 ? (
           <MentionPicker
             users={threadMentionCandidates}
@@ -768,17 +907,52 @@ function ThreadPanel({
             onSelect={insertThreadMention}
           />
         ) : null}
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          placeholder={disabled ? t("profileIncomplete") : t("threadComposerPlaceholder")}
-          disabled={disabled}
-          onChange={(event) => {
-            onDraftChange(event.target.value);
-            syncThreadMentionState(event.target);
-          }}
+        <div
+          ref={threadEditorRef}
+          contentEditable={!disabled}
+          suppressContentEditableWarning={true}
+          role="textbox"
+          aria-placeholder={disabled ? t("profileIncomplete") : t("threadComposerPlaceholder")}
+          aria-label={t("threadComposerPlaceholder")}
+          className={`thread-composer-editor ${disabled ? "disabled" : ""}`}
+          data-placeholder={disabled ? t("profileIncomplete") : t("threadComposerPlaceholder")}
+          onInput={(event) => syncThreadDraft(event.currentTarget)}
           onClick={(event) => syncThreadMentionState(event.currentTarget)}
           onKeyDown={(event) => {
+            if (disabled) {
+              return;
+            }
+            if (event.key === "Backspace" && removeAdjacentMentionToken(threadEditorRef.current, "backward")) {
+              event.preventDefault();
+              syncThreadDraft(event.currentTarget);
+              return;
+            }
+            if (event.key === "Delete" && removeAdjacentMentionToken(threadEditorRef.current, "forward")) {
+              event.preventDefault();
+              syncThreadDraft(event.currentTarget);
+              return;
+            }
+            if (
+              handleSlashPickerNavigation({
+                event,
+                candidates: threadSkillCandidates,
+                activeIndex: threadSkillIndex,
+                pickerOpen: threadSkillPickerOpen,
+                onIndexChange: (value) => onSetThreadSkillIndex(value),
+                onApply: (value) => onApplyThreadSkillCandidate(value, threadEditorRef.current),
+                onDismiss: () => {
+                  onDismissThreadSkillPicker();
+                  setMentionState(null);
+                  setMentionIndex(0);
+                },
+                onPrepareNavigation: () => {
+                  setMentionState(null);
+                  setMentionIndex(0);
+                },
+              })
+            ) {
+              return;
+            }
             if (threadMentionCandidates.length > 0) {
               if (event.key === "ArrowDown") {
                 event.preventDefault();
@@ -804,17 +978,37 @@ function ThreadPanel({
                 return;
               }
             }
+            if (event.key === "Enter" && event.shiftKey) {
+              event.preventDefault();
+              insertComposerLineBreak(threadEditorRef.current);
+              syncThreadDraft(threadEditorRef.current);
+              return;
+            }
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               onSend();
             }
           }}
           onKeyUp={(event) => syncThreadMentionState(event.currentTarget)}
+          onPaste={(event) => {
+            event.preventDefault();
+            const pasted = event.clipboardData?.getData("text/plain") ?? "";
+            const segments = normalizeTextMentions([{ type: "text", text: pasted }], mentionableUsersByHandle);
+            if (segments.some((segment) => segment.type === "mention")) {
+              insertComposerSegmentsAtSelection(segments);
+            } else {
+              insertPlainTextAtSelection(pasted);
+            }
+            syncThreadDraft(threadEditorRef.current);
+          }}
+          onCompositionEnd={() => {
+            syncThreadDraft(threadEditorRef.current);
+          }}
         />
         <Button
           variant="primary"
           className="thread-send-button"
-          disabled={disabled || !String(draft || "").trim()}
+          disabled={disabled || !segmentsToPlainText(draftSegments || []).trim()}
           onClick={onSend}
         >
           <span aria-hidden="true">{IconImage("send")}</span>

@@ -281,7 +281,9 @@
 .message-row.admin .mention,
 .message-row.admin .message-mention,
 .message-row.admin.own .mention,
-.message-row.admin.own .message-mention {
+.message-row.admin.own .message-mention,
+.message-row.admin .message-slash-token,
+.message-row.admin.own .message-slash-token {
   color: var(--admin-mention);
   background: transparent;
 }
@@ -325,11 +327,19 @@
   cursor: not-allowed;
 }
 
-.message-row.own .message-mention {
+.message-row.own .message-mention,
+.message-row.own .message-slash-token {
   color: var(--mention-on-primary);
 }
 
 .composer-mention-token {
+  color: var(--mention);
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.composer-slash-token {
   color: var(--mention);
   font-weight: 600;
   margin: 0;
@@ -870,11 +880,13 @@
 }
 
 :root[data-theme="dark"] .message-row.own .message-mention,
+:root[data-theme="dark"] .message-row.own .message-slash-token,
 :root[data-theme="dark"] .message-row.own .mention {
   color: var(--portal-white);
 }
 
 .message-row.own .message-mention,
+.message-row.own .message-slash-token,
 .message-row.own .mention {
   color: var(--portal-brand-700);
 }

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { ConversationPane } from "@/pages/ConversationPage/components/ConversationPane/ConversationPane";
 import { AgentActivityMsgTypes, CSGCLAW_AGENT_ACTIVITY_TYPE } from "@/shared/constants/messages";
 import type { IMConversation, IMUser, ThreadView, TranslateFn } from "@/models/conversations";
+import type { ComposerSegment } from "@/models/composer";
 
 const users: IMUser[] = [
   {
@@ -130,7 +131,7 @@ function renderThreadPane({
   };
 
   function Harness() {
-    const [threadDraft, setThreadDraft] = useState("");
+    const [threadDraftSegments, setThreadDraftSegments] = useState<ComposerSegment[]>([]);
     return (
       <ConversationPane
         activeThreadRootID="msg-root"
@@ -180,10 +181,10 @@ function renderThreadPane({
         showToolCalls={showToolCalls}
         t={t}
         theme="light"
-        threadDraft={threadDraft}
+        threadDraftSegments={threadDraftSegments}
         threadError=""
         threadLoading={false}
-        onThreadDraftChange={setThreadDraft}
+        onThreadDraftChange={setThreadDraftSegments}
         usersById={usersById}
         visibleMessages={[root]}
       />
@@ -198,7 +199,10 @@ describe("ConversationPane", () => {
     const user = userEvent.setup();
     renderThreadPane();
 
-    await user.type(screen.getByPlaceholderText("Reply in thread"), "@");
+    const threadComposer = within(screen.getByRole("complementary", { name: "Thread" })).getByRole("textbox", {
+      name: "Reply in thread",
+    });
+    await user.type(threadComposer, "@");
 
     expect(screen.getByText("@manager")).toBeInTheDocument();
   });
@@ -207,7 +211,10 @@ describe("ConversationPane", () => {
     const user = userEvent.setup();
     renderThreadPane();
 
-    await user.type(screen.getByPlaceholderText("Reply in thread"), "@");
+    const threadComposer = within(screen.getByRole("complementary", { name: "Thread" })).getByRole("textbox", {
+      name: "Reply in thread",
+    });
+    await user.type(threadComposer, "@");
     await user.keyboard("{ArrowDown}");
 
     expect(screen.getByText("@manager").closest("button")).toHaveClass("active");
@@ -222,7 +229,10 @@ describe("ConversationPane", () => {
     try {
       renderThreadPane({ conversationMembers: roomUsers });
 
-      await user.type(screen.getByPlaceholderText("Reply in thread"), "@");
+      const threadComposer = within(screen.getByRole("complementary", { name: "Thread" })).getByRole("textbox", {
+        name: "Reply in thread",
+      });
+      await user.type(threadComposer, "@");
       await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
 
       expect(screen.getByText("@sales").closest("button")).toHaveClass("active");

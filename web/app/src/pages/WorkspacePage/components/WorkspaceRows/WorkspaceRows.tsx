@@ -15,6 +15,7 @@ import {
   isDirectConversation,
   resolveConversationUser,
 } from "@/models/conversations";
+import { MessagePreviewText } from "@/components/business/MessageContent";
 import { AgentIcon, ChevronIcon, ComputerIcon, RoomPlusIcon, RoomsIcon } from "@/components/ui/Icons";
 import { Button } from "@/components/ui";
 import type { DragEvent, ReactNode } from "react";
@@ -191,6 +192,7 @@ export function WorkspaceConversationRow({
   const directAgentRunning = isAgentRunning(directAgent);
   const title = isDirect && displayUser ? displayUser.name : conversation.title;
   const icon = isDirect && displayUser ? displayUser.avatar : "#";
+  const preview = formatConversationPreview(lastMessage, conversation, currentUserID, usersById, locale, t);
   return (
     <button
       className={`workspace-row conversation-nav-row ${active ? "active" : ""}`}
@@ -231,7 +233,7 @@ export function WorkspaceConversationRow({
           ) : null}
         </span>
         <span className="workspace-row-meta truncate">
-          {formatConversationPreview(lastMessage, conversation, currentUserID, usersById, locale, t)}
+          <MessagePreviewText content={preview} />
         </span>
       </span>
       <span className="workspace-row-time">{formatTime(lastMessage?.created_at, locale)}</span>
@@ -247,9 +249,8 @@ export function WorkspaceThreadRow({ conversation, thread, active, locale, t, on
   }
   const latestReply = thread?.summary?.latest_reply;
   const title = formatMessagePreviewText(thread?.summary?.context_summary?.root_excerpt || root.content);
-  const meta = latestReply
-    ? `${t("latestThreadReply")}: ${formatMessagePreviewText(latestReply.content)}`
-    : formatThreadReplyCount(thread?.summary?.reply_count, t);
+  const latestReplyText = latestReply ? formatMessagePreviewText(latestReply.content) : "";
+  const meta = latestReply ? null : formatThreadReplyCount(thread?.summary?.reply_count, t);
   const updatedAt = latestReply?.created_at || root.created_at;
 
   return (
@@ -262,8 +263,19 @@ export function WorkspaceThreadRow({ conversation, thread, active, locale, t, on
         <RoomsIcon />
       </span>
       <span className="workspace-row-main">
-        <span className="workspace-row-title truncate">{title}</span>
-        <span className="workspace-row-meta truncate">{meta}</span>
+        <span className="workspace-row-title truncate" title={title}>
+          <MessagePreviewText content={title} />
+        </span>
+        <span className="workspace-row-meta truncate">
+          {latestReply ? (
+            <>
+              <span>{`${t("latestThreadReply")}: `}</span>
+              <MessagePreviewText content={latestReplyText} />
+            </>
+          ) : (
+            meta
+          )}
+        </span>
       </span>
       <span className="workspace-row-time">{formatTime(updatedAt, locale)}</span>
     </button>
