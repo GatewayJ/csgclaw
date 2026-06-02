@@ -508,11 +508,13 @@ export function useConversationController({
     }
 
     setComposerError("");
+    const serializedDraft = serializeComposerSegments(draftSegments);
+    const content = normalizeSlashShorthandForPayload(serializedDraft);
     try {
       const created = await sendMessageRequest({
         room_id: activeConversation.id,
         sender_id: data.current_user_id,
-        content: serializeComposerSegments(draftSegments),
+        content,
       });
       setBootstrapData((current) => appendMessageToData(current, activeConversation.id, created));
       clearComposer();
@@ -737,7 +739,7 @@ export function useConversationController({
     if (!skillName || !editor || !activeConversationId) {
       return;
     }
-    const nextText = slashSkillCommandText(skillName);
+    const nextText = slashSkillInputText(skillName);
     editor.textContent = nextText;
     placeCaretAtEnd(editor);
     setDraftsByConversationId((current) =>
@@ -1015,16 +1017,71 @@ export function slashSkillQueryForDraft(draftText: string): string | null {
 }
 
 export function slashSkillCommandText(skillName: string): string {
+  return slashSkillCommandTextWithBody(skillName, "");
+}
+
+function slashSkillCommandTextWithBody(skillName: string, body = ""): string {
   const skillArg = escapeXMLAttribute(String(skillName || "").trim());
-  return `<slash-command name="use-skill" arg="${skillArg}"></slash-command> `;
+  const base = `<slash-command name="use-skill" arg="${skillArg}"></slash-command>`;
+  const normalizedBody = String(body ?? "").trim();
+  if (!normalizedBody) {
+    return base;
+  }
+  return `${base} ${normalizedBody}`;
+}
+
+export function slashSkillInputText(skillName: string): string {
+  return `/${String(skillName || "").trim()} `;
+}
+
+export function normalizeSlashShorthandForPayload(text: string): string {
+  const shorthand = parseSlashShorthandToPayload(text);
+  if (!shorthand) {
+    return text;
+  }
+  return slashSkillCommandTextWithBody(shorthand.arg, shorthand.body);
+}
+
+function parseSlashShorthandToPayload(text: string): { arg: string; body: string } | null {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) {
+    return null;
+  }
+
+  const afterSlash = trimmed.slice(1).replace(/^\s+/, "");
+  if (!afterSlash) {
+    return null;
+  }
+  let arg = afterSlash;
+  let body = "";
+  for (let index = 0; index < afterSlash.length; index++) {
+    if (/\s/u.test(afterSlash[index])) {
+      arg = afterSlash.slice(0, index);
+      body = afterSlash.slice(index);
+      break;
+    }
+  }
+  if (!arg) {
+    return null;
+  }
+  if (!isValidSkillSlug(arg)) {
+    return null;
+  }
+  return {
+    arg,
+    body: body.trim(),
+  };
+}
+
+function isValidSkillSlug(value: string): boolean {
+  if (!value || value === "." || value === ".." || /[/\\]/u.test(value)) {
+    return false;
+  }
+  return /^[A-Za-z0-9._-]+$/u.test(value);
 }
 
 function escapeXMLAttribute(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 function fuzzySkillMatch(name: string, query: string): boolean {

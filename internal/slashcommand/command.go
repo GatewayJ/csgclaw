@@ -33,51 +33,51 @@ func Parse(content string) (Command, bool, error) {
 	decoder := xml.NewDecoder(strings.NewReader(text))
 	token, err := decoder.Token()
 	if err != nil {
-		return Command{}, false, fmt.Errorf("parse slash command: %w", err)
+		return Command{}, false, nil
 	}
 	start, ok := token.(xml.StartElement)
 	if !ok || start.Name.Space != "" || start.Name.Local != ElementName {
-		return Command{}, false, fmt.Errorf("expected <%s> root", ElementName)
+		return Command{}, false, nil
 	}
 
 	cmd, err := commandFromStart(start)
 	if err != nil {
-		return Command{}, false, err
+		return Command{}, false, nil
 	}
 
 	var elementBody strings.Builder
 	for {
 		token, err := decoder.Token()
 		if err != nil {
-			return Command{}, false, fmt.Errorf("parse slash command body: %w", err)
+			return Command{}, false, nil
 		}
 		switch t := token.(type) {
 		case xml.CharData:
 			elementBody.Write([]byte(t))
 		case xml.EndElement:
 			if t.Name.Space != "" || t.Name.Local != ElementName {
-				return Command{}, false, fmt.Errorf("unexpected closing element </%s>", t.Name.Local)
+				return Command{}, false, nil
 			}
 			if strings.TrimSpace(elementBody.String()) != "" {
-				return Command{}, false, fmt.Errorf("slash command element must be empty; put the user prompt after </%s>", ElementName)
+				return Command{}, false, nil
 			}
 			end := int(decoder.InputOffset())
 			if end < 0 || end > len(text) {
-				return Command{}, false, fmt.Errorf("slash command offset out of range")
+				return Command{}, false, nil
 			}
 			cmd.Body = strings.TrimSpace(text[end:])
 			if err := validate(cmd); err != nil {
-				return Command{}, false, err
+				return Command{}, false, nil
 			}
 			return cmd, true, nil
 		case xml.StartElement:
-			return Command{}, false, fmt.Errorf("slash command element must be empty")
+			return Command{}, false, nil
 		case xml.Comment:
-			return Command{}, false, fmt.Errorf("slash command element must be empty")
+			return Command{}, false, nil
 		case xml.ProcInst, xml.Directive:
-			return Command{}, false, fmt.Errorf("slash command contains unsupported XML token")
+			return Command{}, false, nil
 		default:
-			return Command{}, false, fmt.Errorf("slash command contains unsupported XML token")
+			return Command{}, false, nil
 		}
 	}
 }
@@ -101,7 +101,7 @@ func ParseFeishuShorthand(content string) (Command, bool, error) {
 	}
 	slug, body := splitSlashCommand(strings.TrimPrefix(text, "/"))
 	if !validSkillSlug(slug) {
-		return Command{}, false, fmt.Errorf("invalid skill slug %q", slug)
+		return Command{}, false, nil
 	}
 	return Command{
 		Name: UseSkillCommandName,

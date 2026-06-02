@@ -73,6 +73,32 @@ func TestNormalizeFeishuInputConvertsSlashSkillShorthand(t *testing.T) {
 	}
 }
 
+func TestParseFeishuShorthandFallsBackOnInvalidSlug(t *testing.T) {
+	cmd, ok, err := ParseFeishuShorthand(`/foo/bar create a review skill`)
+	if err != nil {
+		t.Fatalf("ParseFeishuShorthand() error = %v", err)
+	}
+	if ok {
+		t.Fatalf("ParseFeishuShorthand() ok = true, want false (fallback to plain text)")
+	}
+	if cmd != (Command{}) {
+		t.Fatalf("ParseFeishuShorthand() cmd = %+v, want empty", cmd)
+	}
+}
+
+func TestNormalizeFallsBackOnMalformedSlashCommandPrefix(t *testing.T) {
+	got, ok, err := Normalize(`<slash-command name="use-skill"`)
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if ok {
+		t.Fatal("Normalize() ok = true, want false")
+	}
+	if got != "" {
+		t.Fatalf("Normalize() = %q, want empty", got)
+	}
+}
+
 func TestRenderFeishuFallbackConvertsCanonicalUseSkillToSlashText(t *testing.T) {
 	got := RenderFeishuFallback(`<slash-command name="use-skill" arg="skill-creator"></slash-command> create a review skill`)
 	want := `/skill-creator create a review skill`
@@ -81,27 +107,28 @@ func TestRenderFeishuFallbackConvertsCanonicalUseSkillToSlashText(t *testing.T) 
 	}
 }
 
-func TestNormalizeRejectsMalformedSlashCommand(t *testing.T) {
+func TestParseRejectsNestedSlashCommandElement(t *testing.T) {
+	_, ok, err := Parse(`<slash-command name="use-skill" arg="skill-creator"><b>bad</b></slash-command> prompt`)
+	if err != nil || ok {
+		t.Fatalf("Parse(nested) = ok=%v err=%v, want plain-text fallback", ok, err)
+	}
+}
+
+func TestParseRejectsMalformedSlashCommand(t *testing.T) {
 	for _, input := range []string{
 		`<slash-command name=""></slash-command> body`,
 		`<slash-command/> body`,
 	} {
-		if got, ok, err := Normalize(input); err == nil || ok || got != "" {
-			t.Fatalf("Normalize(%q) = %q ok %v err %v, want error", input, got, ok, err)
+		_, ok, err := Parse(input)
+		if err != nil || ok {
+			t.Fatalf("Parse(%q) = ok=%v err=%v, want plain-text fallback", input, ok, err)
 		}
-	}
-}
-
-func TestParseRejectsNestedSlashCommandElement(t *testing.T) {
-	_, ok, err := Parse(`<slash-command name="use-skill" arg="skill-creator"><b>bad</b></slash-command> prompt`)
-	if err == nil || ok {
-		t.Fatalf("Parse(nested) ok=%v err=%v, want nested element error", ok, err)
 	}
 }
 
 func TestParseRejectsPromptInsideSlashCommandElement(t *testing.T) {
 	_, ok, err := Parse(`<slash-command name="use-skill" arg="skill-creator">prompt</slash-command>`)
-	if err == nil || ok {
-		t.Fatalf("Parse(inline prompt) ok=%v err=%v, want prompt outside command element error", ok, err)
+	if err != nil || ok {
+		t.Fatalf("Parse(inline prompt) ok=%v err=%v, want plain-text fallback", ok, err)
 	}
 }
