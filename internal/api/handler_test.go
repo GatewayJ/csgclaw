@@ -3094,6 +3094,36 @@ func TestHandleFeishuMessagesPostNormalizesCanonicalSlashCommand(t *testing.T) {
 	}
 }
 
+func TestHandleFeishuMessagesPostConvertsSlashShorthandToCanonicalCommand(t *testing.T) {
+	wantContent := `<slash-command name="use-skill" arg="skill-creator"></slash-command> create & review`
+	feishuSvc := feishu.NewServiceWithSendMessage(
+		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
+		func(_ context.Context, _ feishu.AppConfig, req feishu.SendMessageRequest) (feishu.SendMessageResponse, error) {
+			if req.ChatID != "oc_alpha" || req.Content != wantContent {
+				t.Fatalf("send request = %+v, want chat/content %q", req, wantContent)
+			}
+			return feishu.SendMessageResponse{MessageID: "om_1", SenderOpenID: "ou_manager"}, nil
+		},
+	)
+	srv := &Handler{feishu: feishuSvc}
+
+	body := `{"room_id":"oc_alpha","sender_id":"u-manager","content":"/skill-creator create & review"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/messages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var got im.Message
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Content != wantContent {
+		t.Fatalf("content = %q, want %q", got.Content, wantContent)
+	}
+}
+
 func TestHandleFeishuMessagesGetListsRoomMessages(t *testing.T) {
 	feishuSvc := feishu.NewServiceWithCreateChatAndListRoomMessages(
 		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"}},

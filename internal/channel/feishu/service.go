@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"csgclaw/internal/im"
+	"csgclaw/internal/slashcommand"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
@@ -860,6 +861,9 @@ func feishuSDKMessageToIMMessage(item *larkim.Message) (im.Message, bool) {
 	content := ""
 	if item.Body != nil {
 		content = feishuMessageContentText(larkcore.StringValue(item.Body.Content))
+		if normalized, ok, err := slashcommand.NormalizeFeishuInput(content); err == nil && ok {
+			content = normalized
+		}
 	}
 
 	return im.Message{
@@ -918,7 +922,7 @@ func feishuMessageMentions(mentions []*larkim.Mention) []im.Mention {
 }
 
 func defaultSendMessage(ctx context.Context, app AppConfig, req SendMessageRequest) (SendMessageResponse, error) {
-	text := req.Content
+	text := slashcommand.RenderFeishuFallback(req.Content)
 	senderInfo, err := fetchBotInfo(ctx, app)
 	if err != nil {
 		return SendMessageResponse{}, err
@@ -936,7 +940,7 @@ func defaultSendMessage(ctx context.Context, app AppConfig, req SendMessageReque
 			return SendMessageResponse{}, err
 		}
 		mentionOpenID = botInfo.OpenID
-		text = fmt.Sprintf("<at user_id=\"%s\">%s</at> %s", mentionOpenID, mentionID, req.Content)
+		text = fmt.Sprintf("<at user_id=\"%s\">%s</at> %s", mentionOpenID, mentionID, slashcommand.RenderFeishuFallback(req.Content))
 	}
 
 	content, err := json.Marshal(map[string]string{"text": text})

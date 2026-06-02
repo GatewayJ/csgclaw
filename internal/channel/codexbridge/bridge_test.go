@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -197,6 +199,62 @@ func TestServiceRoundTrip(t *testing.T) {
 
 	waitFor(t, func() bool {
 		return slices.Equal(prompter.texts(), []string{"hello"}) && slices.Equal(client.sentTexts(), []string{"Hello back"})
+	})
+}
+
+func TestServiceExpandsUseSkillSlashCommandBeforePrompt(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	skillDir := filepath.Join(workspaceRoot, "skills", "reviewer")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Reviewer\nRead code carefully.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{
+		MessageID: "m-1",
+		RoomID:    "room-1",
+		Text:      `<slash-command name="use-skill" arg="reviewer"></slash-command> inspect this bug`,
+	}
+
+	sink := runtimecodex.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) error {
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: string(req.SessionId),
+				Kind:      runtimecodex.SessionEventPromptCompleted,
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1", WorkspaceRoot: workspaceRoot}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		texts := prompter.texts()
+		return len(texts) == 1 &&
+			strings.Contains(texts[0], `invoked the "reviewer" skill`) &&
+			strings.Contains(texts[0], "# Reviewer\nRead code carefully.") &&
+			strings.Contains(texts[0], "inspect this bug") &&
+			!strings.Contains(texts[0], "<slash-command")
 	})
 }
 
