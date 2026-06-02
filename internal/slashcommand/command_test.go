@@ -86,10 +86,10 @@ func TestParseFeishuShorthandFallsBackOnInvalidSlug(t *testing.T) {
 	}
 }
 
-func TestNormalizeFallsBackOnMalformedSlashCommandPrefix(t *testing.T) {
+func TestNormalizeRejectsMalformedSlashCommandPrefix(t *testing.T) {
 	got, ok, err := Normalize(`<slash-command name="use-skill"`)
-	if err != nil {
-		t.Fatalf("Normalize() error = %v", err)
+	if err == nil {
+		t.Fatal("Normalize() err = nil, want malformed command error")
 	}
 	if ok {
 		t.Fatal("Normalize() ok = true, want false")
@@ -120,9 +120,16 @@ func TestParseRejectsMalformedSlashCommand(t *testing.T) {
 		`<slash-command/> body`,
 	} {
 		_, ok, err := Parse(input)
-		if err != nil || ok {
-			t.Fatalf("Parse(%q) = ok=%v err=%v, want plain-text fallback", input, ok, err)
+		if err == nil || ok {
+			t.Fatalf("Parse(%q) = ok=%v err=%v, want malformed command error", input, ok, err)
 		}
+	}
+}
+
+func TestParseRejectsDuplicateSlashCommandAttribute(t *testing.T) {
+	_, ok, err := Parse(`<slash-command name="use-skill" name="use-skill" arg="skill-creator"></slash-command>`)
+	if err == nil || ok {
+		t.Fatalf("Parse(duplicate-attr) = ok=%v err=%v, want malformed command error", ok, err)
 	}
 }
 

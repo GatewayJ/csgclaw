@@ -33,7 +33,7 @@ func Parse(content string) (Command, bool, error) {
 	decoder := xml.NewDecoder(strings.NewReader(text))
 	token, err := decoder.Token()
 	if err != nil {
-		return Command{}, false, nil
+		return Command{}, false, err
 	}
 	start, ok := token.(xml.StartElement)
 	if !ok || start.Name.Space != "" || start.Name.Local != ElementName {
@@ -42,42 +42,42 @@ func Parse(content string) (Command, bool, error) {
 
 	cmd, err := commandFromStart(start)
 	if err != nil {
-		return Command{}, false, nil
+		return Command{}, false, err
 	}
 
 	var elementBody strings.Builder
 	for {
 		token, err := decoder.Token()
 		if err != nil {
-			return Command{}, false, nil
+			return Command{}, false, err
 		}
 		switch t := token.(type) {
 		case xml.CharData:
 			elementBody.Write([]byte(t))
 		case xml.EndElement:
 			if t.Name.Space != "" || t.Name.Local != ElementName {
-				return Command{}, false, nil
+				return Command{}, false, fmt.Errorf("unexpected closing tag %q", t.Name.Local)
 			}
 			if strings.TrimSpace(elementBody.String()) != "" {
-				return Command{}, false, nil
+				return Command{}, false, fmt.Errorf("slash command body must be empty")
 			}
 			end := int(decoder.InputOffset())
 			if end < 0 || end > len(text) {
-				return Command{}, false, nil
+				return Command{}, false, fmt.Errorf("invalid token end offset")
 			}
 			cmd.Body = strings.TrimSpace(text[end:])
 			if err := validate(cmd); err != nil {
-				return Command{}, false, nil
+				return Command{}, false, err
 			}
 			return cmd, true, nil
 		case xml.StartElement:
-			return Command{}, false, nil
+			return Command{}, false, fmt.Errorf("slash command body must not contain child elements")
 		case xml.Comment:
-			return Command{}, false, nil
+			return Command{}, false, fmt.Errorf("slash command body must be plain text")
 		case xml.ProcInst, xml.Directive:
-			return Command{}, false, nil
+			return Command{}, false, fmt.Errorf("invalid slash command body token")
 		default:
-			return Command{}, false, nil
+			return Command{}, false, fmt.Errorf("unsupported token in slash command body")
 		}
 	}
 }

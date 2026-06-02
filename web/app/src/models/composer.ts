@@ -39,15 +39,16 @@ export function createSlashTokenElement(value) {
   return token;
 }
 
-const slashTokenPattern = /\/[\w.-]+/g;
+const slashTokenPattern = /(^|[\s])\/[A-Za-z0-9._-]+(?!\/)/g;
 
 function splitTextSegmentBySlash(value) {
   const text = String(value ?? "");
   const segments = [];
   let last = 0;
   for (const match of text.matchAll(slashTokenPattern)) {
-    const matchText = match[0] || "";
-    const start = match.index || 0;
+    const fullMatch = match[0] || "";
+    const matchText = fullMatch.trimStart();
+    const start = (match.index || 0) + (fullMatch.length - matchText.length);
     if (start > last) {
       segments.push({ type: "text", text: text.slice(last, start) });
     }

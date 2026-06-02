@@ -162,7 +162,7 @@ export type MessagePreviewTextToken = {
   type: "text" | "mention" | "slash";
 };
 
-const previewTokenPattern = /@[\w.-]+|\/[\w.-]+/g;
+const previewTokenPattern = /(^|[\s])\/[A-Za-z0-9._-]+(?!\/)|@[\w.-]+/g;
 
 export function splitMessagePreviewText(content: unknown): MessagePreviewTextToken[] {
   const text = formatMessagePreviewText(content);
@@ -172,14 +172,18 @@ export function splitMessagePreviewText(content: unknown): MessagePreviewTextTok
   const tokens: MessagePreviewTextToken[] = [];
   let last = 0;
   for (const match of text.matchAll(previewTokenPattern)) {
-    const matchText = match[0] || "";
-    const start = match.index || 0;
+    const fullMatch = match[0] || "";
+    if (!fullMatch) {
+      continue;
+    }
+    const matchText = fullMatch.trimStart();
+    const start = (match.index || 0) + (fullMatch.length - matchText.length);
     if (start > last) {
       tokens.push({ text: text.slice(last, start), type: "text" });
     }
-    const type = matchText.startsWith("/") ? "slash" : "mention";
+    const type: MessagePreviewTextToken["type"] = matchText.startsWith("/") ? "slash" : "mention";
     tokens.push({ text: matchText, type });
-    last = start + matchText.length;
+    last = Math.max(last, start + matchText.length);
   }
   if (last < text.length) {
     tokens.push({ text: text.slice(last), type: "text" });

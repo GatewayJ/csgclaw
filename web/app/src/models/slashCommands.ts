@@ -32,7 +32,12 @@ export function parseSlashCommand(content: unknown): SlashCommandPayload | null 
   }
 
   const allowedAttributes = new Set(["name", "arg"]);
+  const seenAttributes = new Set<string>();
   for (const attr of Array.from(root.attributes)) {
+    if (seenAttributes.has(attr.name)) {
+      return null;
+    }
+    seenAttributes.add(attr.name);
     if (attr.namespaceURI || !allowedAttributes.has(attr.name)) {
       return null;
     }

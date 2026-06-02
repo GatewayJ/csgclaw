@@ -6,6 +6,7 @@ import {
   formatConversationPreview,
   formatEventMessage,
   formatMessagePreviewText,
+  splitMessagePreviewText,
   formatTime,
   isAgentRosterEvent,
   isToolCallMessage,
@@ -93,8 +94,17 @@ describe("conversation model helpers", () => {
     expect(formatMessagePreviewText('<slash-command name="use-skill" arg="skill-creator"></slash-command> create README'))
       .toBe("/skill-creator create README");
     expect(formatMessagePreviewText('<slash-command name="use-skill" arg="skill-creator" />')).toBe("/skill-creator");
-    expect(formatMessagePreviewText('<slash-command name="use-skill" arg="skill-creator"><b>bad</b></slash-command>'))
-      .toBe('<slash-command name="use-skill" arg="skill-creator"><b>bad</b></slash-command>');
+    expect(
+      formatMessagePreviewText('<slash-command name="use-skill" arg="skill-creator"><b>bad</b></slash-command>'),
+    ).toBe('<slash-command name="use-skill" arg="skill-creator"><b>bad</b></slash-command>');
+  });
+
+  it("keeps path-like slash segments in plain text previews", () => {
+    expect(splitMessagePreviewText("Open /tmp/build logs")).toEqual([{ text: "Open /tmp/build logs", type: "text" }]);
+    expect(splitMessagePreviewText("/skill-creator run tests")).toEqual([
+      { text: "/skill-creator", type: "slash" },
+      { text: " run tests", type: "text" },
+    ]);
   });
 
   it("formats message timestamps with the browser local timezone", () => {
