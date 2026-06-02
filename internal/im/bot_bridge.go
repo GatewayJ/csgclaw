@@ -374,10 +374,7 @@ func messageEventForBot(room Room, sender User, message Message, botID string) B
 func textForBotEvent(message Message, botID string) string {
 	content := message.Content
 	botID = strings.TrimSpace(botID)
-	if botID == "" {
-		return content
-	}
-	if content == "" || hasMentionTagForUser(content, botID) {
+	if content == "" || botID == "" || hasMentionTagForUser(content, botID) {
 		return content
 	}
 	for _, mention := range message.Mentions {

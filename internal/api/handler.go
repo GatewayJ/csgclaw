@@ -1764,7 +1764,6 @@ func (r createMessageRequest) toServiceRequest() (im.CreateMessageRequest, error
 	if roomID == "" {
 		return im.CreateMessageRequest{}, fmt.Errorf("room_id is required")
 	}
-
 	return im.CreateMessageRequest{
 		RoomID:    roomID,
 		SenderID:  r.SenderID,
