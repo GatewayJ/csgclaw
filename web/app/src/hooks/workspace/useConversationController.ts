@@ -44,7 +44,7 @@ import {
   updateDrafts,
 } from "@/models/composer";
 import { WorkspacePaneTypes } from "@/models/routing";
-import { normalizeAuthProviderName, normalizeRuntimeKind, providerNeedsAuth } from "@/models/agents";
+import { normalizeAuthProviderName, providerNeedsAuth } from "@/models/agents";
 import { localizeError } from "@/shared/i18n";
 import { subscribeIMEvents } from "@/shared/realtime/imEvents";
 import { MESSAGE_LIST_BOTTOM_THRESHOLD } from "@/shared/constants/workspace";
@@ -177,15 +177,18 @@ export function useConversationController({
     selectedConversation && !isDirectConversation(selectedConversation) ? selectedConversation : null;
   const selectedMessageCount = selectedConversation?.messages?.length ?? 0;
   const logAgent = useMemo(() => {
-    if (!selectedConversation || !isDirectConversation(selectedConversation) || !data?.current_user_id) {
+    if (!selectedConversation || !data?.current_user_id) {
       return null;
     }
+
     const directUser = resolveConversationUser(selectedConversation, data.current_user_id, usersById);
-    const agentID =
-      directUser?.id || selectedConversation.members.find((id) => id && id !== data.current_user_id) || "";
+    const otherMembers = selectedConversation.members.filter((id) => id && id !== data.current_user_id);
+    if (otherMembers.length !== 1) {
+      return null;
+    }
+    const agentID = directUser?.id || otherMembers[0];
     const agent = agents.find((item) => item.id === agentID || agentMatchesUser(item, directUser));
-    const runtimeKind = normalizeRuntimeKind(agent?.runtime_kind);
-    return runtimeKind === "openclaw_sandbox" || runtimeKind === "picoclaw_sandbox" ? agent : null;
+    return agent ?? null;
   }, [agents, data?.current_user_id, selectedConversation, usersById]);
   const activeConversationMembers = activeConversation
     ? activeConversation.members.map((id) => usersById.get(id)).filter(Boolean)
