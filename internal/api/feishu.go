@@ -220,6 +220,12 @@ func (h *Handler) handleFeishuMessages(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 			return
 		}
+		content, err := normalizeSlashCommandContent(req.Content)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		req.Content = content
 		message, err := h.feishu.SendMessage(req)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

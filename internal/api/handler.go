@@ -1491,11 +1491,6 @@ func (h *Handler) handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	serviceReq, err = h.attachSkillInvocation(serviceReq)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 
 	message, err := channel.SendMessage(serviceReq)
 	if err != nil {
@@ -1769,11 +1764,15 @@ func (r createMessageRequest) toServiceRequest() (im.CreateMessageRequest, error
 	if roomID == "" {
 		return im.CreateMessageRequest{}, fmt.Errorf("room_id is required")
 	}
+	content, err := normalizeSlashCommandContent(r.Content)
+	if err != nil {
+		return im.CreateMessageRequest{}, err
+	}
 
 	return im.CreateMessageRequest{
 		RoomID:    roomID,
 		SenderID:  r.SenderID,
-		Content:   r.Content,
+		Content:   content,
 		MentionID: r.MentionID,
 		RelatesTo: r.RelatesTo,
 	}, nil

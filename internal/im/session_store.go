@@ -23,38 +23,35 @@ const (
 
 // sessionMessageLine is the on-disk jsonl shape. blob_ref points at spillover payload.
 type sessionMessageLine struct {
-	ID           string           `json:"id"`
-	SenderID     string           `json:"sender_id"`
-	Kind         string           `json:"kind,omitempty"`
-	Content      string           `json:"content"`
-	AgentContent string           `json:"agent_content,omitempty"`
-	Event        *EventPayload    `json:"event,omitempty"`
-	CreatedAt    string           `json:"created_at"`
-	Mentions     []Mention        `json:"mentions"`
-	RelatesTo    *MessageRelation `json:"relates_to,omitempty"`
-	Thread       *ThreadSummary   `json:"thread,omitempty"`
-	BlobRef      string           `json:"blob_ref,omitempty"`
+	ID        string           `json:"id"`
+	SenderID  string           `json:"sender_id"`
+	Kind      string           `json:"kind,omitempty"`
+	Content   string           `json:"content"`
+	Event     *EventPayload    `json:"event,omitempty"`
+	CreatedAt string           `json:"created_at"`
+	Mentions  []Mention        `json:"mentions"`
+	RelatesTo *MessageRelation `json:"relates_to,omitempty"`
+	Thread    *ThreadSummary   `json:"thread,omitempty"`
+	BlobRef   string           `json:"blob_ref,omitempty"`
 }
 
 type sessionMessageBlob struct {
-	Content      string         `json:"content,omitempty"`
-	AgentContent string         `json:"agent_content,omitempty"`
-	Event        *EventPayload  `json:"event,omitempty"`
-	Thread       *ThreadSummary `json:"thread,omitempty"`
+	Content string         `json:"content,omitempty"`
+	Event   *EventPayload  `json:"event,omitempty"`
+	Thread  *ThreadSummary `json:"thread,omitempty"`
 }
 
 func messageToSessionLine(message Message) sessionMessageLine {
 	return sessionMessageLine{
-		ID:           message.ID,
-		SenderID:     message.SenderID,
-		Kind:         message.Kind,
-		Content:      message.Content,
-		AgentContent: message.AgentContent,
-		Event:        message.Event,
-		CreatedAt:    message.CreatedAt.UTC().Format(timeRFC3339Nano),
-		Mentions:     message.Mentions,
-		RelatesTo:    message.RelatesTo,
-		Thread:       message.Thread,
+		ID:        message.ID,
+		SenderID:  message.SenderID,
+		Kind:      message.Kind,
+		Content:   message.Content,
+		Event:     message.Event,
+		CreatedAt: message.CreatedAt.UTC().Format(timeRFC3339Nano),
+		Mentions:  message.Mentions,
+		RelatesTo: message.RelatesTo,
+		Thread:    message.Thread,
 	}
 }
 
@@ -64,16 +61,15 @@ func sessionLineToMessage(line sessionMessageLine) (Message, error) {
 		return Message{}, err
 	}
 	return Message{
-		ID:           line.ID,
-		SenderID:     line.SenderID,
-		Kind:         line.Kind,
-		Content:      line.Content,
-		AgentContent: line.AgentContent,
-		Event:        line.Event,
-		CreatedAt:    createdAt,
-		Mentions:     line.Mentions,
-		RelatesTo:    line.RelatesTo,
-		Thread:       line.Thread,
+		ID:        line.ID,
+		SenderID:  line.SenderID,
+		Kind:      line.Kind,
+		Content:   line.Content,
+		Event:     line.Event,
+		CreatedAt: createdAt,
+		Mentions:  line.Mentions,
+		RelatesTo: line.RelatesTo,
+		Thread:    line.Thread,
 	}, nil
 }
 
@@ -197,7 +193,6 @@ func decodeSessionMessageLine(sessionsRoot string, line []byte) (Message, error)
 		return Message{}, err
 	}
 	message.Content = blob.Content
-	message.AgentContent = blob.AgentContent
 	message.Event = blob.Event
 	message.Thread = blob.Thread
 	return message, nil
@@ -291,10 +286,9 @@ func encodeSessionMessageLine(sessionsRoot, roomID string, message Message) ([]b
 		return nil, "", err
 	}
 	blob := sessionMessageBlob{
-		Content:      message.Content,
-		AgentContent: message.AgentContent,
-		Event:        message.Event,
-		Thread:       message.Thread,
+		Content: message.Content,
+		Event:   message.Event,
+		Thread:  message.Thread,
 	}
 	blobData, err := json.Marshal(blob)
 	if err != nil {
@@ -309,7 +303,6 @@ func encodeSessionMessageLine(sessionsRoot, roomID string, message Message) ([]b
 	}
 
 	line.Content = ""
-	line.AgentContent = ""
 	line.Event = nil
 	line.Thread = nil
 	line.BlobRef = relativeRef

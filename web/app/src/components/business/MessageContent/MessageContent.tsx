@@ -3,6 +3,8 @@ import { ActionCard } from "./ActionCard";
 import { AgentActivityCard } from "./AgentActivityCard";
 import { renderMarkdown } from "./markdown";
 import { prepareMermaidBlocks, renderMermaidBlocks } from "./mermaid";
+import { SlashCommandCard } from "./SlashCommandCard";
+import { parseSlashCommand } from "./slashCommands";
 import { StructuredMessageCard } from "./StructuredMessageCard";
 import { parseStructuredMessage } from "./structuredMessages";
 import type { ActionCardPayload, MessageContentProps } from "./types";
@@ -12,8 +14,15 @@ import "./MessageContent.css";
 export function MessageContent({ content, message, actionBusy, actionError, onAction }: MessageContentProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const activity = useMemo(() => parseAgentActivity(content), [content]);
-  const structured = useMemo(() => (activity ? null : parseStructuredMessage(content)), [activity, content]);
-  const markup = useMemo(() => (activity || structured ? "" : renderMarkdown(content)), [activity, content, structured]);
+  const slashCommand = useMemo(() => (activity ? null : parseSlashCommand(content)), [activity, content]);
+  const structured = useMemo(
+    () => (activity || slashCommand ? null : parseStructuredMessage(content)),
+    [activity, content, slashCommand],
+  );
+  const markup = useMemo(
+    () => (activity || slashCommand || structured ? "" : renderMarkdown(content)),
+    [activity, content, slashCommand, structured],
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -36,6 +45,10 @@ export function MessageContent({ content, message, actionBusy, actionError, onAc
 
   if (activity) {
     return <AgentActivityCard activity={activity} />;
+  }
+
+  if (slashCommand) {
+    return <SlashCommandCard command={slashCommand} />;
   }
 
   if (structured) {

@@ -1971,114 +1971,6 @@ func TestHandleAgentWorkspaceFileReturnsContent(t *testing.T) {
 	}
 }
 
-func TestAttachSkillInvocationExpandsDirectRoomMessage(t *testing.T) {
-	svc := mustNewService(t)
-	created, err := svc.Create(context.Background(), agent.CreateRequest{
-		Spec: agent.CreateAgentSpec{
-			Name:        "alice",
-			Role:        agent.RoleWorker,
-			RuntimeKind: agent.RuntimeKindPicoClawSandbox,
-			Image:       "worker-image:test",
-			AgentProfile: agent.AgentProfile{
-				ProfileComplete: true,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	workspaceRoot, err := agent.WorkspaceRoot(created.Name, created.RuntimeKind)
-	if err != nil {
-		t.Fatalf("WorkspaceRoot() error = %v", err)
-	}
-	skillDir := filepath.Join(workspaceRoot, "skills", "custom")
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		t.Fatalf("create skill dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Custom\nFollow custom rules.\n"), 0o644); err != nil {
-		t.Fatalf("write skill file: %v", err)
-	}
-
-	imSvc := im.NewServiceFromBootstrap(im.Bootstrap{
-		CurrentUserID: "u-admin",
-		Users: []im.User{
-			{ID: "u-admin", Name: "admin", Handle: "admin"},
-			{ID: created.ID, Name: created.Name, Handle: created.Name},
-		},
-		Rooms: []im.Room{{
-			ID:       "room-1",
-			IsDirect: true,
-			Members:  []string{"u-admin", created.ID},
-		}},
-	})
-	srv := &Handler{svc: svc, im: imSvc}
-
-	got, err := srv.attachSkillInvocation(im.CreateMessageRequest{
-		RoomID:   "room-1",
-		SenderID: "u-admin",
-		Content:  "/custom do this",
-	})
-	if err != nil {
-		t.Fatalf("attachSkillInvocation() error = %v", err)
-	}
-	if got.Content != "/custom do this" {
-		t.Fatalf("Content = %q, want original slash text", got.Content)
-	}
-	for _, want := range []string{
-		`invoked the "custom" skill`,
-		"# Custom\nFollow custom rules.",
-		"[Skill directory: skills/custom]",
-		"do this",
-	} {
-		if !strings.Contains(got.AgentContent, want) {
-			t.Fatalf("AgentContent missing %q in:\n%s", want, got.AgentContent)
-		}
-	}
-}
-
-func TestAttachSkillInvocationSkipsGroupRoom(t *testing.T) {
-	svc := mustNewService(t)
-	created, err := svc.Create(context.Background(), agent.CreateRequest{
-		Spec: agent.CreateAgentSpec{
-			Name:        "alice",
-			Role:        agent.RoleWorker,
-			RuntimeKind: agent.RuntimeKindPicoClawSandbox,
-			Image:       "worker-image:test",
-			AgentProfile: agent.AgentProfile{
-				ProfileComplete: true,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	imSvc := im.NewServiceFromBootstrap(im.Bootstrap{
-		CurrentUserID: "u-admin",
-		Users: []im.User{
-			{ID: "u-admin", Name: "admin", Handle: "admin"},
-			{ID: created.ID, Name: created.Name, Handle: created.Name},
-		},
-		Rooms: []im.Room{{
-			ID:       "room-1",
-			IsDirect: false,
-			Members:  []string{"u-admin", created.ID},
-		}},
-	})
-	srv := &Handler{svc: svc, im: imSvc}
-
-	got, err := srv.attachSkillInvocation(im.CreateMessageRequest{
-		RoomID:   "room-1",
-		SenderID: "u-admin",
-		Content:  "/custom do this",
-	})
-	if err != nil {
-		t.Fatalf("attachSkillInvocation() error = %v", err)
-	}
-	if got.AgentContent != "" {
-		t.Fatalf("AgentContent = %q, want empty for group room", got.AgentContent)
-	}
-}
-
 func TestHandleHubTemplateWithoutWorkspaceOmitsEntriesAndFilePreview(t *testing.T) {
 	hubSvc := mustNewLocalTemplateHubServiceWithoutWorkspace(t, "review-bot", hub.Template{
 		ID:          "review-bot",
@@ -2841,6 +2733,81 @@ func TestHandleMessagesPostCreatesMessage(t *testing.T) {
 	}
 }
 
+func TestHandleMessagesPostNormalizesCanonicalSlashCommand(t *testing.T) {
+	srv := &Handler{
+		im: im.NewServiceFromBootstrap(im.Bootstrap{
+			CurrentUserID: "u-admin",
+			Users: []im.User{
+				{ID: "u-admin", Name: "admin", Handle: "admin"},
+				{ID: "u-manager", Name: "manager", Handle: "manager"},
+			},
+			Rooms: []im.Room{{ID: "room-1", Title: "Room One", Members: []string{"u-admin", "u-manager"}}},
+		}),
+	}
+
+	body := `{"room_id":"room-1","sender_id":"u-admin","content":"  <slash-command arg=\"skill-creator\" name=\"use-skill\"/>  create & review <safely>  "}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/csgclaw/messages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var got im.Message
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := `<slash-command name="use-skill" arg="skill-creator"></slash-command> create & review <safely>`
+	if got.Content != want {
+		t.Fatalf("content = %q, want canonical slash command %q", got.Content, want)
+	}
+}
+
+func TestHandleMessagesPostRejectsMalformedSlashCommand(t *testing.T) {
+	srv := &Handler{
+		im: im.NewServiceFromBootstrap(im.Bootstrap{
+			CurrentUserID: "u-admin",
+			Users:         []im.User{{ID: "u-admin", Name: "admin", Handle: "admin"}},
+			Rooms:         []im.Room{{ID: "room-1", Title: "Room One", Members: []string{"u-admin"}}},
+		}),
+	}
+
+	body := `{"room_id":"room-1","sender_id":"u-admin","content":"<slash-command name=\"\"></slash-command> body"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/messages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestHandleMessagesPostKeepsLegacySlashTextAsPlainContent(t *testing.T) {
+	srv := &Handler{
+		im: im.NewServiceFromBootstrap(im.Bootstrap{
+			CurrentUserID: "u-admin",
+			Users:         []im.User{{ID: "u-admin", Name: "admin", Handle: "admin"}},
+			Rooms:         []im.Room{{ID: "room-1", Title: "Room One", Members: []string{"u-admin"}}},
+		}),
+	}
+
+	body := `{"room_id":"room-1","sender_id":"u-admin","content":"/skill-creator create a review skill"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/messages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var got im.Message
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Content != "/skill-creator create a review skill" {
+		t.Fatalf("content = %q, want legacy slash text kept as plain content", got.Content)
+	}
+}
+
 func TestHandleThreadRoutesAndMessageFiltering(t *testing.T) {
 	srv := &Handler{
 		im: im.NewServiceFromBootstrap(im.Bootstrap{
@@ -3097,6 +3064,36 @@ func TestHandleFeishuMessagesPostSendsMessage(t *testing.T) {
 	}
 }
 
+func TestHandleFeishuMessagesPostNormalizesCanonicalSlashCommand(t *testing.T) {
+	wantContent := `<slash-command name="use-skill" arg="skill-creator"></slash-command> create & review`
+	feishuSvc := feishu.NewServiceWithSendMessage(
+		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
+		func(_ context.Context, _ feishu.AppConfig, req feishu.SendMessageRequest) (feishu.SendMessageResponse, error) {
+			if req.ChatID != "oc_alpha" || req.Content != wantContent {
+				t.Fatalf("send request = %+v, want chat/content %q", req, wantContent)
+			}
+			return feishu.SendMessageResponse{MessageID: "om_1", SenderOpenID: "ou_manager"}, nil
+		},
+	)
+	srv := &Handler{feishu: feishuSvc}
+
+	body := `{"room_id":"oc_alpha","sender_id":"u-manager","content":"<slash-command arg=\"skill-creator\" name=\"use-skill\"/> create & review"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/messages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var got im.Message
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Content != wantContent {
+		t.Fatalf("content = %q, want %q", got.Content, wantContent)
+	}
+}
+
 func TestHandleFeishuMessagesGetListsRoomMessages(t *testing.T) {
 	feishuSvc := feishu.NewServiceWithCreateChatAndListRoomMessages(
 		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"}},
@@ -3169,7 +3166,7 @@ func TestHandleFeishuEventsStreamsMessageBusEvents(t *testing.T) {
 		Message: &im.Message{
 			ID:       "om_1",
 			SenderID: "ou_manager",
-			Content:  "hello @alice",
+			Content:  "/custom do this",
 			Mentions: []im.Mention{{ID: "u-manager"}},
 		},
 	})
@@ -3192,6 +3189,12 @@ func TestHandleFeishuEventsStreamsMessageBusEvents(t *testing.T) {
 	}
 	if !strings.Contains(body, `"id":"om_1"`) {
 		t.Fatalf("body = %q, want message id", body)
+	}
+	if !strings.Contains(body, `"content":"/custom do this"`) {
+		t.Fatalf("body = %q, want original slash invocation content", body)
+	}
+	if strings.Contains(body, "agent_content") || strings.Contains(body, "Follow custom rules") {
+		t.Fatalf("body = %q, want no hidden skill payload", body)
 	}
 }
 

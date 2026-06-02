@@ -89,7 +89,7 @@ func TestPublishMessageEventUsesGroupChatTypeForTwoMemberGroup(t *testing.T) {
 	}
 }
 
-func TestPublishMessageEventUsesAgentContentWhenPresent(t *testing.T) {
+func TestPublishMessageEventUsesSlashContentVerbatim(t *testing.T) {
 	bridge := NewBotBridge("")
 	events, cancel := bridge.Subscribe("u-bot")
 	defer cancel()
@@ -101,19 +101,18 @@ func TestPublishMessageEventUsesAgentContentWhenPresent(t *testing.T) {
 	}
 	sender := User{ID: "u-admin", Name: "Admin", Handle: "admin"}
 	message := Message{
-		ID:           "msg-skill",
-		SenderID:     "u-admin",
-		Content:      "/skill-creator make a skill",
-		AgentContent: "expanded skill payload",
-		CreatedAt:    time.Now().UTC(),
+		ID:        "msg-skill",
+		SenderID:  "u-admin",
+		Content:   "/skill-creator make a skill",
+		CreatedAt: time.Now().UTC(),
 	}
 
 	bridge.PublishMessageEvent(room, sender, message)
 
 	select {
 	case evt := <-events:
-		if evt.Text != "expanded skill payload" {
-			t.Fatalf("Text = %q, want expanded skill payload", evt.Text)
+		if evt.Text != "/skill-creator make a skill" {
+			t.Fatalf("Text = %q, want original slash content", evt.Text)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("PublishMessageEvent() timed out waiting for event")
