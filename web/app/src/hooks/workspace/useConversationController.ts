@@ -734,7 +734,7 @@ export function useConversationController({
     if (!skillName || !editor || !activeConversationId) {
       return;
     }
-    const nextText = `/${skillName} `;
+    const nextText = slashSkillCommandText(skillName);
     editor.textContent = nextText;
     placeCaretAtEnd(editor);
     setDraftsByConversationId((current) =>
@@ -1009,6 +1009,19 @@ export function slashSkillQueryForDraft(draftText: string): string | null {
   }
   const query = trimmed.slice(1);
   return /\s/.test(query) ? null : query.toLowerCase();
+}
+
+export function slashSkillCommandText(skillName: string): string {
+  const skillArg = escapeXMLAttribute(String(skillName || "").trim());
+  return `<slash-command name="use-skill" arg="${skillArg}"></slash-command> `;
+}
+
+function escapeXMLAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 function fuzzySkillMatch(name: string, query: string): boolean {
