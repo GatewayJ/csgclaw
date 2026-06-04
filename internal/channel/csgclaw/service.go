@@ -37,10 +37,6 @@ func (s *Service) DeleteRoom(roomID string) error {
 	return s.im.DeleteRoom(roomID)
 }
 
-func (s *Service) ClearRoomMessages(roomID string) (im.Room, error) {
-	return s.im.ClearRoomMessages(roomID)
-}
-
 func (s *Service) ListRoomMembers(roomID string) ([]im.User, error) {
 	return s.im.ListMembers(roomID)
 }

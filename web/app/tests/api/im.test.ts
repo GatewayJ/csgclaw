@@ -16,13 +16,13 @@ describe("IM API", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses the channel-scoped clearMessages custom method", async () => {
+  it("uses the IM-native clearMessages custom method", async () => {
     const fetchMock = mockFetch();
 
     await clearRoomMessagesRequest("room-1");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "api/v1/channels/csgclaw/rooms/room-1:clearMessages",
+      "api/v1/rooms/room-1:clearMessages",
       expect.objectContaining({ method: "POST" }),
     );
   });

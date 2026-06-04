@@ -145,7 +145,7 @@ func TestHandleCsgclawChannelNestedRoutesMirrorLocalMutations(t *testing.T) {
 	}
 }
 
-func TestHandleCsgclawClearRoomMessages(t *testing.T) {
+func TestHandleClearRoomMessages(t *testing.T) {
 	bus := im.NewBus()
 	events, cancel := bus.Subscribe()
 	defer cancel()
@@ -164,7 +164,7 @@ func TestHandleCsgclawClearRoomMessages(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	srv.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/channels/csgclaw/rooms/room-1:clearMessages", nil))
+	srv.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/rooms/room-1:clearMessages", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}

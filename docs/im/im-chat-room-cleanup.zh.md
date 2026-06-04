@@ -1,4 +1,4 @@
-# Issue 2219：CSGClaw IM 房间聊天记录清空方案
+# CSGClaw IM 房间聊天记录清空方案
 
 ## 背景与范围
 
@@ -93,9 +93,9 @@ Issue 2219 要求在 CSGClaw IM 的房间工具中支持清空聊天记录。关
 1. 用户点击 `ConversationPane` 的 room tools。
 2. 用户点击“清空聊天记录”。
 3. 弹出确认 Dialog，展示 room title 和清理范围。
-4. 用户确认后调用 `clearRoomMessagesRequest({ channel: "csgclaw", roomID })`。
+4. 用户确认后调用 `clearRoomMessagesRequest(roomID)`。
 5. 请求成功后：
-   - 更新 bootstrap cache 中目标 room 的 `messages=[]`、`threads=[]`。
+   - 将 HTTP response 中返回的 cleared room upsert 到 bootstrap cache。
    - 清理该 room 下的 thread drafts。
    - 如果当前 active thread 属于该 room，关闭 thread panel。
    - 关闭工具菜单和确认弹窗。
@@ -103,16 +103,10 @@ Issue 2219 要求在 CSGClaw IM 的房间工具中支持清空聊天记录。关
 
 ### 1.4 新增接口 API
 
-只新增 channel-scoped room custom method，Web UI 和 CLI 都走这条路径：
+只新增 IM-native room custom method，Web UI 走这条路径：
 
 ```http
-POST /api/v1/channels/{channel}/rooms/{room}:clearMessages
-```
-
-具体到当前 CSGClaw channel：
-
-```http
-POST /api/v1/channels/csgclaw/rooms/{room}:clearMessages
+POST /api/v1/rooms/{room}:clearMessages
 ```
 
 不新增下面这些接口：
@@ -120,16 +114,16 @@ POST /api/v1/channels/csgclaw/rooms/{room}:clearMessages
 ```http
 DELETE /api/v1/channels/{channel}/rooms/{room}/messages
 POST /api/v1/channels/{channel}/rooms/{room}/messages/clear
-POST /api/v1/rooms/{room}:clearMessages
+POST /api/v1/channels/{channel}/rooms/{room}:clearMessages
 ```
 
 原因：
 
 - “清空聊天记录”不是删除 room，也不是删除单条 message，而是对 room 执行一个有副作用的清空动作；按 Google AIP custom method 风格，应使用 `POST` 和 `:clearMessages`。
 - `DELETE /rooms/{room}/messages` 容易被误解为删除 messages 集合资源或批量删除 message 资源，而不是明确的 room-level clear action。
-- 当前前端的 CSGClaw IM 资源已经可以通过 `/api/v1/channels/{channel}/...` 表达，清理接口继续使用同一套 channel route。
-- 不带 channel 的 URL 会让调用方产生两套入口的错觉，后续权限、审计、CLI 和 channel client 都容易分叉。
-- HTTP handler 只负责 channel 分发，最终仍复用同一个 `internal/channel/csgclaw.Service.ClearRoomMessages` 和 `internal/im.Service.ClearRoomMessages`。
+- 清空聊天记录只操作本地 IM room 状态、session JSONL 和 blob，不是 Feishu 等外部 channel 的通用 room 能力。
+- 放在 `/api/v1/rooms/...` 下可以让 API ownership 与状态归属一致，HTTP handler 直接调用 `internal/im.Service.ClearRoomMessages(roomID)`。
+- 暂不新增 channel-scoped 入口，避免把 IM-native 操作固化为跨 channel 能力。
 
 响应：
 
@@ -147,7 +141,7 @@ POST /api/v1/rooms/{room}:clearMessages
 
 | 条件 | 状态码 |
 |---|---:|
-| channel 或 room 为空 / 格式非法 | 400 |
+| room 为空 / 格式非法 | 400 |
 | room 不存在 | 404 |
 | IM service 未配置 | 503 |
 | 保存失败 | 500 |
@@ -159,9 +153,9 @@ POST /api/v1/rooms/{room}:clearMessages
 
 接口分层如下：
 
-- HTTP 层从 URL 解析出 `channel=csgclaw`，把请求分发给 CSGClaw channel service。
-- `internal/channel/csgclaw.Service` 持有 `*im.Service`，负责 CSGClaw 渠道适配，例如 bot id/user id 转换、slash 内容归一化、后续权限校验。
-- `internal/im.Service` 只处理已经确定属于本地 CSGClaw IM 的 room/message 数据，入参只需要 `roomID`。到达这一层时 channel 已经在上一层完成选择，不再把 channel 作为领域参数继续下传。
+- HTTP 层从 URL 解析出 `roomID`，直接调用本地 `internal/im.Service.ClearRoomMessages(roomID)`。
+- `internal/channel/csgclaw.Service` 继续负责 CSGClaw channel 适配，例如 bot id/user id 转换、slash 内容归一化、后续权限校验，但不承载清空 IM room 消息的能力。
+- `internal/im.Service` 处理本地 IM room/message 数据，负责“清空、落盘、发布领域事件”的完整操作边界。
 
 当前消息发送链路也是这个模式：
 
@@ -175,13 +169,12 @@ POST /api/v1/channels/csgclaw/messages
 清理聊天记录沿用同样的链路：
 
 ```text
-POST /api/v1/channels/csgclaw/rooms/{room}:clearMessages
-  -> api handler 选择 csgclaw channel
-  -> internal/channel/csgclaw.Service.ClearRoomMessages
+POST /api/v1/rooms/{room}:clearMessages
+  -> api handler 解析 roomID
   -> internal/im.Service.ClearRoomMessages(roomID)
 ```
 
-所以 `internal/im.Service.ClearRoomMessages` 没有 channel 参数，不代表绕过渠道；它只是不重复处理已经由上层解析完成的 HTTP/channel 信息。
+所以 `internal/im.Service.ClearRoomMessages` 没有 channel 参数，是因为该能力归属于本地 IM room，而不是跨 channel room surface。
 
 `internal/im/service.go`：
 
@@ -189,19 +182,13 @@ POST /api/v1/channels/csgclaw/rooms/{room}:clearMessages
 func (s *Service) ClearRoomMessages(roomID string) (Room, error)
 ```
 
-`internal/channel/csgclaw/service.go`：
-
-```go
-func (s *Service) ClearRoomMessages(roomID string) (im.Room, error)
-```
-
 `internal/apiclient/client.go`：
 
 ```go
-func (c *Client) ClearRoomMessages(ctx context.Context, channel, roomID string) (apitypes.Room, error)
+func (c *Client) ClearRoomMessages(ctx context.Context, roomID string) (apitypes.Room, error)
 ```
 
-`apiclient` 必须要求 `channel` 和 `roomID` 非空，并通过 `roomClearMessagesPath(channel, roomID)` 生成 `POST /api/v1/channels/{channel}/rooms/{room}:clearMessages`。当前实现只支持 `channel == "csgclaw"`；传空 channel、空 roomID 或未实现清理语义的 channel，直接返回参数错误，不回退到 `/api/v1/rooms/...`。
+`apiclient` 必须要求 `roomID` 非空，并通过 `roomClearMessagesPath(roomID)` 生成 `POST /api/v1/rooms/{room}:clearMessages`。不提供 channel 参数，也不回退到 channel-scoped route。
 
 ### 1.6 后端清理流程
 
@@ -226,10 +213,8 @@ room.Threads = []RoomThread{}
 ```mermaid
 flowchart LR
   UI["Room tools: 清空聊天记录"] --> Confirm["二次确认"]
-  Confirm --> API["POST /api/v1/channels/csgclaw/rooms/{room}:clearMessages"]
-  API --> ChannelRouter["internal/api channel router"]
-  ChannelRouter --> Channel["csgclaw.Service.ClearRoomMessages"]
-  Channel --> IM["internal/im.Service.ClearRoomMessages"]
+  Confirm --> API["POST /api/v1/rooms/{room}:clearMessages"]
+  API --> IM["internal/im.Service.ClearRoomMessages"]
   IM --> Memory["room.Messages = []; room.Threads = []"]
   Memory --> Save["saveRoomLocked()"]
   Save --> JSONL["truncate sessions/<roomID>.jsonl"]
@@ -271,7 +256,7 @@ if len(messages) == 0 {
 
 `internal/im.Service.ClearRoomMessages()` 持久化成功后发布 `room.messages_cleared` SSE，event payload 带清空后的 `room`。前端 `applyIMEvent(room.messages_cleared)` 将该 room 作为权威状态写回 bootstrap data，因此其他窗口或标签页可以通过 SSE 同步清空结果。
 
-前端点击确认后调用 `clearRoomMessagesRequest(roomID)`，请求成功后当前窗口先做 request-local cleanup；随后如果收到 `room.messages_cleared` SSE，会再按权威 room 状态收敛。
+前端点击确认后调用 `clearRoomMessagesRequest(roomID)`，请求成功后当前窗口立即 upsert HTTP response 中的 cleared room；随后如果收到 `room.messages_cleared` SSE，会再按同一 room-level authoritative update path 收敛。
 
 `useConversationController` 的请求成功回调中额外处理：
 
@@ -279,39 +264,84 @@ if len(messages) == 0 {
 - 清理当前 room 的 thread drafts。
 - 不清理普通 composer draft，用户可能正在输入下一条消息。
 
-### 1.8 CLI 清理房间聊天记录
+### 1.8 IM domain event 收口设计
 
-新增 CLI 子命令，和 Web UI 使用同一个 channel-scoped custom method API：
+`room.messages_cleared` 事件引入后，IM 状态变化和事件发布的边界需要保持清晰。长期方向是：所有 IM 领域状态变化都由 `internal/im.Service` 负责完成“校验、修改内存状态、落盘、发布领域事件”，HTTP/API/CLI/channel 层只负责解析请求、做 channel 适配、调用 service 和返回响应。
 
-```bash
-csgclaw-cli room clear-messages <room-id> --channel csgclaw
+当前代码中事件发布存在混合来源：
+
+- `internal/im.Service` 负责修改 IM 内存状态和保存。
+- `internal/api.Handler` 在部分请求成功后发布 `message.created`、`room.created`、`room.members_added`、`thread.created`、`thread.updated`。
+- `internal/im.Provisioner` 会发布初始化相关的 user、room、message event。
+- `ClearRoomMessages()` 已经开始在 `internal/im.Service` 内发布 `room.messages_cleared`。
+
+这种混合模式的风险是：状态变化和事件发布不在同一个领域操作边界里。并发请求下，事件顺序可能和真实状态写入顺序不一致。例如：
+
+```text
+A: ClearRoomMessages 保存成功
+A: 释放 im.Service 锁
+B: CreateMessage 保存成功
+B: API 层发布 message.created
+A: 发布 room.messages_cleared
 ```
 
-`room` 命令由 `csgclaw` 和 `csgclaw-cli` 两个入口复用，因此 full CLI 也自然支持：
+如果前端先收到 `message.created`，再收到迟到的 `room.messages_cleared`，就可能用空 room 状态覆盖刚追加的新消息，直到下一次刷新或 bootstrap reload 才恢复。
 
-```bash
-csgclaw room clear-messages <room-id> --channel csgclaw
+目标分层如下：
+
+```text
+api.Handler
+  - parse request
+  - auth/channel dispatch where applicable
+  - call im.Service or channel service
+  - write response
+
+internal/channel/csgclaw.Service
+  - channel adapter for channel-owned operations
+  - bot/user id normalization if needed
+  - delegate to im.Service
+
+internal/im.Service
+  - validate domain input
+  - mutate room/user/thread/message state
+  - persist state
+  - publish IM domain events
 ```
 
-CLI 设计：
+对应的领域事件归属：
 
-- 命令位置：`cli/room/room.go`，新增 `clear-messages` subcommand。
-- 参数形态：沿用 `room delete <id>` 的 positional id 风格，避免同一个 room 命令下既有 `<id>` 又有 `--room-id`。
-- `--channel` 默认 `csgclaw`，但传空值时报错；不提供无 channel fallback。
-- 调用链路：`run.APIClient(globals).ClearRoomMessages(ctx, channel, roomID)`，客户端内部请求 `POST /api/v1/channels/{channel}/rooms/{roomID}:clearMessages`。
-- 输出：复用 `command.RenderRooms` 返回清空后的 room；json 输出时可以直接看到 `messages: []`、`threads: []`。
+- `CreateRoom` -> `room.created`
+- `AddRoomMembers` -> `room.members_added`
+- `CreateMessage` -> `message.created`
+- `DeliverMessage` -> `message.created`，必要时触发 `thread.updated`
+- `StartThread` -> `thread.created`
+- `ClearRoomMessages` -> `room.messages_cleared`
+- `DeleteUser` -> `user.deleted`
 
-CLI 链路：
+简单稳妥的实现方式：
 
-```mermaid
-flowchart LR
-  CLI["csgclaw-cli room clear-messages <room-id>"] --> Client["apiclient.ClearRoomMessages(ctx, channel, roomID)"]
-  Client --> API["POST /api/v1/channels/csgclaw/rooms/{room}:clearMessages"]
-  API --> Channel["csgclaw.Service.ClearRoomMessages"]
-  Channel --> IM["internal/im.Service.ClearRoomMessages"]
-```
+1. 所有 IM domain event 都从 `internal/im.Service` 发布。
+2. 每个写操作在 `s.mu` 保护下完成校验、状态修改和持久化。
+3. 持久化成功后、释放锁前发布对应事件。
+4. `Bus.Publish()` 当前是非阻塞发送，channel 满时会 drop，因此在锁内发布不会引入长时间阻塞。
+5. API 层删除 `publishMessageCreated()`、`publishRoomEvent()`、`publishThreadEvent()` 这类 domain event 补发逻辑，只保留 HTTP 响应和非 IM 领域副作用。
 
-### 1.9 测试覆盖
+更完整的演进方式是给 `im.Event` 增加单调递增的 `seq` 或 `version`：
+
+1. 每个 IM 写操作在 service 内分配 event sequence。
+2. 事件可以在释放锁后发布，但仍携带领域状态顺序。
+3. 前端按 sequence 应用事件，忽略过期事件。
+4. 这种方式可以减少持锁发布的顾虑，但需要更多协议和前端状态管理改造。
+
+本阶段优先使用简单稳妥版：让 `im.Service` 串行化状态写入和事件发布，保证事件顺序与持久化顺序一致。后续如果 IM event 量增大或需要跨进程同步，再引入 sequence/version 机制。
+
+### 1.9 CLI 清理房间聊天记录暂缓
+
+本阶段不新增 `room clear-messages` CLI 子命令。
+
+原因是清空聊天记录已经明确归属于 IM-native API，而不是跨 channel room 能力。`room` CLI 当前同时承载 CSGClaw 和 Feishu channel room 操作，如果现在加入 `room clear-messages --channel csgclaw`，会把该能力固化为 generic room/channel 命令。等后续确认需要 CLI 操作时，再设计一个与 `/api/v1/rooms/{room}:clearMessages` 一致、不会误导为 Feishu/channel 通用能力的命令入口。
+
+### 1.10 测试覆盖
 
 后端：
 
@@ -325,15 +355,12 @@ flowchart LR
   - 清空后 `sessions/<roomID>.jsonl` 为空或不存在但可加载为空。
   - 清空后 `sessions/blobs/<roomID>/` 被删除。
 - `internal/api/handler_test.go`
-	  - `POST /api/v1/channels/csgclaw/rooms/{room}:clearMessages` 返回清空后的 room。
+  - `POST /api/v1/rooms/{room}:clearMessages` 返回清空后的 room。
   - 不存在 room 返回 404。
   - 通过 IM service 发布 `room.messages_cleared` SSE。
 - `internal/apiclient/client_test.go`
-	  - `ClearRoomMessages(ctx, "csgclaw", roomID)` path 拼接为 `/api/v1/channels/csgclaw/rooms/{roomID}:clearMessages`。
-  - 空 channel 不回退到 `/api/v1/rooms/...`。
-- `cli/room/room_test.go`
-  - `room clear-messages <id> --channel csgclaw` 调用 `ClearRoomMessages` 对应 HTTP path。
-  - 缺少 `<id>` 时返回参数错误。
+  - `ClearRoomMessages(ctx, roomID)` path 拼接为 `/api/v1/rooms/{roomID}:clearMessages`。
+  - 空 roomID 返回参数错误。
 
 前端：
 
@@ -344,4 +371,4 @@ flowchart LR
 - `web/app/tests/components/ConversationPane.test.tsx`
   - room tools 显示“清空聊天记录”。
   - 点击后需要确认，不直接调用删除。
-	  - 确认后调用 `/api/v1/channels/csgclaw/rooms/{roomID}:clearMessages`，不调用 `/api/v1/rooms/{roomID}/messages`。
+  - 确认后调用 `/api/v1/rooms/{roomID}:clearMessages`，不调用 `/api/v1/rooms/{roomID}/messages`。

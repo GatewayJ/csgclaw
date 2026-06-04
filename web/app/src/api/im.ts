@@ -63,11 +63,8 @@ export function deleteRoomRequest(roomID: string): Promise<void> {
   return del(`api/v1/rooms/${encodeURIComponent(roomID)}`);
 }
 
-export function clearRoomMessagesRequest(roomID: string, channel = "csgclaw"): Promise<IMConversation> {
-  return post(
-    `api/v1/channels/${encodeURIComponent(channel)}/rooms/${encodeURIComponent(roomID)}:clearMessages`,
-    {},
-  );
+export function clearRoomMessagesRequest(roomID: string): Promise<IMConversation> {
+  return post(`api/v1/rooms/${encodeURIComponent(roomID)}:clearMessages`, {});
 }
 
 export function joinAgentToRoomRequest(payload: JoinAgentToRoomPayload): Promise<IMConversation> {

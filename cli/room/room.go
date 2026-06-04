@@ -38,8 +38,6 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 		return c.runList(ctx, run, args[1:], globals)
 	case "create":
 		return c.runCreate(ctx, run, args[1:], globals)
-	case "clear-messages":
-		return c.runClearMessages(ctx, run, args[1:], globals)
 	case "delete":
 		return c.runDelete(ctx, run, args[1:], globals)
 	default:
@@ -52,7 +50,6 @@ func (c cmd) usage(run *command.Context) {
 	run.UsageCommandGroup(c, run.Program+" room <subcommand> [flags]", []string{
 		"list               List rooms",
 		"create             Create a room",
-		"clear-messages <id> Clear room messages",
 		"delete <id>        Delete a room",
 	})
 }
@@ -96,25 +93,6 @@ func (c cmd) runCreate(ctx context.Context, run *command.Context, args []string,
 		MemberIDs:   command.ParseCSV(*memberIDs),
 		Locale:      *locale,
 	})
-	if err != nil {
-		return err
-	}
-	return command.RenderRooms(globals.Output, run.Stdout, []apitypes.Room{room})
-}
-
-func (c cmd) runClearMessages(ctx context.Context, run *command.Context, args []string, globals command.GlobalOptions) error {
-	fs := run.NewFlagSet("room clear-messages", run.Program+" room clear-messages <id> [flags]", "Clear room messages.")
-	channelName := fs.String("channel", "csgclaw", "channel name: csgclaw")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	rest := fs.Args()
-	if len(rest) != 1 {
-		return fmt.Errorf("room clear-messages requires exactly one id")
-	}
-
-	room, err := run.APIClient(globals).ClearRoomMessages(ctx, *channelName, rest[0])
 	if err != nil {
 		return err
 	}

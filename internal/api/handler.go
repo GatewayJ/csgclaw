@@ -1414,12 +1414,12 @@ func (h *Handler) handleClearRoomMessages(w http.ResponseWriter, r *http.Request
 		http.Error(w, "room_id is required", http.StatusBadRequest)
 		return
 	}
-	channel, ok := h.requireLocalChannel(w)
-	if !ok {
+	if h == nil || h.im == nil {
+		http.Error(w, "im service is not configured", http.StatusServiceUnavailable)
 		return
 	}
 
-	room, err := channel.ClearRoomMessages(roomID)
+	room, err := h.im.ClearRoomMessages(roomID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			http.Error(w, "room not found", http.StatusNotFound)

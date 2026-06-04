@@ -173,9 +173,9 @@ func (c *Client) DeleteRoom(ctx context.Context, channel, id string) error {
 	return c.DoNoContent(ctx, http.MethodDelete, path)
 }
 
-func (c *Client) ClearRoomMessages(ctx context.Context, channel, roomID string) (apitypes.Room, error) {
+func (c *Client) ClearRoomMessages(ctx context.Context, roomID string) (apitypes.Room, error) {
 	var room apitypes.Room
-	path, err := roomClearMessagesPath(channel, roomID)
+	path, err := roomClearMessagesPath(roomID)
 	if err != nil {
 		return apitypes.Room{}, err
 	}
@@ -542,21 +542,12 @@ func roomDeletePath(channelName, roomID string) (string, error) {
 	}
 }
 
-func roomClearMessagesPath(channelName, roomID string) (string, error) {
-	channelName = strings.ToLower(strings.TrimSpace(channelName))
+func roomClearMessagesPath(roomID string) (string, error) {
 	roomID = strings.TrimSpace(roomID)
-	if channelName == "" {
-		return "", fmt.Errorf("channel is required")
-	}
 	if roomID == "" {
 		return "", fmt.Errorf("room_id is required")
 	}
-	switch channelName {
-	case "csgclaw":
-		return "/api/v1/channels/csgclaw/rooms/" + url.PathEscape(roomID) + ":clearMessages", nil
-	default:
-		return "", fmt.Errorf("unsupported channel %q", channelName)
-	}
+	return "/api/v1/rooms/" + url.PathEscape(roomID) + ":clearMessages", nil
 }
 
 func userDeletePath(channelName, userID string) (string, error) {

@@ -2,7 +2,6 @@ import {
   agentMatchesUser,
   applyIMEvent,
   appendMessageToData,
-  clearKnownConversationMessagesInData,
   conversationThreadViews,
   formatConversationPreview,
   formatEventMessage,
@@ -236,31 +235,6 @@ describe("conversation model helpers", () => {
     });
 
     expect(next.rooms[0].messages.map((item) => item.id)).toEqual(["general-message"]);
-  });
-
-  it("clears only messages known before the request", () => {
-    const current = {
-      rooms: [
-        room("general", "2026-05-15T00:00:00Z", {
-          messages: [
-            message("old-root", "2026-05-15T00:00:00Z"),
-            message("late-message", "2026-05-15T00:01:00Z"),
-          ],
-          threads: [{ root_message_id: "old-root" }, { root_message_id: "late-message" }],
-        }),
-      ],
-      users: [],
-    };
-
-    const next = clearKnownConversationMessagesInData(
-      current,
-      "general",
-      new Set(["old-root"]),
-      new Set(["old-root"]),
-    );
-
-    expect(next.rooms[0].messages.map((item) => item.id)).toEqual(["late-message"]);
-    expect(next.rooms[0].threads?.map((item) => item.root_message_id)).toEqual(["late-message"]);
   });
 
   it("applies room messages cleared events as authoritative room updates", () => {

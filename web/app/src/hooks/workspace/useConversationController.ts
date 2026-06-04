@@ -17,7 +17,6 @@ import {
   appendReplyToThreadView,
   applyIMEvent,
   applyThreadToData,
-  clearKnownConversationMessagesInData,
   conversationThreadViews,
   isDirectConversation,
   isThreadReply,
@@ -775,20 +774,16 @@ export function useConversationController({
     if (!data || !roomID) {
       return;
     }
-    const roomBeforeClear = data.rooms.find((room) => room.id === roomID);
-    const messageIDsToClear = new Set((roomBeforeClear?.messages || []).map((message) => message.id || ""));
-    const threadRootIDsToClear = new Set((roomBeforeClear?.threads || []).map((thread) => thread.root_message_id || ""));
 
+    let clearedRoom;
     try {
-      await clearRoomMessagesRequest(roomID);
+      clearedRoom = await clearRoomMessagesRequest(roomID);
     } catch (err) {
       setComposerError(localizeError(err.message, t));
       return;
     }
 
-    setBootstrapData((current) =>
-      clearKnownConversationMessagesInData(current, roomID, messageIDsToClear, threadRootIDsToClear),
-    );
+    setBootstrapData((current) => upsertConversationInData(current, clearedRoom));
     setThreadDraftsByKey((current) => clearThreadDraftsForConversation(current, roomID));
     setComposerError("");
     setSubmitError("");
