@@ -115,9 +115,9 @@ function renderThreadPane({
   conversationMembers?: IMUser[];
   isDirect?: boolean;
   messages?: IMConversation["messages"];
-  onClearRoomMessages?: ReturnType<typeof vi.fn>;
-  onDeleteRoom?: ReturnType<typeof vi.fn>;
-  onPreviewUser?: ReturnType<typeof vi.fn>;
+  onClearRoomMessages?: (id: string) => void;
+  onDeleteRoom?: (id: string) => void;
+  onPreviewUser?: (user: IMUser) => void;
   replies?: ThreadView["replies"];
   showToolCalls?: boolean;
 } = {}) {
