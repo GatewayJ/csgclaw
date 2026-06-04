@@ -104,13 +104,19 @@ const t: TranslateFn = (key, params = {}) => {
 
 function renderThreadPane({
   conversationMembers = users,
+  isDirect = true,
   messages,
+  onClearRoomMessages = vi.fn(),
+  onDeleteRoom = vi.fn(),
   onPreviewUser = vi.fn(),
   replies = [],
   showToolCalls = false,
 }: {
   conversationMembers?: IMUser[];
+  isDirect?: boolean;
   messages?: IMConversation["messages"];
+  onClearRoomMessages?: ReturnType<typeof vi.fn>;
+  onDeleteRoom?: ReturnType<typeof vi.fn>;
   onPreviewUser?: ReturnType<typeof vi.fn>;
   replies?: ThreadView["replies"];
   showToolCalls?: boolean;
@@ -124,7 +130,7 @@ function renderThreadPane({
   const timelineMessages = messages || [root];
   const conversation: IMConversation = {
     id: "room-1",
-    is_direct: true,
+    is_direct: isDirect,
     members: conversationMembers.map((user) => user.id),
     messages: timelineMessages,
     title: "manager",
@@ -141,6 +147,8 @@ function renderThreadPane({
   };
 
   function Harness() {
+    const [showChannelTools, setShowChannelTools] = useState(false);
+    const [showMemberList, setShowMemberList] = useState(false);
     const [threadDraftSegments, setThreadDraftSegments] = useState<ComposerSegment[]>([]);
     return (
       <ConversationPane
@@ -169,11 +177,12 @@ function renderThreadPane({
         messageActionError=""
         messageListRef={createRef<HTMLElement>()}
         onApplyMention={() => {}}
+        onClearRoomMessages={onClearRoomMessages}
         onCloseThread={() => {}}
         onComposerCompositionEnd={() => {}}
         onComposerCompositionStart={() => {}}
         onComposerKeyDown={() => {}}
-        onDeleteRoom={() => {}}
+        onDeleteRoom={onDeleteRoom}
         onInviteAction={() => {}}
         onMessageAction={() => {}}
         onOpenThread={() => {}}
@@ -182,12 +191,12 @@ function renderThreadPane({
         onSendMessage={() => {}}
         onSendThreadReply={() => {}}
         onSyncComposer={() => {}}
-        onToggleChannelTools={() => {}}
-        onToggleMemberList={() => {}}
+        onToggleChannelTools={setShowChannelTools}
+        onToggleMemberList={setShowMemberList}
         onToggleToolCalls={() => {}}
         selectedMessageCount={timelineMessages.length}
-        showChannelTools={false}
-        showMemberList={false}
+        showChannelTools={showChannelTools}
+        showMemberList={showMemberList}
         showToolCalls={showToolCalls}
         t={t}
         theme="light"
@@ -247,9 +256,9 @@ describe("ConversationPane", () => {
         "data-tooltip",
         "2026-05-11 10:25:00",
       );
-      expect([...container.querySelectorAll(".message-row .message-timestamp")].map((item) => item.textContent)).toEqual(
-        ["10:25", "16:45", "09:15"],
-      );
+      expect(
+        [...container.querySelectorAll(".message-row .message-timestamp")].map((item) => item.textContent),
+      ).toEqual(["10:25", "16:45", "09:15"]);
     } finally {
       vi.useRealTimers();
     }
@@ -336,5 +345,41 @@ describe("ConversationPane", () => {
     expect(within(threadPanel).queryByText("hidden shell output")).not.toBeInTheDocument();
     expect(within(threadPanel).getByText("Visible answer")).toBeInTheDocument();
     expect(within(threadPanel).getByText("1 replies")).toBeInTheDocument();
+  });
+
+  it("confirms before clearing room messages from the tools menu", async () => {
+    const user = userEvent.setup();
+    const onClearRoomMessages = vi.fn();
+    const onDeleteRoom = vi.fn();
+    renderThreadPane({ isDirect: false, onClearRoomMessages, onDeleteRoom });
+
+    await user.click(screen.getByRole("button", { name: "channelTools" }));
+    await user.click(screen.getByRole("button", { name: "clearRoomMessages" }));
+
+    expect(onClearRoomMessages).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "clearRoomMessagesConfirm" }));
+
+    expect(onClearRoomMessages).toHaveBeenCalledWith("room-1");
+    expect(onDeleteRoom).not.toHaveBeenCalled();
+  });
+
+  it("confirms before deleting a room from the tools menu", async () => {
+    const user = userEvent.setup();
+    const onClearRoomMessages = vi.fn();
+    const onDeleteRoom = vi.fn();
+    renderThreadPane({ isDirect: false, onClearRoomMessages, onDeleteRoom });
+
+    await user.click(screen.getByRole("button", { name: "channelTools" }));
+    await user.click(screen.getByRole("button", { name: "deleteRoom" }));
+
+    expect(onDeleteRoom).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "deleteRoomConfirm" }));
+
+    expect(onDeleteRoom).toHaveBeenCalledWith("room-1");
+    expect(onClearRoomMessages).not.toHaveBeenCalled();
   });
 });

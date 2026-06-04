@@ -173,6 +173,18 @@ func (c *Client) DeleteRoom(ctx context.Context, channel, id string) error {
 	return c.DoNoContent(ctx, http.MethodDelete, path)
 }
 
+func (c *Client) ClearRoomMessages(ctx context.Context, channel, roomID string) (apitypes.Room, error) {
+	var room apitypes.Room
+	path, err := roomClearMessagesPath(channel, roomID)
+	if err != nil {
+		return apitypes.Room{}, err
+	}
+	if err := c.DoJSON(ctx, http.MethodPost, path, nil, &room); err != nil {
+		return apitypes.Room{}, err
+	}
+	return room, nil
+}
+
 func (c *Client) ListUsers(ctx context.Context) ([]apitypes.User, error) {
 	return c.ListUsersByChannel(ctx, "csgclaw")
 }
@@ -525,6 +537,23 @@ func roomDeletePath(channelName, roomID string) (string, error) {
 		return "/api/v1/channels/csgclaw/rooms/" + url.PathEscape(roomID), nil
 	case "feishu":
 		return "/api/v1/channels/feishu/rooms/" + url.PathEscape(roomID), nil
+	default:
+		return "", fmt.Errorf("unsupported channel %q", channelName)
+	}
+}
+
+func roomClearMessagesPath(channelName, roomID string) (string, error) {
+	channelName = strings.ToLower(strings.TrimSpace(channelName))
+	roomID = strings.TrimSpace(roomID)
+	if channelName == "" {
+		return "", fmt.Errorf("channel is required")
+	}
+	if roomID == "" {
+		return "", fmt.Errorf("room_id is required")
+	}
+	switch channelName {
+	case "csgclaw":
+		return "/api/v1/channels/csgclaw/rooms/" + url.PathEscape(roomID) + ":clearMessages", nil
 	default:
 		return "", fmt.Errorf("unsupported channel %q", channelName)
 	}

@@ -233,6 +233,13 @@ func saveMessagesJSONL(path, roomID string, messages []Message) error {
 	}
 
 	sessionsRoot := filepath.Dir(path)
+	if len(messages) == 0 {
+		if err := truncateSessionJSONL(path); err != nil {
+			return err
+		}
+		return removeRoomSessionBlobs(sessionsRoot, roomID)
+	}
+
 	blobDir := filepath.Join(sessionsRoot, sessionBlobsDirName, roomID)
 	if err := os.MkdirAll(blobDir, 0o755); err != nil {
 		return fmt.Errorf("create im session blobs dir: %w", err)
@@ -263,6 +270,17 @@ func saveMessagesJSONL(path, roomID string, messages []Message) error {
 
 	if err := cleanupRoomSessionBlobs(blobDir, keepBlobs); err != nil {
 		return err
+	}
+	return nil
+}
+
+func truncateSessionJSONL(path string) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create im session: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close im session: %w", err)
 	}
 	return nil
 }

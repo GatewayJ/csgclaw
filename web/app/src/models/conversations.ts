@@ -480,6 +480,34 @@ export function applyIMEvent<T extends IMData | null | undefined>(
   return current;
 }
 
+export function clearKnownConversationMessagesInData<T extends IMData | null | undefined>(
+  current: T,
+  conversationID: string | null | undefined,
+  messageIDs: ReadonlySet<string>,
+  threadRootIDs: ReadonlySet<string>,
+): T | IMData {
+  const id = String(conversationID || "").trim();
+  if (!current || !id || (messageIDs.size === 0 && threadRootIDs.size === 0)) {
+    return current;
+  }
+  let changed = false;
+  const rooms = current.rooms.map((room) => {
+    if (room.id !== id) {
+      return room;
+    }
+    changed = true;
+    return {
+      ...room,
+      messages: room.messages.filter((message) => !message.id || !messageIDs.has(message.id)),
+      threads: (room.threads || []).filter((thread) => {
+        const rootID = String(thread.root_message_id || "").trim();
+        return !rootID || !threadRootIDs.has(rootID);
+      }),
+    };
+  });
+  return changed ? { ...current, rooms } : current;
+}
+
 function formatClockTime(date: Date): string {
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }

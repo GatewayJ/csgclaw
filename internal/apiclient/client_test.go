@@ -101,6 +101,15 @@ func TestClientUsesCsgclawChannelRoutes(t *testing.T) {
 			},
 		},
 		{
+			name: "clear room messages",
+			body: `{"id":"room-1","messages":[]}`,
+			want: "POST /api/v1/channels/csgclaw/rooms/room-1:clearMessages",
+			call: func(c *Client) error {
+				_, err := c.ClearRoomMessages(ctx, "csgclaw", "room-1")
+				return err
+			},
+		},
+		{
 			name: "list users",
 			body: `[]`,
 			want: "GET /api/v1/channels/csgclaw/users",

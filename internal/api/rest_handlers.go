@@ -58,9 +58,12 @@ func (h *Handler) getIMEvents(w http.ResponseWriter, r *http.Request)    { h.han
 func (h *Handler) listRooms(w http.ResponseWriter, r *http.Request)      { h.handleRooms(w, r) }
 func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request)     { h.handleCreateRoom(w, r) }
 func (h *Handler) deleteRoom(w http.ResponseWriter, r *http.Request)     { h.handleRoomByID(w, r) }
-func (h *Handler) listThreads(w http.ResponseWriter, r *http.Request)    { h.handleThreadsByRoomID(w, r) }
-func (h *Handler) createThread(w http.ResponseWriter, r *http.Request)   { h.handleThreadsByRoomID(w, r) }
-func (h *Handler) getThread(w http.ResponseWriter, r *http.Request)      { h.handleThreadByID(w, r) }
+func (h *Handler) clearCsgclawRoomMessages(w http.ResponseWriter, r *http.Request) {
+	h.handleClearRoomMessages(w, r)
+}
+func (h *Handler) listThreads(w http.ResponseWriter, r *http.Request)  { h.handleThreadsByRoomID(w, r) }
+func (h *Handler) createThread(w http.ResponseWriter, r *http.Request) { h.handleThreadsByRoomID(w, r) }
+func (h *Handler) getThread(w http.ResponseWriter, r *http.Request)    { h.handleThreadByID(w, r) }
 func (h *Handler) listThreadRelations(w http.ResponseWriter, r *http.Request) {
 	h.handleThreadRelationsByID(w, r)
 }

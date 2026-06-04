@@ -876,6 +876,27 @@ func (s *Service) DeleteConversation(conversationID string) error {
 	return s.DeleteRoom(conversationID)
 }
 
+func (s *Service) ClearRoomMessages(roomID string) (Room, error) {
+	roomID = strings.TrimSpace(roomID)
+	if roomID == "" {
+		return Room{}, fmt.Errorf("room_id is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room, ok := s.rooms[roomID]
+	if !ok {
+		return Room{}, fmt.Errorf("room not found")
+	}
+	room.Messages = []Message{}
+	room.Threads = []ThreadState{}
+	if err := s.saveLocked(); err != nil {
+		return Room{}, err
+	}
+	return s.presentRoomLocked(*room), nil
+}
+
 func (s *Service) DeleteUser(userID string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {

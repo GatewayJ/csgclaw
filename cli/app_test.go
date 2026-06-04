@@ -1800,6 +1800,28 @@ func TestExecuteRoomDeleteUsesHTTPClient(t *testing.T) {
 	}
 }
 
+func TestExecuteRoomClearMessagesUsesHTTPClient(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &App{
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodPost {
+				t.Fatalf("method = %q, want %q", req.Method, http.MethodPost)
+			}
+			if req.URL.String() != "http://example.test/api/v1/channels/csgclaw/rooms/room-1:clearMessages" {
+				t.Fatalf("url = %q, want %q", req.URL.String(), "http://example.test/api/v1/channels/csgclaw/rooms/room-1:clearMessages")
+			}
+			return jsonResponse(http.StatusOK, `{"id":"room-1","title":"Ops","members":["u-admin"],"messages":[],"threads":[]}`), nil
+		}),
+	}
+
+	if err := app.Execute(context.Background(), []string{"--endpoint", "http://example.test", "room", "clear-messages", "room-1"}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	assertTableHasRow(t, stdout.String(), "room-1", "Ops", "false", "1", "0")
+}
+
 func TestExecuteRoomDeleteUsesFeishuChannelRoute(t *testing.T) {
 	app := &App{
 		stdout: &bytes.Buffer{},

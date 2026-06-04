@@ -145,6 +145,37 @@ func TestHandleCsgclawChannelNestedRoutesMirrorLocalMutations(t *testing.T) {
 	}
 }
 
+func TestHandleCsgclawClearRoomMessages(t *testing.T) {
+	srv := &Handler{
+		im: im.NewServiceFromBootstrap(im.Bootstrap{
+			CurrentUserID: "u-admin",
+			Rooms: []im.Room{{
+				ID:       "room-1",
+				Title:    "Room One",
+				Members:  []string{"u-admin"},
+				Messages: []im.Message{{ID: "msg-1", SenderID: "u-admin", Content: "hello"}},
+				Threads:  []im.ThreadState{{RootMessageID: "msg-1"}},
+			}},
+		}),
+	}
+
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/channels/csgclaw/rooms/room-1:clearMessages", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var room im.Room
+	if err := json.NewDecoder(rec.Body).Decode(&room); err != nil {
+		t.Fatalf("decode room: %v", err)
+	}
+	if room.ID != "room-1" || len(room.Members) != 1 {
+		t.Fatalf("room = %+v, want preserved room and members", room)
+	}
+	if len(room.Messages) != 0 || len(room.Threads) != 0 {
+		t.Fatalf("messages/threads = %d/%d, want 0/0", len(room.Messages), len(room.Threads))
+	}
+}
+
 func testUsersContain(users []im.User, id string) bool {
 	for _, user := range users {
 		if user.ID == id {

@@ -133,6 +133,40 @@ func TestSaveMessageKeepsSlashInvocationAsContentOnly(t *testing.T) {
 	}
 }
 
+func TestSaveEmptyMessagesTruncatesSessionAndRemovesBlobs(t *testing.T) {
+	dir := t.TempDir()
+	roomID := "room-clear"
+	path := filepath.Join(dir, "sessions", roomID+".jsonl")
+	large := strings.Repeat("B", 70*1024)
+
+	if err := saveMessagesJSONL(path, roomID, []Message{{
+		ID:        "msg-large",
+		SenderID:  "u-admin",
+		Content:   large,
+		CreatedAt: time.Date(2026, 5, 25, 5, 0, 0, 0, time.UTC),
+	}}); err != nil {
+		t.Fatalf("saveMessagesJSONL(large) error = %v", err)
+	}
+	blobDir := filepath.Join(dir, "sessions", sessionBlobsDirName, roomID)
+	if _, err := os.Stat(blobDir); err != nil {
+		t.Fatalf("Stat(blob dir) error = %v", err)
+	}
+
+	if err := saveMessagesJSONL(path, roomID, nil); err != nil {
+		t.Fatalf("saveMessagesJSONL(empty) error = %v", err)
+	}
+	sessionData, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(session) error = %v", err)
+	}
+	if len(sessionData) != 0 {
+		t.Fatalf("session bytes = %d, want 0", len(sessionData))
+	}
+	if _, err := os.Stat(blobDir); !os.IsNotExist(err) {
+		t.Fatalf("Stat(blob dir) error = %v, want not exist", err)
+	}
+}
+
 func TestLoadLegacyOversizedInlineLine(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.json")

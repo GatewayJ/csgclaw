@@ -137,6 +137,7 @@ func (h *Handler) registerChannelRoutes(router chi.Router) {
 		r.Route("/csgclaw/rooms", func(r chi.Router) {
 			r.Get("/", h.listRooms)
 			r.Post("/", h.createRoom)
+			r.Post("/{id}:clearMessages", h.clearCsgclawRoomMessages)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Delete("/", h.deleteCsgclawRoom)
 				r.Get("/threads", h.listThreads)

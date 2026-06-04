@@ -345,6 +345,54 @@ func TestDeleteRoomRemovesRoom(t *testing.T) {
 	}
 }
 
+func TestClearRoomMessagesKeepsRoomAndAllowsLaterMessages(t *testing.T) {
+	svc := NewServiceFromBootstrap(Bootstrap{
+		CurrentUserID: "u-admin",
+		Users:         []User{{ID: "u-admin", Name: "admin"}, {ID: "u-bot", Name: "bot"}},
+		Rooms: []Room{{
+			ID:      "room-1",
+			Title:   "Room One",
+			Members: []string{"u-admin", "u-bot"},
+			Messages: []Message{
+				{ID: "msg-1", SenderID: "u-admin", Content: "before"},
+				{ID: "reply-1", SenderID: "u-bot", Content: "thread", RelatesTo: &MessageRelation{RelType: RelationTypeThread, EventID: "msg-1"}},
+			},
+			Threads: []ThreadState{{RootMessageID: "msg-1"}},
+		}},
+	})
+
+	room, err := svc.ClearRoomMessages(" room-1 ")
+	if err != nil {
+		t.Fatalf("ClearRoomMessages() error = %v", err)
+	}
+	if room.ID != "room-1" || len(room.Members) != 2 {
+		t.Fatalf("ClearRoomMessages() room = %+v, want room and members preserved", room)
+	}
+	if len(room.Messages) != 0 || len(room.Threads) != 0 {
+		t.Fatalf("ClearRoomMessages() messages/threads = %d/%d, want 0/0", len(room.Messages), len(room.Threads))
+	}
+
+	late, err := svc.DeliverMessage(DeliverMessageRequest{
+		RoomID:    "room-1",
+		SenderID:  "u-bot",
+		MessageID: "late-1",
+		Content:   "after clear",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage(after clear) error = %v", err)
+	}
+	if late.ID != "late-1" {
+		t.Fatalf("late message ID = %q, want late-1", late.ID)
+	}
+	messages, err := svc.ListMessages("room-1")
+	if err != nil {
+		t.Fatalf("ListMessages() error = %v", err)
+	}
+	if len(messages) != 1 || messages[0].ID != "late-1" {
+		t.Fatalf("messages after late delivery = %+v, want late-1 only", messages)
+	}
+}
+
 func TestDeleteUserRemovesUserFromStateConversationsAndMessages(t *testing.T) {
 	svc := NewServiceFromBootstrap(Bootstrap{
 		CurrentUserID: "u-admin",

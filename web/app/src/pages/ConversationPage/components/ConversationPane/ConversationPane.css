@@ -1094,6 +1094,127 @@
   border-color: var(--panel);
 }
 
+.csg-dialog-overlay.room-danger-backdrop {
+  background: rgba(16, 24, 40, 0.72);
+}
+
+.csg-dialog-content.room-danger-dialog {
+  width: min(286px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: visible;
+  padding: 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--portal-white);
+  color: var(--portal-gray-900);
+  box-shadow:
+    0 20px 24px -4px rgba(16, 24, 40, 0.12),
+    0 8px 8px -4px rgba(16, 24, 40, 0.04);
+}
+
+.room-danger-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.room-danger-copy {
+  min-width: 0;
+}
+
+.room-danger-dialog .csg-dialog-title {
+  margin: 0;
+  color: var(--portal-gray-900);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: 0;
+}
+
+.room-danger-dialog .csg-dialog-description {
+  margin: 4px 0 0;
+  color: var(--portal-gray-500);
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0;
+}
+
+.room-danger-close.csg-dialog-close {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--portal-gray-400);
+  box-shadow: none;
+}
+
+.room-danger-close.csg-dialog-close:hover:not(:disabled),
+.room-danger-close.csg-dialog-close:focus-visible {
+  background: var(--portal-gray-100);
+  color: var(--portal-gray-600);
+  box-shadow: none;
+}
+
+.room-danger-close .icon-button-mark,
+.room-danger-close .icon-button-mark svg {
+  width: 14px;
+  height: 14px;
+}
+
+.room-danger-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.room-danger-actions .room-danger-button {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  min-height: 32px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.csg-dialog-content.room-danger-dialog .room-danger-actions .btn-secondary-gray {
+  border-color: var(--portal-gray-300);
+  background: var(--portal-white);
+  color: var(--portal-gray-700);
+  box-shadow: var(--shadow-xs);
+}
+
+.csg-dialog-content.room-danger-dialog .room-danger-actions .btn-secondary-gray:hover:not(:disabled),
+.csg-dialog-content.room-danger-dialog .room-danger-actions .btn-secondary-gray:focus-visible {
+  border-color: var(--portal-gray-300);
+  background: var(--portal-gray-50);
+  color: var(--portal-gray-800);
+}
+
+.csg-dialog-content.room-danger-dialog .room-danger-actions .btn-danger {
+  border-color: var(--portal-error-600);
+  background: var(--portal-error-600);
+  color: var(--portal-white);
+  box-shadow: var(--shadow-xs);
+}
+
+.csg-dialog-content.room-danger-dialog .room-danger-actions .btn-danger:hover:not(:disabled),
+.csg-dialog-content.room-danger-dialog .room-danger-actions .btn-danger:focus-visible {
+  border-color: var(--portal-error-700);
+  background: var(--portal-error-700);
+  color: var(--portal-white);
+}
+
 .agent-logs-backdrop {
   background: rgba(15, 23, 42, 0.38);
 }
@@ -1189,6 +1310,34 @@
 
 :root[data-theme="dark"] .agent-logs-backdrop {
   background: rgba(2, 6, 23, 0.58);
+}
+
+:root[data-theme="dark"] .csg-dialog-overlay.room-danger-backdrop {
+  background: rgba(16, 24, 40, 0.72);
+}
+
+:root[data-theme="dark"] .csg-dialog-content.room-danger-dialog {
+  background: var(--portal-white);
+  color: var(--portal-gray-900);
+}
+
+:root[data-theme="dark"] .room-danger-dialog .csg-dialog-title {
+  color: var(--portal-gray-900);
+}
+
+:root[data-theme="dark"] .room-danger-dialog .csg-dialog-description {
+  color: var(--portal-gray-500);
+}
+
+:root[data-theme="dark"] .room-danger-close.csg-dialog-close {
+  background: transparent;
+  color: var(--portal-gray-400);
+}
+
+:root[data-theme="dark"] .room-danger-close.csg-dialog-close:hover:not(:disabled),
+:root[data-theme="dark"] .room-danger-close.csg-dialog-close:focus-visible {
+  background: var(--portal-gray-100);
+  color: var(--portal-gray-600);
 }
 
 :root[data-theme="dark"] .csg-dialog-content.agent-logs-modal .agent-logs-viewer {

@@ -78,6 +78,7 @@ export function ConversationPane({
   editorRef,
   onPreviewUser,
   onDeleteRoom,
+  onClearRoomMessages = (_id) => {},
   inviteActionLabel,
   onInviteAction,
   mentionCandidates,
@@ -128,6 +129,8 @@ export function ConversationPane({
   const [logContent, setLogContent] = useState("");
   const [logError, setLogError] = useState("");
   const [logLoading, setLogLoading] = useState(false);
+  const [clearMessagesDialogOpen, setClearMessagesDialogOpen] = useState(false);
+  const [deleteRoomDialogOpen, setDeleteRoomDialogOpen] = useState(false);
   const logAgentID = logAgent?.id || "";
   const logAgentName = logAgent?.name || conversation.title;
 
@@ -136,6 +139,8 @@ export function ConversationPane({
     setLogContent("");
     setLogError("");
     setLogLoading(false);
+    setClearMessagesDialogOpen(false);
+    setDeleteRoomDialogOpen(false);
   }, [conversation.id, logAgentID]);
 
   useLayoutEffect(() => {
@@ -266,13 +271,26 @@ export function ConversationPane({
                       <span>{showToolCalls ? t("toggleToolCallsHide") : t("toggleToolCallsShow")}</span>
                       <strong>{showToolCalls ? t("enabled") : t("disabled")}</strong>
                     </Button>
+                    <Button
+                      variant="outlineDanger"
+                      className="tool-menu-row danger"
+                      onClick={() => {
+                        onToggleChannelTools(false);
+                        setClearMessagesDialogOpen(true);
+                      }}
+                    >
+                      <span>{t("clearRoomMessages")}</span>
+                      <span className="tool-menu-icon" aria-hidden="true">
+                        <TrashIcon />
+                      </span>
+                    </Button>
                     {!isDirectConversation(conversation) ? (
                       <Button
                         variant="outlineDanger"
                         className="tool-menu-row danger"
                         onClick={() => {
                           onToggleChannelTools(false);
-                          onDeleteRoom(conversation.id);
+                          setDeleteRoomDialogOpen(true);
                         }}
                       >
                         <span>{t("deleteRoom")}</span>
@@ -520,6 +538,34 @@ export function ConversationPane({
           onSend={onSendThreadReply}
         />
       ) : null}
+      <RoomDangerConfirmDialog
+        cancelLabel={t("cancel")}
+        closeLabel={t("close")}
+        confirmLabel={t("clearRoomMessagesConfirm")}
+        description={t("clearRoomMessagesAgentScopeHint")}
+        open={clearMessagesDialogOpen}
+        title={t("clearRoomMessages")}
+        onConfirm={() => {
+          setClearMessagesDialogOpen(false);
+          onClearRoomMessages(conversation.id);
+        }}
+        onOpenChange={setClearMessagesDialogOpen}
+      />
+      {!isDirectConversation(conversation) ? (
+        <RoomDangerConfirmDialog
+          cancelLabel={t("cancel")}
+          closeLabel={t("close")}
+          confirmLabel={t("deleteRoomConfirm")}
+          description={t("deleteRoomConfirmBody")}
+          open={deleteRoomDialogOpen}
+          title={t("deleteRoom")}
+          onConfirm={() => {
+            setDeleteRoomDialogOpen(false);
+            onDeleteRoom(conversation.id);
+          }}
+          onOpenChange={setDeleteRoomDialogOpen}
+        />
+      ) : null}
       {logModalOpen && logAgent ? (
         <AgentLogsDialog
           agentName={logAgentName}
@@ -654,6 +700,50 @@ function SkillPicker({ candidates = [], activeIndex = 0, loading = false, classN
   );
 }
 
+type RoomDangerConfirmDialogProps = {
+  cancelLabel: string;
+  closeLabel: string;
+  confirmLabel: string;
+  description: string;
+  open: boolean;
+  title: string;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+};
+
+function RoomDangerConfirmDialog({
+  cancelLabel,
+  closeLabel,
+  confirmLabel,
+  description,
+  open,
+  title,
+  onConfirm,
+  onOpenChange,
+}: RoomDangerConfirmDialogProps) {
+  return (
+    <DialogRoot open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="room-danger-dialog" overlayClassName="room-danger-backdrop">
+        <DialogHeader className="room-danger-header">
+          <div className="room-danger-copy">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
+          </div>
+          <DialogCloseButton className="room-danger-close" label={closeLabel} size="sm" variant="tertiaryGray" />
+        </DialogHeader>
+        <div className="room-danger-actions">
+          <Button className="room-danger-button" size="sm" variant="secondaryGray" onClick={() => onOpenChange(false)}>
+            {cancelLabel}
+          </Button>
+          <Button className="room-danger-button" size="sm" variant="danger" onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </DialogContent>
+    </DialogRoot>
+  );
+}
+
 function AgentLogsDialog({ agentName, content, error, loading, t, onClose, onRefresh }) {
   const logsViewerRef = useRef<HTMLPreElement | null>(null);
   const displayContent = content || (loading ? t("agentLogsLoading") : t("agentLogsEmpty"));
@@ -744,7 +834,9 @@ function ThreadPanel({
   const mentionableUsersByHandle = useMemo(() => {
     const result = new Map<string, (typeof mentionableUsers)[number]>();
     mentionableUsers.forEach((user) => {
-      const handle = String(user.handle || user.name || user.id || "").trim().toLowerCase();
+      const handle = String(user.handle || user.name || user.id || "")
+        .trim()
+        .toLowerCase();
       if (!handle) {
         return;
       }
@@ -754,10 +846,7 @@ function ThreadPanel({
     });
     return result;
   }, [mentionableUsers]);
-  const displayDraftSegments = useMemo(
-    () => normalizeComposerSegmentsForDisplay(draftSegments || []),
-    [draftSegments],
-  );
+  const displayDraftSegments = useMemo(() => normalizeComposerSegmentsForDisplay(draftSegments || []), [draftSegments]);
   const threadMentionCandidates = useMemo(() => {
     if (!mentionState) {
       return [];
@@ -854,7 +943,9 @@ function ThreadPanel({
           <div className="thread-panel-kicker">{t("threadPanelTitle")}</div>
           <div className="thread-panel-title truncate">
             {visibleRoot ? (
-              <MessagePreviewText content={thread?.summary?.context_summary?.root_excerpt || visibleRoot.content || ""} />
+              <MessagePreviewText
+                content={thread?.summary?.context_summary?.root_excerpt || visibleRoot.content || ""}
+              />
             ) : (
               t("noVisibleMessages")
             )}
