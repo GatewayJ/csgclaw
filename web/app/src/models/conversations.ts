@@ -472,7 +472,8 @@ export function applyIMEvent<T extends IMData | null | undefined>(
     (event.type === "conversation.created" ||
       event.type === "conversation.members_added" ||
       event.type === "room.created" ||
-      event.type === "room.members_added") &&
+      event.type === "room.members_added" ||
+      event.type === "room.messages_cleared") &&
     event.room?.id
   ) {
     return upsertConversationInData(current, event.room as IMConversation);

@@ -393,6 +393,110 @@ func TestClearRoomMessagesKeepsRoomAndAllowsLaterMessages(t *testing.T) {
 	}
 }
 
+func TestClearRoomMessagesPersistsOnlyTargetRoomAndPublishesEvent(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	createdAt := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	state := Bootstrap{
+		CurrentUserID: "u-admin",
+		Users: []User{
+			{ID: "u-admin", Name: "admin", Handle: "admin"},
+			{ID: "u-bot", Name: "bot", Handle: "bot"},
+		},
+		Rooms: []Room{
+			{
+				ID:      "room-clear",
+				Title:   "Clear",
+				Members: []string{"u-admin", "u-bot"},
+				Messages: []Message{
+					{ID: "msg-clear", SenderID: "u-admin", Content: "before", CreatedAt: createdAt},
+				},
+				Threads: []ThreadState{{RootMessageID: "msg-clear"}},
+			},
+			{
+				ID:      "room-keep",
+				Title:   "Keep",
+				Members: []string{"u-admin", "u-bot"},
+				Messages: []Message{
+					{ID: "msg-keep", SenderID: "u-bot", Content: "keep", CreatedAt: createdAt.Add(time.Minute)},
+				},
+			},
+		},
+	}
+	if err := SaveBootstrap(statePath, state); err != nil {
+		t.Fatalf("SaveBootstrap() error = %v", err)
+	}
+
+	keepPath := filepath.Join(dir, filepath.FromSlash(sessionRelativePath("room-keep")))
+	keepBefore, err := os.ReadFile(keepPath)
+	if err != nil {
+		t.Fatalf("ReadFile(keep session) error = %v", err)
+	}
+	keepBefore = append(append([]byte(nil), keepBefore...), '\n', '\n')
+	if err := os.WriteFile(keepPath, keepBefore, 0o600); err != nil {
+		t.Fatalf("WriteFile(keep session) error = %v", err)
+	}
+
+	bus := NewBus()
+	events, cancel := bus.Subscribe()
+	defer cancel()
+	svc, err := NewServiceFromPathWithBus(statePath, bus)
+	if err != nil {
+		t.Fatalf("NewServiceFromPathWithBus() error = %v", err)
+	}
+
+	room, err := svc.ClearRoomMessages("room-clear")
+	if err != nil {
+		t.Fatalf("ClearRoomMessages() error = %v", err)
+	}
+	if len(room.Messages) != 0 || len(room.Threads) != 0 {
+		t.Fatalf("cleared room messages/threads = %d/%d, want 0/0", len(room.Messages), len(room.Threads))
+	}
+
+	evt := mustReceiveEvent(t, events)
+	if evt.Type != EventTypeRoomMessagesCleared || evt.RoomID != "room-clear" || evt.Room == nil {
+		t.Fatalf("event = %+v, want room.messages_cleared for room-clear", evt)
+	}
+	if len(evt.Room.Messages) != 0 || len(evt.Room.Threads) != 0 {
+		t.Fatalf("event room messages/threads = %d/%d, want 0/0", len(evt.Room.Messages), len(evt.Room.Threads))
+	}
+
+	clearData, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(sessionRelativePath("room-clear"))))
+	if err != nil {
+		t.Fatalf("ReadFile(clear session) error = %v", err)
+	}
+	if len(clearData) != 0 {
+		t.Fatalf("clear session bytes = %d, want 0", len(clearData))
+	}
+	keepAfter, err := os.ReadFile(keepPath)
+	if err != nil {
+		t.Fatalf("ReadFile(keep session after clear) error = %v", err)
+	}
+	if string(keepAfter) != string(keepBefore) {
+		t.Fatalf("keep session was rewritten, want unrelated room session bytes preserved")
+	}
+
+	loaded, err := LoadBootstrap(statePath)
+	if err != nil {
+		t.Fatalf("LoadBootstrap() error = %v", err)
+	}
+	var loadedClear, loadedKeep *Room
+	for i := range loaded.Rooms {
+		switch loaded.Rooms[i].ID {
+		case "room-clear":
+			loadedClear = &loaded.Rooms[i]
+		case "room-keep":
+			loadedKeep = &loaded.Rooms[i]
+		}
+	}
+	if loadedClear == nil || len(loadedClear.Messages) != 0 || len(loadedClear.Threads) != 0 {
+		t.Fatalf("loaded cleared room = %+v, want empty messages and threads", loadedClear)
+	}
+	if loadedKeep == nil || len(loadedKeep.Messages) != 1 || loadedKeep.Messages[0].ID != "msg-keep" {
+		t.Fatalf("loaded kept room = %+v, want msg-keep preserved", loadedKeep)
+	}
+}
+
 func TestDeleteUserRemovesUserFromStateConversationsAndMessages(t *testing.T) {
 	svc := NewServiceFromBootstrap(Bootstrap{
 		CurrentUserID: "u-admin",

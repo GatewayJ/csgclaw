@@ -231,10 +231,13 @@ flowchart LR
   ChannelRouter --> Channel["csgclaw.Service.ClearRoomMessages"]
   Channel --> IM["internal/im.Service.ClearRoomMessages"]
   IM --> Memory["room.Messages = []; room.Threads = []"]
-  Memory --> Save["saveLocked()"]
+  Memory --> Save["saveRoomLocked()"]
   Save --> JSONL["truncate sessions/<roomID>.jsonl"]
   Save --> Blob["remove sessions/blobs/<roomID>/"]
+  Save --> State["refresh room metadata in state.json"]
+  Save --> Event["publish room.messages_cleared"]
   API --> Web["response room 更新当前窗口"]
+  Event --> Web
 ```
 
 `ClearRoomMessages` 内部步骤：
@@ -243,10 +246,17 @@ flowchart LR
 2. 加写锁。
 3. 查找 room，不存在返回 `room not found`。
 4. 设置 `room.Messages = []`，`room.Threads = []`。
-5. 调用 `saveLocked()`。
-6. 返回清空后的 `presentRoomLocked(*room)`。
+5. 调用 room-scoped `saveRoomLocked()`，只保存当前 room 的 session JSONL/blob，并刷新 `state.json` 中的 room metadata。
+6. 持久化成功后发布 `room.messages_cleared` 事件。
+7. 返回清空后的 `presentRoomLocked(*room)`。
 
-`saveLocked()` 会调用现有 `SaveBootstrap()`，当目标 room 的 messages 为空时，`saveMessagesJSONL()` 会创建或截断 `sessions/<roomID>.jsonl`，并通过 `cleanupRoomSessionBlobs()` 删除该 room 的 stale blobs。为了避免空消息也保留空 blob 目录，在 `saveMessagesJSONL()` 中增加清空分支：
+`ClearRoomMessages()` 不走全量 `saveLocked() -> SaveBootstrap()`，避免为单个 room 的清空操作重写所有 room 的 session JSONL，并避免扫描清理整个 `sessions` 目录。它复用现有 JSONL/blob 编码和 cleanup helper，只更新：
+
+- `sessions/<roomID>.jsonl`
+- `sessions/blobs/<roomID>/`
+- `state.json` 中该 room 的 metadata，尤其是 `Threads`
+
+当目标 room 的 messages 为空时，`saveMessagesJSONL()` 会创建或截断 `sessions/<roomID>.jsonl`，并删除该 room 的 blob 目录。为了避免空消息也保留空 blob 目录，在 `saveMessagesJSONL()` 中增加清空分支：
 
 ```go
 if len(messages) == 0 {
@@ -259,9 +269,9 @@ if len(messages) == 0 {
 
 ### 1.7 前端状态更新
 
-当前不做多窗口实时同步。API handler 不发布 `room.messages_cleared` SSE；其他窗口或标签页刷新/bootstrap reload 后再体现清空结果。
+`internal/im.Service.ClearRoomMessages()` 持久化成功后发布 `room.messages_cleared` SSE，event payload 带清空后的 `room`。前端 `applyIMEvent(room.messages_cleared)` 将该 room 作为权威状态写回 bootstrap data，因此其他窗口或标签页可以通过 SSE 同步清空结果。
 
-前端点击确认后调用 `clearRoomMessagesRequest(roomID)`，请求成功后使用 response 中返回的清空后 `room` 更新当前窗口 bootstrap data。
+前端点击确认后调用 `clearRoomMessagesRequest(roomID)`，请求成功后当前窗口先做 request-local cleanup；随后如果收到 `room.messages_cleared` SSE，会再按权威 room 状态收敛。
 
 `useConversationController` 的请求成功回调中额外处理：
 
@@ -309,13 +319,15 @@ flowchart LR
   - `ClearRoomMessages` 保留 room 和 members。
   - 清空 messages 和 threads。
   - 重新加载 state 后 messages/threads 仍为空。
+  - 只重写目标 room 的 session，不重写其他 room session。
+  - 持久化成功后发布 `room.messages_cleared` 事件。
 - `internal/im/session_store_test.go`
   - 清空后 `sessions/<roomID>.jsonl` 为空或不存在但可加载为空。
   - 清空后 `sessions/blobs/<roomID>/` 被删除。
 - `internal/api/handler_test.go`
 	  - `POST /api/v1/channels/csgclaw/rooms/{room}:clearMessages` 返回清空后的 room。
   - 不存在 room 返回 404。
-  - 不发布 `room.messages_cleared` SSE，其他窗口暂不实时同步。
+  - 通过 IM service 发布 `room.messages_cleared` SSE。
 - `internal/apiclient/client_test.go`
 	  - `ClearRoomMessages(ctx, "csgclaw", roomID)` path 拼接为 `/api/v1/channels/csgclaw/rooms/{roomID}:clearMessages`。
   - 空 channel 不回退到 `/api/v1/rooms/...`。

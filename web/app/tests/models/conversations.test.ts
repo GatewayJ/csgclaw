@@ -263,6 +263,33 @@ describe("conversation model helpers", () => {
     expect(next.rooms[0].threads?.map((item) => item.root_message_id)).toEqual(["late-message"]);
   });
 
+  it("applies room messages cleared events as authoritative room updates", () => {
+    const current = {
+      rooms: [
+        room("general", "2026-05-15T00:00:00Z", {
+          messages: [message("old-root", "2026-05-15T00:00:00Z")],
+          threads: [{ root_message_id: "old-root" }],
+        }),
+        room("other", "2026-05-15T00:02:00Z", {
+          messages: [message("other-message", "2026-05-15T00:02:00Z")],
+        }),
+      ],
+      users: [],
+    };
+
+    const next = applyIMEvent(current, {
+      room: { ...current.rooms[0], messages: [], threads: [] },
+      room_id: "general",
+      type: "room.messages_cleared",
+    });
+
+    expect(next.rooms.find((item) => item.id === "general")?.messages).toEqual([]);
+    expect(next.rooms.find((item) => item.id === "general")?.threads).toEqual([]);
+    expect(next.rooms.find((item) => item.id === "other")?.messages.map((item) => item.id)).toEqual([
+      "other-message",
+    ]);
+  });
+
   it("applies thread event summaries to root messages and exposes thread views", () => {
     const root = message("root-1", "2026-05-15T00:00:00Z");
     const current = {

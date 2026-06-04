@@ -146,8 +146,11 @@ func TestHandleCsgclawChannelNestedRoutesMirrorLocalMutations(t *testing.T) {
 }
 
 func TestHandleCsgclawClearRoomMessages(t *testing.T) {
+	bus := im.NewBus()
+	events, cancel := bus.Subscribe()
+	defer cancel()
 	srv := &Handler{
-		im: im.NewServiceFromBootstrap(im.Bootstrap{
+		im: im.NewServiceFromBootstrapWithBus(im.Bootstrap{
 			CurrentUserID: "u-admin",
 			Rooms: []im.Room{{
 				ID:       "room-1",
@@ -156,7 +159,8 @@ func TestHandleCsgclawClearRoomMessages(t *testing.T) {
 				Messages: []im.Message{{ID: "msg-1", SenderID: "u-admin", Content: "hello"}},
 				Threads:  []im.ThreadState{{RootMessageID: "msg-1"}},
 			}},
-		}),
+		}, bus),
+		imBus: bus,
 	}
 
 	rec := httptest.NewRecorder()
@@ -173,6 +177,13 @@ func TestHandleCsgclawClearRoomMessages(t *testing.T) {
 	}
 	if len(room.Messages) != 0 || len(room.Threads) != 0 {
 		t.Fatalf("messages/threads = %d/%d, want 0/0", len(room.Messages), len(room.Threads))
+	}
+	evt := mustReceiveEvent(t, events)
+	if evt.Type != im.EventTypeRoomMessagesCleared || evt.RoomID != "room-1" || evt.Room == nil {
+		t.Fatalf("event = %+v, want room.messages_cleared for room-1", evt)
+	}
+	if len(evt.Room.Messages) != 0 || len(evt.Room.Threads) != 0 {
+		t.Fatalf("event room messages/threads = %d/%d, want 0/0", len(evt.Room.Messages), len(evt.Room.Threads))
 	}
 }
 
