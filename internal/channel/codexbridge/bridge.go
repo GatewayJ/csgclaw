@@ -316,18 +316,28 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 func (w *worker) handleConversationReset(ctx context.Context, evt BotEvent) error {
 	roomID := strings.TrimSpace(evt.RoomID)
 	if roomID == "" {
-		return fmt.Errorf("room id is required")
+		return w.flushConversationResetError(ctx, evt, "room id is required")
 	}
 	resetter, ok := w.service.prompter.(ConversationHistoryClearer)
 	if !ok {
-		return fmt.Errorf("codex session prompter does not support conversation reset")
+		return w.flushConversationResetError(ctx, evt, "codex session prompter does not support conversation reset")
 	}
 	if err := resetter.ResetConversationHistory(ctx, runtimecodex.SessionHandle{RuntimeID: w.binding.RuntimeID}, roomID); err != nil {
-		return err
+		return w.flushConversationResetError(ctx, evt, err.Error())
 	}
 	w.clearContextCache(roomID)
 	_, err := w.sendMessage(ctx, roomID, evt.ThreadRootID, "Cleared my internal history for this conversation. The IM room messages were not cleared.")
 	return err
+}
+
+func (w *worker) flushConversationResetError(ctx context.Context, evt BotEvent, message string) error {
+	renderer := runtimebridge.NewTurnRenderer()
+	renderer.SetPromptError(strings.TrimSpace(message))
+	_, err := w.flushTurn(ctx, evt.RoomID, evt.ThreadRootID, renderer)
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf(strings.TrimSpace(message))
 }
 
 func (w *worker) clearContextCache(roomID string) {

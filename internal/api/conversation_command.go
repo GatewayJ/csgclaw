@@ -61,17 +61,20 @@ func (h *Handler) publishNewConversationBotEvent(ctx context.Context, room im.Ro
 
 func (h *Handler) rewriteFeishuNewConversationEvent(ctx context.Context, botID string, evt im.Message, roomID string, reason string) (im.Message, bool) {
 	if h == nil || h.svc == nil {
-		return evt, false
+		evt.Content = "Failed to execute /new: conversation service is unavailable."
+		return evt, true
 	}
 	action, err := h.svc.NewConversationAction(ctx, agent.NewConversationRequest{
-		Channel: feishuChannelID,
-		BotID:   botID,
-		RoomID:  roomID,
-		Reason:  reason,
+		Channel:      feishuChannelID,
+		BotID:        botID,
+		RoomID:       roomID,
+		ThreadRootID: conversationThreadRootID(evt),
+		Reason:       reason,
 	})
 	if err != nil {
 		slog.Warn("new conversation action failed", "channel", feishuChannelID, "bot_id", botID, "room_id", roomID, "error", err)
-		return evt, false
+		evt.Content = "Failed to execute /new. Please try again later."
+		return evt, true
 	}
 	switch action.Mode {
 	case agent.NewConversationActionBotEvent:
@@ -82,9 +85,11 @@ func (h *Handler) rewriteFeishuNewConversationEvent(ctx context.Context, botID s
 		return evt, true
 	case agent.NewConversationActionInternal:
 		slog.Warn("new conversation internal action is not supported on feishu channel", "channel", feishuChannelID, "bot_id", botID, "room_id", roomID)
-		return evt, false
+		evt.Content = "Failed to execute /new: thread reset is not supported on feishu channel."
+		return evt, true
 	default:
-		return evt, false
+		evt.Content = "Failed to execute /new: unsupported action type."
+		return evt, true
 	}
 }
 
