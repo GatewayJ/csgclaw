@@ -73,6 +73,69 @@ func TestNormalizeFeishuInputConvertsSlashSkillShorthand(t *testing.T) {
 	}
 }
 
+func TestNormalizeFeishuInputConvertsNewConversationShorthand(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "default scope",
+			input: `/new`,
+			want:  `<slash-command name="new" arg="conversation"></slash-command>`,
+		},
+			{
+				name:  "body after command",
+				input: `/new reset before rebuild`,
+				want:  `<slash-command name="new" arg="conversation"></slash-command> reset before rebuild`,
+			},
+			{
+				name:  "conversation text remains body",
+				input: `/new conversation reset before rebuild`,
+				want:  `<slash-command name="new" arg="conversation"></slash-command> conversation reset before rebuild`,
+			},
+		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok, err := NormalizeFeishuInput(tt.input)
+			if err != nil {
+				t.Fatalf("NormalizeFeishuInput() error = %v", err)
+			}
+			if !ok {
+				t.Fatal("NormalizeFeishuInput() ok = false, want true")
+			}
+			if got != tt.want {
+				t.Fatalf("NormalizeFeishuInput() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseFeishuShorthandRequiresSlashAsFirstNonSpaceCharacter(t *testing.T) {
+	for _, input := range []string{
+		`@manager /new`,
+		`<at user_id="ou_manager">manager</at> /new`,
+		`hello /new`,
+	} {
+		if _, ok, err := ParseFeishuShorthand(input); ok || err != nil {
+			t.Fatalf("ParseFeishuShorthand(%q) = ok %v err %v, want ok false err nil", input, ok, err)
+		}
+	}
+}
+
+func TestParseFeishuShorthandNewTreatsFollowingTextAsBody(t *testing.T) {
+	cmd, ok, err := ParseFeishuShorthand(`/new agent`)
+	if err != nil {
+		t.Fatalf("ParseFeishuShorthand(/new agent) error = %v", err)
+	}
+	if !ok {
+		t.Fatal("ParseFeishuShorthand(/new agent) ok = false, want true")
+	}
+	if cmd.Name != NewConversationCommandName || cmd.Arg != "conversation" || cmd.Body != "agent" {
+		t.Fatalf("ParseFeishuShorthand(/new agent) = %+v, want new conversation body agent", cmd)
+	}
+}
+
 func TestParseFeishuShorthandFallsBackOnInvalidSlug(t *testing.T) {
 	cmd, ok, err := ParseFeishuShorthand(`/foo/bar create a review skill`)
 	if err != nil {
@@ -102,6 +165,14 @@ func TestNormalizeRejectsMalformedSlashCommandPrefix(t *testing.T) {
 func TestRenderFeishuFallbackConvertsCanonicalUseSkillToSlashText(t *testing.T) {
 	got := RenderFeishuFallback(`<slash-command name="use-skill" arg="skill-creator"></slash-command> create a review skill`)
 	want := `/skill-creator create a review skill`
+	if got != want {
+		t.Fatalf("RenderFeishuFallback() = %q, want %q", got, want)
+	}
+}
+
+func TestRenderFeishuFallbackConvertsCanonicalNewToSlashText(t *testing.T) {
+	got := RenderFeishuFallback(`<slash-command name="new" arg="conversation"></slash-command> reset before rebuild`)
+	want := `/new reset before rebuild`
 	if got != want {
 		t.Fatalf("RenderFeishuFallback() = %q, want %q", got, want)
 	}

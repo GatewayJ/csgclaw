@@ -76,11 +76,19 @@ export function MessageContent({ content, message, actionBusy, actionError, onAc
 }
 
 function renderSlashCommandText(command: ReturnType<typeof parseSlashCommand>): string {
-  if (!command || command.name !== "use-skill") {
+  if (!command) {
     return "";
   }
 
-  const prefix = `<span class="message-slash-token">/${escapeHTML(command.arg)}</span>`;
+  let prefix = "";
+  if (command.name === "use-skill") {
+    prefix = `<span class="message-slash-token">/${escapeHTML(command.arg)}</span>`;
+  } else if (command.name === "new" && (command.arg === "" || command.arg === "conversation")) {
+    prefix = '<span class="message-slash-token">/new conversation</span>';
+  }
+  if (!prefix) {
+    return "";
+  }
   const body = renderSlashCommandBodyMarkup(command.body);
   return body ? `${prefix} ${body}` : prefix;
 }

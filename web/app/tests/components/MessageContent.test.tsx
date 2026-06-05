@@ -29,9 +29,20 @@ describe("MessageContent", () => {
       />,
     );
 
-    expect(screen.getByText("/skill-creator create <review> skill <img src=x onerror=alert(1)>")).toBeInTheDocument();
+    expect(screen.getByText("/skill-creator")).toHaveClass("message-slash-token");
+    expect(screen.getByText("create <review> skill <img src=x onerror=alert(1)>")).toHaveClass("slash-command-body");
     expect(document.querySelector("slash-command")).toBeNull();
     expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("renders canonical new conversation commands as slash text", () => {
+    render(
+      <MessageContent content={'<slash-command name="new" arg="conversation"></slash-command> reset before rebuild'} />,
+    );
+
+    expect(screen.getByText("/new")).toHaveClass("message-slash-token");
+    expect(screen.getByText("reset before rebuild")).toHaveClass("slash-command-body");
+    expect(document.querySelector("slash-command")).toBeNull();
   });
 
   it("renders canonical slash command mentions in history with mention and slash highlight classes", () => {

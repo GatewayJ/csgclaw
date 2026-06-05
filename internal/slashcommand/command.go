@@ -15,7 +15,8 @@ var commandNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 var skillSlugPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 const (
-	UseSkillCommandName = "use-skill"
+	UseSkillCommandName        = "use-skill"
+	NewConversationCommandName = "new"
 )
 
 type Command struct {
@@ -59,7 +60,7 @@ func Parse(content string) (Command, bool, error) {
 				return Command{}, false, fmt.Errorf("unexpected closing tag %q", t.Name.Local)
 			}
 			if strings.TrimSpace(elementBody.String()) != "" {
-				return Command{}, false, fmt.Errorf("slash command body must be empty")
+				return Command{}, false, nil
 			}
 			end := int(decoder.InputOffset())
 			if end < 0 || end > len(text) {
@@ -71,7 +72,7 @@ func Parse(content string) (Command, bool, error) {
 			}
 			return cmd, true, nil
 		case xml.StartElement:
-			return Command{}, false, fmt.Errorf("slash command body must not contain child elements")
+			return Command{}, false, nil
 		case xml.Comment:
 			return Command{}, false, fmt.Errorf("slash command body must be plain text")
 		case xml.ProcInst, xml.Directive:
@@ -100,6 +101,13 @@ func ParseFeishuShorthand(content string) (Command, bool, error) {
 		return Command{}, false, nil
 	}
 	slug, body := splitSlashCommand(strings.TrimPrefix(text, "/"))
+	if strings.EqualFold(slug, NewConversationCommandName) {
+		return Command{
+			Name: NewConversationCommandName,
+			Arg:  "conversation",
+			Body: strings.TrimSpace(body),
+		}, true, nil
+	}
 	if !validSkillSlug(slug) {
 		return Command{}, false, nil
 	}
@@ -124,13 +132,25 @@ func NormalizeFeishuInput(content string) (string, bool, error) {
 
 func RenderFeishuFallback(content string) string {
 	cmd, ok, err := Parse(content)
-	if err != nil || !ok || strings.TrimSpace(cmd.Name) != UseSkillCommandName || !validSkillSlug(cmd.Arg) {
+	if err != nil || !ok {
 		return content
 	}
-	if body := strings.TrimSpace(cmd.Body); body != "" {
-		return "/" + strings.TrimSpace(cmd.Arg) + " " + body
+	if strings.TrimSpace(cmd.Name) == UseSkillCommandName && validSkillSlug(cmd.Arg) {
+		if body := strings.TrimSpace(cmd.Body); body != "" {
+			return "/" + strings.TrimSpace(cmd.Arg) + " " + body
+		}
+		return "/" + strings.TrimSpace(cmd.Arg)
 	}
-	return "/" + strings.TrimSpace(cmd.Arg)
+	if IsNewConversationCommand(cmd) {
+		if _, err := NormalizeNewConversationArg(cmd.Arg); err != nil {
+			return content
+		}
+		if body := strings.TrimSpace(cmd.Body); body != "" {
+			return "/new " + body
+		}
+		return "/new"
+	}
+	return content
 }
 
 func Render(cmd Command) (string, error) {
@@ -225,6 +245,23 @@ func validate(cmd Command) error {
 func validSkillSlug(slug string) bool {
 	slug = strings.TrimSpace(slug)
 	return slug != "" && slug != "." && slug != ".." && !strings.ContainsAny(slug, `/\`) && skillSlugPattern.MatchString(slug)
+}
+
+func IsNewConversationCommand(cmd Command) bool {
+	if !strings.EqualFold(strings.TrimSpace(cmd.Name), NewConversationCommandName) {
+		return false
+	}
+	_, err := NormalizeNewConversationArg(cmd.Arg)
+	return err == nil
+}
+
+func NormalizeNewConversationArg(arg string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "", "conversation":
+		return "conversation", nil
+	default:
+		return "", fmt.Errorf("unsupported new scope %q", arg)
+	}
 }
 
 func escapeXML(value string) string {

@@ -330,7 +330,7 @@ button.thread-message-avatar:focus-visible {
 }
 
 .thread-mention-picker,
-.thread-skill-picker {
+.thread-slash-picker {
   left: 14px;
   right: 14px;
   bottom: calc(100% - 4px);

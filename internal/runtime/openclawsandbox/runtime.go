@@ -19,6 +19,7 @@ type Runtime struct {
 }
 
 var _ agentruntime.Provisioner = (*Runtime)(nil)
+var _ agentruntime.ConversationStarter = (*Runtime)(nil)
 
 func New(deps Dependencies) *Runtime {
 	deps.RuntimeKind = agentruntime.KindOpenClawSandbox
@@ -41,6 +42,13 @@ func New(deps Dependencies) *Runtime {
 
 func (r *Runtime) WorkspaceRoot(agentHome string) string {
 	return workspaceRoot(agentHome)
+}
+
+func (r *Runtime) NewConversation(_ context.Context, _ agentruntime.Handle, _ agentruntime.ConversationStartRequest) (agentruntime.ConversationStartAction, error) {
+	return agentruntime.ConversationStartAction{
+		Mode:         agentruntime.ConversationStartActionBotEvent,
+		BotEventText: "/new",
+	}, nil
 }
 
 func (r *Runtime) Provision(_ context.Context, req agentruntime.ProvisionRequest) error {

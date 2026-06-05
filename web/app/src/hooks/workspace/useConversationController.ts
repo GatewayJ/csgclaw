@@ -53,6 +53,7 @@ import { localizeError } from "@/shared/i18n";
 import { subscribeIMEvents } from "@/shared/realtime/imEvents";
 import { MESSAGE_LIST_BOTTOM_THRESHOLD } from "@/shared/constants/workspace";
 import type { IMMessage, IMServerEvent, IMUser, ThreadView } from "@/models/conversations";
+import type { SlashPickerCandidate } from "@/models/slashCommands";
 import type { UseConversationControllerArgs } from "./types";
 
 type ComposerMentionState = {
@@ -121,11 +122,11 @@ export function useConversationController({
   const [composerMentionState, setComposerMentionState] = useState<ComposerMentionState | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [skillNames, setSkillNames] = useState<string[]>([]);
-  const [skillIndex, setSkillIndex] = useState(0);
-  const [skillLoading, setSkillLoading] = useState(false);
-  const [skillPickerDismissed, setSkillPickerDismissed] = useState(false);
-  const [threadSkillPickerDismissed, setThreadSkillPickerDismissed] = useState(false);
-  const [threadSkillIndex, setThreadSkillIndex] = useState(0);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashPickerLoading, setSlashPickerLoading] = useState(false);
+  const [slashPickerDismissed, setSlashPickerDismissed] = useState(false);
+  const [threadSlashPickerDismissed, setThreadSlashPickerDismissed] = useState(false);
+  const [threadSlashIndex, setThreadSlashIndex] = useState(0);
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showMemberList, setShowMemberList] = useState(false);
@@ -246,14 +247,14 @@ export function useConversationController({
     () =>
       buildSlashPickerState({
         draftText,
-        enabled: Boolean(logAgent?.id && !skillPickerDismissed),
+        enabled: Boolean(logAgent?.id && !slashPickerDismissed),
         skillNames,
       }),
-    [draftText, logAgent, skillPickerDismissed, skillNames],
+    [draftText, logAgent, slashPickerDismissed, skillNames],
   );
-  const slashSkillQuery = slashPickerState.query;
-  const slashSkillActive = slashPickerState.active;
-  const skillCandidates = slashPickerState.candidates;
+  const slashPickerQuery = slashPickerState.query;
+  const slashPickerActive = slashPickerState.active;
+  const slashCandidates = slashPickerState.candidates;
   const activeThreadDraftKey = activeThreadRootID ? threadKey(activeConversationId, activeThreadRootID) : "";
   const activeThreadDraftSegments = useMemo(() => {
     if (!activeThreadDraftKey) {
@@ -268,14 +269,14 @@ export function useConversationController({
         draftText: activeThreadDraft,
         enabled: Boolean(logAgent?.id && activeThreadDraftKey),
         skillNames,
-        disabled: threadSkillPickerDismissed,
+        disabled: threadSlashPickerDismissed,
       }),
-    [activeThreadDraft, logAgent, activeThreadDraftKey, threadSkillPickerDismissed, skillNames],
+    [activeThreadDraft, logAgent, activeThreadDraftKey, threadSlashPickerDismissed, skillNames],
   );
-  const threadSlashSkillQuery = threadSlashPickerState.query;
-  const threadSlashSkillActive = threadSlashPickerState.active;
-  const threadSkillCandidates = threadSlashPickerState.candidates;
-  const isAnySlashSkillPickerNeeded = slashSkillActive || threadSlashSkillActive;
+  const threadSlashPickerQuery = threadSlashPickerState.query;
+  const threadSlashPickerActive = threadSlashPickerState.active;
+  const threadSlashCandidates = threadSlashPickerState.candidates;
+  const isAnySlashPickerNeeded = slashPickerActive || threadSlashPickerActive;
 
   useEffect(() => {
     activeThreadKeyRef.current = activeThreadRootID ? threadKey(activeConversationId, activeThreadRootID) : "";
@@ -309,36 +310,36 @@ export function useConversationController({
   }, [activeConversationId, composerMentionState?.query, draftText]);
 
   useEffect(() => {
-    setSkillPickerDismissed(false);
+    setSlashPickerDismissed(false);
   }, [draftText]);
 
   useEffect(() => {
     setSkillNames([]);
-    setSkillIndex(0);
-    setSkillPickerDismissed(false);
+    setSlashIndex(0);
+    setSlashPickerDismissed(false);
   }, [activeConversationId]);
 
   useEffect(() => {
-    setThreadSkillIndex(0);
-    setThreadSkillPickerDismissed(false);
+    setThreadSlashIndex(0);
+    setThreadSlashPickerDismissed(false);
   }, [activeThreadDraftKey]);
 
   useEffect(() => {
-    setSkillIndex(0);
-  }, [slashSkillQuery, skillNames]);
+    setSlashIndex(0);
+  }, [slashPickerQuery, skillNames]);
 
   useEffect(() => {
-    setThreadSkillIndex(0);
-  }, [threadSlashSkillQuery, skillNames]);
+    setThreadSlashIndex(0);
+  }, [threadSlashPickerQuery, skillNames]);
 
   useEffect(() => {
-    if (!isAnySlashSkillPickerNeeded || !logAgent?.id) {
+    if (!isAnySlashPickerNeeded || !logAgent?.id) {
       setSkillNames([]);
-      setSkillLoading(false);
+      setSlashPickerLoading(false);
       return;
     }
     let cancelled = false;
-    setSkillLoading(true);
+    setSlashPickerLoading(true);
     fetchAgentWorkspace(logAgent.id, "skills")
       .then((workspace) => {
         if (cancelled) {
@@ -353,13 +354,13 @@ export function useConversationController({
       })
       .finally(() => {
         if (!cancelled) {
-          setSkillLoading(false);
+          setSlashPickerLoading(false);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [isAnySlashSkillPickerNeeded, logAgent?.id]);
+  }, [isAnySlashPickerNeeded, logAgent?.id]);
 
   useEffect(() => {
     if (!managerProfileIncomplete) {
@@ -801,30 +802,30 @@ export function useConversationController({
     syncComposerFromEditor();
   }
 
-  function applySkillCandidate(name: string | null | undefined, editor?: HTMLElement | null) {
+  function applySlashCandidate(name: string | null | undefined, editor?: HTMLElement | null) {
     const skillName = String(name || "").trim();
     if (!skillName || !activeConversationId) {
       return;
     }
-    const nextText = slashSkillInputText(skillName);
+    const nextText = slashCommandInputText(skillName);
     const nextSegments = normalizeComposerSegmentsForDisplay([{ type: "text", text: nextText }]);
     applySlashSuggestionToComposer(editor ?? editorRef.current, nextSegments, () =>
       setDraftsByConversationId((current) => updateDrafts(current, activeConversationId, nextSegments)),
     );
-    setSkillIndex(0);
+    setSlashIndex(0);
   }
 
-  function applyThreadSkillCandidate(name: string | null | undefined, editor?: HTMLElement | null) {
+  function applyThreadSlashCandidate(name: string | null | undefined, editor?: HTMLElement | null) {
     const skillName = String(name || "").trim();
     if (!skillName || !activeThreadDraftKey) {
       return;
     }
-    const nextText = slashSkillInputText(skillName);
+    const nextText = slashCommandInputText(skillName);
     const nextSegments = normalizeComposerSegmentsForDisplay([{ type: "text", text: nextText }]);
     applySlashSuggestionToComposer(editor, nextSegments, () => {
       setThreadDraftsByKey((current) => updateDrafts(current, activeThreadDraftKey, nextSegments));
     });
-    setThreadSkillIndex(0);
+    setThreadSlashIndex(0);
   }
 
   function applySlashSuggestionToComposer(
@@ -853,26 +854,26 @@ export function useConversationController({
       return;
     }
 
-    if (slashSkillActive) {
-      if (event.key === "ArrowDown" && skillCandidates.length > 0) {
+    if (slashPickerActive) {
+      if (event.key === "ArrowDown" && slashCandidates.length > 0) {
         event.preventDefault();
-        setSkillIndex((value) => (value + 1) % skillCandidates.length);
+        setSlashIndex((value) => (value + 1) % slashCandidates.length);
         return;
       }
-      if (event.key === "ArrowUp" && skillCandidates.length > 0) {
+      if (event.key === "ArrowUp" && slashCandidates.length > 0) {
         event.preventDefault();
-        setSkillIndex((value) => (value - 1 + skillCandidates.length) % skillCandidates.length);
+        setSlashIndex((value) => (value - 1 + slashCandidates.length) % slashCandidates.length);
         return;
       }
-      if (event.key === "Enter" && !event.shiftKey && skillCandidates.length > 0) {
+      if (event.key === "Enter" && !event.shiftKey && slashCandidates.length > 0) {
         event.preventDefault();
-        applySkillCandidate(skillCandidates[skillIndex] ?? skillCandidates[0], editorRef.current);
+        applySlashCandidate((slashCandidates[slashIndex] ?? slashCandidates[0])?.name, editorRef.current);
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        setSkillPickerDismissed(true);
-        setSkillIndex(0);
+        setSlashPickerDismissed(true);
+        setSlashIndex(0);
         return;
       }
     }
@@ -1012,11 +1013,11 @@ export function useConversationController({
       mentionCandidates,
       mentionIndex,
       onApplyMention: applyMention,
-      skillCandidates,
-      skillIndex,
-      skillLoading,
-      skillPickerOpen: slashSkillActive,
-      onApplySkillCandidate: applySkillCandidate,
+      slashCandidates,
+      slashIndex,
+      slashPickerLoading,
+      slashPickerOpen: slashPickerActive,
+      onApplySlashCandidate: applySlashCandidate,
       managerProfile,
       managerProfileIncomplete,
       authStatuses,
@@ -1046,22 +1047,22 @@ export function useConversationController({
           return;
         }
         setThreadDraftsByKey((current) => updateDrafts(current, activeThreadDraftKey, segments));
-        setThreadSkillPickerDismissed(false);
+        setThreadSlashPickerDismissed(false);
         if (segmentsToPlainText(segments) !== activeThreadDraft) {
-          setThreadSkillIndex(0);
+          setThreadSlashIndex(0);
         }
       },
       onSendThreadReply: sendThreadReply,
-      threadSkillCandidates,
-      threadSkillIndex,
-      threadSkillLoading: skillLoading,
-      threadSkillPickerOpen: threadSlashSkillActive,
-      onApplyThreadSkillCandidate: applyThreadSkillCandidate,
-      onDismissThreadSkillPicker: () => {
-        setThreadSkillPickerDismissed(true);
-        setThreadSkillIndex(0);
+      threadSlashCandidates,
+      threadSlashIndex,
+      threadSlashPickerLoading: slashPickerLoading,
+      threadSlashPickerOpen: threadSlashPickerActive,
+      onApplyThreadSlashCandidate: applyThreadSlashCandidate,
+      onDismissThreadSlashPicker: () => {
+        setThreadSlashPickerDismissed(true);
+        setThreadSlashIndex(0);
       },
-      onSetThreadSkillIndex: setThreadSkillIndex,
+      onSetThreadSlashIndex: setThreadSlashIndex,
     },
     createRoomModalProps:
       showCreateRoom && data
@@ -1118,6 +1119,8 @@ function skillNamesFromWorkspace(entries: readonly { name?: string; path?: strin
     .sort((left, right) => left.localeCompare(right));
 }
 
+const builtinSlashCommandNames = ["new"];
+
 type SlashPickerStateInput = {
   draftText: string;
   disabled?: boolean;
@@ -1128,11 +1131,11 @@ type SlashPickerStateInput = {
 type SlashPickerState = {
   query: string | null;
   active: boolean;
-  candidates: string[];
+  candidates: SlashPickerCandidate[];
 };
 
-function buildSlashPickerState(input: SlashPickerStateInput): SlashPickerState {
-  const query = slashSkillQueryForDraft(input.draftText);
+export function buildSlashPickerState(input: SlashPickerStateInput): SlashPickerState {
+  const query = slashPickerQueryForDraft(input.draftText);
   const active = Boolean(input.enabled && query !== null && !input.disabled);
   if (!active) {
     return {
@@ -1145,11 +1148,18 @@ function buildSlashPickerState(input: SlashPickerStateInput): SlashPickerState {
   return {
     query,
     active: true,
-    candidates: input.skillNames.filter((name) => fuzzySkillMatch(name, query ?? "")),
+    candidates: [
+      ...builtinSlashCommandNames
+        .filter((name) => fuzzySkillMatch(name, query ?? ""))
+        .map((name) => ({ name, type: "command" as const })),
+      ...input.skillNames.filter(
+        (name) => !builtinSlashCommandNames.includes(name) && fuzzySkillMatch(name, query ?? ""),
+      ).map((name) => ({ name, type: "skill" as const })),
+    ],
   };
 }
 
-export function slashSkillQueryForDraft(draftText: string): string | null {
+export function slashPickerQueryForDraft(draftText: string): string | null {
   const trimmed = draftText.trimStart();
   if (!trimmed.startsWith("/")) {
     return null;
@@ -1172,7 +1182,7 @@ function slashSkillCommandTextWithBody(skillName: string, body = ""): string {
   return `${base} ${normalizedBody}`;
 }
 
-export function slashSkillInputText(skillName: string): string {
+export function slashCommandInputText(skillName: string): string {
   return `/${String(skillName || "").trim()} `;
 }
 
@@ -1181,10 +1191,22 @@ export function normalizeSlashShorthandForPayload(text: string): string {
   if (!shorthand) {
     return text;
   }
+  if (shorthand.name === "new") {
+    return slashNewConversationCommandTextWithBody(shorthand.body);
+  }
   return slashSkillCommandTextWithBody(shorthand.arg, shorthand.body);
 }
 
-function parseSlashShorthandToPayload(text: string): { arg: string; body: string } | null {
+function slashNewConversationCommandTextWithBody(body = ""): string {
+  const base = '<slash-command name="new" arg="conversation"></slash-command>';
+  const normalizedBody = String(body ?? "").trim();
+  if (!normalizedBody) {
+    return base;
+  }
+  return `${base} ${normalizedBody}`;
+}
+
+function parseSlashShorthandToPayload(text: string): { arg: string; body: string; name: "new" | "use-skill" } | null {
   const trimmed = text.trimStart();
   if (!trimmed.startsWith("/") || trimmed.startsWith("//")) {
     return null;
@@ -1206,12 +1228,20 @@ function parseSlashShorthandToPayload(text: string): { arg: string; body: string
   if (!arg) {
     return null;
   }
+  if (arg.toLowerCase() === "new") {
+    return {
+      arg: "conversation",
+      body: body.trim(),
+      name: "new",
+    };
+  }
   if (!isValidSkillSlug(arg)) {
     return null;
   }
   return {
     arg,
     body: body.trim(),
+    name: "use-skill",
   };
 }
 

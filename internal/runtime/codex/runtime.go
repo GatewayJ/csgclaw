@@ -128,8 +128,9 @@ type Runtime struct {
 }
 
 var (
-	_ agentruntime.Runtime     = (*Runtime)(nil)
-	_ agentruntime.LogStreamer = (*Runtime)(nil)
+	_ agentruntime.Runtime             = (*Runtime)(nil)
+	_ agentruntime.LogStreamer         = (*Runtime)(nil)
+	_ agentruntime.ConversationStarter = (*Runtime)(nil)
 )
 
 func New(deps Dependencies) *Runtime {
@@ -290,6 +291,20 @@ func (r *Runtime) StreamLogs(ctx context.Context, h agentruntime.Handle, opts ag
 		lines = 20
 	}
 	return streamLogFile(ctx, logPath, opts.Follow, lines, opts.Writer)
+}
+
+func (r *Runtime) NewConversation(ctx context.Context, h agentruntime.Handle, req agentruntime.ConversationStartRequest) (agentruntime.ConversationStartAction, error) {
+	roomID := strings.TrimSpace(req.RoomID)
+	if roomID == "" {
+		return agentruntime.ConversationStartAction{}, fmt.Errorf("room id is required")
+	}
+	if strings.TrimSpace(h.RuntimeID) == "" {
+		return agentruntime.ConversationStartAction{}, fmt.Errorf("runtime id is required")
+	}
+	return agentruntime.ConversationStartAction{
+		Mode:    agentruntime.ConversationStartActionInternal,
+		AckText: "Cleared my internal history for this conversation. The IM room messages were not cleared.",
+	}, nil
 }
 
 func (r *Runtime) sessionManager() Manager {

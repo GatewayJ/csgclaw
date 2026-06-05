@@ -1510,13 +1510,13 @@
   line-height: 18px;
 }
 
-.skill-picker-empty {
+.slash-picker-empty {
   padding: 9px 10px;
   color: var(--muted);
   font-size: 13px;
 }
 
-.skill-option-mark {
+.slash-option-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1527,6 +1527,18 @@
   background: var(--primary-soft);
   color: var(--primary-strong);
   font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.command-option .slash-option-mark {
+  background: var(--warning-soft, #fff3cd);
+  color: var(--warning-strong, #8a4b00);
+}
+
+.skill-slash-option .slash-option-mark {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
 }
 
 /* Preserve the message display design after the latest main refinements. */

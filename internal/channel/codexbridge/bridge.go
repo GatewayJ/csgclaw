@@ -10,6 +10,7 @@ import (
 	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/runtimebridge"
 	runtimecodex "csgclaw/internal/runtime/codex"
+	"csgclaw/internal/slashcommand"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -34,6 +35,10 @@ type SessionPrompter interface {
 
 type ConversationSessionEnsurer interface {
 	EnsureSession(ctx context.Context, handle runtimecodex.SessionHandle, conversationKey string) (string, error)
+}
+
+type ConversationHistoryClearer interface {
+	ResetConversationHistory(ctx context.Context, handle runtimecodex.SessionHandle, roomID string) error
 }
 
 type Service struct {
@@ -229,6 +234,14 @@ func (w *worker) enqueue(ctx context.Context, evt BotEvent) {
 }
 
 func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-chan runtimecodex.SessionEvent) error {
+	if cmd, ok, err := slashcommand.Parse(evt.Text); err == nil && ok && slashcommand.IsNewConversationCommand(cmd) {
+		return w.handleConversationReset(ctx, evt)
+	} else if err != nil {
+		renderer := runtimebridge.NewTurnRenderer()
+		renderer.SetPromptError(err.Error())
+		_, err := w.flushTurn(ctx, evt.RoomID, evt.ThreadRootID, renderer)
+		return err
+	}
 	sessionID, err := w.sessionID(ctx, evt)
 	if err != nil {
 		renderer := runtimebridge.NewTurnRenderer()
@@ -296,6 +309,37 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 				_, err := w.flushTurn(ctx, evt.RoomID, evt.ThreadRootID, renderer)
 				return err
 			}
+		}
+	}
+}
+
+func (w *worker) handleConversationReset(ctx context.Context, evt BotEvent) error {
+	roomID := strings.TrimSpace(evt.RoomID)
+	if roomID == "" {
+		return fmt.Errorf("room id is required")
+	}
+	resetter, ok := w.service.prompter.(ConversationHistoryClearer)
+	if !ok {
+		return fmt.Errorf("codex session prompter does not support conversation reset")
+	}
+	if err := resetter.ResetConversationHistory(ctx, runtimecodex.SessionHandle{RuntimeID: w.binding.RuntimeID}, roomID); err != nil {
+		return err
+	}
+	w.clearContextCache(roomID)
+	_, err := w.sendMessage(ctx, roomID, evt.ThreadRootID, "Cleared my internal history for this conversation. The IM room messages were not cleared.")
+	return err
+}
+
+func (w *worker) clearContextCache(roomID string) {
+	roomID = strings.TrimSpace(roomID)
+	if roomID == "" {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for key := range w.contextSent {
+		if key == roomID || strings.HasPrefix(key, roomID+":") {
+			delete(w.contextSent, key)
 		}
 	}
 }

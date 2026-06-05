@@ -35,6 +35,7 @@ import {
   normalizeTextMentions,
 } from "@/models/composer";
 import { isAgentRunning, normalizeAuthProviderName, providerNeedsAuth } from "@/models/agents";
+import type { SlashPickerCandidate } from "@/models/slashCommands";
 import {
   agentMatchesUser,
   formatEventMessage,
@@ -86,18 +87,18 @@ export function ConversationPane({
   mentionCandidates,
   mentionIndex,
   onApplyMention,
-  skillCandidates = [],
-  skillIndex = 0,
-  skillLoading = false,
-  skillPickerOpen = false,
-  onApplySkillCandidate = (_name) => {},
-  threadSkillCandidates = [],
-  threadSkillIndex = 0,
-  threadSkillLoading = false,
-  threadSkillPickerOpen = false,
-  onApplyThreadSkillCandidate = (_name) => {},
-  onDismissThreadSkillPicker = () => {},
-  onSetThreadSkillIndex = (_index) => {},
+  slashCandidates = [],
+  slashIndex = 0,
+  slashPickerLoading = false,
+  slashPickerOpen = false,
+  onApplySlashCandidate = (_name) => {},
+  threadSlashCandidates = [],
+  threadSlashIndex = 0,
+  threadSlashPickerLoading = false,
+  threadSlashPickerOpen = false,
+  onApplyThreadSlashCandidate = (_name) => {},
+  onDismissThreadSlashPicker = () => {},
+  onSetThreadSlashIndex = (_index) => {},
   managerProfile,
   managerProfileIncomplete,
   authStatuses,
@@ -447,13 +448,13 @@ export function ConversationPane({
       </section>
 
       <footer className="composer">
-        {skillPickerOpen ? (
-          <SkillPicker
-            candidates={skillCandidates}
-            activeIndex={skillIndex}
-            loading={skillLoading}
+        {slashPickerOpen ? (
+          <SlashPicker
+            candidates={slashCandidates}
+            activeIndex={slashIndex}
+            loading={slashPickerLoading}
             t={t}
-            onSelect={(name) => onApplySkillCandidate?.(name)}
+            onSelect={(name) => onApplySlashCandidate?.(name)}
           />
         ) : null}
         {mentionCandidates.length > 0 ? (
@@ -532,13 +533,13 @@ export function ConversationPane({
           t={t}
           onClose={onCloseThread}
           onDraftChange={onThreadDraftChange}
-          threadSkillCandidates={threadSkillCandidates}
-          threadSkillIndex={threadSkillIndex}
-          threadSkillLoading={threadSkillLoading}
-          threadSkillPickerOpen={threadSkillPickerOpen}
-          onApplyThreadSkillCandidate={onApplyThreadSkillCandidate}
-          onDismissThreadSkillPicker={onDismissThreadSkillPicker}
-          onSetThreadSkillIndex={onSetThreadSkillIndex}
+          threadSlashCandidates={threadSlashCandidates}
+          threadSlashIndex={threadSlashIndex}
+          threadSlashPickerLoading={threadSlashPickerLoading}
+          threadSlashPickerOpen={threadSlashPickerOpen}
+          onApplyThreadSlashCandidate={onApplyThreadSlashCandidate}
+          onDismissThreadSlashPicker={onDismissThreadSlashPicker}
+          onSetThreadSlashIndex={onSetThreadSlashIndex}
           mentionableUsers={conversationMembers}
           onPreviewUser={onPreviewUser}
           onSend={onSendThreadReply}
@@ -589,7 +590,7 @@ export function ConversationPane({
 
 type SlashPickerNavigationInput = {
   event: ReactKeyboardEvent<HTMLElement>;
-  candidates: string[];
+  candidates: SlashPickerCandidate[];
   activeIndex: number;
   pickerOpen: boolean;
   onIndexChange: (index: number) => void;
@@ -625,7 +626,7 @@ function handleSlashPickerNavigation({
   }
   if (event.key === "Enter" && !event.shiftKey && candidates.length > 0) {
     event.preventDefault();
-    onApply(candidates[activeIndex] ?? candidates[0]);
+    onApply((candidates[activeIndex] ?? candidates[0])?.name ?? "");
     return true;
   }
   if (event.key === "Escape") {
@@ -677,35 +678,36 @@ function MentionPicker({ users = [], activeIndex = 0, className = "", showRole =
   );
 }
 
-function SkillPicker({ candidates = [], activeIndex = 0, loading = false, className = "", t, onSelect }) {
+function SlashPicker({ candidates = [], activeIndex = 0, loading = false, className = "", t, onSelect }) {
   const activeOptionRef = useRef<HTMLButtonElement | null>(null);
-  const activeSkill = candidates[activeIndex] || "";
+  const activeCandidate = candidates[activeIndex] || null;
+  const activeCandidateKey = activeCandidate ? `${activeCandidate.type}:${activeCandidate.name}` : "";
 
   useLayoutEffect(() => {
     activeOptionRef.current?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex, activeSkill, candidates.length]);
+  }, [activeIndex, activeCandidateKey, candidates.length]);
 
   return (
-    <div className={`mention-picker skill-picker ${className}`.trim()} role="listbox">
-      {loading ? <div className="skill-picker-empty">{t("agentWorkspaceLoading")}</div> : null}
-      {!loading && candidates.length === 0 ? <div className="skill-picker-empty">{t("skillPickerEmpty")}</div> : null}
-      {candidates.map((name, index) => (
+    <div className={`mention-picker slash-picker ${className}`.trim()} role="listbox">
+      {loading ? <div className="slash-picker-empty">{t("agentWorkspaceLoading")}</div> : null}
+      {!loading && candidates.length === 0 ? <div className="slash-picker-empty">{t("slashPickerEmpty")}</div> : null}
+      {candidates.map((candidate, index) => (
         <button
-          key={name}
+          key={`${candidate.type}:${candidate.name}`}
           ref={index === activeIndex ? activeOptionRef : null}
           role="option"
           aria-selected={index === activeIndex}
-          className={`mention-option skill-option ${index === activeIndex ? "active" : ""}`}
+          className={`mention-option slash-option ${candidate.type === "command" ? "command-option" : "skill-slash-option"} ${index === activeIndex ? "active" : ""}`}
           onMouseDown={(event) => {
             event.preventDefault();
-            onSelect(name);
+            onSelect(candidate.name);
           }}
         >
-          <span className="skill-option-mark" aria-hidden="true">
-            /
+          <span className="slash-option-mark" aria-hidden="true">
+            {candidate.type === "command" ? "CMD" : "/"}
           </span>
           <div>
-            <div className="message-author">{name}</div>
+            <div className="message-author">{candidate.name}</div>
           </div>
         </button>
       ))}
@@ -824,13 +826,13 @@ function ThreadPanel({
   t,
   onClose,
   onDraftChange,
-  threadSkillCandidates = [],
-  threadSkillIndex = 0,
-  threadSkillLoading = false,
-  threadSkillPickerOpen = false,
-  onApplyThreadSkillCandidate = (_name) => {},
-  onDismissThreadSkillPicker = () => {},
-  onSetThreadSkillIndex = (_index) => {},
+  threadSlashCandidates = [],
+  threadSlashIndex = 0,
+  threadSlashPickerLoading = false,
+  threadSlashPickerOpen = false,
+  onApplyThreadSlashCandidate = (_name) => {},
+  onDismissThreadSlashPicker = () => {},
+  onSetThreadSlashIndex = (_index) => {},
   onPreviewUser,
   mentionableUsers = [],
   onSend,
@@ -1005,14 +1007,14 @@ function ThreadPanel({
         </div>
       </div>
       <div className="thread-composer">
-        {threadSkillPickerOpen ? (
-          <SkillPicker
-            candidates={threadSkillCandidates}
-            activeIndex={threadSkillIndex}
-            loading={threadSkillLoading}
-            className="thread-skill-picker"
+        {threadSlashPickerOpen ? (
+          <SlashPicker
+            candidates={threadSlashCandidates}
+            activeIndex={threadSlashIndex}
+            loading={threadSlashPickerLoading}
+            className="thread-slash-picker"
             t={t}
-            onSelect={(name) => onApplyThreadSkillCandidate(name)}
+            onSelect={(name) => onApplyThreadSlashCandidate(name)}
           />
         ) : null}
         {threadMentionCandidates.length > 0 ? (
@@ -1053,13 +1055,13 @@ function ThreadPanel({
             if (
               handleSlashPickerNavigation({
                 event,
-                candidates: threadSkillCandidates,
-                activeIndex: threadSkillIndex,
-                pickerOpen: threadSkillPickerOpen,
-                onIndexChange: (value) => onSetThreadSkillIndex(value),
-                onApply: (value) => onApplyThreadSkillCandidate(value),
+                candidates: threadSlashCandidates,
+                activeIndex: threadSlashIndex,
+                pickerOpen: threadSlashPickerOpen,
+                onIndexChange: (value) => onSetThreadSlashIndex(value),
+                onApply: (value) => onApplyThreadSlashCandidate(value),
                 onDismiss: () => {
-                  onDismissThreadSkillPicker();
+                  onDismissThreadSlashPicker();
                   setMentionState(null);
                   setMentionIndex(0);
                 },

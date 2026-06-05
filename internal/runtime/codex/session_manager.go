@@ -284,6 +284,49 @@ func (m *acpManager) EnsureSession(ctx context.Context, handle SessionHandle, co
 	return sessionID, nil
 }
 
+func (m *acpManager) ResetConversationHistory(ctx context.Context, handle SessionHandle, roomID string) error {
+	runtimeID := strings.TrimSpace(handle.RuntimeID)
+	roomID = strings.TrimSpace(roomID)
+	if runtimeID == "" {
+		return fmt.Errorf("runtime id is required")
+	}
+	if roomID == "" {
+		return fmt.Errorf("room id is required")
+	}
+
+	m.mu.RLock()
+	live := m.sessions[runtimeID]
+	m.mu.RUnlock()
+	if live == nil || live.conn == nil || live.session == nil {
+		return os.ErrNotExist
+	}
+
+	live.mu.Lock()
+	sessionIDs := make([]string, 0)
+	for key, sessionID := range live.conversationSessions {
+		key = strings.TrimSpace(key)
+		if key != roomID && !strings.HasPrefix(key, roomID+":") {
+			continue
+		}
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID != "" {
+			sessionIDs = append(sessionIDs, sessionID)
+		}
+		delete(live.conversationSessions, key)
+	}
+	live.mu.Unlock()
+
+	for _, sessionID := range uniqueStrings(sessionIDs) {
+		_, _ = live.conn.CloseSession(ctx, acp.CloseSessionRequest{
+			SessionId: acp.SessionId(sessionID),
+		})
+		if m.deps.Permission != nil {
+			m.deps.Permission.CancelSession(runtimeID, sessionID)
+		}
+	}
+	return nil
+}
+
 func (m *acpManager) waitSession(runtimeID string, live *liveSession) {
 	err := live.cmd.Wait()
 	exitCode := 0
@@ -363,6 +406,26 @@ func isReservedSessionEnvKey(key string) bool {
 	default:
 		return false
 	}
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func formatSessionConfigOptionsDebug(options []acp.SessionConfigOption) string {

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import {
+  buildSlashPickerState,
   normalizeSlashShorthandForPayload,
   slashSkillCommandText,
-  slashSkillInputText,
-  slashSkillQueryForDraft,
+  slashCommandInputText,
+  slashPickerQueryForDraft,
   useConversationController,
 } from "@/hooks/workspace/useConversationController";
 import type { IMData, LocaleCode, TranslateFn } from "@/models/conversations";
@@ -80,11 +81,31 @@ function useConversationControllerTestHarness() {
 
 describe("useConversationController slash skill helpers", () => {
   it("keeps the skill picker open only while editing the command name", () => {
-    expect(slashSkillQueryForDraft("/")).toBe("");
-    expect(slashSkillQueryForDraft("  /sk")).toBe("sk");
-    expect(slashSkillQueryForDraft("/skill-creator ")).toBeNull();
-    expect(slashSkillQueryForDraft("/skill-creator make a skill")).toBeNull();
-    expect(slashSkillQueryForDraft("hello /skill-creator")).toBeNull();
+    expect(slashPickerQueryForDraft("/")).toBe("");
+    expect(slashPickerQueryForDraft("  /sk")).toBe("sk");
+    expect(slashPickerQueryForDraft("/skill-creator ")).toBeNull();
+    expect(slashPickerQueryForDraft("/skill-creator make a skill")).toBeNull();
+    expect(slashPickerQueryForDraft("hello /skill-creator")).toBeNull();
+  });
+
+  it("includes builtin slash commands before workspace skills", () => {
+    expect(
+      buildSlashPickerState({
+        draftText: "/",
+        enabled: true,
+        skillNames: ["skill-creator", "new"],
+      }).candidates,
+    ).toEqual([
+      { name: "new", type: "command" },
+      { name: "skill-creator", type: "skill" },
+    ]);
+    expect(
+      buildSlashPickerState({
+        draftText: "/ne",
+        enabled: true,
+        skillNames: ["skill-creator"],
+      }).candidates,
+    ).toEqual([{ name: "new", type: "command" }]);
   });
 
   it("renders selected skills as canonical slash-command XML", () => {
@@ -97,8 +118,8 @@ describe("useConversationController slash skill helpers", () => {
   });
 
   it("renders skill input as /slug command text", () => {
-    expect(slashSkillInputText("skill-creator")).toBe("/skill-creator ");
-    expect(slashSkillInputText(" manager-worker-dispatch ")).toBe("/manager-worker-dispatch ");
+    expect(slashCommandInputText("skill-creator")).toBe("/skill-creator ");
+    expect(slashCommandInputText(" manager-worker-dispatch ")).toBe("/manager-worker-dispatch ");
   });
 
   it("normalizes slash-command shorthand into canonical XML before send", () => {
@@ -110,6 +131,15 @@ describe("useConversationController slash skill helpers", () => {
     );
     expect(normalizeSlashShorthandForPayload("  /skill-creator   build a review  ")).toBe(
       '<slash-command name="use-skill" arg="skill-creator"></slash-command> build a review',
+    );
+    expect(normalizeSlashShorthandForPayload("/new")).toBe(
+      '<slash-command name="new" arg="conversation"></slash-command>',
+    );
+    expect(normalizeSlashShorthandForPayload("/new reset before rebuild")).toBe(
+      '<slash-command name="new" arg="conversation"></slash-command> reset before rebuild',
+    );
+    expect(normalizeSlashShorthandForPayload("/new conversation reset before rebuild")).toBe(
+      '<slash-command name="new" arg="conversation"></slash-command> conversation reset before rebuild',
     );
   });
 
@@ -128,7 +158,7 @@ describe("useConversationController send errors", () => {
 
   it("shows the complete API error body when message send fails", async () => {
     const fullError =
-      'Error processing message: LLM call failed after retries: API request failed:\n' +
+      "Error processing message: LLM call failed after retries: API request failed:\n" +
       "Status: 500\n" +
       'Body: {"error":{"message":"Post \\"https://chatgpt.com/backend-api/codex/responses\\": EOF","type":"server_error","code":"internal_server_error","param":null}}';
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(fullError, { status: 500 }));

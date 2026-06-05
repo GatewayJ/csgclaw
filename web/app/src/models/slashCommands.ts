@@ -4,6 +4,13 @@ export type SlashCommandPayload = {
   name: string;
 };
 
+export type SlashPickerCandidateType = "command" | "skill";
+
+export type SlashPickerCandidate = {
+  name: string;
+  type: SlashPickerCandidateType;
+};
+
 const slashCommandNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const slashCommandOpenPattern = /^<slash-command(?:\s|>|\/)/;
 const slashCommandCloseTag = "</slash-command>";
@@ -67,11 +74,17 @@ export function parseSlashCommand(content: unknown): SlashCommandPayload | null 
 
 export function renderSlashCommandAsText(content: unknown): string | null {
   const command = parseSlashCommand(content);
-  if (!command || command.name !== "use-skill") {
+  if (!command) {
     return null;
   }
 
-  return command.body ? `/${command.arg} ${command.body}` : `/${command.arg}`;
+  if (command.name === "use-skill") {
+    return command.body ? `/${command.arg} ${command.body}` : `/${command.arg}`;
+  }
+  if (command.name === "new" && (command.arg === "" || command.arg === "conversation")) {
+    return command.body ? `/new ${command.body}` : "/new";
+  }
+  return null;
 }
 
 export function renderSlashCommandPreviewText(content: unknown): string {

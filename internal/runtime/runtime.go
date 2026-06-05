@@ -35,6 +35,31 @@ type LogStreamer interface {
 	StreamLogs(ctx context.Context, h Handle, opts LogOptions) error
 }
 
+type ConversationStartActionMode string
+
+const (
+	ConversationStartActionBotEvent ConversationStartActionMode = "bot_event"
+	ConversationStartActionInternal ConversationStartActionMode = "internal"
+)
+
+type ConversationStartRequest struct {
+	Channel      string
+	BotID        string
+	RoomID       string
+	ThreadRootID string
+	Reason       string
+}
+
+type ConversationStartAction struct {
+	Mode         ConversationStartActionMode
+	BotEventText string
+	AckText      string
+}
+
+type ConversationStarter interface {
+	NewConversation(ctx context.Context, h Handle, req ConversationStartRequest) (ConversationStartAction, error)
+}
+
 // HydrateTrustPersistedStopped reports whether hydrate should keep a persisted "stopped"
 // agent status instead of overwriting it from runtime Info (some in-process runtimes
 // always report "running" from Info/State).

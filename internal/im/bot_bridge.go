@@ -182,6 +182,15 @@ func (b *BotBridge) EnqueueMessageEvent(room Room, sender User, message Message,
 	return b.enqueue(botID, messageEventForBot(room, sender, message, botID))
 }
 
+func (b *BotBridge) EnqueueMessageEventWithText(room Room, sender User, message Message, botID string, text string) bool {
+	if !shouldNotifyBot(room, message, botID) {
+		return true
+	}
+	evt := messageEventForBot(room, sender, message, botID)
+	evt.Text = strings.TrimSpace(text)
+	return b.enqueue(botID, evt)
+}
+
 func (b *BotBridge) enqueue(botID string, evt BotEvent) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()

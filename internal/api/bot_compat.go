@@ -50,6 +50,13 @@ func (h *Handler) PublishBotEvent(evt im.Event) {
 	if !ok {
 		return
 	}
+	if reason, ok, err := newConversationCommandReason(evt.Message.Content); err != nil {
+		slog.Warn("parse new conversation command failed", "room_id", evt.RoomID, "message_id", evt.Message.ID, "error", err)
+	} else if ok {
+		missed := h.publishNewConversationBotEvent(context.Background(), room, *evt.Sender, *evt.Message, reason)
+		h.reconnectMissedBotAgents(evt.Sender.ID, missed)
+		return
+	}
 	missed := h.botBridge.PublishMessageEvent(room, *evt.Sender, *evt.Message)
 	h.reconnectMissedBotAgents(evt.Sender.ID, missed)
 }

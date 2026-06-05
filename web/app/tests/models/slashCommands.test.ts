@@ -13,5 +13,8 @@ describe("slash command parser", () => {
         '<slash-command name="use-skill" arg="skill-creator"></slash-command> build a skill',
       ),
     ).toBe("/skill-creator build a skill");
+    expect(
+      renderSlashCommandPreviewText('<slash-command name="new" arg="conversation"></slash-command> reset first'),
+    ).toBe("/new reset first");
   });
 });
