@@ -3313,8 +3313,8 @@ func TestHandleFeishuMessagesPostSendsMessage(t *testing.T) {
 	}
 }
 
-func TestHandleFeishuMessagesPostNormalizesCanonicalSlashCommand(t *testing.T) {
-	wantContent := `<slash-command name="use-skill" arg="skill-creator"></slash-command> create & review`
+func TestHandleFeishuMessagesPostKeepsCanonicalSlashCommandAsPlainMessage(t *testing.T) {
+	wantContent := `<slash-command arg="skill-creator" name="use-skill"/> create & review`
 	feishuSvc := feishu.NewServiceWithSendMessage(
 		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
 		func(_ context.Context, _ feishu.AppConfig, req feishu.SendMessageRequest) (feishu.SendMessageResponse, error) {
@@ -3343,8 +3343,8 @@ func TestHandleFeishuMessagesPostNormalizesCanonicalSlashCommand(t *testing.T) {
 	}
 }
 
-func TestHandleFeishuMessagesPostConvertsSlashShorthandToCanonicalCommand(t *testing.T) {
-	wantContent := `<slash-command name="use-skill" arg="skill-creator"></slash-command> create & review`
+func TestHandleFeishuMessagesPostKeepsSlashShorthandAsPlainMessage(t *testing.T) {
+	wantContent := `/skill-creator create & review`
 	feishuSvc := feishu.NewServiceWithSendMessage(
 		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
 		func(_ context.Context, _ feishu.AppConfig, req feishu.SendMessageRequest) (feishu.SendMessageResponse, error) {

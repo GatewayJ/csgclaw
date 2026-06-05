@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -75,17 +74,6 @@ func (h *Handler) handleFeishuEvents(w http.ResponseWriter, r *http.Request, bot
 			}
 			if !feishuEventMentions(evt, botOpenID) {
 				continue
-			}
-			if evt.Message != nil {
-				if reason, matched, err := newConversationCommandReason(evt.Message.Content); err != nil {
-					slog.Warn("parse new conversation command failed", "channel", feishuChannelID, "room_id", evt.RoomID, "message_id", evt.Message.ID, "error", err)
-				} else if matched {
-					message, deliver := h.rewriteFeishuNewConversationEvent(r.Context(), botID, *evt.Message, evt.RoomID, reason)
-					if !deliver {
-						continue
-					}
-					evt.Message = &message
-				}
 			}
 			data, err := json.Marshal(evt)
 			if err != nil {

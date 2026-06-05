@@ -11,8 +11,6 @@ import (
 	"csgclaw/internal/slashcommand"
 )
 
-const feishuChannelID = "feishu"
-
 func newConversationCommandReason(content string) (string, bool, error) {
 	cmd, ok, err := slashcommand.Parse(content)
 	if err != nil || !ok {
@@ -57,40 +55,6 @@ func (h *Handler) publishNewConversationBotEvent(ctx context.Context, room im.Ro
 		}
 	}
 	return missed
-}
-
-func (h *Handler) rewriteFeishuNewConversationEvent(ctx context.Context, botID string, evt im.Message, roomID string, reason string) (im.Message, bool) {
-	if h == nil || h.svc == nil {
-		evt.Content = "Failed to execute /new: conversation service is unavailable."
-		return evt, true
-	}
-	action, err := h.svc.NewConversationAction(ctx, agent.NewConversationRequest{
-		Channel:      feishuChannelID,
-		BotID:        botID,
-		RoomID:       roomID,
-		ThreadRootID: conversationThreadRootID(evt),
-		Reason:       reason,
-	})
-	if err != nil {
-		slog.Warn("new conversation action failed", "channel", feishuChannelID, "bot_id", botID, "room_id", roomID, "error", err)
-		evt.Content = "Failed to execute /new. Please try again later."
-		return evt, true
-	}
-	switch action.Mode {
-	case agent.NewConversationActionBotEvent:
-		if action.BotEventText == "" {
-			return evt, false
-		}
-		evt.Content = action.BotEventText
-		return evt, true
-	case agent.NewConversationActionInternal:
-		slog.Warn("new conversation internal action is not supported on feishu channel", "channel", feishuChannelID, "bot_id", botID, "room_id", roomID)
-		evt.Content = "Failed to execute /new: thread reset is not supported on feishu channel."
-		return evt, true
-	default:
-		evt.Content = "Failed to execute /new: unsupported action type."
-		return evt, true
-	}
 }
 
 func newConversationTargets(room im.Room, message im.Message, isAgent func(string) bool) []string {

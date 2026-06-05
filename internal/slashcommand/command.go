@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 const ElementName = "slash-command"
@@ -95,41 +94,6 @@ func Normalize(content string) (string, bool, error) {
 	return rendered, true, nil
 }
 
-func ParseFeishuShorthand(content string) (Command, bool, error) {
-	text := strings.TrimSpace(content)
-	if !strings.HasPrefix(text, "/") || strings.HasPrefix(text, "//") {
-		return Command{}, false, nil
-	}
-	slug, body := splitSlashCommand(strings.TrimPrefix(text, "/"))
-	if strings.EqualFold(slug, NewConversationCommandName) {
-		return Command{
-			Name: NewConversationCommandName,
-			Arg:  "conversation",
-			Body: strings.TrimSpace(body),
-		}, true, nil
-	}
-	if !validSkillSlug(slug) {
-		return Command{}, false, nil
-	}
-	return Command{
-		Name: UseSkillCommandName,
-		Arg:  slug,
-		Body: strings.TrimSpace(body),
-	}, true, nil
-}
-
-func NormalizeFeishuInput(content string) (string, bool, error) {
-	cmd, ok, err := ParseFeishuShorthand(content)
-	if err != nil || !ok {
-		return "", ok, err
-	}
-	rendered, err := Render(cmd)
-	if err != nil {
-		return "", false, err
-	}
-	return rendered, true, nil
-}
-
 func RenderFeishuFallback(content string) string {
 	cmd, ok, err := Parse(content)
 	if err != nil || !ok {
@@ -191,16 +155,6 @@ func looksLikeSlashCommand(text string) bool {
 	}
 	next := text[len("<"+ElementName)]
 	return next == ' ' || next == '	' || next == '\n' || next == '\r' || next == '>' || next == '/'
-}
-
-func splitSlashCommand(rest string) (string, string) {
-	rest = strings.TrimLeftFunc(rest, unicode.IsSpace)
-	for idx, r := range rest {
-		if unicode.IsSpace(r) {
-			return rest[:idx], rest[idx:]
-		}
-	}
-	return rest, ""
 }
 
 func commandFromStart(start xml.StartElement) (Command, error) {

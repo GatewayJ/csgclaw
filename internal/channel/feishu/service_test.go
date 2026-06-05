@@ -422,7 +422,7 @@ func TestFeishuSendMessageUsesSenderAppAndStoresLocalMessage(t *testing.T) {
 	}
 }
 
-func TestFeishuSendMessageConvertsSlashShorthandToCanonicalMessage(t *testing.T) {
+func TestFeishuSendMessageKeepsSlashShorthandAsPlainMessage(t *testing.T) {
 	var gotReq SendMessageRequest
 	svc := NewServiceWithSendMessage(
 		map[string]AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
@@ -442,15 +442,15 @@ func TestFeishuSendMessageConvertsSlashShorthandToCanonicalMessage(t *testing.T)
 		t.Fatalf("SendMessage() error = %v", err)
 	}
 
-	want := `<slash-command name="use-skill" arg="skill-creator"></slash-command> create a review skill`
+	want := "/skill-creator create a review skill"
 	if gotReq.Content != want {
-		t.Fatalf("send content = %q, want canonical XML %q", gotReq.Content, want)
+		t.Fatalf("send content = %q, want plain slash text %q", gotReq.Content, want)
 	}
 	if message.Content != want {
-		t.Fatalf("message content = %q, want canonical XML %q", message.Content, want)
+		t.Fatalf("message content = %q, want plain slash text %q", message.Content, want)
 	}
 	if svc.rooms["oc_alpha"].Messages[0].Content != want {
-		t.Fatalf("stored content = %q, want canonical XML %q", svc.rooms["oc_alpha"].Messages[0].Content, want)
+		t.Fatalf("stored content = %q, want plain slash text %q", svc.rooms["oc_alpha"].Messages[0].Content, want)
 	}
 }
 
