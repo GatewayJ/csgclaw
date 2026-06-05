@@ -284,14 +284,14 @@ func (m *acpManager) EnsureSession(ctx context.Context, handle SessionHandle, co
 	return sessionID, nil
 }
 
-func (m *acpManager) ResetConversationHistory(ctx context.Context, handle SessionHandle, roomID string) error {
+func (m *acpManager) ResetConversationHistory(ctx context.Context, handle SessionHandle, conversationKey string) error {
 	runtimeID := strings.TrimSpace(handle.RuntimeID)
-	roomID = strings.TrimSpace(roomID)
+	conversationKey = strings.TrimSpace(conversationKey)
 	if runtimeID == "" {
 		return fmt.Errorf("runtime id is required")
 	}
-	if roomID == "" {
-		return fmt.Errorf("room id is required")
+	if conversationKey == "" {
+		return fmt.Errorf("conversation key is required")
 	}
 
 	m.mu.RLock()
@@ -305,7 +305,7 @@ func (m *acpManager) ResetConversationHistory(ctx context.Context, handle Sessio
 	sessionIDs := make([]string, 0)
 	for key, sessionID := range live.conversationSessions {
 		key = strings.TrimSpace(key)
-		if key != roomID && !strings.HasPrefix(key, roomID+":") {
+		if key != conversationKey {
 			continue
 		}
 		sessionID = strings.TrimSpace(sessionID)

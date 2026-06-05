@@ -93,12 +93,19 @@ type ensureCall struct {
 	conversationKey string
 }
 
+type resetCall struct {
+	runtimeID       string
+	conversationKey string
+}
+
 type fakePrompter struct {
 	mu      sync.Mutex
 	calls   []promptCall
 	ensures []ensureCall
+	resets  []resetCall
 	prompt  func(context.Context, runtimecodex.SessionHandle, acp.PromptRequest) error
 	ensure  func(context.Context, runtimecodex.SessionHandle, string) (string, error)
+	reset   func(context.Context, runtimecodex.SessionHandle, string) error
 }
 
 func (p *fakePrompter) Prompt(ctx context.Context, handle runtimecodex.SessionHandle, req acp.PromptRequest) (acp.PromptResponse, error) {
@@ -128,6 +135,16 @@ func (p *fakePrompter) EnsureSession(ctx context.Context, handle runtimecodex.Se
 	return "", nil
 }
 
+func (p *fakePrompter) ResetConversationHistory(ctx context.Context, handle runtimecodex.SessionHandle, conversationKey string) error {
+	p.mu.Lock()
+	p.resets = append(p.resets, resetCall{runtimeID: handle.RuntimeID, conversationKey: conversationKey})
+	p.mu.Unlock()
+	if p.reset != nil {
+		return p.reset(ctx, handle, conversationKey)
+	}
+	return nil
+}
+
 func (p *fakePrompter) texts() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -153,6 +170,14 @@ func (p *fakePrompter) ensureCalls() []ensureCall {
 	defer p.mu.Unlock()
 	out := make([]ensureCall, len(p.ensures))
 	copy(out, p.ensures)
+	return out
+}
+
+func (p *fakePrompter) resetCalls() []resetCall {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]resetCall, len(p.resets))
+	copy(out, p.resets)
 	return out
 }
 
@@ -448,6 +473,42 @@ func TestServiceKeepsToolActivityInsideExistingThread(t *testing.T) {
 			records[1].RoomID == "room-1" &&
 			records[1].ThreadRootID == "msg-root" &&
 			records[1].Text == "thread done"
+	})
+}
+
+func TestServiceConversationResetClearsSingleThreadKey(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{
+		MessageID:    "m-reset",
+		RoomID:       "room-1",
+		ThreadRootID: "msg-thread",
+		Text:         `<slash-command name="new" arg="conversation"></slash-command> start fresh`,
+	}
+
+	sink := runtimecodex.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{}
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		calls := prompter.resetCalls()
+		return len(calls) == 1 &&
+			calls[0].runtimeID == "rt-1" &&
+			calls[0].conversationKey == "room-1:msg-thread"
 	})
 }
 

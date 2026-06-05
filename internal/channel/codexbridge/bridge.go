@@ -38,7 +38,7 @@ type ConversationSessionEnsurer interface {
 }
 
 type ConversationHistoryClearer interface {
-	ResetConversationHistory(ctx context.Context, handle runtimecodex.SessionHandle, roomID string) error
+	ResetConversationHistory(ctx context.Context, handle runtimecodex.SessionHandle, conversationKey string) error
 }
 
 type Service struct {
@@ -322,10 +322,14 @@ func (w *worker) handleConversationReset(ctx context.Context, evt BotEvent) erro
 	if !ok {
 		return w.flushConversationResetError(ctx, evt, "codex session prompter does not support conversation reset")
 	}
-	if err := resetter.ResetConversationHistory(ctx, runtimecodex.SessionHandle{RuntimeID: w.binding.RuntimeID}, roomID); err != nil {
+	conversationKey := conversationKey(evt)
+	if conversationKey == "" {
+		return w.flushConversationResetError(ctx, evt, "conversation key is required")
+	}
+	if err := resetter.ResetConversationHistory(ctx, runtimecodex.SessionHandle{RuntimeID: w.binding.RuntimeID}, conversationKey); err != nil {
 		return w.flushConversationResetError(ctx, evt, err.Error())
 	}
-	w.clearContextCache(roomID)
+	w.clearContextCache(conversationKey)
 	_, err := w.sendMessage(ctx, roomID, evt.ThreadRootID, "Cleared my internal history for this conversation. The IM room messages were not cleared.")
 	return err
 }
@@ -337,21 +341,17 @@ func (w *worker) flushConversationResetError(ctx context.Context, evt BotEvent, 
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf(strings.TrimSpace(message))
+	return fmt.Errorf("%s", strings.TrimSpace(message))
 }
 
-func (w *worker) clearContextCache(roomID string) {
-	roomID = strings.TrimSpace(roomID)
-	if roomID == "" {
+func (w *worker) clearContextCache(conversationKey string) {
+	conversationKey = strings.TrimSpace(conversationKey)
+	if conversationKey == "" {
 		return
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	for key := range w.contextSent {
-		if key == roomID || strings.HasPrefix(key, roomID+":") {
-			delete(w.contextSent, key)
-		}
-	}
+	delete(w.contextSent, conversationKey)
 }
 
 func (w *worker) flushTurn(ctx context.Context, roomID, threadRootID string, renderer *runtimebridge.TurnRenderer) (string, error) {

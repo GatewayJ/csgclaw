@@ -250,6 +250,15 @@ func (h *Handler) replayRecentBotMessages(botID, lastEventID string) {
 			if !ok {
 				continue
 			}
+			if reason, ok, err := newConversationCommandReason(message.Content); err != nil {
+				slog.Warn("parse new conversation command failed", "bot_id", botID, "message_id", message.ID, "error", err)
+				h.botBridge.EnqueueMessageEvent(room, sender, message, botID)
+				continue
+			} else if ok {
+				missed := h.publishNewConversationBotEvent(context.Background(), room, sender, message, reason)
+				h.reconnectMissedBotAgents(sender.ID, missed)
+				continue
+			}
 			// Route replay through the bridge so the stable message ID remains the
 			// dedupe key for events already delivered live or drained from pending.
 			h.botBridge.EnqueueMessageEvent(room, sender, message, botID)
