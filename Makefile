@@ -139,7 +139,7 @@ prepare-docker-embed-dist:
 
 prepare-picoclaw-embed-dist: prepare-docker-embed-dist
 
-patch-docker-embed-image-refs:
+patch-docker-embed-image-refs: prepare-docker-embed-dist
 	chmod +x scripts/list-docker-embed-templates.sh scripts/patch-docker-embed-image-refs.sh
 	ACR_REGISTRY="$(ACR_REGISTRY)" VERSION="$(DOCKER_EMBED_IMAGE_TAG)" \
 		scripts/patch-docker-embed-image-refs.sh
