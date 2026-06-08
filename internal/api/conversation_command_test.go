@@ -66,3 +66,44 @@ func TestNewConversationTargetsGroupRoomRequiresMentionedAgent(t *testing.T) {
 		t.Fatalf("newConversationTargets() = %#v, want %#v", got, want)
 	}
 }
+
+func TestNewConversationTargetsGroupRoomSupportsAtMentionTag(t *testing.T) {
+	room := im.Room{
+		ID:       "room-1",
+		IsDirect: false,
+		Members:  []string{"u-user", "u-agent-a", "u-agent-b"},
+	}
+	message := im.Message{
+		SenderID: "u-user",
+		Content:  `<at user_id="u-agent-b">qa-worker</at>`,
+	}
+	got := newConversationTargets(room, message, func(id string) bool {
+		return id == "u-agent-a" || id == "u-agent-b"
+	})
+	want := []string{"u-agent-b"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("newConversationTargets() = %#v, want %#v", got, want)
+	}
+}
+
+func TestNewConversationTargetsGroupRoomSupportsAtMentionTagWithExtraMentions(t *testing.T) {
+	room := im.Room{
+		ID:       "room-1",
+		IsDirect: false,
+		Members:  []string{"u-user", "u-agent-a", "u-agent-b", "u-human-c"},
+	}
+	message := im.Message{
+		SenderID: "u-user",
+		Content:  `<at user_id="u-human-c">human-c</at> <at user_id="u-agent-b">qa-worker</at>`,
+		Mentions: []im.Mention{
+			{ID: "u-human-c"},
+		},
+	}
+	got := newConversationTargets(room, message, func(id string) bool {
+		return id == "u-agent-a" || id == "u-agent-b"
+	})
+	want := []string{"u-agent-b"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("newConversationTargets() = %#v, want %#v", got, want)
+	}
+}

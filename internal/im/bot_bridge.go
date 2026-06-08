@@ -187,7 +187,10 @@ func (b *BotBridge) EnqueueMessageEventWithText(room Room, sender User, message 
 		return true
 	}
 	evt := messageEventForBot(room, sender, message, botID)
-	evt.Text = strings.TrimSpace(text)
+	evt.Text = botActionTextForEvent(message, botID, text)
+	if messageMentionsBot(message, botID) {
+		ensureBotMentioned(&evt, botID)
+	}
 	return b.enqueue(botID, evt)
 }
 
@@ -383,7 +386,7 @@ func messageEventForBot(room Room, sender User, message Message, botID string) B
 func textForBotEvent(message Message, botID string) string {
 	content := message.Content
 	botID = strings.TrimSpace(botID)
-	if content == "" || botID == "" || hasMentionTagForUser(content, botID) {
+	if content == "" || botID == "" || HasMentionTagForUser(content, botID) {
 		return content
 	}
 	for _, mention := range message.Mentions {
@@ -394,17 +397,53 @@ func textForBotEvent(message Message, botID string) string {
 	return content
 }
 
-func hasMentionTagForUser(content, userID string) bool {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+func botActionTextForEvent(message Message, botID, text string) string {
+	text = strings.TrimSpace(text)
+	botID = strings.TrimSpace(botID)
+	if text == "" || botID == "" || HasMentionTagForUser(text, botID) || !messageMentionsBot(message, botID) {
+		return text
+	}
+	return text + " " + mentionTagForBot(message, botID)
+}
+
+func messageMentionsBot(message Message, botID string) bool {
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
 		return false
 	}
-	for _, match := range mentionTagPattern.FindAllStringSubmatch(content, -1) {
-		if len(match) > 1 && strings.TrimSpace(match[1]) == userID {
+	for _, mention := range message.Mentions {
+		if strings.TrimSpace(mention.ID) == botID {
 			return true
 		}
 	}
-	return false
+	return HasMentionTagForUser(message.Content, botID)
+}
+
+func ensureBotMentioned(evt *BotEvent, botID string) {
+	if evt == nil {
+		return
+	}
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return
+	}
+	for _, mention := range evt.Mentions {
+		if strings.TrimSpace(mention) == botID {
+			evt.Context.Mentioned = true
+			return
+		}
+	}
+	evt.Mentions = append(evt.Mentions, botID)
+	evt.Context.Mentioned = true
+}
+
+func mentionTagForBot(message Message, botID string) string {
+	for _, mention := range message.Mentions {
+		if strings.TrimSpace(mention.ID) == strings.TrimSpace(botID) {
+			return fmt.Sprintf(`<at user_id="%s">%s</at>`, strings.TrimSpace(botID), mentionDisplayName(mention))
+		}
+	}
+	return fmt.Sprintf(`<at user_id="%s">%s</at>`, strings.TrimSpace(botID), strings.TrimSpace(botID))
 }
 
 func replaceMentionHandleWithTag(content string, mention Mention) string {

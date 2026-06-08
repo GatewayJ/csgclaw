@@ -200,6 +200,21 @@ export function useConversationController({
     const agent = agents.find((item) => item.id === agentID || agentMatchesUser(item, directUser));
     return agent ?? null;
   }, [agents, data?.current_user_id, selectedConversation, usersById]);
+  const hasActiveConversationAgent = useMemo(() => {
+    if (!selectedConversation) {
+      return false;
+    }
+    if (logAgent?.id) {
+      return true;
+    }
+    return selectedConversation.members.some((memberId) => {
+      if (memberId === data?.current_user_id) {
+        return false;
+      }
+      const member = usersById.get(memberId);
+      return agents.some((agent) => agent.id === memberId || (member && agentMatchesUser(agent, member)));
+    });
+  }, [agents, data?.current_user_id, logAgent?.id, selectedConversation, usersById]);
   const activeConversationMembers = activeConversation
     ? activeConversation.members.map((id) => usersById.get(id)).filter(Boolean)
     : [];
@@ -243,14 +258,15 @@ export function useConversationController({
     [draftsByConversationId, activeConversationId],
   );
   const draftText = useMemo(() => segmentsToPlainText(draftSegments), [draftSegments]);
+  const slashPickerEnabled = Boolean((logAgent?.id || hasActiveConversationAgent) && !slashPickerDismissed);
   const slashPickerState = useMemo(
     () =>
       buildSlashPickerState({
         draftText,
-        enabled: Boolean(logAgent?.id && !slashPickerDismissed),
+        enabled: slashPickerEnabled,
         skillNames,
       }),
-    [draftText, logAgent, slashPickerDismissed, skillNames],
+    [draftText, slashPickerEnabled, skillNames],
   );
   const slashPickerQuery = slashPickerState.query;
   const slashPickerActive = slashPickerState.active;
@@ -263,15 +279,16 @@ export function useConversationController({
     return activeThreadDraftKey ? (threadDraftsByKey[activeThreadDraftKey] ?? []) : [];
   }, [activeThreadDraftKey, threadDraftsByKey]);
   const activeThreadDraft = useMemo(() => segmentsToPlainText(activeThreadDraftSegments), [activeThreadDraftSegments]);
+  const threadSlashPickerEnabled = Boolean((logAgent?.id || hasActiveConversationAgent) && activeThreadDraftKey);
   const threadSlashPickerState = useMemo(
     () =>
       buildSlashPickerState({
         draftText: activeThreadDraft,
-        enabled: Boolean(logAgent?.id && activeThreadDraftKey),
+        enabled: threadSlashPickerEnabled,
         skillNames,
         disabled: threadSlashPickerDismissed,
       }),
-    [activeThreadDraft, logAgent, activeThreadDraftKey, threadSlashPickerDismissed, skillNames],
+    [activeThreadDraft, threadSlashPickerEnabled, threadSlashPickerDismissed, skillNames],
   );
   const threadSlashPickerQuery = threadSlashPickerState.query;
   const threadSlashPickerActive = threadSlashPickerState.active;

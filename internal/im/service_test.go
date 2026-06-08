@@ -910,3 +910,22 @@ func TestRoomIDsForMember(t *testing.T) {
 		t.Fatal("expected empty for unknown user")
 	}
 }
+
+func TestMentionTagUserIDs(t *testing.T) {
+	ids := MentionTagUserIDs(`<at user_id="u-agent-a">agent-a</at> hi <at user_id="u-agent-b">agent-b</at>`)
+	if len(ids) != 2 || ids[0] != "u-agent-a" || ids[1] != "u-agent-b" {
+		t.Fatalf("MentionTagUserIDs() = %#v, want [u-agent-a u-agent-b]", ids)
+	}
+	if len(MentionTagUserIDs("plain hi")) != 0 {
+		t.Fatalf("MentionTagUserIDs(\"plain hi\") = %#v, want empty", MentionTagUserIDs("plain hi"))
+	}
+}
+
+func TestHasMentionTagForUser(t *testing.T) {
+	if !HasMentionTagForUser(`<at user_id="u-agent-a">agent-a</at>`, "u-agent-a") {
+		t.Fatalf("HasMentionTagForUser() = false, want true")
+	}
+	if HasMentionTagForUser(`<at user_id="u-agent-a">agent-a</at>`, "u-agent-b") {
+		t.Fatalf("HasMentionTagForUser(u-agent-b) = true, want false")
+	}
+}

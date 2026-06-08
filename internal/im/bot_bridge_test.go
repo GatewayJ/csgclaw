@@ -238,6 +238,42 @@ func TestPublishMessageEventNormalizesPlainThreadMentionForPicoClaw(t *testing.T
 	}
 }
 
+func TestEnqueueMessageEventWithTextKeepsGroupMentionVisible(t *testing.T) {
+	bridge := NewBotBridge("")
+	events, cancel := bridge.Subscribe("u-qa")
+	defer cancel()
+
+	room := Room{
+		ID:       "room-group",
+		IsDirect: false,
+		Members:  []string{"u-admin", "u-qa"},
+	}
+	sender := User{ID: "u-admin", Name: "Admin", Handle: "admin"}
+	message := Message{
+		ID:        "msg-new",
+		SenderID:  "u-admin",
+		Content:   `<slash-command name="new" arg="conversation"></slash-command> <at user_id="u-qa">qa</at>`,
+		CreatedAt: time.Now().UTC(),
+		Mentions:  []Mention{{ID: "u-qa", Name: "qa"}},
+	}
+
+	if !bridge.EnqueueMessageEventWithText(room, sender, message, "u-qa", "/clear") {
+		t.Fatal("EnqueueMessageEventWithText() = false, want true for subscribed bot")
+	}
+
+	select {
+	case evt := <-events:
+		if evt.Text != `/clear <at user_id="u-qa">qa</at>` {
+			t.Fatalf("Text = %q, want action text with mention tag", evt.Text)
+		}
+		if len(evt.Mentions) != 1 || evt.Mentions[0] != "u-qa" || !evt.Context.Mentioned {
+			t.Fatalf("Mentions = %+v context = %+v, want u-qa mentioned", evt.Mentions, evt.Context)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("EnqueueMessageEventWithText() timed out waiting for event")
+	}
+}
+
 func TestPublishMessageEventQueuesUntilBotSubscribes(t *testing.T) {
 	bridge := NewBotBridge("")
 	room := Room{

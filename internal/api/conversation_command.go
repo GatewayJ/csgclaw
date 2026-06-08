@@ -85,7 +85,7 @@ func messageMentions(message im.Message, userID string) bool {
 			return true
 		}
 	}
-	return false
+	return im.HasMentionTagForUser(message.Content, userID)
 }
 
 func conversationThreadRootID(message im.Message) string {

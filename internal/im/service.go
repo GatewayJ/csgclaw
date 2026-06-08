@@ -128,6 +128,36 @@ type Service struct {
 var mentionPattern = regexp.MustCompile(`(^|[^\w])@([a-zA-Z0-9._-]+)`)
 var mentionTagPattern = regexp.MustCompile(`<at\s+user_id="([^"]+)">[^<]*</at>`)
 
+func MentionTagUserIDs(content string) []string {
+	if content == "" {
+		return nil
+	}
+	ids := make([]string, 0, 1)
+	for _, match := range mentionTagPattern.FindAllStringSubmatch(content, -1) {
+		if len(match) <= 1 {
+			continue
+		}
+		id := strings.TrimSpace(match[1])
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func HasMentionTagForUser(content, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	for _, id := range MentionTagUserIDs(content) {
+		if id == userID {
+			return true
+		}
+	}
+	return false
+}
+
 const sessionsDirName = "sessions"
 
 type persistedBootstrap struct {
