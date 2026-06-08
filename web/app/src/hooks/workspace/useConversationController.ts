@@ -219,6 +219,15 @@ export function useConversationController({
   const hasActiveConversationAgent = useMemo(() => {
     return activeConversationAgentMembers.length > 0;
   }, [activeConversationAgentMembers]);
+  const activeConversationAgentId = useMemo(() => {
+    if (logAgent?.id) {
+      return logAgent.id;
+    }
+    if (activeConversationAgentMembers.length === 1) {
+      return activeConversationAgentMembers[0];
+    }
+    return "";
+  }, [activeConversationAgentMembers, logAgent?.id]);
   const activeConversationMembers = activeConversation
     ? activeConversation.members.map((id) => usersById.get(id)).filter(Boolean)
     : [];
@@ -262,33 +271,7 @@ export function useConversationController({
     [draftsByConversationId, activeConversationId],
   );
   const draftText = useMemo(() => segmentsToPlainText(draftSegments), [draftSegments]);
-  const activeConversationAgentId = useMemo(() => {
-    if (logAgent?.id) {
-      return logAgent.id;
-    }
-
-    const mentionedAgentIds = new Set<string>();
-    for (const segment of draftSegments) {
-      if (segment.type !== "mention") {
-        continue;
-      }
-      const user = usersById.get(segment.userId);
-      const mentionedAgent = agents.find(
-        (agent) => agent.id === segment.userId || (user && agentMatchesUser(agent, user)),
-      );
-      if (mentionedAgent) {
-        mentionedAgentIds.add(mentionedAgent.id);
-      }
-    }
-    if (mentionedAgentIds.size === 1) {
-      return [...mentionedAgentIds][0];
-    }
-    if (activeConversationAgentMembers.length === 1) {
-      return activeConversationAgentMembers[0];
-    }
-    return "";
-  }, [activeConversationAgentMembers, agents, draftSegments, logAgent?.id, usersById]);
-  const slashPickerEnabled = Boolean((activeConversationAgentId || hasActiveConversationAgent) && !slashPickerDismissed);
+  const slashPickerEnabled = Boolean((hasActiveConversationAgent || logAgent?.id) && !slashPickerDismissed);
   const slashPickerState = useMemo(
     () =>
       buildSlashPickerState({
