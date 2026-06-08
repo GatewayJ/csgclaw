@@ -200,21 +200,25 @@ export function useConversationController({
     const agent = agents.find((item) => item.id === agentID || agentMatchesUser(item, directUser));
     return agent ?? null;
   }, [agents, data?.current_user_id, selectedConversation, usersById]);
-  const hasActiveConversationAgent = useMemo(() => {
+  const activeConversationAgentMembers = useMemo(() => {
     if (!selectedConversation) {
-      return false;
+      return [];
     }
-    if (logAgent?.id) {
-      return true;
-    }
-    return selectedConversation.members.some((memberId) => {
-      if (memberId === data?.current_user_id) {
-        return false;
-      }
-      const member = usersById.get(memberId);
-      return agents.some((agent) => agent.id === memberId || (member && agentMatchesUser(agent, member)));
-    });
-  }, [agents, data?.current_user_id, logAgent?.id, selectedConversation, usersById]);
+
+    return selectedConversation.members
+      .filter((memberId) => memberId !== data?.current_user_id)
+      .map((memberId) => ({
+        memberId: memberId,
+        user: usersById.get(memberId),
+      }))
+      .filter((entry) =>
+        agents.some((agent) => agent.id === entry.memberId || (entry.user && agentMatchesUser(agent, entry.user))),
+      )
+      .map((entry) => entry.memberId);
+  }, [agents, data?.current_user_id, selectedConversation, usersById]);
+  const hasActiveConversationAgent = useMemo(() => {
+    return activeConversationAgentMembers.length > 0;
+  }, [activeConversationAgentMembers]);
   const activeConversationMembers = activeConversation
     ? activeConversation.members.map((id) => usersById.get(id)).filter(Boolean)
     : [];
@@ -258,7 +262,33 @@ export function useConversationController({
     [draftsByConversationId, activeConversationId],
   );
   const draftText = useMemo(() => segmentsToPlainText(draftSegments), [draftSegments]);
-  const slashPickerEnabled = Boolean((logAgent?.id || hasActiveConversationAgent) && !slashPickerDismissed);
+  const activeConversationAgentId = useMemo(() => {
+    if (logAgent?.id) {
+      return logAgent.id;
+    }
+
+    const mentionedAgentIds = new Set<string>();
+    for (const segment of draftSegments) {
+      if (segment.type !== "mention") {
+        continue;
+      }
+      const user = usersById.get(segment.userId);
+      const mentionedAgent = agents.find(
+        (agent) => agent.id === segment.userId || (user && agentMatchesUser(agent, user)),
+      );
+      if (mentionedAgent) {
+        mentionedAgentIds.add(mentionedAgent.id);
+      }
+    }
+    if (mentionedAgentIds.size === 1) {
+      return [...mentionedAgentIds][0];
+    }
+    if (activeConversationAgentMembers.length === 1) {
+      return activeConversationAgentMembers[0];
+    }
+    return "";
+  }, [activeConversationAgentMembers, agents, draftSegments, logAgent?.id, usersById]);
+  const slashPickerEnabled = Boolean((activeConversationAgentId || hasActiveConversationAgent) && !slashPickerDismissed);
   const slashPickerState = useMemo(
     () =>
       buildSlashPickerState({
@@ -350,14 +380,14 @@ export function useConversationController({
   }, [threadSlashPickerQuery, skillNames]);
 
   useEffect(() => {
-    if (!isAnySlashPickerNeeded || !logAgent?.id) {
+    if (!isAnySlashPickerNeeded || !activeConversationAgentId) {
       setSkillNames([]);
       setSlashPickerLoading(false);
       return;
     }
     let cancelled = false;
     setSlashPickerLoading(true);
-    fetchAgentWorkspace(logAgent.id, "skills")
+    fetchAgentWorkspace(activeConversationAgentId, "skills")
       .then((workspace) => {
         if (cancelled) {
           return;
@@ -377,7 +407,7 @@ export function useConversationController({
     return () => {
       cancelled = true;
     };
-  }, [isAnySlashPickerNeeded, logAgent?.id]);
+  }, [activeConversationAgentId, isAnySlashPickerNeeded]);
 
   useEffect(() => {
     if (!managerProfileIncomplete) {
