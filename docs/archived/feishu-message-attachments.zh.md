@@ -13,7 +13,8 @@ Agent 在自己的沙箱/工作区中找不到本地图片文件，也拿不到�
 本方案目标：
 
 - 飞书入站图片由接收飞书消息的 Agent runtime 下载或解析成真实文件。
-- Agent 能拿到当前 runtime 可访问的文件路径或 `media://` 引用。
+- Agent 能拿到当前 runtime 可访问的本地文件路径；`media://` 可以继续作为 runtime 内部引用，但不能作为 GitLab 等外部工具唯一输入。
+- 图片既可以作为模型多模态输入，也必须在 Agent 文本上下文中暴露工具可读路径，例如 `[image:/tmp/picoclaw_media/...]`。
 - CSGClaw 只消费 runtime 产生的文本、活动消息和媒体描述，不重复下载飞书资源。
 - Agent 能稳定把本地图片交给 GitLab API 上传，或生成 Markdown 图片链接。
 
@@ -45,7 +46,10 @@ PicoClaw 本身已有部分 Feishu 图片处理能力，是 runtime-owned 模式
 
 因此，PicoClaw 不是缺少“用 `message_id + image_key` 下载飞书图片”的底座能力。当前已有 `downloadResource(ctx, messageID, imageKey, "image", ".jpg", store, scope)` 这条路径，会调用飞书 message resource 接口，把资源写入 `/tmp/picoclaw_media/...` 并登记为 `media://<uuid>`。
 
-当前缺口是：这条下载路径只被部分消息类型调用，`post` 富文本图片还没有接上。
+当前需要补齐两个小闭环：
+
+1. 这条下载路径只被部分消息类型调用，`post` 富文本图片还没有接上。
+2. 已下载的图片目前主要作为模型视觉输入解析，不能保证 GitLab 上传等工具能从 prompt 中拿到本地路径；需要额外暴露图片本地路径或提供等价 resolver。
 
 | 飞书消息类型 | 当前 PicoClaw 行为 | 本方案要求 |
 |---|---|---|
@@ -91,7 +95,7 @@ Feishu/Lark 用户发送图片+文字
 
 因此，如果某个部署中 Agent 仍只能看到 `image_key`，优先检查消息是否是 `post` 富文本图片、运行中的 PicoClaw runtime 是否包含 `MsgTypePost` 图片下载能力、Feishu channel 是否启用、权限是否足够，以及媒体路径是否被注入给 Agent，而不是在 CSGClaw 服务端补一套下载链路。
 
-因此，这个问题的根因不是 GitLab comment 工具缺失，也不是 CSGClaw 的 Feishu channel 缺少下载器，而是 PicoClaw runtime-owned 飞书入站缺少 `post` 富文本图片的 materialization：它没有把富文本里的 `image_key` 稳定转换成 Agent 可读的本地路径或 media ref。
+因此，这个问题的根因不是 GitLab comment 工具缺失，也不是 CSGClaw 的 Feishu channel 缺少下载器，而是 PicoClaw runtime-owned 飞书入站缺少 `post` 富文本图片的 materialization，并且图片路径还没有稳定暴露给工具调用：它没有把富文本里的 `image_key` 稳定转换成 Agent 可读的本地路径或可解析引用。
 
 ## 架构原则
 
@@ -118,6 +122,26 @@ GitLab 上传需要真实文件。仅把图片作为模型视觉输入不够，�
 
 如果 runtime 选择把附件复制到 workspace，也必须由 runtime 根据自己的 mount 规则生成路径。CSGClaw 不在 Feishu channel 层硬编码 workspace 表。
 
+PicoClaw 的最小实现建议是不新增服务、不复制到 workspace：在现有 `resolveMediaRefs` 中保留图片转 data URL 的模型输入能力，同时把图片本地路径追加到同一条用户消息，例如：
+
+```text
+将这个图片评论在 issue 中 [image:/tmp/picoclaw_media/msg-img.jpg]
+```
+
+这样模型仍能看图，`read_file`、`exec`、GitLab 上传工具也能读取同一个 runtime-local 文件。非图片附件继续使用现有 `[file:/path]`、`[audio:/path]`、`[video:/path]` 形式。
+
+还需要覆盖飞书常见的分开发送场景：用户先发送一张图片，再发送一句“把这个图片评论到 issue”。这两条飞书消息有不同的 `message_id`，第二条文本消息不会携带第一条图片的 `mediaRefs`。因此图片路径标签不能只存在于当前 provider 请求的临时消息里，必须进入 PicoClaw session history：
+
+```text
+第一条图片消息进入历史:
+[image: photo] [image:/tmp/picoclaw_media/msg-img.jpg]
+
+第二条文本消息:
+把这个图片评论到 issue
+```
+
+这样 Agent 在处理第二条文本指令时，可以从最近历史中找到上一张图的本地路径，而不需要用户手动补充路径。
+
 ### 3 失败必须对 Agent 可见
 
 资源读取失败时不能只留下 `image_key`。runtime 需要把失败状态注入 Agent 可见上下文，例如：
@@ -138,6 +162,8 @@ Attachments:
 - 不因为 Feishu WebSocket 重投、runtime retry、Agent retry 或 CSGClaw participant SSE replay 的误触发而重复下载并生成多个不同路径。
 - 如果 media temp dir 有 TTL，Agent prompt 中应避免引用已经被清理的路径；必要时 runtime resolver 应能重新 materialize。
 
+为了保持改动简单，第一版不需要新增完整的持久化 media registry。可以先利用现有本地文件名 `message_id + resource_key + ext`，并让 `FileMediaStore.Store(localPath, scope)` 在同一 `scope + localPath` 已登记时返回已有 ref，而不是每次生成新的 `media://<uuid>`。如果后续需要跨进程、跨重启幂等，再升级为显式 deterministic key。
+
 ## Runtime 实现要求
 
 ### PicoClaw
@@ -155,17 +181,22 @@ PicoClaw 需要把 `post` 富文本作为一等入站附件来源处理：
 2. 提取所有 `tag="img"` 元素中的 `image_key`。
 3. 使用当前消息的 Feishu `message_id`，复用已有 message resource 下载接口。
 4. 下载结果走现有 MediaStore：写入 `/tmp/picoclaw_media/...`，登记为 `media://<uuid>`。
-5. 保留富文本中的文字内容，或继续传 raw JSON，但必须追加附件摘要或 media ref。
+5. 将富文本里的 `text` 元素 flatten 成普通文本；不要把 raw JSON 作为 Agent 主体内容再追加 `[attachment]`，避免破坏 JSON 语义。
 6. 下载失败时把失败原因作为 Agent 可见摘要注入，而不是只留下 `image_key`。
 
 具体代码接点应在 PicoClaw runtime 内完成：
 
 1. 在 Feishu content helper 中增加 `post` 富文本图片提取函数，输入 raw content，输出 `[]image_key`。
-2. 在 `downloadInboundMedia` 增加 `MsgTypePost` 分支。
-3. `MsgTypePost` 分支复用现有 `downloadResource(ctx, messageID, imageKey, "image", ".jpg", store, scope)`。
-4. 下载得到的 refs 继续走现有 `mediaRefs -> appendMediaTags -> HandleMessage(..., mediaRefs, ...)` 链路。
-5. 本次不是重写 Feishu 图片下载器，而是把 `post.content[*][*].tag="img"` 中的 `image_key` 接入现有下载器。
-6. 不新增 CSGClaw 服务端下载接口，也不把飞书 token、app secret 或 host path 暴露给 Agent。
+2. 在 Feishu content helper 中增加 `post` 富文本文字提取函数，输入 raw content，输出普通文本。
+3. 在 `downloadInboundMedia` 增加 `MsgTypePost` 分支。
+4. `MsgTypePost` 的 Agent 主体内容使用 flatten 后的文本，而不是 raw JSON。
+5. `MsgTypePost` 分支复用现有 `downloadResource(ctx, messageID, imageKey, "image", ".jpg", store, scope)`。
+6. 下载得到的 refs 继续走现有 `mediaRefs -> appendMediaTags -> HandleMessage(..., mediaRefs, ...)` 链路；`interactive` 这类仍保持 raw JSON 的消息继续跳过 `appendMediaTags`。
+7. 在 Agent media resolver 中对图片额外注入 `[image:<localPath>]`，不要只生成 data URL。
+8. 注入后的图片路径标签必须写入 session history；不能只存在于当前 provider 请求里。
+9. 下载失败时生成脱敏失败摘要并追加到 Agent 可见内容。
+10. 本次不是重写 Feishu 图片下载器，而是把 `post.content[*][*].tag="img"` 中的 `image_key` 接入现有下载器。
+11. 不新增 CSGClaw 服务端下载接口，也不把飞书 token、app secret 或 host path 暴露给 Agent。
 
 PicoClaw 不需要把附件固定复制到 `~/.picoclaw/workspace/attachments/...`。如果后续为了工具兼容选择复制到 workspace，应作为 PicoClaw runtime 自己的 materialization 策略，而不是 CSGClaw Feishu channel 的职责。
 
@@ -202,23 +233,29 @@ PicoClaw 不需要把附件固定复制到 `~/.picoclaw/workspace/attachments/..
 
 1. 确认 PicoClaw Feishu 入站消息能拿到 `message_id + image_key/file_key`。
 2. 增加 `post` 富文本图片解析：从 `content[*][*]` 中提取 `tag="img"` 的 `image_key`。
-3. 对 `image`、`post`、`interactive`、`file/audio/media` 统一走 runtime 内下载、大小限制、内容校验和安全文件名处理。
-4. 生成 Agent 可访问的 runtime path 或 `media://` 引用。
-5. 下载失败时生成 Agent 可见失败摘要。
+3. 增加 `post` 富文本文字 flatten：从 `content[*][*]` 中提取 `tag="text"` 的文本，作为 Agent 主体内容。
+4. 对 `image`、`post`、`interactive`、`file/audio/media` 统一走 runtime 内下载、大小限制、内容校验和安全文件名处理。
+5. 生成 Agent 可访问的 runtime path 和 `media://` 引用；图片保留多模态输入，同时追加 `[image:<localPath>]`。
+6. 将追加了 `[image:<localPath>]` 的内容写入 session history，保证图片和文本分开发送时后续文本指令仍能引用上一张图。
+7. 下载失败时生成 Agent 可见失败摘要。
+8. 对同一 `scope + localPath` 复用已有 media ref，避免重复事件生成多个无关 `media://`。
 
 需要补充的 PicoClaw 单测：
 
 1. `post` content fixture 能提取一个或多个 `tag="img"` 的 `image_key`。
-2. `downloadInboundMedia(MsgTypePost)` 会对每个图片 key 调用 message resource 下载并返回 `media://` refs。
-3. `post` 消息中的文本内容仍保留，最终 Agent 输入包含文字和附件摘要或 media ref。
-4. 下载失败时消息仍投递给 Agent，并包含脱敏失败摘要，不泄露 token、app secret 或 Authorization header。
-5. 同一 `message_id + image_key` 重复处理时不会生成多个无关本地文件或重复 media record。
+2. `post` content fixture 能提取文字内容，最终 Agent 主体内容不再是 raw JSON。
+3. `downloadInboundMedia(MsgTypePost)` 会对每个图片 key 调用 message resource 下载并返回 `media://` refs。
+4. `post` 消息中的文本内容仍保留，最终 Agent 输入包含文字、图片路径标签和附件摘要或 media ref。
+5. 单独图片消息写入 session history 时包含 `[image:<localPath>]`，下一条纯文本指令能从历史找到该路径。
+6. 下载失败时消息仍投递给 Agent，并包含脱敏失败摘要，不泄露 token、app secret 或 Authorization header。
+7. 同一 `message_id + image_key` 重复处理时不会生成多个无关本地文件或重复 media record。
 
 ### 阶段 2：Agent 输入和工具可读性
 
 1. prompt 或 runtime message metadata 中包含附件摘要。
-2. Agent shell/tool 能读取 runtime path，或通过 media resolver 读取 `media://`。
+2. Agent shell/tool 能读取 runtime path；图片场景推荐在 prompt 和 session history 中都出现 `[image:<localPath>]`。
 3. GitLab 上传工具使用真实文件路径或字节流，而不是飞书 `image_key`。
+4. 当图片和文字分开发送时，后续文本指令能引用最近一条图片消息中的本地路径。
 
 ### 阶段 3：幂等和生命周期
 
@@ -236,8 +273,11 @@ PicoClaw 不需要把附件固定复制到 `~/.picoclaw/workspace/attachments/..
 ## 验收标准
 
 1. 飞书单独图片消息：PicoClaw Feishu channel 下载图片到 `picoclaw_media`，生成 `media://<uuid>`，Agent loop 能 resolve。
-2. 飞书“图片 + 文字”富文本 `post` 消息：PicoClaw 提取 `content[*][*].image_key`，下载图片并生成 `media://<uuid>`。
-3. `dev` 在自己的 shell/tool 中可以读取该路径，或通过 runtime media resolver 读取真实文件。
-4. Agent 能把该图片上传到 GitLab Issue #2408，并生成评论 Markdown。
-5. 飞书图片下载失败时，Agent 收到明确失败原因，不再只看到 `image_key`。
-6. CSGClaw IM 只展示 runtime 返回的文本、媒体摘要或失败摘要，不出现 host-only path、app secret、tenant access token。
+2. 飞书“图片 + 文字”富文本 `post` 消息：PicoClaw 提取 `content[*][*].image_key` 和文本内容，下载图片并生成 `media://<uuid>`。
+3. Agent 输入同时包含富文本文字、图片多模态输入和 `[image:<localPath>]`。
+4. 飞书先发送单独图片、再发送文本指令时，第二条文本指令能从 session history 中找到上一张图片的 `[image:<localPath>]`。
+5. `dev` 在自己的 shell/tool 中可以读取该路径，或通过 runtime media resolver 读取真实文件。
+6. Agent 能把该图片上传到 GitLab Issue #2408，并生成评论 Markdown。
+7. 飞书图片下载失败时，Agent 收到明确失败原因，不再只看到 `image_key`。
+8. 同一飞书消息重复投递时，不生成多个无关本地文件或多个无关 media ref。
+9. CSGClaw IM 只展示 runtime 返回的文本、媒体摘要或失败摘要，不出现 host-only path、app secret、tenant access token。
