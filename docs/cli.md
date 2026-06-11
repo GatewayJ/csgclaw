@@ -461,8 +461,8 @@ Subcommands:
 
 - `list`
 - `create`
+- `bind`
 - `delete`
-- `config`
 
 `participant list` flags:
 
@@ -498,30 +498,33 @@ csgclaw participant delete <id> [flags]
 - `--channel string`: `csgclaw` or `feishu`. Default `csgclaw`.
 - `--delete-agent string`: agent cleanup mode. Supported value: `if_unreferenced`.
 
-`participant config` manages participant channel configuration through the local HTTP API.
-Only Feishu is currently supported.
+`participant bind` applies Feishu participant credentials.
+Currently, only Feishu is supported.
 
-`participant config` flags:
+`participant bind` flags:
 
-- `--channel string`: only `feishu` is supported. Default `feishu`.
-- `--get`: get masked Feishu config.
-- `--set`: set Feishu config.
-- `--reload`: reload Feishu config.
-- `--bot-id string`: Feishu config key used by the current server API.
-- `--app-id string`: Feishu app id. Required with `--set`.
-- `--admin-open-id string`: optional Feishu admin open_id.
-- `--app-secret-file string`: read Feishu app secret from a file.
-- `--app-secret-env string`: read Feishu app secret from an environment variable.
+- `--channel string`: `feishu` only. Default `feishu`.
+- `--feishu-kind string`: `human` or `bot`.
+- `--admin`: bind the Feishu admin human participant.
+- `--open-id string`: required when `--feishu-kind human` and `--admin` is set.
+- `--name string`: optional name for Feishu admin human participant.
+- `--agent string`: worker/manager agent for Feishu bot binding.
+- `--app-id string`: Feishu app id for bot binding.
+- `--app-secret-file string`: read Feishu app secret from file.
+- `--app-secret-env string`: read Feishu app secret from env var.
 - `--app-secret-stdin`: read Feishu app secret from stdin.
-- `--no-reload`: write config without reloading the running server.
+- `--restart`: recreate worker after saving config. If the target is manager, `--restart` marks `restart_status` as
+  `manager_restart_required` and does not attempt automatic recreate.
 
-`participant config` behavior:
+`participant bind` behavior:
 
-- Exactly one of `--get`, `--set`, or `--reload` is required.
-- `--get` and `--set` require `--bot-id`.
-- `--set` requires exactly one app secret source.
-- The returned `app_secret` value is a status marker, not the real secret.
-- `pt config` is equivalent to `participant config`.
+- Exactly one `--feishu-kind` value is required.
+- `--feishu-kind human` requires `--admin` and `--open-id`.
+- `--feishu-kind bot` requires `--agent` and `--app-id`.
+- For bot binding, exactly one of `--app-secret-file`, `--app-secret-env`, or `--app-secret-stdin` is required.
+- `--restart` defaults to `false`; include it only when you want worker to be recreated. For manager targets, the command
+  returns `restart_status=manager_restart_required` so the user can complete the manager bootstrap flow safely.
+- `pt bind` is equivalent to `participant bind`.
 
 #### `room`
 
@@ -626,8 +629,8 @@ Examples:
 ```bash
 csgclaw participant list
 csgclaw participant create --name alice --bind create --role worker --model-id gpt-5.4-mini
-csgclaw participant config --channel feishu --get --bot-id u-manager
-csgclaw pt config --channel feishu --set --bot-id u-manager --app-id cli_xxx --app-secret-env FEISHU_APP_SECRET
+csgclaw participant bind --channel feishu --feishu-kind human --admin --open-id ou_xxx
+csgclaw pt bind --channel feishu --feishu-kind bot --agent u-manager --app-id cli_xxx --app-secret-env FEISHU_APP_SECRET
 csgclaw room create --title "release-room" --creator-id manager --member-ids manager,alice
 csgclaw member create --room-id room-1 --user-id alice --inviter-id manager
 csgclaw message list --room-id room-1
@@ -680,8 +683,8 @@ csgclaw-cli completion fish
 - `pt list`
 - `pt create`
 - `pt delete`
-- `participant config`
-- `pt config`
+- `participant bind`
+- `pt bind`
 - `room list`
 - `room create`
 - `room delete`
@@ -697,8 +700,8 @@ Examples:
 ```bash
 csgclaw-cli participant list --channel feishu --type agent
 csgclaw-cli pt create --name manager --channel feishu --type agent --bind create --role manager
-csgclaw-cli participant config --channel feishu --get --bot-id u-manager
-csgclaw-cli pt config --channel feishu --reload
+csgclaw-cli participant bind --channel feishu --feishu-kind human --admin --open-id ou_xxx
+csgclaw-cli pt bind --channel feishu --feishu-kind bot --agent u-manager --app-id cli_xxx --app-secret-stdin
 csgclaw-cli room create --channel feishu --title "ops-room" --creator-id manager --member-ids manager,dev
 csgclaw-cli member list --channel feishu --room-id oc_x
 csgclaw-cli member create --channel feishu --room-id oc_x --user-id dev --inviter-id manager

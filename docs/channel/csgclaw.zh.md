@@ -13,6 +13,7 @@
   "type": "csgclaw.action_card",
   "status": "manager_recreate_pending",
   "bot_id": "u-manager",
+  "agent_id": "u-manager",
   "title": "Manager Feishu 配置已完成",
   "subtitle": "u-manager",
   "badge": "需在窗口点击",
@@ -33,6 +34,7 @@
 
 - `type` 必须是 `csgclaw.action_card`。
 - `bot_id` 是现有 setup helper 沿用的旧 payload 字段；其值表示目标 agent ID，不是 participant ID。
+- `agent_id` 与 `bot_id` 保持一致，供 participant 语义的新调用方使用；旧客户端仍只认识 legacy 名称时，两者都要保留。
 - `actions[0].id` 必须是 `rebuild-manager`。
 - `actions[0].method` 必须是 `manager-bootstrap-replace`。
 - 前端必须将该 payload 直接作为完整聊天内容渲染（不允许附加普通文本、markdown 表格或 markdown 代码块）。

@@ -283,7 +283,7 @@ func TestBootstrapConfigViewUsesServerUpgradeVisibility(t *testing.T) {
 func TestHandleFeishuRoomsMembers(t *testing.T) {
 	feishuSvc := feishu.NewServiceWithCreateChatAndAddMembers(
 		map[string]feishu.AppConfig{
-			"u-manager": {AppID: "manager-app-id", AppSecret: "app-secret", AdminOpenID: "ou_admin"},
+			"manager":   {AppID: "manager-app-id", AppSecret: "app-secret", AdminOpenID: "ou_admin"},
 			"fsu-alice": {AppID: "alice-app-id", AppSecret: "alice-secret"},
 		},
 		func(_ context.Context, _ feishu.AppConfig, req feishu.CreateChatRequest) (feishu.CreateChatResponse, error) {
@@ -343,7 +343,7 @@ func TestHandleFeishuRoomsMembers(t *testing.T) {
 	if len(members) != 2 {
 		t.Fatalf("members = %+v, want two users", members)
 	}
-	if members[0].ID != "u-manager" || members[1].ID != "fsu-alice" {
+	if members[0].ID != "manager" || members[1].ID != "fsu-alice" {
 		t.Fatalf("members = %+v, want bot ids", members)
 	}
 }
@@ -1087,8 +1087,9 @@ func TestHandleAgentsPatchUpdatesMetadataAndProfile(t *testing.T) {
 		t.Fatalf("agent = %#v, want updated description", got)
 	}
 	profile, ok := got["agent_profile"].(map[string]any)
-	if !ok || profile["env_restart_required"] != true || profile["model_id"] != "new-model" {
-		t.Fatalf("agent_profile = %#v, want env_restart_required true", got["agent_profile"])
+	env, envOK := profile["env"].(map[string]any)
+	if !ok || profile["model_id"] != "new-model" || !envOK || env["A"] != "B" {
+		t.Fatalf("agent_profile = %#v, want updated model and env", got["agent_profile"])
 	}
 }
 
@@ -3159,7 +3160,7 @@ func TestHandleMessagesPostPrefixesMentionID(t *testing.T) {
 
 func TestHandleFeishuMessagesPostSendsMessage(t *testing.T) {
 	feishuSvc := feishu.NewServiceWithSendMessage(
-		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
+		map[string]feishu.AppConfig{"manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
 		func(_ context.Context, _ feishu.AppConfig, req feishu.SendMessageRequest) (feishu.SendMessageResponse, error) {
 			if req.ChatID != "oc_alpha" || req.Content != "hello" {
 				t.Fatalf("send request = %+v, want chat/content", req)
@@ -3189,7 +3190,7 @@ func TestHandleFeishuMessagesPostSendsMessage(t *testing.T) {
 func TestHandleFeishuMessagesPostKeepsCanonicalSlashCommandAsPlainMessage(t *testing.T) {
 	wantContent := `<slash-command arg="skill-creator" name="use-skill"/> create & review`
 	feishuSvc := feishu.NewServiceWithSendMessage(
-		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
+		map[string]feishu.AppConfig{"manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
 		func(_ context.Context, _ feishu.AppConfig, req feishu.SendMessageRequest) (feishu.SendMessageResponse, error) {
 			if req.ChatID != "oc_alpha" || req.Content != wantContent {
 				t.Fatalf("send request = %+v, want chat/content %q", req, wantContent)
@@ -3219,7 +3220,7 @@ func TestHandleFeishuMessagesPostKeepsCanonicalSlashCommandAsPlainMessage(t *tes
 func TestHandleFeishuMessagesPostKeepsSlashShorthandAsPlainMessage(t *testing.T) {
 	wantContent := `/skill-creator create & review`
 	feishuSvc := feishu.NewServiceWithSendMessage(
-		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
+		map[string]feishu.AppConfig{"manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
 		func(_ context.Context, _ feishu.AppConfig, req feishu.SendMessageRequest) (feishu.SendMessageResponse, error) {
 			if req.ChatID != "oc_alpha" || req.Content != wantContent {
 				t.Fatalf("send request = %+v, want chat/content %q", req, wantContent)
@@ -3248,7 +3249,7 @@ func TestHandleFeishuMessagesPostKeepsSlashShorthandAsPlainMessage(t *testing.T)
 
 func TestHandleFeishuMessagesGetListsRoomMessages(t *testing.T) {
 	feishuSvc := feishu.NewServiceWithCreateChatAndListRoomMessages(
-		map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"}},
+		map[string]feishu.AppConfig{"manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"}},
 		func(_ context.Context, _ feishu.AppConfig, req feishu.CreateChatRequest) (feishu.CreateChatResponse, error) {
 			return feishu.CreateChatResponse{ChatID: "oc_alpha", Name: req.Title}, nil
 		},
@@ -3277,7 +3278,7 @@ func TestHandleFeishuMessagesGetListsRoomMessages(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != "om_1" || got[0].SenderID != "u-manager" {
+	if len(got) != 1 || got[0].ID != "om_1" || got[0].SenderID != "manager" {
 		t.Fatalf("messages = %+v, want listed feishu messages with bot ids", got)
 	}
 }
@@ -3623,7 +3624,7 @@ func TestHandleFeishuRoomsDeleteRemovesRoom(t *testing.T) {
 	deleted := make([]string, 0, 1)
 	srv := &Handler{
 		feishu: feishu.NewServiceWithDeleteChat(
-			map[string]feishu.AppConfig{"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"}},
+			map[string]feishu.AppConfig{"manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"}},
 			func(_ context.Context, _ feishu.AppConfig, roomID string) error {
 				deleted = append(deleted, roomID)
 				return nil

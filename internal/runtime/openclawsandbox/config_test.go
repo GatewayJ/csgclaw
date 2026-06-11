@@ -218,7 +218,7 @@ func TestRenderAgentOpenClawConfigAddsFeishuChannelWhenConfigured(t *testing.T) 
 		ModelID: "MiniMax-M2.7",
 	}, testBaseURLResolver, staticFeishuProvider{
 		bots: map[string]feishuchannel.AppConfig{
-			"u-manager": {
+			"manager": {
 				AppID:     "cli_a_test",
 				AppSecret: "secret-test",
 			},
@@ -239,14 +239,14 @@ func TestRenderAgentOpenClawConfigAddsFeishuChannelWhenConfigured(t *testing.T) 
 	if got, want := feishuCfg["connectionMode"], "websocket"; got != want {
 		t.Fatalf("feishu.connectionMode = %v, want %v", got, want)
 	}
-	if got, want := feishuCfg["defaultAccount"], "u-manager"; got != want {
+	if got, want := feishuCfg["defaultAccount"], "manager"; got != want {
 		t.Fatalf("feishu.defaultAccount = %v, want %v", got, want)
 	}
 	if got, want := feishuCfg["requireMention"], true; got != want {
 		t.Fatalf("feishu.requireMention = %v, want %v", got, want)
 	}
 	accounts := feishuCfg["accounts"].(map[string]any)
-	account := accounts["u-manager"].(map[string]any)
+	account := accounts["manager"].(map[string]any)
 	if got, want := account["appId"], "cli_a_test"; got != want {
 		t.Fatalf("feishu account appId = %v, want %v", got, want)
 	}
@@ -294,4 +294,10 @@ type staticFeishuProvider struct {
 func (p staticFeishuProvider) BotConfig(botID string) (feishuchannel.AppConfig, bool) {
 	app, ok := p.bots[botID]
 	return app, ok
+}
+
+func (p staticFeishuProvider) BotConfigForAgent(agentID string) (string, feishuchannel.AppConfig, bool) {
+	participantID := strings.TrimPrefix(strings.TrimSpace(agentID), "u-")
+	app, ok := p.bots[participantID]
+	return participantID, app, ok
 }

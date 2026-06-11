@@ -44,30 +44,6 @@ func TestExecuteAgentListUsesHTTPClientJSON(t *testing.T) {
 	}
 }
 
-func TestExecuteParticipantConfigGetUsesHTTPClient(t *testing.T) {
-	var stdout bytes.Buffer
-	app := &App{
-		stdout: &stdout,
-		stderr: &bytes.Buffer{},
-		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.Method != http.MethodGet {
-				t.Fatalf("method = %q, want %q", req.Method, http.MethodGet)
-			}
-			if req.URL.String() != "http://example.test/api/v1/channels/feishu/config?bot_id=u-manager" {
-				t.Fatalf("url = %q, want Feishu config route", req.URL.String())
-			}
-			return jsonResponse(http.StatusOK, `{"bot_id":"u-manager","configured":true,"app_id":"cli_xxx","app_secret":"present","admin_open_id":"ou_xxx"}`), nil
-		}),
-	}
-
-	if err := app.Execute(context.Background(), []string{"--endpoint", "http://example.test", "--output", "json", "participant", "config", "--channel", "feishu", "--get", "--bot-id", "u-manager"}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if !strings.Contains(stdout.String(), `"bot_id": "u-manager"`) || !strings.Contains(stdout.String(), `"app_secret": "present"`) {
-		t.Fatalf("stdout = %q, want masked Feishu config JSON", stdout.String())
-	}
-}
-
 func TestExecuteDefaultsToJSONOutputForNonTerminalStdout(t *testing.T) {
 	stdout, err := os.CreateTemp(t.TempDir(), "stdout-*")
 	if err != nil {

@@ -903,72 +903,13 @@ Notes:
 
 ## `feishu` Channel
 
-### Config
+### Feishu Credentials
 
-#### `GET /api/v1/channels/feishu/config`
+`/api/v1/channels/feishu/config` was removed. Feishu credentials are part of
+the Feishu participant object (`channel_app_config`) and are set via participant
+binding (`participant bind`) or participant update APIs.
 
-Returns the Feishu channel config view.
-
-Optional query parameters:
-
-- `bot_id`
-
-`bot_id` is the current Feishu credential/config key field name. It is not a
-participant ID; participant-facing routes continue to use participant IDs.
-
-Example response:
-
-```json
-{
-  "bot_id": "u-manager",
-  "configured": true,
-  "app_id": "cli_xxx",
-  "app_secret": "present",
-  "admin_open_id": "ou_xxx"
-}
-```
-
-Note:
-
-- `app_secret` is returned as a status marker, not the real secret
-
-#### `PUT /api/v1/channels/feishu/config`
-
-Updates the Feishu channel config.
-
-Request body:
-
-```json
-{
-  "bot_id": "u-manager",
-  "app_id": "cli_xxx",
-  "app_secret": "secret",
-  "admin_open_id": "ou_xxx",
-  "reload": true
-}
-```
-
-Notes:
-
-- `app_id` and `app_secret` are required
-- `bot_id` may come from either query or body
-- `reload` defaults to `true` when omitted
-
-#### `POST /api/v1/channels/feishu/config`
-
-Reloads the Feishu config.
-
-Example response:
-
-```json
-{
-  "status": "reloaded",
-  "feishu_bots": ["u-manager"]
-}
-```
-
-`feishu_bots` is the current response field name for reloaded Feishu
-credential keys. Values are target agent IDs, not participant IDs.
+In participant responses, the secret is masked as `present`.
 
 ### Participant Events
 

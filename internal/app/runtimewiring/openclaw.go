@@ -10,7 +10,7 @@ import (
 	"csgclaw/internal/runtime/sandboxgateway"
 )
 
-func WithOpenClawSandboxRuntime(feishuProvider feishu.BotCredentialProvider) agent.ServiceOption {
+func WithOpenClawSandboxRuntime(feishuProvider feishu.AgentCredentialProvider) agent.ServiceOption {
 	return func(s *agent.Service) error {
 		if s == nil {
 			return fmt.Errorf("agent service is required")
@@ -22,11 +22,11 @@ func WithOpenClawSandboxRuntime(feishuProvider feishu.BotCredentialProvider) age
 	}
 }
 
-func UpdateOpenClawFeishuProvider(svc *agent.Service, provider feishu.BotCredentialProvider) {
+func UpdateOpenClawFeishuProvider(svc *agent.Service, provider feishu.AgentCredentialProvider) {
 	updateRuntimeFeishuProvider(svc, agentruntime.KindOpenClawSandbox, provider)
 }
 
-func openClawBoxEnvVars(baseURL, accessToken, participantID, _ string, llmBaseURL, modelID string, _ feishu.BotCredentialProvider) map[string]string {
+func openClawBoxEnvVars(baseURL, accessToken, participantID, _ string, llmBaseURL, modelID string, _ feishu.AgentCredentialProvider) map[string]string {
 	env := bridgeLLMEnvVars(llmBaseURL, accessToken, modelID)
 	env["CSGCLAW_BASE_URL"] = baseURL
 	env["CSGCLAW_ACCESS_TOKEN"] = accessToken

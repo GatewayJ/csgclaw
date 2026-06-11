@@ -254,6 +254,13 @@ func cloneParticipant(item apitypes.Participant) apitypes.Participant {
 		}
 		item.Metadata = cloned
 	}
+	if item.ChannelAppConfig != nil {
+		cloned := make(map[string]any, len(item.ChannelAppConfig))
+		for key, value := range item.ChannelAppConfig {
+			cloned[key] = value
+		}
+		item.ChannelAppConfig = cloned
+	}
 	return item
 }
 

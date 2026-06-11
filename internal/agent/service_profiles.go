@@ -181,10 +181,10 @@ func (s *Service) syncGatewayHostConfig(got Agent, profile AgentProfile) error {
 		if err != nil {
 			return err
 		}
-		var feishuProvider feishu.BotCredentialProvider
+		var feishuProvider feishu.AgentCredentialProvider
 		if rt, err := s.runtimeForKind(RuntimeKindOpenClawSandbox); err == nil {
 			if fp, ok := rt.(interface {
-				CurrentFeishuProvider() feishu.BotCredentialProvider
+				CurrentFeishuProvider() feishu.AgentCredentialProvider
 			}); ok {
 				feishuProvider = fp.CurrentFeishuProvider()
 			}

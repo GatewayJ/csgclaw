@@ -66,6 +66,26 @@ func (c *Client) ListParticipants(ctx context.Context, channel, typ, agentID str
 	return participants, nil
 }
 
+func (c *Client) ListAgents(ctx context.Context) ([]apitypes.Agent, error) {
+	var agents []apitypes.Agent
+	if err := c.GetJSON(ctx, "/api/v1/agents", &agents); err != nil {
+		return nil, err
+	}
+	return agents, nil
+}
+
+func (c *Client) GetAgent(ctx context.Context, id string) (apitypes.Agent, error) {
+	var got apitypes.Agent
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return apitypes.Agent{}, fmt.Errorf("agent id is required")
+	}
+	if err := c.GetJSON(ctx, "/api/v1/agents/"+url.PathEscape(id), &got); err != nil {
+		return apitypes.Agent{}, err
+	}
+	return got, nil
+}
+
 func (c *Client) CreateParticipant(ctx context.Context, req participant.CreateRequest) (apitypes.Participant, error) {
 	var created apitypes.Participant
 	path, err := participantCollectionPath(req.Channel)
@@ -76,6 +96,18 @@ func (c *Client) CreateParticipant(ctx context.Context, req participant.CreateRe
 		return apitypes.Participant{}, err
 	}
 	return created, nil
+}
+
+func (c *Client) UpdateParticipant(ctx context.Context, channel, id string, req participant.UpdateRequest) (apitypes.Participant, error) {
+	var updated apitypes.Participant
+	path, err := participantItemPath(channel, id)
+	if err != nil {
+		return apitypes.Participant{}, err
+	}
+	if err := c.DoJSON(ctx, http.MethodPatch, path, req, &updated); err != nil {
+		return apitypes.Participant{}, err
+	}
+	return updated, nil
 }
 
 func (c *Client) DeleteParticipant(ctx context.Context, channel, id, deleteAgent string) error {
@@ -89,6 +121,18 @@ func (c *Client) DeleteParticipant(ctx context.Context, channel, id, deleteAgent
 		path += "?" + values.Encode()
 	}
 	return c.DoNoContent(ctx, http.MethodDelete, path)
+}
+
+func (c *Client) RecreateAgent(ctx context.Context, id string) (apitypes.Agent, error) {
+	var recreated apitypes.Agent
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return apitypes.Agent{}, fmt.Errorf("agent id is required")
+	}
+	if err := c.DoJSON(ctx, http.MethodPost, "/api/v1/agents/"+url.PathEscape(id)+"/recreate", nil, &recreated); err != nil {
+		return apitypes.Agent{}, err
+	}
+	return recreated, nil
 }
 
 func (c *Client) ListRooms(ctx context.Context) ([]apitypes.Room, error) {

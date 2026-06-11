@@ -58,27 +58,32 @@ Never skip `hub list` / `hub get` because you think you already know the templat
 6. `csgclaw-cli --output json hub get <template-id>` — read `image_env`.
 7. Collect every `required=true` env with no `default`; never echo `secret=true` values.
 8. Confirm `name`, optional `--id`, and `--description` (template description is a good default).
-9. Create:
+9. Create. For a user-facing worker name like `dev`, keep the identity stable: participant id `dev`, agent id `u-dev`, and CSGClaw local user ref `dev`. When this skill is invoked before Feishu setup, create the base worker in the `csgclaw` channel first; the Feishu skill will bind Feishu credentials afterwards.
 
 ```bash
 csgclaw-cli participant create --type agent --bind create \
+  --id gitlab-worker \
+  --agent-id u-gitlab-worker \
   --name gitlab-worker \
   --description "GitLab issue and MR worker" \
   --role worker \
   --from-template <matched-template-id> \
+  --channel csgclaw \
+  --channel-user-ref gitlab-worker \
+  --channel-user-kind local_user_id \
   --env GITLAB_TOKEN=<user-provided> \
-  --channel <current_channel>
 ```
 
 10. Report participant id, template id, and env status. Use `basics` for `member create` if the user wants the worker in the room. Do **not** auto-dispatch unless asked.
+11. If creation fails with a container/BoxLite name conflict for the requested worker name, stop and report that the host has a stale runtime with that exact name. Do **not** silently rename `dev` to `dev-worker` or `dev-feishu`; that changes the user's requested identity and breaks the later Feishu bind.
 
 ## Commands
 
 ```bash
 csgclaw-cli --output json hub list
 csgclaw-cli --output json hub get builtin.gitlab-worker
-csgclaw-cli participant list --channel <current_channel> --type agent
-csgclaw-cli participant create --type agent --bind create --from-template <id> --env KEY=VALUE ... --channel <current_channel>
+csgclaw-cli participant list --channel csgclaw --type agent
+csgclaw-cli participant create --type agent --bind create --id <slug> --agent-id u-<slug> --from-template <id> --channel csgclaw --channel-user-ref <slug> --channel-user-kind local_user_id --env KEY=VALUE ...
 ```
 
 Template env vars with `default` are injected by the server; pass `--env` only for secrets and overrides.
@@ -86,6 +91,7 @@ Template env vars with `default` are injected by the server; pass `--env` only f
 ## Operating Rules
 
 - `--from-template` is **required** for every new worker created through this skill.
+- For normal workers, pass `--id`, `--agent-id`, `--channel-user-ref`, and `--channel-user-kind`; do not rely on generated IDs.
 - Prefer `csgclaw-cli` over ad hoc HTTP.
 - Put global flags (`--output json`, `--endpoint`, `--token`) **before** the subcommand, e.g. `csgclaw-cli --output json hub list` (not after `hub list`).
 - Do not use `manager-worker-dispatch` until provisioning finishes.

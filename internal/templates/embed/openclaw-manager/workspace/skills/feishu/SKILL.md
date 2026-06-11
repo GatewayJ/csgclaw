@@ -1,6 +1,6 @@
 ---
 name: feishu
-description: Configure and troubleshoot CSGClaw Feishu/Lark channel credentials for manager or worker agents. Use when the Manager needs to generate a Feishu bot app creation URL or QR code, collect App ID/App Secret through registration, write and reload channel config through Feishu config API, ensure or recreate agents, or debug Feishu messages not reaching CSGClaw/OpenClaw workers.
+description: Configure and troubleshoot CSGClaw Feishu/Lark channel credentials for manager or worker agents. Use when the Manager needs to generate a Feishu bot app creation URL or QR code, collect App ID/App Secret through registration, bind Feishu participants through `csgclaw-cli participant bind`, recreate workers, or debug Feishu messages not reaching CSGClaw/OpenClaw workers.
 ---
 
 # Feishu
@@ -12,7 +12,7 @@ This skill sets up Feishu/Lark bot app credentials for CSGClaw-managed OpenClaw 
 Use the bundled script at `/home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py`:
 
 ```bash
-python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py start --bot-id u-dev --role worker --bot-name dev --qr
+python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py start --agent u-dev --role worker --bot-name dev --qr
 python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py finalize --registration-id <id>
 ```
 
@@ -20,10 +20,10 @@ If `start`/`poll` returns a machine-mode `next` command, prefer that absolute co
 
 ## Script roles
 
-- `scripts/feishu_register.py`: User-facing CLI entrypoint. Supports `start`, `poll`, `finalize`, `status`, `recreate-agent`.
+- `scripts/feishu_register.py`: User-facing CLI entrypoint. Supports `start`, `poll`, `finalize`, `status`, `recreate-agent`, `bind-manager`.
 - `scripts/feishu_setup/commands.py`: Parses CLI arguments and maps them to handler functions.
 - `scripts/feishu_setup/registration.py`: Implements registration flow and device-code polling state transitions.
-- `scripts/feishu_setup/csgclaw.py`: Applies config to CSGClaw, triggers reload, and performs participant/agent ensure/recreate actions.
+- `scripts/feishu_setup/csgclaw.py`: Applies config to CSGClaw through `participant bind` and returns the manager action card when needed.
 - `scripts/feishu_setup/state.py`: Stores and migrates registration state files.
 - `scripts/feishu_setup/config.py`: Defines constants, env-key names, and default path constants.
 - `scripts/tests/`: tests and fixtures for script behavior.
@@ -36,7 +36,7 @@ The script uses Feishu/Lark's accounts registration flow:
 4. poll with `action=poll`, `device_code=<...>`, `tp=ob_app`
 5. when the user completes app creation, receive `client_id` and `client_secret`
 6. map `client_id` -> CSGClaw `app_id`, and `client_secret` -> CSGClaw `app_secret`
-7. immediately write the secret to CSGClaw through `PUT /api/v1/channels/feishu/config` without printing it
+7. immediately pipe the secret to `csgclaw-cli participant bind --feishu-kind bot --app-secret-stdin` without printing it
 
 Do not add or require a public Feishu Open Platform HTTP webhook as the main inbound path. OpenClaw uses Feishu/Lark WebSocket mode for real inbound bot messages. CSGClaw's `/api/v1/channels/feishu/participants/{participant}/events` endpoint is an internal SSE bridge for CSGClaw manager-to-worker dispatch, not a Feishu public webhook.
 
@@ -47,7 +47,7 @@ Use this skill when the user asks to:
 - create/configure Feishu credentials for the manager agent `u-manager` or a worker agent such as `u-dev`
 - generate a Feishu/Lark bot creation URL or QR code
 - get Feishu AK/SK, App ID/App Secret, or client_id/client_secret for a CSGClaw-managed agent
-- reload CSGClaw channel config after setting Feishu credentials
+- bind Feishu participant config after setting Feishu credentials
 - recreate a worker or manager after Feishu credentials are configured
 - debug why Feishu messages do not reach a CSGClaw/OpenClaw worker
 
@@ -55,7 +55,7 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
 
 ## Terms
 
-- Target agent ID: usually `u-manager`, `u-dev`, `u-qa`, etc. The helper script still names this legacy argument `--bot-id`.
+- Target agent ID: usually `u-manager`, `u-dev`, `u-qa`, etc. Pass it to the helper script with `--agent`.
 - Feishu `app_id` / `app_secret`: the Feishu bot application's credentials.
 - AK/SK in user wording usually means Feishu `app_id/app_secret` or `client_id/client_secret` returned by the registration flow.
 - Manager agent: usually `u-manager`; recreating it can interrupt the current manager skill run.
@@ -71,7 +71,7 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
    - inside manager box: typically `~/.openclaw/workspace/skills/feishu` or your configured skill root
    - host repo path: `internal/templates/embed/openclaw-manager/workspace/skills/feishu`
 4. Server build supports:
-   - Feishu config API (`PUT`/`GET`/`POST /api/v1/channels/feishu/config`)
+   - `csgclaw-cli participant bind`
    - `POST /api/v1/channels/feishu/participants`
    - `POST /api/v1/agents/{id}/recreate`
 
@@ -101,12 +101,19 @@ For existing Feishu groups, `csgclaw-cli member list` and `member create` requir
 1. Never print `app_secret`, `client_secret`, access tokens, verification tokens, encryption keys, or connection strings.
 2. If a secret must be represented in examples or summaries, write `[REDACTED]`.
 3. The script must print only `app_secret: present` after finalize.
-4. Do not store returned `client_secret` in skill state files. `finalize` pipes it directly to `PUT /api/v1/channels/feishu/config`.
-5. Verify with `GET /api/v1/channels/feishu/config?bot_id=<id>`, not by printing the secret.
+4. Do not store returned `client_secret` in skill state files. `finalize` pipes it directly to `csgclaw-cli participant bind --app-secret-stdin`.
+5. Verify with `csgclaw-cli participant list --channel feishu` and check the `channel_app_config.app_id` you configured; keep `app_secret` masked.
 
 ## Choose Target Agent
 
 Ask for the target when it is not explicit.
+
+If the user asks to **create/provision/add a new worker and connect it to Feishu** in one request, do this as a two-phase workflow:
+
+1. Use `agent-creator` first to create the worker. That skill must run `hub list`, `hub get`, then `csgclaw-cli participant create --type agent --bind create --from-template ...`.
+2. Only after the worker agent exists, return to this Feishu skill and run the QR/manual credential flow for that existing agent.
+
+Do not run Feishu `start`, `finalize`, or `participant bind --feishu-kind bot` for a worker that does not exist yet. `participant bind` only attaches Feishu credentials to an existing agent; it does not create the worker.
 
 If the user does not specify an agent in the request, ask: "请明确要对接飞书的目标 Agent 名字（如 `manager`/`u-manager` 或 `dev`/`u-dev`）".
 Resolve target:
@@ -120,7 +127,8 @@ Example normalization:
 - `manager` -> manager
 - `u-manager` -> manager
 
-For worker flow, finalize writes config, reloads Feishu channel config, ensures the CSGClaw Feishu participant, then recreates the worker so runtime env/files are materialized from the updated config.
+For worker flow, finalize binds the Feishu bot participant through `csgclaw-cli participant bind`; the bind command saves credentials and recreates the worker unless recreate was disabled.
+If the target worker is missing, `start` fails before creating a Feishu app and points back to `agent-creator`.
 
 ## Primary QR/Launcher Flow
 
@@ -130,7 +138,7 @@ Run from this skill directory:
 
 ```bash
 python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py start \
-  --bot-id <target_agent_id> \
+  --agent <target_agent_id> \
   --role worker \
   --bot-name <worker_name> \
   --description "dev worker agent" \
@@ -162,15 +170,12 @@ By default, `finalize` will:
 
 1. poll Feishu/Lark until credentials are available or timeout
 2. receive `client_id/client_secret`
-3. write `app_id/app_secret` to CSGClaw through `Feishu config API`
-   - for `u-manager`, overwrite global `admin_open_id` only with the registration `open_id`
-   - for worker agents, ignore registration `open_id` and do not read, preserve, write, or report `admin_open_id`
-4. auto-reload channel config
-5. ensure the CSGClaw Feishu participant through `POST /api/v1/channels/feishu/participants`
-6. for worker targets, recreate the worker after participant ensure so the new Feishu env/files take effect
+3. for `u-manager`, bind `feishu:admin` human to the registration `open_id`
+4. bind the Feishu bot participant through `csgclaw-cli participant bind --feishu-kind bot`
+5. for worker targets, recreate the worker from the bind command so the new Feishu env/files take effect
    - if BoxLite reports `box with name '<name>' already exists` while CSGClaw reports `agent "<id>" not found`, stop and tell the user the host has a stale partial worker box; do not keep trying random API paths or host-only commands from inside manager
-7. for manager targets, print a `csgclaw.action_card` JSON payload with a whitelisted `rebuild-manager` action; the CSGClaw Web chat message should render the button to complete the window-triggered manager bootstrap replace flow.
-8. print JSON with `app_secret: present`, never the real secret
+6. for manager targets, print a `csgclaw.action_card` JSON payload with a whitelisted `rebuild-manager` action; the CSGClaw Web chat message should render the button to complete the window-triggered manager bootstrap replace flow.
+7. print JSON with `app_secret: present`, never the real secret
 
 For a worker, default finalize is usually enough:
 
@@ -178,12 +183,12 @@ For a worker, default finalize is usually enough:
 python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py finalize --registration-id <id>
 ```
 
-Use an exec/tool timeout of at least 600 seconds for this command. For workers, finalize recreates the target worker after config reload and participant ensure; do not create a second worker or change the target agent ID.
+Use an exec/tool timeout of at least 600 seconds for this command. For workers, finalize should report `config.bot_bind.restart_status`; do not create a second worker or change the target agent ID.
 
-For manager, default finalize configures credentials and ensures the participant, then prints a structured action card. Return the JSON object exactly as the chat message content: no leading sentence, no Markdown table, no bullet list, no ```json fence, and no explanatory wrapper. The CSGClaw Web frontend will render a "重建 Manager" button.
+For manager, default finalize binds `feishu:admin` and `feishu:manager`, then prints a structured action card. Return the JSON object exactly as the chat message content: no leading sentence, no Markdown table, no bullet list, no ```json fence, and no explanatory wrapper. The CSGClaw Web frontend will render a "重建 Manager" button.
 The click is handled by the browser and calls the manager bootstrap replace surface (`POST /api/v1/agents` with `{"id":"u-manager","replace":true}`), not the hazardous generic recreate route.
 
-Do not run `python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py recreate-agent --bot-id u-manager` as a terminal self-recreate step anymore. The manager-rebuild action must be completed by clicking the rendered Web window button, which calls `POST /api/v1/agents` with `{"id":"u-manager","replace":true}`.
+Do not run `python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py recreate-agent --agent u-manager` as a terminal self-recreate step. The manager-rebuild action must be completed by clicking the rendered Web window button, which calls `POST /api/v1/agents` with `{"id":"u-manager","replace":true}`.
 
 For manager only, BoxLite status is not a valid post-recreate success check in this skill. The OpenClaw gateway is managed by the runtime wrapper, so BoxLite may report a transient lifecycle state while CSGClaw is replacing the manager. Do not treat that as a reason to recreate manager again from the same manager-hosted run.
 
@@ -215,74 +220,75 @@ If Feishu/Lark registration endpoint fails, expires, or tenant policy blocks sca
    - App ID, usually `cli_...`
    - App Secret, provided only through a secure path.
 
-Use the Feishu config API to set manually:
+Use `participant bind` to set manually:
 
 ```bash
-curl -sS -X PUT "$CSGCLAW_BASE_URL/api/v1/channels/feishu/config" \
-  -H "Authorization: Bearer [REDACTED]" \
-  -H "Content-Type: application/json" \
-  -d '{"bot_id":"u-dev","app_id":"cli_xxx","app_secret":"[REDACTED]"}'
+printf '%s' '[REDACTED]' | csgclaw-cli participant bind \
+  --channel feishu \
+  --feishu-kind bot \
+  --agent u-dev \
+  --app-id cli_xxx \
+  --app-secret-stdin \
+  --restart
 ```
 
-For manager setup, include `admin_open_id`:
+For manager setup, use the wrapper so the final chat response is a browser action card:
 
 ```bash
-curl -sS -X PUT "$CSGCLAW_BASE_URL/api/v1/channels/feishu/config" \
-  -H "Authorization: Bearer [REDACTED]" \
-  -H "Content-Type: application/json" \
-  -d '{"bot_id":"u-manager","app_id":"cli_xxx","app_secret":"[REDACTED]","admin_open_id":"ou_xxx"}'
+printf '%s' '[REDACTED]' | python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py bind-manager \
+  --open-id ou_xxx \
+  --app-id cli_xxx \
+  --app-secret-stdin
 ```
+
+Return the printed JSON object exactly as the chat response. Do not summarize it, translate it, add a Markdown table, or wrap it in a code fence.
 
 ## CLI Workflow Used by Script
 
-The script writes and reloads Feishu config through `Feishu config API` because sandboxed skills should not edit host files directly or hand-roll config API calls.
+The script writes Feishu config through `csgclaw-cli participant bind` because sandboxed skills should not edit host files directly.
 
-For `u-manager`, the script passes the registration `open_id` as the global `admin_open_id` while setting config and auto-reloading:
+For `u-manager`, `bind-manager` binds `feishu:admin` when `--open-id` is provided, binds `feishu:manager` with `--restart`, then prints a top-level action card:
 
 ```bash
-curl -sS -X PUT "$CSGCLAW_BASE_URL/api/v1/channels/feishu/config" \
-  -H "Authorization: Bearer [REDACTED]" \
-  -H "Content-Type: application/json" \
-  -d '{"bot_id":"u-manager","app_id":"cli_xxx","app_secret":"[REDACTED]","admin_open_id":"ou_xxx"}'
+printf '%s' '[REDACTED]' | python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py bind-manager --open-id ou_xxx --app-id cli_xxx --app-secret-stdin
 ```
 
-Expected response shape:
+Expected wrapper response shape:
 
 ```json
 {
+  "type": "csgclaw.action_card",
+  "status": "manager_recreate_pending",
+  "agent_id": "u-manager",
   "bot_id": "u-manager",
-  "configured": true,
-  "app_id": "cli_xxx",
-  "app_secret": "present",
-  "admin_open_id": "ou_xxx",
-  "reloaded": true
+  "setup_status": "configured",
+  "config": {
+    "bot_bind": {
+      "participant_id": "manager",
+      "restart_status": "manager_restart_required"
+    }
+  },
+  "actions": [
+    {
+      "id": "rebuild-manager",
+      "method": "manager-bootstrap-replace"
+    }
+  ]
 }
 ```
 
-Ensure participant:
+For workers, the bind command recreates the worker by default so the runtime picks up the updated Feishu credentials:
 
 ```bash
-csgclaw-cli participant create --type agent --bind create --id dev --agent-id u-dev --name dev --description "dev worker agent" --role worker --channel feishu --channel-user-ref ou_xxx --channel-user-kind open_id --channel-app-ref cli_xxx
-```
-
-Recreate the worker after config reload and participant ensure so the runtime picks up the updated Feishu credentials:
-
-```bash
-curl -sS -X POST "$CSGCLAW_BASE_URL/api/v1/agents/u-dev/recreate" \
-  -H "Authorization: Bearer [REDACTED]"
+printf '%s' '[REDACTED]' | csgclaw-cli participant bind --channel feishu --feishu-kind bot --agent u-dev --app-id cli_xxx --app-secret-stdin --restart
 ```
 
 ## CLI Workflow for Manual Control
 
-Use `Feishu config API` for channel config. Use the helper script or the backend recreate API for agent recreate, because lite `csgclaw-cli` does not expose agent commands and manager boxes usually do not have full `csgclaw`.
+Use `participant bind` for channel config. Use the helper script for manager rebuild because the manager must not recreate itself from the same manager-hosted run.
 
 ```bash
-curl -sS "$CSGCLAW_BASE_URL/api/v1/channels/feishu/config?bot_id=u-dev" \
-  -H "Authorization: Bearer [REDACTED]"
-curl -sS -X POST "$CSGCLAW_BASE_URL/api/v1/channels/feishu/config" \
-  -H "Authorization: Bearer [REDACTED]"
-csgclaw-cli participant create --type agent --bind create --id dev --agent-id u-dev --name dev --description "dev worker agent" --role worker --channel feishu --channel-user-ref ou_xxx --channel-user-kind open_id --channel-app-ref cli_xxx
-python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py recreate-agent --bot-id u-dev
+printf '%s' '[REDACTED]' | csgclaw-cli participant bind --channel feishu --feishu-kind bot --agent u-dev --app-id cli_xxx --app-secret-stdin --restart
 ```
 
 ## Worker One-Shot Recipe
@@ -290,7 +296,7 @@ python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py r
 1. Start registration:
 
 ```bash
-python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py start --bot-id <worker_id> --role worker --bot-name <worker_name> --description "<worker_desc>" --qr
+python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py start --agent <worker_id> --role worker --bot-name <worker_name> --description "<worker_desc>" --qr
 ```
 
 2. Send the printed URL/QR to the user.
@@ -302,7 +308,7 @@ python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py f
 
 Run the command with exec `timeout` at least `600`.
 
-4. Confirm finalize recreated the worker after reload and participant ensure.
+4. Confirm finalize returned `config.bot_bind.restart_status` for the worker.
 5. Tell the user to test from Feishu by messaging or @mentioning the Feishu bot app.
 
 ## Manager One-Shot Recipe
@@ -312,7 +318,7 @@ Run this recipe from the normal flow and render the manager rebuild action card 
 1. Start registration:
 
 ```bash
-python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py start --bot-id u-manager --role manager --bot-name manager --description "manager agent" --qr
+python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py start --agent u-manager --role manager --bot-name manager --description "manager agent" --qr
 ```
 
 2. Send the printed URL/QR to the user.
@@ -332,9 +338,9 @@ Do not use the generic manager recreate endpoint or any terminal/host-side manag
 
 1. Using `csgclaw-cli agent ...`: lite CLI does not have agent commands. Use full `csgclaw` or API.
 2. Running host-only `csgclaw` or `boxlite` commands from inside manager: manager usually only has `csgclaw-cli`; use this script/API from manager, and ask the host operator to clean stale BoxLite boxes if needed.
-3. Looking for removed `csgclaw-cli bot config ...` commands: use `csgclaw-cli participant config --channel feishu ...`, backed by `/api/v1/channels/feishu/config`.
-4. Creating the CSGClaw participant before writing/reloading Feishu config: this can create local placeholder identity.
-5. Expecting reload to update an already-running OpenClaw box: recreate is still required.
+3. If you see older workflow docs mentioning alternate Feishu config commands, ignore them and use `csgclaw-cli participant bind ...` to write config.
+4. Binding the wrong target: pass the CSGClaw agent ID such as `u-dev` or `u-manager`; the bind command writes the canonical Feishu participant ID.
+5. Expecting bind alone to update an already-running OpenClaw box: worker recreate or manager rebuild is still required.
 6. Calling manager recreate from inside this manager-hosted skill: return the action card so the current window renders the rebuild button.
 7. Checking `agent list` or `participant list` after manager recreate and treating `stopped` as failure: manager gateway runs in daemon mode, so BoxLite status is not a reliable success signal for this skill.
 8. Printing secrets in summaries or logs: always mask as `[REDACTED]` or `present`.
@@ -345,10 +351,10 @@ Do not use the generic manager recreate endpoint or any terminal/host-side manag
 
 - [ ] `start` printed a launcher URL or QR code for the user.
 - [ ] `finalize` output shows `app_secret` only as `present`.
-- [ ] `finalize` configured the target agent ID (`bot_id` field) and `app_id` in CSGClaw.
-- [ ] CSGClaw channel config was reloaded.
+- [ ] `finalize` configured the target agent ID (`agent_id` field) and `app_id` in CSGClaw.
+- [ ] `config.bot_bind.participant_id` is the canonical Feishu participant ID, such as `dev` or `manager`.
 - [ ] CSGClaw participant exists with `channel=feishu`.
-- [ ] Worker agents are recreated after config reload and participant ensure.
+- [ ] Worker bind reported `restart_status` such as `worker_recreated` or `restart_skipped`.
 - [ ] New worker finalize was run with a tool timeout of at least 600 seconds.
 - [ ] Manager finalize returned a raw `csgclaw.action_card` JSON object with `rebuild-manager` action metadata for the web button.
 - [ ] No manager-hosted command called the generic manager recreate endpoint or any host-side manager rebuild command.

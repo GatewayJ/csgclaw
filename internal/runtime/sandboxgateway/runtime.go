@@ -34,7 +34,7 @@ type WorkspaceLayout struct {
 
 type Dependencies struct {
 	RuntimeKind    string
-	FeishuProvider feishu.BotCredentialProvider
+	FeishuProvider feishu.AgentCredentialProvider
 
 	SandboxProviderName func() string
 	EnsureRuntime       func(agentName string) (sandbox.Runtime, error)
@@ -52,7 +52,7 @@ type Dependencies struct {
 
 	ResolveAgent       func(h agentruntime.Handle) (AgentRef, error)
 	SyncHandle         func(h agentruntime.Handle) error
-	BuildRuntimeEnv    func(baseURL, accessToken, participantID, agentID, llmBaseURL, modelID string, feishuProvider feishu.BotCredentialProvider) map[string]string
+	BuildRuntimeEnv    func(baseURL, accessToken, participantID, agentID, llmBaseURL, modelID string, feishuProvider feishu.AgentCredentialProvider) map[string]string
 	AddProfileEnv      func(envVars map[string]string, profileEnv map[string]string)
 	HomeEnv            string
 	MountGuestPath     string
@@ -91,7 +91,7 @@ func New(deps Dependencies) *Runtime {
 	}
 }
 
-func (r *Runtime) SetFeishuProvider(provider feishu.BotCredentialProvider) {
+func (r *Runtime) SetFeishuProvider(provider feishu.AgentCredentialProvider) {
 	if r == nil {
 		return
 	}
@@ -101,7 +101,7 @@ func (r *Runtime) SetFeishuProvider(provider feishu.BotCredentialProvider) {
 }
 
 // CurrentFeishuProvider returns the provider used when provisioning or creating gateway boxes.
-func (r *Runtime) CurrentFeishuProvider() feishu.BotCredentialProvider {
+func (r *Runtime) CurrentFeishuProvider() feishu.AgentCredentialProvider {
 	if r == nil {
 		return nil
 	}

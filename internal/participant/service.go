@@ -88,20 +88,21 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (apitypes.Parti
 
 	now := time.Now().UTC()
 	created := apitypes.Participant{
-		ID:              normalized.ID,
-		Channel:         normalized.Channel,
-		Type:            normalized.Type,
-		Name:            normalized.Name,
-		Avatar:          normalized.Avatar,
-		ChannelUserRef:  normalized.ChannelUser.Ref,
-		ChannelUserKind: normalized.ChannelUser.Kind,
-		ChannelAppRef:   normalized.ChannelAppRef,
-		AgentID:         normalized.AgentID,
-		LifecycleStatus: LifecycleStatusActive,
-		Mentionable:     true,
-		Metadata:        cloneMetadata(normalized.Metadata),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:               normalized.ID,
+		Channel:          normalized.Channel,
+		Type:             normalized.Type,
+		Name:             normalized.Name,
+		Avatar:           normalized.Avatar,
+		ChannelUserRef:   normalized.ChannelUser.Ref,
+		ChannelUserKind:  normalized.ChannelUser.Kind,
+		ChannelAppRef:    normalized.ChannelAppRef,
+		ChannelAppConfig: cloneMap(normalized.ChannelAppConfig),
+		AgentID:          normalized.AgentID,
+		LifecycleStatus:  LifecycleStatusActive,
+		Mentionable:      true,
+		Metadata:         cloneMetadata(normalized.Metadata),
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	if err := s.store.Save(created); err != nil {
 		return apitypes.Participant{}, err
@@ -349,6 +350,40 @@ func (s *Service) Update(_ context.Context, channel, id string, req UpdateReques
 	if req.Avatar != nil {
 		item.Avatar = strings.TrimSpace(*req.Avatar)
 	}
+	if req.ChannelUserRef != nil {
+		if channel != ChannelFeishu {
+			return apitypes.Participant{}, false, fmt.Errorf("channel_user_ref can only be updated for %s participants", ChannelFeishu)
+		}
+		item.ChannelUserRef = strings.TrimSpace(*req.ChannelUserRef)
+	}
+	if req.ChannelUserKind != nil {
+		if channel != ChannelFeishu {
+			return apitypes.Participant{}, false, fmt.Errorf("channel_user_kind can only be updated for %s participants", ChannelFeishu)
+		}
+		kind := strings.TrimSpace(*req.ChannelUserKind)
+		if kind == "" {
+			return apitypes.Participant{}, false, fmt.Errorf("channel_user_kind is required")
+		}
+		item.ChannelUserKind = kind
+	}
+	if req.ChannelAppConfig != nil {
+		if channel != ChannelFeishu {
+			return apitypes.Participant{}, false, fmt.Errorf("channel_app_config can only be updated for %s participants", ChannelFeishu)
+		}
+		item.ChannelAppConfig = cloneMap(req.ChannelAppConfig)
+	}
+	if req.AgentID != nil {
+		if channel != ChannelFeishu {
+			return apitypes.Participant{}, false, fmt.Errorf("agent_id can only be updated for %s participants", ChannelFeishu)
+		}
+		if item.Type != TypeAgent {
+			return apitypes.Participant{}, false, fmt.Errorf("agent_id can only be updated for %s participants", TypeAgent)
+		}
+		item.AgentID = strings.TrimSpace(*req.AgentID)
+	}
+	if err := validateFeishuParticipantConfig(item.Channel, item.Type, item.ChannelUserRef, item.ChannelUserKind, item.ChannelAppConfig); err != nil {
+		return apitypes.Participant{}, false, err
+	}
 	if req.Mentionable != nil {
 		item.Mentionable = *req.Mentionable
 	}
@@ -472,16 +507,17 @@ func (s *Service) deleteUnreferencedCSGClawAgentUser(deleted apitypes.Participan
 }
 
 type normalizedCreateRequest struct {
-	ID            string
-	Channel       string
-	Type          string
-	Name          string
-	Avatar        string
-	ChannelAppRef string
-	ChannelUser   ChannelUserSpec
-	AgentBinding  AgentBindingSpec
-	AgentID       string
-	Metadata      map[string]any
+	ID               string
+	Channel          string
+	Type             string
+	Name             string
+	Avatar           string
+	ChannelAppRef    string
+	ChannelAppConfig map[string]any
+	ChannelUser      ChannelUserSpec
+	AgentBinding     AgentBindingSpec
+	AgentID          string
+	Metadata         map[string]any
 }
 
 func (s *Service) normalizeCreateRequest(req CreateRequest) (normalizedCreateRequest, error) {
@@ -522,8 +558,14 @@ func (s *Service) normalizeCreateRequest(req CreateRequest) (normalizedCreateReq
 			channelUser.Kind = ChannelUserKindOpenID
 		}
 	}
-	if channelUser.Ref == "" {
+	if channelUser.Ref == "" && !allowsEmptyFeishuChannelUserRef(channel, typ, channelUser.Kind, req.ChannelAppConfig) {
 		return normalizedCreateRequest{}, fmt.Errorf("channel_user.ref is required")
+	}
+	if err := validateFeishuParticipantConfig(channel, typ, channelUser.Ref, channelUser.Kind, req.ChannelAppConfig); err != nil {
+		return normalizedCreateRequest{}, err
+	}
+	if channel != ChannelFeishu && len(req.ChannelAppConfig) > 0 {
+		return normalizedCreateRequest{}, fmt.Errorf("channel_app_config can only be set for %s participants", ChannelFeishu)
 	}
 
 	binding := req.AgentBinding
@@ -556,16 +598,62 @@ func (s *Service) normalizeCreateRequest(req CreateRequest) (normalizedCreateReq
 	}
 
 	return normalizedCreateRequest{
-		ID:            id,
-		Channel:       channel,
-		Type:          typ,
-		Name:          name,
-		Avatar:        avatar,
-		ChannelAppRef: strings.TrimSpace(req.ChannelAppRef),
-		ChannelUser:   channelUser,
-		AgentBinding:  binding,
-		Metadata:      cloneMetadata(req.Metadata),
+		ID:               id,
+		Channel:          channel,
+		Type:             typ,
+		Name:             name,
+		Avatar:           avatar,
+		ChannelAppRef:    strings.TrimSpace(req.ChannelAppRef),
+		ChannelAppConfig: cloneMap(req.ChannelAppConfig),
+		ChannelUser:      channelUser,
+		AgentBinding:     binding,
+		Metadata:         cloneMetadata(req.Metadata),
 	}, nil
+}
+
+func allowsEmptyFeishuChannelUserRef(channel, typ, kind string, appConfig map[string]any) bool {
+	return channel == ChannelFeishu &&
+		typ == TypeAgent &&
+		strings.TrimSpace(kind) == ChannelUserKindAppID &&
+		strings.TrimSpace(feishuConfigString(appConfig, "app_id")) != ""
+}
+
+func validateFeishuParticipantConfig(channel, typ, channelUserRef, channelUserKind string, appConfig map[string]any) error {
+	if channel != ChannelFeishu {
+		return nil
+	}
+	switch strings.TrimSpace(channelUserKind) {
+	case ChannelUserKindOpenID:
+		if strings.TrimSpace(channelUserRef) == "" {
+			return fmt.Errorf("channel_user.ref is required")
+		}
+	case ChannelUserKindAppID:
+		if typ != TypeAgent {
+			return fmt.Errorf("channel_user_kind %q requires participant type %q", ChannelUserKindAppID, TypeAgent)
+		}
+		if strings.TrimSpace(feishuConfigString(appConfig, "app_id")) == "" {
+			return fmt.Errorf("channel_app_config.app_id is required")
+		}
+		if strings.TrimSpace(feishuConfigString(appConfig, "app_secret")) == "" {
+			return fmt.Errorf("channel_app_config.app_secret is required")
+		}
+	default:
+		return fmt.Errorf("channel_user_kind must be one of %q or %q", ChannelUserKindOpenID, ChannelUserKindAppID)
+	}
+	return nil
+}
+
+func feishuConfigString(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	value, _ := values[key]
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return ""
+	}
 }
 
 func (s *Service) resolveParticipantID(channel, typ string, req CreateRequest) (string, error) {
@@ -741,6 +829,10 @@ func randomSuffix() string {
 }
 
 func cloneMetadata(src map[string]any) map[string]any {
+	return cloneMap(src)
+}
+
+func cloneMap(src map[string]any) map[string]any {
 	if len(src) == 0 {
 		return nil
 	}

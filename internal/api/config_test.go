@@ -287,3 +287,22 @@ func TestHandleServerConfigValidatesBootstrapWithHubBeforeSave(t *testing.T) {
 		t.Fatalf("config content = %q, want updated server fields", content)
 	}
 }
+
+func writeMinimalAPIConfig(t *testing.T, path string) {
+	t.Helper()
+	content := `[server]
+listen_addr = "127.0.0.1:18080"
+access_token = "secret"
+
+[models]
+default = "default.model"
+
+[models.providers.default]
+base_url = "http://127.0.0.1:4000"
+api_key = "sk"
+models = ["model"]
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+}

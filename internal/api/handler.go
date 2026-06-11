@@ -1818,7 +1818,7 @@ func (h *Handler) presentAgentsForRequest(r *http.Request, items []agent.Agent) 
 	if !includeParticipants(r) || h == nil || h.participant == nil {
 		return out
 	}
-	byAgent := participantsByAgentID(h.participant.List(participant.ListOptions{}))
+	byAgent := participantsByAgentID(presentParticipants(h.participant.List(participant.ListOptions{})))
 	for i := range out {
 		out[i].Participants = byAgent[out[i].ID]
 	}
@@ -1830,7 +1830,7 @@ func (h *Handler) presentAgentForRequest(r *http.Request, item agent.Agent) agen
 	if !includeParticipants(r) || h == nil || h.participant == nil {
 		return resp
 	}
-	resp.Participants = h.participant.List(participant.ListOptions{AgentID: item.ID})
+	resp.Participants = presentParticipants(h.participant.List(participant.ListOptions{AgentID: item.ID}))
 	return resp
 }
 

@@ -43,7 +43,7 @@ func HostGatewayLogPath(agentHome string) string {
 	return filepath.Join(Root(agentHome), "gateway.log")
 }
 
-func EnsureConfig(agentHome, participantID, agentID string, server config.ServerConfig, model config.ModelConfig, resolveBaseURL BaseURLResolver, feishuProvider feishu.BotCredentialProvider) (string, error) {
+func EnsureConfig(agentHome, participantID, agentID string, server config.ServerConfig, model config.ModelConfig, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) (string, error) {
 	hostRoot := Root(agentHome)
 	if err := os.MkdirAll(hostRoot, 0o755); err != nil {
 		return "", fmt.Errorf("create openclaw config dir: %w", err)
@@ -114,7 +114,7 @@ func writeExecApprovalsAllowAll(hostRoot string) error {
 	return nil
 }
 
-func renderConfig(participantID, agentID string, server config.ServerConfig, model config.ModelConfig, resolveBaseURL BaseURLResolver, feishuProvider feishu.BotCredentialProvider) ([]byte, error) {
+func renderConfig(participantID, agentID string, server config.ServerConfig, model config.ModelConfig, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) ([]byte, error) {
 	participantID = strings.TrimSpace(participantID)
 	agentID = strings.TrimSpace(agentID)
 	if participantID == "" {
@@ -230,13 +230,17 @@ func updateOpenClawCsgclawChannel(cfg map[string]any, participantID string, serv
 	return nil
 }
 
-func updateOpenClawFeishuChannel(cfg map[string]any, botID string, provider feishu.BotCredentialProvider) error {
-	botID = strings.TrimSpace(botID)
-	if botID == "" || provider == nil {
+func updateOpenClawFeishuChannel(cfg map[string]any, agentID string, provider feishu.AgentCredentialProvider) error {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" || provider == nil {
 		return nil
 	}
-	app, ok := provider.BotConfig(botID)
+	participantID, app, ok := provider.BotConfigForAgent(agentID)
 	if !ok {
+		return nil
+	}
+	participantID = strings.TrimSpace(participantID)
+	if participantID == "" {
 		return nil
 	}
 	appID := strings.TrimSpace(app.AppID)
@@ -252,17 +256,17 @@ func updateOpenClawFeishuChannel(cfg map[string]any, botID string, provider feis
 	channels["feishu"] = map[string]any{
 		"enabled":        true,
 		"connectionMode": "websocket",
-		"defaultAccount": botID,
+		"defaultAccount": participantID,
 		"dmPolicy":       "open",
 		"allowFrom":      []any{"*"},
 		"groupPolicy":    "open",
 		"requireMention": true,
 		"accounts": map[string]any{
-			botID: map[string]any{
+			participantID: map[string]any{
 				"enabled":   true,
 				"appId":     appID,
 				"appSecret": appSecret,
-				"name":      botID,
+				"name":      participantID,
 			},
 		},
 	}

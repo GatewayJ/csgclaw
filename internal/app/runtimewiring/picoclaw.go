@@ -11,7 +11,7 @@ import (
 	"csgclaw/internal/runtime/sandboxgateway"
 )
 
-func WithPicoClawSandboxRuntime(feishuProvider feishu.BotCredentialProvider) agent.ServiceOption {
+func WithPicoClawSandboxRuntime(feishuProvider feishu.AgentCredentialProvider) agent.ServiceOption {
 	return func(s *agent.Service) error {
 		if s == nil {
 			return fmt.Errorf("agent service is required")
@@ -23,11 +23,11 @@ func WithPicoClawSandboxRuntime(feishuProvider feishu.BotCredentialProvider) age
 	}
 }
 
-func UpdatePicoClawFeishuProvider(svc *agent.Service, provider feishu.BotCredentialProvider) {
+func UpdatePicoClawFeishuProvider(svc *agent.Service, provider feishu.AgentCredentialProvider) {
 	updateRuntimeFeishuProvider(svc, agentruntime.KindPicoClawSandbox, provider)
 }
 
-func picoClawRuntimeEnvVars(baseURL, accessToken, participantID, agentID, llmBaseURL, modelID string, provider feishu.BotCredentialProvider) map[string]string {
+func picoClawRuntimeEnvVars(baseURL, accessToken, participantID, agentID, llmBaseURL, modelID string, provider feishu.AgentCredentialProvider) map[string]string {
 	env := bridgeLLMEnvVars(llmBaseURL, accessToken, modelID)
 	picoclawModelID := picoclawBridgeModelID(modelID)
 	env["CSGCLAW_BASE_URL"] = baseURL
@@ -45,15 +45,15 @@ func picoClawRuntimeEnvVars(baseURL, accessToken, participantID, agentID, llmBas
 	return env
 }
 
-func addFeishuBoxEnvVars(envVars map[string]string, botID string, provider feishu.BotCredentialProvider) {
+func addFeishuBoxEnvVars(envVars map[string]string, agentID string, provider feishu.AgentCredentialProvider) {
 	if envVars == nil {
 		return
 	}
-	botID = strings.TrimSpace(botID)
-	if botID == "" || provider == nil {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" || provider == nil {
 		return
 	}
-	app, ok := provider.BotConfig(botID)
+	_, app, ok := provider.BotConfigForAgent(agentID)
 	if !ok {
 		return
 	}

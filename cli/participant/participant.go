@@ -50,10 +50,10 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 		return c.runList(ctx, run, args[1:], globals)
 	case "create":
 		return c.runCreate(ctx, run, args[1:], globals)
+	case "bind":
+		return c.runBind(ctx, run, args[1:], globals)
 	case "delete":
 		return c.runDelete(ctx, run, args[1:], globals)
-	case "config":
-		return c.runConfig(ctx, run, args[1:], globals)
 	default:
 		c.usage(run)
 		return fmt.Errorf("unknown %s subcommand %q", c.Name(), args[0])
@@ -64,8 +64,8 @@ func (c cmd) usage(run *command.Context) {
 	subcommands := []string{
 		"list               List participants",
 		"create             Create a participant",
+		"bind               Bind an external channel identity",
 		"delete <id>        Delete a participant",
-		"config             Manage participant channel config",
 	}
 	run.UsageCommandGroup(c, run.Program+" "+c.Name()+" <subcommand> [flags]", subcommands)
 }

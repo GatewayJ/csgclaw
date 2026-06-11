@@ -6765,7 +6765,7 @@ func picoclawBoxEnvVars(baseURL, accessToken, participantID, agentID, llmBaseURL
 	return env
 }
 
-func addFeishuBoxEnvVars(envVars map[string]string, botID string, provider feishu.BotCredentialProvider) {
+func addFeishuBoxEnvVars(envVars map[string]string, botID string, provider feishu.AgentCredentialProvider) {
 	if envVars == nil {
 		return
 	}
@@ -6773,7 +6773,7 @@ func addFeishuBoxEnvVars(envVars map[string]string, botID string, provider feish
 	if botID == "" || provider == nil {
 		return
 	}
-	app, ok := provider.BotConfig(botID)
+	_, app, ok := provider.BotConfigForAgent(botID)
 	if !ok {
 		return
 	}
@@ -6783,7 +6783,7 @@ func addFeishuBoxEnvVars(envVars map[string]string, botID string, provider feish
 
 func withTestPicoClawSandboxRuntime(apps ...map[string]feishu.AppConfig) ServiceOption {
 	return func(s *Service) error {
-		var provider feishu.BotCredentialProvider
+		var provider feishu.AgentCredentialProvider
 		if len(apps) > 0 && len(apps[0]) > 0 {
 			provider = testStaticFeishuProvider{apps: cloneTestFeishuApps(apps[0])}
 		}
@@ -6801,7 +6801,7 @@ func withTestPicoClawSandboxRuntime(apps ...map[string]feishu.AppConfig) Service
 	}
 }
 
-func withTestSandboxRuntimeHost(host PicoClawRuntimeHost, provider feishu.BotCredentialProvider, newRuntime func(sandboxgateway.Dependencies) agentruntime.Runtime) ServiceOption {
+func withTestSandboxRuntimeHost(host PicoClawRuntimeHost, provider feishu.AgentCredentialProvider, newRuntime func(sandboxgateway.Dependencies) agentruntime.Runtime) ServiceOption {
 	return func(s *Service) error {
 		return WithRuntime(newRuntime(sandboxgateway.Dependencies{
 			FeishuProvider: provider,
@@ -6836,7 +6836,7 @@ func withTestSandboxRuntimeHost(host PicoClawRuntimeHost, provider feishu.BotCre
 				}, nil
 			},
 			SyncHandle: host.SyncHandle,
-			BuildRuntimeEnv: func(baseURL, accessToken, participantID, agentID, llmBaseURL, modelID string, provider feishu.BotCredentialProvider) map[string]string {
+			BuildRuntimeEnv: func(baseURL, accessToken, participantID, agentID, llmBaseURL, modelID string, provider feishu.AgentCredentialProvider) map[string]string {
 				env := picoclawBoxEnvVars(baseURL, accessToken, participantID, agentID, llmBaseURL, modelID)
 				addFeishuBoxEnvVars(env, agentID, provider)
 				return env
@@ -6854,6 +6854,11 @@ type testStaticFeishuProvider struct {
 func (p testStaticFeishuProvider) BotConfig(botID string) (feishu.AppConfig, bool) {
 	app, ok := p.apps[strings.TrimSpace(botID)]
 	return app, ok
+}
+
+func (p testStaticFeishuProvider) BotConfigForAgent(agentID string) (string, feishu.AppConfig, bool) {
+	app, ok := p.apps[strings.TrimSpace(agentID)]
+	return strings.TrimSpace(agentID), app, ok
 }
 
 func cloneTestFeishuApps(apps map[string]feishu.AppConfig) map[string]feishu.AppConfig {

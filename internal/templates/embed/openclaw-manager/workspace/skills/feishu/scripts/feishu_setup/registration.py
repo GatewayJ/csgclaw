@@ -21,14 +21,14 @@ def accounts_base_url(domain: str) -> str:
     return ONBOARD_ACCOUNTS_URLS.get(domain, ONBOARD_ACCOUNTS_URLS["feishu"])
 
 
-def validate_bot_id(bot_id: str) -> str:
-    bot_id = (bot_id or "").strip()
-    if not bot_id:
-        raise RuntimeError("--bot-id is required")
-    for ch in bot_id:
+def validate_agent_id(agent_id: str) -> str:
+    agent_id = (agent_id or "").strip()
+    if not agent_id:
+        raise RuntimeError("--agent is required")
+    for ch in agent_id:
         if not (ch.isalnum() or ch in "-_"):
-            raise RuntimeError(f"invalid bot id {bot_id!r}: only letters, digits, '-' and '_' are allowed")
-    return bot_id
+            raise RuntimeError(f"invalid agent id {agent_id!r}: only letters, digits, '-' and '_' are allowed")
+    return agent_id
 
 
 def append_launcher_params(url: str, source: str = "csgclaw") -> str:

@@ -17,9 +17,9 @@ func TestRuntimeSetFeishuProviderUpdatesGatewayCreateSpecEnv(t *testing.T) {
 				"u-dev": {AppID: "old-app", AppSecret: "old-secret"},
 			},
 		},
-		BuildRuntimeEnv: func(_, _, participantID, agentID, _, _ string, provider feishu.BotCredentialProvider) map[string]string {
+		BuildRuntimeEnv: func(_, _, participantID, agentID, _, _ string, provider feishu.AgentCredentialProvider) map[string]string {
 			env := map[string]string{"PARTICIPANT_ID": participantID}
-			if app, ok := provider.BotConfig(agentID); ok {
+			if _, app, ok := provider.BotConfigForAgent(agentID); ok {
 				env["APP_ID"] = app.AppID
 				env["APP_SECRET"] = app.AppSecret
 			}
@@ -72,4 +72,9 @@ type feishuProviderStub struct {
 func (p feishuProviderStub) BotConfig(botID string) (feishu.AppConfig, bool) {
 	app, ok := p.apps[botID]
 	return app, ok
+}
+
+func (p feishuProviderStub) BotConfigForAgent(agentID string) (string, feishu.AppConfig, bool) {
+	app, ok := p.apps[agentID]
+	return agentID, app, ok
 }

@@ -306,6 +306,6 @@ non_suspicious_only = true
 
 Channel integration is optional. CSGClaw works with the built-in Web UI by default, and you only need channel config when you want to connect external messaging platforms such as Feishu.
 
-Keep `config.toml` focused on shared server, model, bootstrap, and sandbox settings. Feishu credentials live in a standalone `channels/feishu.toml` file next to the selected `config.toml`; legacy `[channels.feishu]` blocks in `config.toml` are not read.
+Keep `config.toml` focused on shared server, model, bootstrap, and sandbox settings. Feishu credentials live on Feishu participants in `~/.csgclaw/im/participants.json` and are written with `csgclaw-cli participant bind`; legacy `[channels.feishu]` blocks and `channels/feishu.toml` are not read by the participant-backed flow.
 
 For detailed field definitions and examples, see [Feishu Channel Configuration](channel/feishu.md).

@@ -5,7 +5,7 @@
 `~/.csgclaw/im/participants.json` 统一承载 Feishu participant、app 凭证、admin human
 和 agent 绑定关系。旧 toml 自动迁移本期暂不实现。
 
-兼容性原则：保持现有 participant store、participant API、room/message/member 引用和非
+变更边界：保持现有 participant store、participant API、room/message/member 引用和非
 Feishu channel 行为不变；只在 `channel=feishu` 的 participant 内增加 Feishu 专属
 `channel_app_config` 结构。
 
@@ -14,20 +14,20 @@ Feishu channel 行为不变；只在 `channel=feishu` 的 participant 内增加 
 
 ## 当前代码结论
 
-当前实现已经有 participant 架构，但 Feishu 配置还停留在旧形状：
+改造前已经有 participant 架构，但 Feishu 配置仍停留在旧形状：
 
 - `participant.Store` 持久化到 `~/.csgclaw/im/participants.json`，文件结构是顶层
   `participants: []`。
 - `Participant` 当前有 `channel_app_ref`，但没有 `channel_app_config`，无法保存
   Feishu app credential；真人 admin open_id 可以用现有 `channel_user_ref` 表达。
-- `pt create` 可以创建 Feishu participant 并绑定 agent；`pt config` 仍通过
-  `/api/v1/channels/feishu/config` 写 `channels/feishu.toml`。
+- `pt create` 可以创建 Feishu participant 并绑定 agent；旧 `pt config` 会写
+  `channels/feishu.toml`。
 - Feishu provider 仍从 `feishu.FileStore` 读取 `[bots.<key>]`，`BotConfig(key)` 的 key
   仍是旧本地配置 key。
 - PicoClaw runtime env 注入当前仍用 `agentID` 查 Feishu provider；OpenClaw 配置渲染也
   用 `agentID` 查 provider。
-- Feishu skill 当前脚本仍使用 `--bot-id`、先写 Feishu config API、再 ensure participant、
-  最后 recreate worker。
+- Feishu skill 旧脚本使用 agent 的旧 bot 命名、先写 Feishu config API、再 ensure
+  participant、最后 recreate worker。
 
 新版方案要把这条链路改成：
 
@@ -57,7 +57,7 @@ csgclaw-cli pt bind \
   --agent <agent-name-or-id> \
   --app-id <cli_xxx> \
   --app-secret-stdin \
-  [--restart|--no-restart]
+  [--restart]
 
 csgclaw-cli pt bind \
   --channel feishu \
@@ -92,8 +92,7 @@ participant ID 固定为 `admin`，用现有 `channel_user_ref` 保存 Feishu �
 | `--open-id` | human 必填 | 无 | Feishu 真人 open_id，写入 `channel_user_ref`，并设置 `channel_user_kind=open_id`。 |
 | `--app-id` | bot 必填 | 无 | Feishu app `client_id`/`app_id`，写入 `channel_app_config.app_id`。 |
 | `--app-secret-*` | bot 必填 | 无 | Feishu app secret，只读入内存，不打印；human 不接受 app secret。 |
-| `--restart` | bot 可选 | worker 默认 true，manager 走安全动作 | 配置写入后让对应 agent 重新物化 runtime env/config；human 无重启。 |
-| `--no-restart` | bot 可选 | false | 只写 participant/config，不 recreate agent。 |
+| `--restart` | bot 可选 | false | true 时配置写入后让 worker 重新物化 runtime env/config；manager 不会在当前进程内自动 recreate，而是返回 `manager_restart_required`。 |
 
 ### 命令执行逻辑
 
@@ -155,7 +154,7 @@ Bot bind:
    - 继续写入 canonical participant（例如 `feishu:dev`），并在 CLI/server 日志中记录 warning。
    - 后续由历史数据专项迁移统一处理旧 participant。
 9. 保存 participants.json。Feishu 发送、建群和 runtime 注入后续都直接读取该文件，不需要 reload。
-10. 根据 --restart/--no-restart 处理 agent：
+10. 根据 --restart 处理 agent：
    - worker：调用 POST /api/v1/agents/{agent_id}/recreate。
    - manager：保持现有安全边界，返回 action card 或要求浏览器侧 bootstrap replace；不在
      manager-hosted skill 进程里直接自杀式 recreate。
@@ -287,12 +286,12 @@ flowchart TD
 
 ### Skill 具体变更
 
-Feishu skill 不再自己调用旧 Feishu config API，也不再以 `bot_id` 为主语义。
+Feishu skill 不再自己调用旧 Feishu config API，也不再以旧 bot 命名为主语义。
 
 脚本参数建议从：
 
 ```bash
-python .../feishu_register.py start --bot-id u-dev --role worker --bot-name dev --qr
+python .../feishu_register.py start --agent u-dev --role worker --bot-name dev --qr
 python .../feishu_register.py finalize --registration-id <id>
 ```
 
@@ -415,9 +414,8 @@ room 相关命令行和 room API 入参保持当前形状，不新增群主参�
 - `pt bind` 是 CLI 侧串行编排：查询 agent、写 participant、按需 recreate agent。任一步失败
   都不回滚前面已经成功的写入，但必须在日志和命令结果里明确
   标出失败阶段。
-- `pt config --channel feishu --bot-id ...` 作为兼容入口保留；flag 名暂不改，但 `--bot-id`
-  的语义改为 Feishu participant ID。内部改写到 `participants.json` 的 Feishu
-  `channel_app_config`；新文档和 skill 不再推荐它。
+- 删除旧 `pt config` 入口。Feishu 凭证只通过 `pt bind` 写入
+  `participants.json` 的 Feishu `channel_app_config`。
 - CLI 只通过 API 修改 server 侧 state，不直接写宿主机 `participants.json`。
 
 ### API 与 participant 层
@@ -429,7 +427,7 @@ room 相关命令行和 room API 入参保持当前形状，不新增群主参�
 - `internal/participant/service.go`
 - `internal/participant/store.go`
 - `internal/api/participant.go`
-- `internal/api/feishu_config.go`
+- 删除旧 `internal/api/feishu_config.go` 和对应路由。
 - `internal/participant/store_test.go`
 - `internal/participant/service_test.go`
 - `internal/api/participant_test.go`
@@ -462,9 +460,8 @@ room 相关命令行和 room API 入参保持当前形状，不新增群主参�
 - `participant.Store` 继续负责 `participants.json` 落盘和 `0600` 权限。
 - Feishu `channel_app_config` 写入前做 JSON 校验；API 展示和 CLI 渲染统一使用脱敏后的
   participant。
-- `/api/v1/channels/feishu/config` 作为兼容 API 保留，但本期改为写新的 Feishu participant
-  `channel_app_config`，不再写旧 toml，也不承担旧文件自动迁移职责。请求里的旧 `bot_id`
-  字段按 Feishu participant ID 解释。
+- 旧 Feishu config API 不保留。Feishu 凭证通过 participant API 和 `pt bind`
+  写入 `channel_app_config`，不再写旧 toml，也不承担旧文件自动迁移职责。
 
 ### Feishu channel/config reader 层
 
@@ -577,7 +574,7 @@ agentID -> FeishuConfigForAgent(agentID) -> 使用返回的 config 注入 env/co
 职责：
 
 - 用户自然语言入口不变。
-- 脚本 state 从 `bot_id` 改为 `agent`/`agent_id`/`participant_id`。
+- 脚本 state 使用 `agent_id`/`participant_id`。
 - `finalize` 不再 `PUT /api/v1/channels/feishu/config`。
 - `finalize` 改为调用 `csgclaw-cli pt bind`。
 - 输出仍只显示 `app_secret: present`。
@@ -593,7 +590,7 @@ agentID -> FeishuConfigForAgent(agentID) -> 使用返回的 config 注入 env/co
    该 participant 的 `channel_app_config` 注入配置。
 5. 新增 `csgclaw-cli pt bind`，并让它通过现有 API 串行完成 agent 查询、participant upsert、
    agent recreate；失败不回滚，日志和命令结果标明失败阶段。
-6. 修改 Feishu skill：`finalize` 调用 `pt bind`，清理 `bot_id` 文案。
+6. 修改 Feishu skill：`finalize` 调用 `pt bind`，清理旧 bot 命名文案。
 7. 更新 `docs/channel/feishu.zh.md`、`docs/channel/feishu.md` 和 CLI 文档，说明新配置位置。
 8. 跑针对性测试：
 
@@ -610,7 +607,7 @@ go test ./cli/serve ./internal/onboard
 ## 5. 不做的事情
 
 - 不让 skill 直接编辑宿主机 `~/.csgclaw/im/participants.json`。
-- 不继续以 `bot_id` 作为新流程的外部参数或文档主语义。
+- 不继续以旧 bot 命名作为新流程的外部参数或文档主语义。
 - 不在本期实现旧 `channels/feishu.toml` 到 `participants.json` 的自动迁移。
 - 不在 runtime 中保留 `agentID -> old feishu.toml key` 的 fallback。
 - 不把 Feishu public webhook 当作 CSGClaw/OpenClaw 主入站路径。
@@ -641,8 +638,8 @@ go test ./cli/serve ./internal/onboard
    participant ID。
 8. Feishu channel API 入参统一使用 Feishu participant ID；runtime 内部可以按 agent ID 找
    Feishu participant，但 channel API 不直接使用 agent ID/open_id/app_id 作为 participant 入参。
-9. `/api/v1/channels/feishu/config` 兼容入口本期改写到 participant
-   `channel_app_config`，不再写旧 toml；请求里的 `bot_id` 按 Feishu participant ID 解释。
+9. 旧 Feishu config API 不保留；Feishu 凭证只通过 participant API 和 `pt bind`
+   写入 `channel_app_config`，不再写旧 toml。
 10. manager 配置完成后的安全 action card 路径保留；manager 不在 manager-hosted skill 进程里
    直接 recreate 自己。
 11. `pt bind` 采用 CLI 侧串行调用多个现有 API 的实现方式；recreate 或后续步骤失败不回滚已经保存的

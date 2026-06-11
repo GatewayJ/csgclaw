@@ -162,6 +162,75 @@ func TestCreateAgentParticipantCanReuseExistingAgentWithDifferentParticipantID(t
 	}
 }
 
+func TestCreateFeishuBotParticipantStoresChannelAppConfigWithoutOpenID(t *testing.T) {
+	svc := NewService(NewMemoryStore(nil))
+
+	created, err := svc.Create(context.Background(), CreateRequest{
+		ID:      "dev",
+		Channel: ChannelFeishu,
+		Type:    TypeAgent,
+		Name:    "Dev",
+		ChannelUser: ChannelUserSpec{
+			Kind: ChannelUserKindAppID,
+		},
+		ChannelAppConfig: map[string]any{
+			"app_id":     "cli_dev",
+			"app_secret": "dev-secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if created.ChannelUserRef != "" || created.ChannelUserKind != ChannelUserKindAppID {
+		t.Fatalf("created channel user = %+v, want app_id identity without open_id", created)
+	}
+	if got, want := created.ChannelAppConfig["app_id"], "cli_dev"; got != want {
+		t.Fatalf("channel_app_config.app_id = %#v, want %q", got, want)
+	}
+	if got, want := created.ChannelAppConfig["app_secret"], "dev-secret"; got != want {
+		t.Fatalf("channel_app_config.app_secret = %#v, want %q", got, want)
+	}
+}
+
+func TestUpdateFeishuBotParticipantChannelAppConfig(t *testing.T) {
+	svc := NewService(NewMemoryStore(nil))
+	if _, err := svc.Create(context.Background(), CreateRequest{
+		ID:      "dev",
+		Channel: ChannelFeishu,
+		Type:    TypeAgent,
+		Name:    "Dev",
+		ChannelUser: ChannelUserSpec{
+			Kind: ChannelUserKindAppID,
+		},
+		ChannelAppConfig: map[string]any{
+			"app_id":     "cli_old",
+			"app_secret": "old-secret",
+		},
+	}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	updated, ok, err := svc.Update(context.Background(), ChannelFeishu, "dev", UpdateRequest{
+		ChannelAppConfig: map[string]any{
+			"app_id":     "cli_new",
+			"app_secret": "new-secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("Update() ok = false, want true")
+	}
+	if got, want := updated.ChannelAppConfig["app_id"], "cli_new"; got != want {
+		t.Fatalf("updated channel_app_config.app_id = %#v, want %q", got, want)
+	}
+	if got, want := updated.ChannelAppConfig["app_secret"], "new-secret"; got != want {
+		t.Fatalf("updated channel_app_config.app_secret = %#v, want %q", got, want)
+	}
+}
+
 func TestEnsureBootstrapAdminCreatesHumanParticipantWithoutAgent(t *testing.T) {
 	imSvc := im.NewService()
 	store := NewMemoryStore(nil)

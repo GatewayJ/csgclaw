@@ -31,6 +31,7 @@ import (
 	"csgclaw/internal/channel/codexbridge"
 	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/feishu"
+	"csgclaw/internal/channel/feishuparticipant"
 	"csgclaw/internal/cliproxy"
 	"csgclaw/internal/config"
 	"csgclaw/internal/hub"
@@ -260,7 +261,7 @@ func (c internalServeCmd) Run(ctx context.Context, run *command.Context, args []
 
 	printEffectiveConfig(run, cfg, globals.Output)
 	imBus := im.NewBus()
-	feishuProvider, feishuSvc, err := buildFeishuComponents(*configPathFlag)
+	feishuProvider, feishuSvc, err := buildFeishuComponents()
 	if err != nil {
 		return err
 	}
@@ -290,7 +291,7 @@ type serveOptions struct {
 func serveForegroundWithConfigPath(ctx context.Context, run *command.Context, cfg config.Config, configPath string, output string, opts ...serveOptions) error {
 	_ = preflightDefaultModelProvider(ctx, cfg)
 	imBus := im.NewBus()
-	feishuProvider, feishuSvc, err := buildFeishuComponents(configPath)
+	feishuProvider, feishuSvc, err := buildFeishuComponents()
 	if err != nil {
 		return err
 	}
@@ -581,14 +582,13 @@ func configureFeishuService(feishuSvc *feishu.Service, svc *agent.Service) {
 	if feishuSvc == nil {
 		return
 	}
-	update := func(feishuProvider feishu.BotCredentialProvider) {
-		runtimewiring.UpdatePicoClawFeishuProvider(svc, feishuProvider)
-		runtimewiring.UpdateOpenClawFeishuProvider(svc, feishuProvider)
+	provider, ok := feishuSvc.ConfigProvider().(feishu.AgentCredentialProvider)
+	if !ok {
+		slog.Warn("skip feishu runtime wiring: provider does not resolve agent credentials")
+		return
 	}
-	update(feishuSvc.ConfigProvider())
-	feishuSvc.SetConfigReloadHook(func(feishu.Snapshot) {
-		update(feishuSvc.ConfigProvider())
-	})
+	runtimewiring.UpdatePicoClawFeishuProvider(svc, provider)
+	runtimewiring.UpdateOpenClawFeishuProvider(svc, provider)
 }
 
 func preflightDefaultModelProvider(ctx context.Context, cfg config.Config) error {
@@ -859,7 +859,7 @@ func missingModelFlags(fields []string) []string {
 	return flags
 }
 
-func newAgentService(cfg config.Config, feishuProvider feishu.BotCredentialProvider) (*agent.Service, error) {
+func newAgentService(cfg config.Config, feishuProvider feishu.AgentCredentialProvider) (*agent.Service, error) {
 	agentsPath, err := config.DefaultAgentsPath()
 	if err != nil {
 		return nil, err
@@ -1126,11 +1126,11 @@ func newIMService(bus *im.Bus) (*im.Service, error) {
 }
 
 func newParticipantService(agentSvc *agent.Service, imSvc *im.Service) (*participant.Service, error) {
-	imStatePath, err := config.DefaultIMStatePath()
+	participantsPath, err := defaultParticipantsPath()
 	if err != nil {
 		return nil, err
 	}
-	store, err := participant.NewStore(filepath.Join(filepath.Dir(imStatePath), "participants.json"))
+	store, err := participant.NewStore(participantsPath)
 	if err != nil {
 		return nil, err
 	}
@@ -1155,11 +1155,12 @@ func newTeamService(imSvc *im.Service, participantSvc *participant.Service) (*te
 	return team.NewService(team.WithStore(store), team.WithProjector(projector)), adapter, nil
 }
 
-func buildFeishuComponents(configPath string) (feishu.Provider, *feishu.Service, error) {
-	provider, err := feishu.NewProvider(feishu.NewFileStore(configPath))
+func buildFeishuComponents() (feishu.AgentCredentialProvider, *feishu.Service, error) {
+	participantsPath, err := defaultParticipantsPath()
 	if err != nil {
 		return nil, nil, err
 	}
+	provider := feishuparticipant.NewProvider(participantsPath)
 	svc, err := NewFeishuService(provider)
 	if err != nil {
 		return nil, nil, err
@@ -1169,6 +1170,14 @@ func buildFeishuComponents(configPath string) (feishu.Provider, *feishu.Service,
 
 func newFeishuService(provider feishu.Provider) (*feishu.Service, error) {
 	return feishu.NewServiceWithProvider(provider), nil
+}
+
+func defaultParticipantsPath() (string, error) {
+	imStatePath, err := config.DefaultIMStatePath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(imStatePath), "participants.json"), nil
 }
 
 func newLLMService(cfg config.Config, svc *agent.Service) (*llm.Service, error) {

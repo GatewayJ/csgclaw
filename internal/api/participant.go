@@ -29,7 +29,7 @@ func (h *Handler) handleParticipants(w http.ResponseWriter, r *http.Request) {
 			Type:    r.URL.Query().Get("type"),
 			AgentID: r.URL.Query().Get("agent_id"),
 		})
-		writeJSON(w, http.StatusOK, items)
+		writeJSON(w, http.StatusOK, presentParticipants(items))
 	case http.MethodPost:
 		var req participant.CreateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -42,7 +42,7 @@ func (h *Handler) handleParticipants(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusCreated, created)
+		writeJSON(w, http.StatusCreated, presentParticipant(created))
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -67,7 +67,7 @@ func (h *Handler) handleParticipantByIDPath(w http.ResponseWriter, r *http.Reque
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, item)
+		writeJSON(w, http.StatusOK, presentParticipant(item))
 	case http.MethodPatch:
 		var req participant.UpdateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -83,7 +83,7 @@ func (h *Handler) handleParticipantByIDPath(w http.ResponseWriter, r *http.Reque
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, updated)
+		writeJSON(w, http.StatusOK, presentParticipant(updated))
 	case http.MethodDelete:
 		_, ok, err := h.participant.Delete(r.Context(), channelName, id, participant.DeleteOptions{
 			DeleteAgent: r.URL.Query().Get("delete_agent"),
@@ -118,7 +118,7 @@ func (h *Handler) handleParticipantEvents(w http.ResponseWriter, r *http.Request
 		}
 		h.handleParticipantEventsStream(w, r, participantID)
 	case "feishu":
-		h.handleFeishuParticipantEvents(w, r, h.resolveFeishuParticipantTargetID(id))
+		h.handleFeishuParticipantEvents(w, r, id, h.resolveFeishuParticipantTargetID(id))
 	default:
 		http.NotFound(w, r)
 	}
@@ -206,6 +206,30 @@ func participantChannelUserOrID(item apitypes.Participant) string {
 		return ref
 	}
 	return strings.TrimSpace(item.ID)
+}
+
+func presentParticipants(items []apitypes.Participant) []apitypes.Participant {
+	out := make([]apitypes.Participant, 0, len(items))
+	for _, item := range items {
+		out = append(out, presentParticipant(item))
+	}
+	return out
+}
+
+func presentParticipant(item apitypes.Participant) apitypes.Participant {
+	if !strings.EqualFold(strings.TrimSpace(item.Channel), participant.ChannelFeishu) || len(item.ChannelAppConfig) == 0 {
+		return item
+	}
+	cfg := make(map[string]any, len(item.ChannelAppConfig))
+	for key, value := range item.ChannelAppConfig {
+		if strings.EqualFold(strings.TrimSpace(key), "app_secret") && strings.TrimSpace(fmt.Sprint(value)) != "" {
+			cfg[key] = "present"
+			continue
+		}
+		cfg[key] = value
+	}
+	item.ChannelAppConfig = cfg
+	return item
 }
 
 func (h *Handler) requireParticipantBridgeID(w http.ResponseWriter, r *http.Request, id string) (string, bool) {

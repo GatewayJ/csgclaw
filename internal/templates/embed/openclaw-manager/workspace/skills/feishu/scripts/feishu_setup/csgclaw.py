@@ -17,7 +17,7 @@ MANAGER_REBUILD_ACTION_ID = "rebuild-manager"
 
 
 def api_base(args) -> str:
-    return (args.csgclaw_base_url or os.environ.get("CSGCLAW_BASE_URL") or "http://127.0.0.1:18080").rstrip("/")
+    return (getattr(args, "csgclaw_base_url", "") or os.environ.get("CSGCLAW_BASE_URL") or "http://127.0.0.1:18080").rstrip("/")
 
 
 def api_token(args) -> str:
@@ -98,102 +98,55 @@ def csgclaw_cli_json(args, cli_args: list[str], input_text: Optional[str] = None
 
 
 def configure_csgclaw(args, state: dict, result: dict) -> dict:
-    bot_id = state["bot_id"]
-    payload = {
-        "bot_id": bot_id,
-        "app_id": result["app_id"],
-        "app_secret": result["app_secret"],
-    }
+    agent_id = state["agent_id"]
+    response: dict[str, Any] = {}
     candidate_admin_open_id = str(result.get("open_id") or "").strip()
-    if bot_id == "u-manager" and candidate_admin_open_id:
-        payload["admin_open_id"] = candidate_admin_open_id
-    response = api_json(args, "PUT", "/api/v1/channels/feishu/config", payload) or {}
-    if bot_id == "u-manager":
+    if agent_id == "u-manager" and candidate_admin_open_id:
+        response["admin_bind"] = csgclaw_cli_json(
+            args,
+            [
+                "participant",
+                "bind",
+                "--channel",
+                "feishu",
+                "--feishu-kind",
+                "human",
+                "--admin",
+                "--open-id",
+                candidate_admin_open_id,
+            ],
+        )
+    bot_bind_args = [
+        "participant",
+        "bind",
+        "--channel",
+        "feishu",
+        "--feishu-kind",
+        "bot",
+        "--agent",
+        agent_id,
+        "--app-id",
+        result["app_id"],
+        "--app-secret-stdin",
+    ]
+    role = resolve_role(args, state)
+    if role == "worker" and args.recreate in ("auto", "worker"):
+        bot_bind_args.append("--restart")
+    response["bot_bind"] = csgclaw_cli_json(args, bot_bind_args, input_text=result["app_secret"])
+    if agent_id == "u-manager":
         if candidate_admin_open_id:
             response["admin_open_id"] = candidate_admin_open_id
             response["admin_open_id_source"] = "manager_registration"
         else:
             response.pop("admin_open_id", None)
-    elif bot_id != "u-manager":
+    elif agent_id != "u-manager":
         response.pop("admin_open_id", None)
     return response
 
 
 def resolve_role(args, state: dict) -> str:
-    bot_id = state["bot_id"]
-    return args.role or state.get("role") or ("manager" if bot_id == "u-manager" else "worker")
-
-
-def ensure_bot(args, state: dict, result: dict) -> Optional[dict]:
-    if args.no_ensure_bot:
-        return None
-    bot_id = state["bot_id"]
-    name = args.bot_name or state.get("bot_name") or bot_id.removeprefix("u-") or bot_id
-    role = resolve_role(args, state)
-    description = args.description or state.get("description") or f"{name} Feishu {role} agent"
-    payload = {
-        "id": bot_id,
-        "type": "agent",
-        "name": name,
-        "channel_app_ref": result.get("app_id") or state.get("app_id") or "",
-        "channel_user": {"ref": bot_id, "kind": "local_user_id"},
-        "agent_binding": {
-            "mode": "create",
-            "agent_id": bot_id,
-            "agent": {
-                "id": bot_id,
-                "name": name,
-                "description": description,
-                "role": role,
-            },
-        },
-    }
-    return api_json(args, "POST", "/api/v1/channels/feishu/participants", payload)
-
-
-def worker_box_conflict_message(bot_id: str, name: str) -> str:
-    return (
-        f"worker {bot_id!r} could not be created because a residual BoxLite box named {name!r} already exists, "
-        "but CSGClaw has no matching agent record. Stop here and ask the host operator to clean the stale worker "
-        f"runtime, for example: ./bin/boxlite --home ~/.csgclaw/agents/{name}/boxlite rm -f {name}"
-    )
-
-
-def is_box_name_conflict(exc: RuntimeError, name: str) -> bool:
-    message = str(exc)
-    return "box with name" in message and f"'{name}' already exists" in message
-
-
-def is_same_bot_name_conflict(exc: RuntimeError, bot_id: str) -> bool:
-    message = str(exc)
-    return (
-        'bot name "' in message
-        and 'already exists in channel "feishu"' in message
-        and f'with id "{bot_id}"' in message
-    )
-
-
-def bot_exists(args, bot_id: str) -> bool:
-    participants = csgclaw_cli_json(args, ["participant", "list", "--channel", "feishu", "--type", "agent"])
-    if not isinstance(participants, list):
-        raise RuntimeError(f"csgclaw-cli participant list returned unexpected JSON: {participants!r}")
-    return any(str(item.get("id") or "").strip() == bot_id for item in participants if isinstance(item, dict))
-
-
-def maybe_recreate(args, state: dict, worker_existed_before_ensure: Optional[bool] = None) -> Optional[dict]:
-    mode = args.recreate
-    bot_id = state["bot_id"]
-    role = resolve_role(args, state)
-    if mode == "none":
-        return None
-    if role == "manager":
-        if mode == "worker":
-            return {"skipped": True, "reason": "worker recreate requested for manager bot"}
-        return manager_recreate_action_card(bot_id)
-    if mode == "manager":
-        return {"skipped": True, "reason": "manager recreate requested for a worker bot"}
-    # Feishu credentials are materialized into runtime env/files only during provision/start.
-    return api_json(args, "POST", f"/api/v1/agents/{path_id(bot_id)}/recreate", None)
+    agent_id = state["agent_id"]
+    return args.role or state.get("role") or ("manager" if agent_id == "u-manager" else "worker")
 
 
 def public_result(data: dict) -> dict:
@@ -204,13 +157,14 @@ def public_result(data: dict) -> dict:
     return clean
 
 
-def manager_recreate_action_card(bot_id: str) -> dict:
+def manager_recreate_action_card(agent_id: str) -> dict:
     return {
         "type": ACTION_CARD_TYPE,
         "status": "manager_recreate_pending",
-        "bot_id": bot_id,
+        "agent_id": agent_id,
+        "bot_id": agent_id,
         "title": "Manager Feishu 配置已完成",
-        "subtitle": bot_id,
+        "subtitle": agent_id,
         "badge": "需在窗口点击",
         "summary": (
             "飞书配置已写入并重新加载。"

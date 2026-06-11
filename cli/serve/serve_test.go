@@ -633,7 +633,7 @@ func TestServeForegroundPassesContextToServer(t *testing.T) {
 	ctx := context.WithValue(context.Background(), struct{}{}, "serve-context")
 	svc := &agent.Service{}
 
-	NewAgentService = func(config.Config, feishu.BotCredentialProvider) (*agent.Service, error) {
+	NewAgentService = func(config.Config, feishu.AgentCredentialProvider) (*agent.Service, error) {
 		return svc, nil
 	}
 	NewIMService = func(*im.Bus) (*im.Service, error) {
@@ -1187,7 +1187,7 @@ func TestServeForegroundPreservesBootstrapDefaultTemplates(t *testing.T) {
 			DefaultWorkerTemplate:  "local.review-worker",
 		},
 	}
-	NewAgentService = func(got config.Config, _ feishu.BotCredentialProvider) (*agent.Service, error) {
+	NewAgentService = func(got config.Config, _ feishu.AgentCredentialProvider) (*agent.Service, error) {
 		if got.Bootstrap.DefaultManagerTemplate != "local.review-manager" {
 			t.Fatalf("default manager template = %q, want preserved template", got.Bootstrap.DefaultManagerTemplate)
 		}
@@ -1449,6 +1449,9 @@ func TestFormatEffectiveConfigIncludesDefaultHubRegistriesWhenOmitted(t *testing
 }
 
 func TestSandboxServiceOptionsSupportsConfiguredProvider(t *testing.T) {
+	restoreBoxLite := stubBoxLiteAvailable(t)
+	defer restoreBoxLite()
+
 	opts, err := sandboxServiceOptions(config.SandboxConfig{
 		Provider:                 config.BoxLiteProvider,
 		DebianRegistriesOverride: []string{"registry.a"},
@@ -1507,6 +1510,9 @@ func TestNewAgentServiceExplainsMissingConfiguredBoxLite(t *testing.T) {
 }
 
 func TestNewAgentServiceRegistersCodexRuntime(t *testing.T) {
+	restoreBoxLite := stubBoxLiteAvailable(t)
+	defer restoreBoxLite()
+
 	svc, err := newAgentService(config.Config{
 		Sandbox: config.SandboxConfig{
 			Provider: config.DefaultSandboxProvider,
@@ -1557,6 +1563,20 @@ func sandboxprovidersTestOnlyStatPath(t *testing.T, fn func(string) (os.FileInfo
 	return prev
 }
 
+func stubBoxLiteAvailable(t *testing.T) func() {
+	t.Helper()
+	boxlitePath := filepath.Join(t.TempDir(), "boxlite")
+	if err := os.WriteFile(boxlitePath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(boxlite) error = %v", err)
+	}
+	return sandboxprovidersTestOnlyLookPath(t, func(name string) (string, error) {
+		if name == "boxlite" {
+			return boxlitePath, nil
+		}
+		return "", fmt.Errorf("not found")
+	})
+}
+
 func stubServeDependencies(t *testing.T) func() {
 	t.Helper()
 	origRunServer := RunServer
@@ -1580,7 +1600,7 @@ func stubServeDependencies(t *testing.T) func() {
 		}
 		return nil
 	}
-	NewAgentService = func(config.Config, feishu.BotCredentialProvider) (*agent.Service, error) {
+	NewAgentService = func(config.Config, feishu.AgentCredentialProvider) (*agent.Service, error) {
 		return &agent.Service{}, nil
 	}
 	NewIMService = func(*im.Bus) (*im.Service, error) { return nil, nil }

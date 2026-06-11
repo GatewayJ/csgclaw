@@ -177,15 +177,6 @@ func (h *Handler) listCsgclawRoomMembers(w http.ResponseWriter, r *http.Request)
 func (h *Handler) addCsgclawRoomMembers(w http.ResponseWriter, r *http.Request) {
 	h.handleCsgclawRoomMembersByID(w, r)
 }
-func (h *Handler) getFeishuConfig(w http.ResponseWriter, r *http.Request) {
-	h.handleFeishuConfigGet(w, r)
-}
-func (h *Handler) updateFeishuConfig(w http.ResponseWriter, r *http.Request) {
-	h.handleFeishuConfigPut(w, r)
-}
-func (h *Handler) reloadFeishuConfig(w http.ResponseWriter, r *http.Request) {
-	h.handleFeishuConfigReload(w)
-}
 func (h *Handler) listFeishuUsers(w http.ResponseWriter, r *http.Request)  { h.handleFeishuUsers(w, r) }
 func (h *Handler) createFeishuUser(w http.ResponseWriter, r *http.Request) { h.handleFeishuUsers(w, r) }
 func (h *Handler) deleteFeishuUser(w http.ResponseWriter, r *http.Request) {

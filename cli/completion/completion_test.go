@@ -43,10 +43,10 @@ func TestCompleteSubcommandsAndFlags(t *testing.T) {
 	assertContainsAll(t, got, "list", "create-batch", "assign", "claim", "claim-next", "update", "--help")
 
 	got = Complete(LiteSpec(), "csgclaw-cli", []string{"csgclaw-cli", "participant", ""})
-	assertContainsAll(t, got, "list", "create", "delete", "config")
+	assertContainsAll(t, got, "list", "create", "delete", "bind")
 
 	got = Complete(FullSpec(), "csgclaw", []string{"csgclaw", "pt", ""})
-	assertContainsAll(t, got, "list", "create", "delete", "config")
+	assertContainsAll(t, got, "list", "create", "delete", "bind")
 
 	got = Complete(LiteSpec(), "csgclaw-cli", []string{"csgclaw-cli", "participant", "create", "--"})
 	assertContainsAll(t, got, "--channel", "--name", "--type", "--bind", "--agent-id")
@@ -54,8 +54,8 @@ func TestCompleteSubcommandsAndFlags(t *testing.T) {
 	got = Complete(FullSpec(), "csgclaw", []string{"csgclaw", "bot", ""})
 	assertContainsNone(t, got, "list", "create", "delete", "config")
 
-	got = Complete(LiteSpec(), "csgclaw-cli", []string{"csgclaw-cli", "pt", "config", "--"})
-	assertContainsAll(t, got, "--channel", "--get", "--set", "--reload", "--bot-id", "--app-secret-env")
+	got = Complete(LiteSpec(), "csgclaw-cli", []string{"csgclaw-cli", "pt", "bind", "--"})
+	assertContainsAll(t, got, "--channel", "--feishu-kind", "--admin", "--open-id", "--agent", "--app-id", "--app-secret-file", "--app-secret-env", "--app-secret-stdin", "--restart")
 }
 
 func TestCompleteFlagValues(t *testing.T) {

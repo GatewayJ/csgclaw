@@ -306,6 +306,6 @@ non_suspicious_only = true
 
 Channel 集成是可选的。默认情况下，CSGClaw 直接使用内置 Web UI；只有在你需要接入飞书等外部消息平台时，才需要增加 channel 配置。
 
-`config.toml` 只保留通用的 server、model、bootstrap 和 sandbox 配置。飞书凭证放在所选 `config.toml` 旁边的独立 `channels/feishu.toml` 文件中；`config.toml` 里的旧 `[channels.feishu]` 配置块不会被读取。
+`config.toml` 只保留通用的 server、model、bootstrap 和 sandbox 配置。飞书凭证保存在 `~/.csgclaw/im/participants.json` 的 Feishu participant 上，并通过 `csgclaw-cli participant bind` 写入；participant-backed 流程不读取旧 `[channels.feishu]` 配置块或 `channels/feishu.toml`。
 
 更详细的字段说明和示例，请参阅 [飞书 Channel 配置](channel/feishu.zh.md)。

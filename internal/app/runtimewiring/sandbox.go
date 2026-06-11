@@ -12,9 +12,9 @@ import (
 	"csgclaw/internal/sandbox"
 )
 
-type sandboxRuntimeEnvBuilder func(baseURL, accessToken, participantID, agentID, llmBaseURL, modelID string, provider feishu.BotCredentialProvider) map[string]string
+type sandboxRuntimeEnvBuilder func(baseURL, accessToken, participantID, agentID, llmBaseURL, modelID string, provider feishu.AgentCredentialProvider) map[string]string
 
-func withSandboxRuntimeHost(host agent.PicoClawRuntimeHost, feishuProvider feishu.BotCredentialProvider, buildRuntimeEnv sandboxRuntimeEnvBuilder, newRuntime func(sandboxgateway.Dependencies) agentruntime.Runtime) agent.ServiceOption {
+func withSandboxRuntimeHost(host agent.PicoClawRuntimeHost, feishuProvider feishu.AgentCredentialProvider, buildRuntimeEnv sandboxRuntimeEnvBuilder, newRuntime func(sandboxgateway.Dependencies) agentruntime.Runtime) agent.ServiceOption {
 	return func(s *agent.Service) error {
 		return agent.WithRuntime(newRuntime(sandboxgateway.Dependencies{
 			FeishuProvider:      feishuProvider,
@@ -57,7 +57,7 @@ func withSandboxRuntimeHost(host agent.PicoClawRuntimeHost, feishuProvider feish
 	}
 }
 
-func updateRuntimeFeishuProvider(svc *agent.Service, runtimeKind string, provider feishu.BotCredentialProvider) {
+func updateRuntimeFeishuProvider(svc *agent.Service, runtimeKind string, provider feishu.AgentCredentialProvider) {
 	if svc == nil {
 		slog.Warn("skip feishu provider update: agent service is nil", "runtime_kind", runtimeKind)
 		return
@@ -68,7 +68,7 @@ func updateRuntimeFeishuProvider(svc *agent.Service, runtimeKind string, provide
 		return
 	}
 	updater, ok := rt.(interface {
-		SetFeishuProvider(feishu.BotCredentialProvider)
+		SetFeishuProvider(feishu.AgentCredentialProvider)
 	})
 	if !ok {
 		slog.Warn("skip feishu provider update: runtime does not support provider updates", "runtime_kind", rt.Kind())

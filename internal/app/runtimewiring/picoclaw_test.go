@@ -1,6 +1,7 @@
 package runtimewiring
 
 import (
+	"strings"
 	"testing"
 
 	"csgclaw/internal/channel/feishu"
@@ -37,7 +38,7 @@ func TestPicoClawRuntimeEnvVarsEnableFeishuOnlyForConfiguredBot(t *testing.T) {
 		"http://10.0.0.8:18080/api/v1/agents/u-missing/llm",
 		"minimax-m2.7",
 		staticFeishuProvider{apps: map[string]feishu.AppConfig{
-			"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
+			"manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
 		}},
 	)
 	for _, key := range []string{
@@ -58,7 +59,7 @@ func TestPicoClawRuntimeEnvVarsEnableFeishuOnlyForConfiguredBot(t *testing.T) {
 		"http://10.0.0.8:18080/api/v1/agents/u-manager/llm",
 		"minimax-m2.7",
 		staticFeishuProvider{apps: map[string]feishu.AppConfig{
-			"u-manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
+			"manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
 		}},
 	)
 	if got, want := env["PICOCLAW_CHANNELS_FEISHU_ENABLED"], "true"; got != want {
@@ -85,4 +86,10 @@ type staticFeishuProvider struct {
 func (p staticFeishuProvider) BotConfig(botID string) (feishu.AppConfig, bool) {
 	app, ok := p.apps[botID]
 	return app, ok
+}
+
+func (p staticFeishuProvider) BotConfigForAgent(agentID string) (string, feishu.AppConfig, bool) {
+	participantID := strings.TrimPrefix(strings.TrimSpace(agentID), "u-")
+	app, ok := p.apps[participantID]
+	return participantID, app, ok
 }

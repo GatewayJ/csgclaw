@@ -117,56 +117,6 @@ func TestExecuteHiddenCompleteUsesLiteCommandSet(t *testing.T) {
 	}
 }
 
-func TestExecuteParticipantAliasConfigSetUsesHTTPClient(t *testing.T) {
-	t.Setenv("FEISHU_APP_SECRET", "secret-value")
-	var stdout bytes.Buffer
-	app := &App{
-		stdout: &stdout,
-		stderr: &bytes.Buffer{},
-		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.Method != http.MethodPut {
-				t.Fatalf("method = %q, want %q", req.Method, http.MethodPut)
-			}
-			if req.URL.String() != "http://example.test/api/v1/channels/feishu/config" {
-				t.Fatalf("url = %q, want Feishu config route", req.URL.String())
-			}
-			var payload map[string]any
-			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-				t.Fatalf("decode request: %v", err)
-			}
-			if payload["bot_id"] != "u-manager" || payload["app_id"] != "cli_xxx" || payload["app_secret"] != "secret-value" || payload["admin_open_id"] != "ou_xxx" {
-				t.Fatalf("payload = %#v, want Feishu config fields", payload)
-			}
-			if payload["reload"] != false {
-				t.Fatalf("payload reload = %#v, want false", payload["reload"])
-			}
-			return jsonResponse(http.StatusOK, `{"bot_id":"u-manager","configured":true,"app_id":"cli_xxx","app_secret":"present","admin_open_id":"ou_xxx","reloaded":false}`), nil
-		}),
-	}
-
-	err := app.Execute(context.Background(), []string{
-		"--endpoint", "http://example.test",
-		"--output", "json",
-		"pt", "config",
-		"--channel", "feishu",
-		"--set",
-		"--bot-id", "u-manager",
-		"--app-id", "cli_xxx",
-		"--admin-open-id", "ou_xxx",
-		"--app-secret-env", "FEISHU_APP_SECRET",
-		"--no-reload",
-	})
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if strings.Contains(stdout.String(), "secret-value") {
-		t.Fatalf("stdout leaked app secret: %q", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), `"app_secret": "present"`) {
-		t.Fatalf("stdout = %q, want masked secret status", stdout.String())
-	}
-}
-
 func TestExecuteRejectsUnavailableCommands(t *testing.T) {
 	for _, command := range []string{"agent", "serve", "onboard", "user", "bot", "channel"} {
 		t.Run(command, func(t *testing.T) {
@@ -419,6 +369,372 @@ func TestExecuteParticipantListUsesTypeQuery(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"id": "bot-feishu"`) || !strings.Contains(stdout.String(), `"type": "agent"`) {
 		t.Fatalf("stdout = %q, want JSON participant payload", stdout.String())
+	}
+}
+
+func TestExecuteParticipantBindAdminHumanUsesParticipantAPI(t *testing.T) {
+	var stdout bytes.Buffer
+	call := 0
+	app := &App{
+		stdout: &stdout,
+		stderr: &bytes.Buffer{},
+		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			call++
+			switch call {
+			case 1:
+				if req.Method != http.MethodGet || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant list", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusOK, `[]`), nil
+			case 2:
+				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant create", call, req.Method, req.URL.String())
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				channelUser, _ := payload["channel_user"].(map[string]any)
+				if payload["id"] != "admin" || payload["type"] != "human" || payload["name"] != "admin" || channelUser["ref"] != "ou_admin" || channelUser["kind"] != "open_id" {
+					t.Fatalf("payload = %#v, want feishu admin human open_id", payload)
+				}
+				return jsonResponse(http.StatusCreated, `{"id":"admin","name":"admin","type":"human","channel":"feishu","channel_user_ref":"ou_admin","channel_user_kind":"open_id","lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`), nil
+			default:
+				t.Fatalf("unexpected request %d: %s %s", call, req.Method, req.URL.String())
+				return nil, nil
+			}
+		}),
+	}
+
+	err := app.Execute(context.Background(), []string{
+		"--endpoint", "http://example.test",
+		"--output", "json",
+		"pt", "bind",
+		"--channel", "feishu",
+		"--feishu-kind", "human",
+		"--admin",
+		"--open-id", "ou_admin",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if call != 2 {
+		t.Fatalf("request count = %d, want 2", call)
+	}
+	if !strings.Contains(stdout.String(), `"participant_id": "admin"`) || !strings.Contains(stdout.String(), `"feishu_kind": "human"`) {
+		t.Fatalf("stdout = %q, want admin bind result", stdout.String())
+	}
+}
+
+func TestExecuteParticipantBindBotWritesConfigAndRecreatesWorkerWhenRestartFlagSet(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	call := 0
+	app := &App{
+		stdin:  strings.NewReader("secret-value\n"),
+		stdout: &stdout,
+		stderr: &stderr,
+		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			call++
+			switch call {
+			case 1:
+				if req.Method != http.MethodGet || req.URL.String() != "http://example.test/api/v1/agents/u-dev" {
+					t.Fatalf("request %d = %s %s, want agent get", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusOK, `{"id":"u-dev","name":"dev","role":"worker","status":"running","created_at":"2026-04-12T09:00:00Z"}`), nil
+			case 2:
+				if req.Method != http.MethodGet || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant list", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusOK, `[]`), nil
+			case 3:
+				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant create", call, req.Method, req.URL.String())
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				channelUser, _ := payload["channel_user"].(map[string]any)
+				appConfig, _ := payload["channel_app_config"].(map[string]any)
+				agentBinding, _ := payload["agent_binding"].(map[string]any)
+				if payload["id"] != "dev" || payload["type"] != "agent" || payload["name"] != "dev" {
+					t.Fatalf("payload = %#v, want canonical dev agent participant", payload)
+				}
+				if channelUser["kind"] != "app_id" || channelUser["ref"] != nil {
+					t.Fatalf("channel_user = %#v, want app_id without open_id ref", channelUser)
+				}
+				if appConfig["app_id"] != "cli_dev" || appConfig["app_secret"] != "secret-value" {
+					t.Fatalf("channel_app_config = %#v, want app credentials", appConfig)
+				}
+				if agentBinding["mode"] != "reuse" || agentBinding["agent_id"] != "u-dev" {
+					t.Fatalf("agent_binding = %#v, want reuse u-dev", agentBinding)
+				}
+				return jsonResponse(http.StatusCreated, `{"id":"dev","name":"dev","type":"agent","channel":"feishu","agent_id":"u-dev","channel_user_kind":"app_id","channel_app_config":{"app_id":"cli_dev","app_secret":"present"},"lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`), nil
+			case 4:
+				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/agents/u-dev/recreate" {
+					t.Fatalf("request %d = %s %s, want worker recreate", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusCreated, `{"id":"u-dev","name":"dev","role":"worker","status":"running","created_at":"2026-04-12T09:00:00Z"}`), nil
+			default:
+				t.Fatalf("unexpected request %d: %s %s", call, req.Method, req.URL.String())
+				return nil, nil
+			}
+		}),
+	}
+
+	err := app.Execute(context.Background(), []string{
+		"--endpoint", "http://example.test",
+		"--output", "json",
+		"pt", "bind",
+		"--channel", "feishu",
+		"--feishu-kind", "bot",
+		"--agent", "u-dev",
+		"--app-id", "cli_dev",
+		"--app-secret-stdin",
+		"--restart",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v; stderr=%s", err, stderr.String())
+	}
+	if call != 4 {
+		t.Fatalf("request count = %d, want 4", call)
+	}
+	if strings.Contains(stdout.String(), "secret-value") || strings.Contains(stderr.String(), "secret-value") {
+		t.Fatalf("output leaked app secret: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{`"participant_id": "dev"`, `"agent_id": "u-dev"`, `"restart_status": "worker_recreated"`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want %s", stdout.String(), want)
+		}
+	}
+}
+
+func TestExecuteParticipantBindBotReportsPartialResultWhenWorkerRecreateFails(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	call := 0
+	app := &App{
+		stdin:  strings.NewReader("secret-value\n"),
+		stdout: &stdout,
+		stderr: &stderr,
+		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			call++
+			switch call {
+			case 1:
+				if req.Method != http.MethodGet || req.URL.String() != "http://example.test/api/v1/agents/u-dev" {
+					t.Fatalf("request %d = %s %s, want agent get", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusOK, `{"id":"u-dev","name":"dev","role":"worker","status":"running","created_at":"2026-04-12T09:00:00Z"}`), nil
+			case 2:
+				if req.Method != http.MethodGet || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant list", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusOK, `[]`), nil
+			case 3:
+				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant create", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusCreated, `{"id":"dev","name":"dev","type":"agent","channel":"feishu","agent_id":"u-dev","channel_user_kind":"app_id","channel_app_config":{"app_id":"cli_dev","app_secret":"present"},"lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`), nil
+			case 4:
+				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/agents/u-dev/recreate" {
+					t.Fatalf("request %d = %s %s, want worker recreate", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusInternalServerError, `recreate failed`), nil
+			default:
+				t.Fatalf("unexpected request %d: %s %s", call, req.Method, req.URL.String())
+				return nil, nil
+			}
+		}),
+	}
+
+	err := app.Execute(context.Background(), []string{
+		"--endpoint", "http://example.test",
+		"--output", "json",
+		"pt", "bind",
+		"--channel", "feishu",
+		"--feishu-kind", "bot",
+		"--agent", "u-dev",
+		"--app-id", "cli_dev",
+		"--app-secret-stdin",
+		"--restart",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v; stderr=%s stdout=%s", err, stderr.String(), stdout.String())
+	}
+	if call != 4 {
+		t.Fatalf("request count = %d, want 4", call)
+	}
+	if strings.Contains(stdout.String(), "secret-value") || strings.Contains(stderr.String(), "secret-value") {
+		t.Fatalf("output leaked app secret: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		`"status": "partial"`,
+		`"participant_id": "dev"`,
+		`"agent_id": "u-dev"`,
+		`"config_saved": true`,
+		`"restart_status": "recreate_failed"`,
+		`"restart_error":`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want %s", stdout.String(), want)
+		}
+	}
+	if !strings.Contains(stderr.String(), "pt bind failed at recreate: agent_id=u-dev participant_id=dev") {
+		t.Fatalf("stderr = %q, want recreate failure context", stderr.String())
+	}
+}
+
+func TestExecuteParticipantBindBotReportsManagerRestartRequiredWithRestartFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	call := 0
+	app := &App{
+		stdin:  strings.NewReader("secret-value\n"),
+		stdout: &stdout,
+		stderr: &stderr,
+		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			call++
+			switch call {
+			case 1:
+				if req.Method != http.MethodGet || req.URL.String() != "http://example.test/api/v1/agents/u-manager" {
+					t.Fatalf("request %d = %s %s, want agent get", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusOK, `{"id":"u-manager","name":"manager","role":"manager","status":"running","created_at":"2026-04-12T09:00:00Z"}`), nil
+			case 2:
+				if req.Method != http.MethodGet || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant list", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusOK, `[]`), nil
+			case 3:
+				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant create", call, req.Method, req.URL.String())
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				channelUser, _ := payload["channel_user"].(map[string]any)
+				appConfig, _ := payload["channel_app_config"].(map[string]any)
+				agentBinding, _ := payload["agent_binding"].(map[string]any)
+				if payload["id"] != "manager" || payload["type"] != "agent" || payload["name"] != "manager" {
+					t.Fatalf("payload = %#v, want canonical manager agent participant", payload)
+				}
+				if channelUser["kind"] != "app_id" || channelUser["ref"] != nil {
+					t.Fatalf("channel_user = %#v, want app_id without open_id ref", channelUser)
+				}
+				if appConfig["app_id"] != "cli_manager" || appConfig["app_secret"] != "secret-value" {
+					t.Fatalf("channel_app_config = %#v, want app credentials", appConfig)
+				}
+				if agentBinding["mode"] != "reuse" || agentBinding["agent_id"] != "u-manager" {
+					t.Fatalf("agent_binding = %#v, want reuse u-manager", agentBinding)
+				}
+				return jsonResponse(http.StatusCreated, `{"id":"manager","name":"manager","type":"agent","channel":"feishu","agent_id":"u-manager","channel_user_kind":"app_id","channel_app_config":{"app_id":"cli_manager","app_secret":"present"},"lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`), nil
+			default:
+				t.Fatalf("unexpected request %d: %s %s", call, req.Method, req.URL.String())
+				return nil, nil
+			}
+		}),
+	}
+
+	err := app.Execute(context.Background(), []string{
+		"--endpoint", "http://example.test",
+		"--output", "json",
+		"pt", "bind",
+		"--channel", "feishu",
+		"--feishu-kind", "bot",
+		"--agent", "u-manager",
+		"--app-id", "cli_manager",
+		"--app-secret-stdin",
+		"--restart",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v; stderr=%s", err, stderr.String())
+	}
+	if call != 3 {
+		t.Fatalf("request count = %d, want 3", call)
+	}
+	if strings.Contains(stdout.String(), "secret-value") || strings.Contains(stderr.String(), "secret-value") {
+		t.Fatalf("output leaked app secret: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{`"participant_id": "manager"`, `"agent_id": "u-manager"`, `"restart_status": "manager_restart_required"`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want %s", stdout.String(), want)
+		}
+	}
+}
+
+func TestExecuteParticipantBindBotDefaultsToNoRestart(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	call := 0
+	app := &App{
+		stdin:  strings.NewReader("secret-value\n"),
+		stdout: &stdout,
+		stderr: &stderr,
+		httpClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			call++
+			switch call {
+			case 1:
+				if req.Method != http.MethodGet || req.URL.String() != "http://example.test/api/v1/agents/u-dev" {
+					t.Fatalf("request %d = %s %s, want agent get", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusOK, `{"id":"u-dev","name":"dev","role":"worker","status":"running","created_at":"2026-04-12T09:00:00Z"}`), nil
+			case 2:
+				if req.Method != http.MethodGet || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant list", call, req.Method, req.URL.String())
+				}
+				return jsonResponse(http.StatusOK, `[]`), nil
+			case 3:
+				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
+					t.Fatalf("request %d = %s %s, want participant create", call, req.Method, req.URL.String())
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				channelUser, _ := payload["channel_user"].(map[string]any)
+				appConfig, _ := payload["channel_app_config"].(map[string]any)
+				agentBinding, _ := payload["agent_binding"].(map[string]any)
+				if payload["id"] != "dev" || payload["type"] != "agent" || payload["name"] != "dev" {
+					t.Fatalf("payload = %#v, want canonical dev agent participant", payload)
+				}
+				if channelUser["kind"] != "app_id" || channelUser["ref"] != nil {
+					t.Fatalf("channel_user = %#v, want app_id without open_id ref", channelUser)
+				}
+				if appConfig["app_id"] != "cli_dev" || appConfig["app_secret"] != "secret-value" {
+					t.Fatalf("channel_app_config = %#v, want app credentials", appConfig)
+				}
+				if agentBinding["mode"] != "reuse" || agentBinding["agent_id"] != "u-dev" {
+					t.Fatalf("agent_binding = %#v, want reuse u-dev", agentBinding)
+				}
+				return jsonResponse(http.StatusCreated, `{"id":"dev","name":"dev","type":"agent","channel":"feishu","agent_id":"u-dev","channel_user_kind":"app_id","channel_app_config":{"app_id":"cli_dev","app_secret":"present"},"lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`), nil
+			default:
+				t.Fatalf("unexpected request %d: %s %s", call, req.Method, req.URL.String())
+				return nil, nil
+			}
+		}),
+	}
+
+	err := app.Execute(context.Background(), []string{
+		"--endpoint", "http://example.test",
+		"--output", "json",
+		"pt", "bind",
+		"--channel", "feishu",
+		"--feishu-kind", "bot",
+		"--agent", "u-dev",
+		"--app-id", "cli_dev",
+		"--app-secret-stdin",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v; stderr=%s", err, stderr.String())
+	}
+	if call != 3 {
+		t.Fatalf("request count = %d, want 3", call)
+	}
+	if strings.Contains(stdout.String(), "secret-value") || strings.Contains(stderr.String(), "secret-value") {
+		t.Fatalf("output leaked app secret: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"\"participant_id\": \"dev\"", "\"agent_id\": \"u-dev\"", "\"restart_status\": \"restart_skipped\""} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want %s", stdout.String(), want)
+		}
 	}
 }
 

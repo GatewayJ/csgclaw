@@ -135,6 +135,52 @@ func TestCreateFeishuAgentParticipantViaAPIReusesExistingAgent(t *testing.T) {
 	}
 }
 
+func TestCreateFeishuBotParticipantRedactsChannelAppConfigSecretViaAPI(t *testing.T) {
+	participantSvc := participant.NewService(participant.NewMemoryStore(nil))
+	srv := &Handler{participant: participantSvc}
+
+	body := `{
+		"id": "dev",
+		"type": "agent",
+		"name": "Dev",
+		"channel_user": {
+			"kind": "app_id"
+		},
+		"channel_app_config": {
+			"app_id": "cli_dev",
+			"app_secret": "dev-secret"
+		}
+	}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/participants", strings.NewReader(body))
+
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "dev-secret") {
+		t.Fatalf("response leaked app_secret: %s", rec.Body.String())
+	}
+	var created apitypes.Participant
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := created.ChannelAppConfig["app_id"], "cli_dev"; got != want {
+		t.Fatalf("response channel_app_config.app_id = %#v, want %q", got, want)
+	}
+	if got, want := created.ChannelAppConfig["app_secret"], "present"; got != want {
+		t.Fatalf("response channel_app_config.app_secret = %#v, want %q", got, want)
+	}
+	stored, ok := participantSvc.Get(participant.ChannelFeishu, "dev")
+	if !ok {
+		t.Fatal("stored participant not found")
+	}
+	if got, want := stored.ChannelAppConfig["app_secret"], "dev-secret"; got != want {
+		t.Fatalf("stored channel_app_config.app_secret = %#v, want %q", got, want)
+	}
+}
+
 func TestCreateFeishuHumanParticipantViaAPI(t *testing.T) {
 	participantSvc := participant.NewService(participant.NewMemoryStore(nil))
 	srv := &Handler{participant: participantSvc}
@@ -747,6 +793,63 @@ func TestFeishuParticipantEventsRouteUsesParticipantChannelUserRef(t *testing.T)
 	})
 	waitForCondition(t, time.Second, 10*time.Millisecond, func() bool {
 		return strings.Contains(rec.Body.String(), `"id":"om_qa"`)
+	})
+	cancelReq()
+	<-done
+}
+
+func TestFeishuParticipantEventsRouteUsesMentionParticipantIDForAppIDParticipant(t *testing.T) {
+	feishuSvc := feishu.NewService()
+	participantSvc := participant.NewService(participant.NewMemoryStore([]apitypes.Participant{{
+		ID:              "dev",
+		Channel:         participant.ChannelFeishu,
+		Type:            participant.TypeAgent,
+		Name:            "Dev",
+		ChannelUserKind: participant.ChannelUserKindAppID,
+		ChannelAppConfig: map[string]any{
+			"app_id":     "cli_dev",
+			"app_secret": "dev-secret",
+		},
+		AgentID:         "u-dev",
+		LifecycleStatus: participant.LifecycleStatusActive,
+		Mentionable:     true,
+	}}))
+	srv := &Handler{
+		feishu:            feishuSvc,
+		participant:       participantSvc,
+		serverAccessToken: "secret",
+	}
+
+	ctx, cancelReq := context.WithCancel(context.Background())
+	defer cancelReq()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels/feishu/participants/dev/events", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer secret")
+	done := make(chan struct{})
+	go func() {
+		srv.Routes().ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	waitForCondition(t, time.Second, 10*time.Millisecond, func() bool {
+		return strings.Contains(rec.Body.String(), ": connected")
+	})
+	feishuSvc.MessageBus().Publish(feishu.MessageEvent{
+		Type:         feishu.MessageEventTypeMessageCreated,
+		RoomID:       "oc_alpha",
+		SenderBotID:  "manager",
+		MentionBotID: "dev",
+		Message: &im.Message{
+			ID:       "om_dev",
+			SenderID: "ou_manager",
+			Content:  "hello dev",
+			Mentions: []im.Mention{
+				{ID: "ou_dev", Name: "dev"},
+			},
+		},
+	})
+	waitForCondition(t, time.Second, 10*time.Millisecond, func() bool {
+		return strings.Contains(rec.Body.String(), `"id":"om_dev"`)
 	})
 	cancelReq()
 	<-done
