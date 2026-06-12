@@ -217,18 +217,10 @@ func presentParticipants(items []apitypes.Participant) []apitypes.Participant {
 }
 
 func presentParticipant(item apitypes.Participant) apitypes.Participant {
-	if !strings.EqualFold(strings.TrimSpace(item.Channel), participant.ChannelFeishu) || len(item.ChannelAppConfig) == 0 {
+	if len(item.ChannelAppConfig) == 0 {
 		return item
 	}
-	cfg := make(map[string]any, len(item.ChannelAppConfig))
-	for key, value := range item.ChannelAppConfig {
-		if strings.EqualFold(strings.TrimSpace(key), "app_secret") && strings.TrimSpace(fmt.Sprint(value)) != "" {
-			cfg[key] = "present"
-			continue
-		}
-		cfg[key] = value
-	}
-	item.ChannelAppConfig = cfg
+	item.ChannelAppConfig = participant.RedactChannelAppConfig(item.ChannelAppConfig)
 	return item
 }
 

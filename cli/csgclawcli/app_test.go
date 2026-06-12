@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
 
+	"csgclaw/internal/participant"
 	appversion "csgclaw/internal/version"
 )
 
@@ -469,7 +471,7 @@ func TestExecuteParticipantBindBotWritesConfigAndRecreatesWorkerWhenRestartFlagS
 				if agentBinding["mode"] != "reuse" || agentBinding["agent_id"] != "u-dev" {
 					t.Fatalf("agent_binding = %#v, want reuse u-dev", agentBinding)
 				}
-				return jsonResponse(http.StatusCreated, `{"id":"dev","name":"dev","type":"agent","channel":"feishu","agent_id":"u-dev","channel_user_kind":"app_id","channel_app_config":{"app_id":"cli_dev","app_secret":"present"},"lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`), nil
+				return jsonResponse(http.StatusCreated, feishuBotParticipantResponse("dev", "dev", "u-dev", "cli_dev")), nil
 			case 4:
 				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/agents/u-dev/recreate" {
 					t.Fatalf("request %d = %s %s, want worker recreate", call, req.Method, req.URL.String())
@@ -533,7 +535,7 @@ func TestExecuteParticipantBindBotReportsPartialResultWhenWorkerRecreateFails(t 
 				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/channels/feishu/participants" {
 					t.Fatalf("request %d = %s %s, want participant create", call, req.Method, req.URL.String())
 				}
-				return jsonResponse(http.StatusCreated, `{"id":"dev","name":"dev","type":"agent","channel":"feishu","agent_id":"u-dev","channel_user_kind":"app_id","channel_app_config":{"app_id":"cli_dev","app_secret":"present"},"lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`), nil
+				return jsonResponse(http.StatusCreated, feishuBotParticipantResponse("dev", "dev", "u-dev", "cli_dev")), nil
 			case 4:
 				if req.Method != http.MethodPost || req.URL.String() != "http://example.test/api/v1/agents/u-dev/recreate" {
 					t.Fatalf("request %d = %s %s, want worker recreate", call, req.Method, req.URL.String())
@@ -626,7 +628,7 @@ func TestExecuteParticipantBindBotReportsManagerRestartRequiredWithRestartFlag(t
 				if agentBinding["mode"] != "reuse" || agentBinding["agent_id"] != "u-manager" {
 					t.Fatalf("agent_binding = %#v, want reuse u-manager", agentBinding)
 				}
-				return jsonResponse(http.StatusCreated, `{"id":"manager","name":"manager","type":"agent","channel":"feishu","agent_id":"u-manager","channel_user_kind":"app_id","channel_app_config":{"app_id":"cli_manager","app_secret":"present"},"lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`), nil
+				return jsonResponse(http.StatusCreated, feishuBotParticipantResponse("manager", "manager", "u-manager", "cli_manager")), nil
 			default:
 				t.Fatalf("unexpected request %d: %s %s", call, req.Method, req.URL.String())
 				return nil, nil
@@ -704,7 +706,7 @@ func TestExecuteParticipantBindBotDefaultsToNoRestart(t *testing.T) {
 				if agentBinding["mode"] != "reuse" || agentBinding["agent_id"] != "u-dev" {
 					t.Fatalf("agent_binding = %#v, want reuse u-dev", agentBinding)
 				}
-				return jsonResponse(http.StatusCreated, `{"id":"dev","name":"dev","type":"agent","channel":"feishu","agent_id":"u-dev","channel_user_kind":"app_id","channel_app_config":{"app_id":"cli_dev","app_secret":"present"},"lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`), nil
+				return jsonResponse(http.StatusCreated, feishuBotParticipantResponse("dev", "dev", "u-dev", "cli_dev")), nil
 			default:
 				t.Fatalf("unexpected request %d: %s %s", call, req.Method, req.URL.String())
 				return nil, nil
@@ -1041,6 +1043,17 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func feishuBotParticipantResponse(id, name, agentID, appID string) string {
+	return fmt.Sprintf(
+		`{"id":%q,"name":%q,"type":"agent","channel":"feishu","agent_id":%q,"channel_user_kind":"app_id","channel_app_config":{"app_id":%q,"app_secret":%q},"lifecycle_status":"active","created_at":"2026-04-12T09:00:00Z"}`,
+		id,
+		name,
+		agentID,
+		appID,
+		participant.RedactedSecretValue,
+	)
 }
 
 func jsonResponse(status int, body string) *http.Response {

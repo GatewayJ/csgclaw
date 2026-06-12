@@ -634,7 +634,7 @@ func validateFeishuParticipantConfig(channel, typ, channelUserRef, channelUserKi
 		if strings.TrimSpace(feishuConfigString(appConfig, "app_id")) == "" {
 			return fmt.Errorf("channel_app_config.app_id is required")
 		}
-		if strings.TrimSpace(feishuConfigString(appConfig, "app_secret")) == "" {
+		if strings.TrimSpace(feishuConfigString(appConfig, ChannelAppConfigAppSecretKey)) == "" {
 			return fmt.Errorf("channel_app_config.app_secret is required")
 		}
 	default:

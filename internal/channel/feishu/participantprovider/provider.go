@@ -161,7 +161,7 @@ func appConfigFromParticipant(item apitypes.Participant) (feishu.AppConfig, bool
 		return feishu.AppConfig{}, false
 	}
 	appID := channelAppConfigString(item.ChannelAppConfig, "app_id")
-	appSecret := channelAppConfigString(item.ChannelAppConfig, "app_secret")
+	appSecret := channelAppConfigString(item.ChannelAppConfig, participant.ChannelAppConfigAppSecretKey)
 	if appID == "" || appSecret == "" {
 		return feishu.AppConfig{}, false
 	}

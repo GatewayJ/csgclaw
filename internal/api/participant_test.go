@@ -169,7 +169,7 @@ func TestCreateFeishuBotParticipantRedactsChannelAppConfigSecretViaAPI(t *testin
 	if got, want := created.ChannelAppConfig["app_id"], "cli_dev"; got != want {
 		t.Fatalf("response channel_app_config.app_id = %#v, want %q", got, want)
 	}
-	if got, want := created.ChannelAppConfig["app_secret"], "present"; got != want {
+	if got, want := created.ChannelAppConfig["app_secret"], participant.RedactedSecretValue; got != want {
 		t.Fatalf("response channel_app_config.app_secret = %#v, want %q", got, want)
 	}
 	stored, ok := participantSvc.Get(participant.ChannelFeishu, "dev")
