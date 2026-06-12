@@ -31,7 +31,7 @@ import (
 	"csgclaw/internal/channel/codexbridge"
 	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/feishu"
-	"csgclaw/internal/channel/feishuparticipant"
+	"csgclaw/internal/channel/feishu/participantprovider"
 	"csgclaw/internal/cliproxy"
 	"csgclaw/internal/config"
 	"csgclaw/internal/hub"
@@ -1160,7 +1160,7 @@ func buildFeishuComponents() (feishu.AgentCredentialProvider, *feishu.Service, e
 	if err != nil {
 		return nil, nil, err
 	}
-	provider := feishuparticipant.NewProvider(participantsPath)
+	provider := participantprovider.New(participantsPath)
 	svc, err := NewFeishuService(provider)
 	if err != nil {
 		return nil, nil, err

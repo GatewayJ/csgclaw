@@ -1,4 +1,4 @@
-package feishuparticipant
+package participantprovider
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ type ParticipantConfigProvider struct {
 	path string
 }
 
-func NewProvider(path string) *ParticipantConfigProvider {
+func New(path string) *ParticipantConfigProvider {
 	return &ParticipantConfigProvider{path: strings.TrimSpace(path)}
 }
 

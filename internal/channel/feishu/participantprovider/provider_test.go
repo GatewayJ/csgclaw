@@ -1,4 +1,4 @@
-package feishuparticipant
+package participantprovider
 
 import (
 	"path/filepath"
@@ -66,7 +66,7 @@ func TestProviderReadsBotAndAdminConfigFromParticipants(t *testing.T) {
 		}
 	}
 
-	provider := NewProvider(path)
+	provider := New(path)
 	participantID, app, ok := provider.BotConfigForAgent(agent.ManagerUserID)
 	if !ok {
 		t.Fatal("BotConfigForAgent(manager) ok = false, want true")
