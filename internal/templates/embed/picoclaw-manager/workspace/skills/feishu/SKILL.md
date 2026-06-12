@@ -106,7 +106,7 @@ Example normalization:
 - `manager` -> manager
 - `u-manager` -> manager
 
-For worker flow, `finalize` calls `csgclaw-cli participant bind --feishu-kind bot`. The bind command saves the Feishu participant config and recreates the worker unless `--recreate none` or `--recreate manager` was selected.
+For worker flow, `finalize` calls `csgclaw-cli participant bind --feishu-kind bot`. The bind command saves the Feishu participant config and recreates the worker unless the skill helper was run with `finalize --recreate none` or `finalize --recreate manager`.
 If the target worker is missing, `start` fails before creating a Feishu app and points back to `agent-creator`.
 
 ## Primary QR/Launcher Flow
