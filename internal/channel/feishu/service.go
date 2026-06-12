@@ -73,6 +73,7 @@ type SendMessageRequest struct {
 	Content          string
 	UUID             string
 	MentionID        string
+	MentionOpenID    string
 	MentionAppConfig AppConfig
 }
 
@@ -930,15 +931,18 @@ func defaultSendMessage(ctx context.Context, app AppConfig, req SendMessageReque
 	mentionID := strings.TrimSpace(req.MentionID)
 	mentionOpenID := ""
 	if mentionID != "" {
-		mentionApp, err := validateAppConfig(req.MentionAppConfig, mentionID)
-		if err != nil {
-			return SendMessageResponse{}, err
+		mentionOpenID = strings.TrimSpace(req.MentionOpenID)
+		if mentionOpenID == "" {
+			mentionApp, err := validateAppConfig(req.MentionAppConfig, mentionID)
+			if err != nil {
+				return SendMessageResponse{}, err
+			}
+			botInfo, err := fetchBotInfo(ctx, mentionApp)
+			if err != nil {
+				return SendMessageResponse{}, err
+			}
+			mentionOpenID = botInfo.OpenID
 		}
-		botInfo, err := fetchBotInfo(ctx, mentionApp)
-		if err != nil {
-			return SendMessageResponse{}, err
-		}
-		mentionOpenID = botInfo.OpenID
 		text = fmt.Sprintf("<at user_id=\"%s\">%s</at> %s", mentionOpenID, mentionID, slashcommand.RenderFeishuFallback(req.Content))
 	}
 
@@ -1028,8 +1032,13 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 	app, err := s.appConfigForSenderLocked(senderID)
 	mentionID := strings.TrimSpace(req.MentionID)
 	var mentionApp AppConfig
+	var mentionOpenID string
 	if err == nil && mentionID != "" {
-		mentionApp, err = s.appConfigForMentionLocked(mentionID)
+		if openID, ok := s.participantMentionOpenIDLocked(mentionID); ok {
+			mentionOpenID = openID
+		} else {
+			mentionApp, err = s.appConfigForMentionLocked(mentionID)
+		}
 	}
 	s.mu.RUnlock()
 	if err != nil {
@@ -1042,6 +1051,7 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 		Content:          content,
 		UUID:             fallbackID,
 		MentionID:        mentionID,
+		MentionOpenID:    mentionOpenID,
 		MentionAppConfig: mentionApp,
 	})
 	if err != nil {
@@ -1051,8 +1061,11 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 	if senderOpenID == "" {
 		return im.Message{}, fmt.Errorf("resolve feishu sender open_id: empty open_id for %q", senderID)
 	}
-	mentionOpenID := strings.TrimSpace(sent.MentionOpenID)
-	if mentionID != "" && mentionOpenID == "" {
+	sentMentionOpenID := strings.TrimSpace(sent.MentionOpenID)
+	if sentMentionOpenID == "" {
+		sentMentionOpenID = mentionOpenID
+	}
+	if mentionID != "" && sentMentionOpenID == "" {
 		return im.Message{}, fmt.Errorf("resolve feishu mention open_id: empty open_id for %q", mentionID)
 	}
 
@@ -1068,8 +1081,8 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 		CreatedAt: time.Now().UTC(),
 		Mentions:  nil,
 	}
-	if mentionOpenID != "" {
-		message.Mentions = []im.Mention{{ID: mentionOpenID, Name: mentionID}}
+	if sentMentionOpenID != "" {
+		message.Mentions = []im.Mention{{ID: sentMentionOpenID, Name: mentionID}}
 	}
 
 	s.mu.Lock()
@@ -1514,6 +1527,20 @@ func (s *Service) appConfigForMentionLocked(mention string) (AppConfig, error) {
 		return validateAppConfig(app, mention)
 	}
 	return AppConfig{}, fmt.Errorf("feishu app is not configured for mention %q", mention)
+}
+
+func (s *Service) participantMentionOpenIDLocked(participantID string) (string, bool) {
+	participantID = strings.TrimSpace(participantID)
+	if participantID == "" || s.configProvider == nil {
+		return "", false
+	}
+	provider, ok := s.configProvider.(ParticipantMentionProvider)
+	if !ok {
+		return "", false
+	}
+	openID, ok := provider.MentionOpenID(participantID)
+	openID = strings.TrimSpace(openID)
+	return openID, ok && openID != ""
 }
 
 func (s *Service) managerAppConfigLocked() (AppConfig, error) {

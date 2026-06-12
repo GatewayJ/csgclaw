@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,11 +14,44 @@ import (
 )
 
 func (h *Handler) handleFeishuParticipantEvents(w http.ResponseWriter, r *http.Request, participantID, targetID string) {
-	h.streamFeishuEvents(w, r, feishuEventTarget{IDs: []string{participantID, targetID}})
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !h.validateServerAccessToken(r.Header.Get("Authorization")) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	targetIDs := []string{participantID, targetID}
+	targetIDs = append(targetIDs, h.resolveFeishuParticipantEventOpenIDs(r.Context(), participantID, targetID)...)
+	h.streamFeishuEvents(w, r, feishuEventTarget{IDs: targetIDs})
 }
 
 type feishuEventTarget struct {
 	IDs []string
+}
+
+func (h *Handler) resolveFeishuParticipantEventOpenIDs(ctx context.Context, ids ...string) []string {
+	if h == nil || h.feishu == nil {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		openID, _, err := h.feishu.ResolveBotOpenID(ctx, id)
+		if err != nil {
+			continue
+		}
+		openID = strings.TrimSpace(openID)
+		if openID == "" || openID == id {
+			continue
+		}
+		out = append(out, openID)
+	}
+	return out
 }
 
 func (h *Handler) streamFeishuEvents(w http.ResponseWriter, r *http.Request, target feishuEventTarget) {

@@ -483,6 +483,7 @@ room 相关命令行和 room API 入参保持当前形状，不新增群主参�
   - `FeishuConfigForAgent(agentID string) (participantID string, config FeishuChannelAppConfig, ok bool)`。
   - `FeishuConfigForParticipant(participantID string) (config FeishuChannelAppConfig, ok bool)`。
   - `DefaultAdminOpenID() (openID string, ok bool)`。
+  - `MentionOpenID(participantID string) (openID string, ok bool)` 用于 human participant 的 @ 目标。
   - 每次调用直接读取当前 `participants.json`；本期优先保持实现简单，不引入缓存失效问题。
   - 如果同一个 `agent_id` 同时存在 canonical 和历史非 canonical Feishu participant，优先使用
     canonical participant，并记录 warning；本期不在 reader 内改写历史 participant ID。
@@ -495,8 +496,9 @@ room 相关命令行和 room API 入参保持当前形状，不新增群主参�
   - `/api/v1/channels/feishu/participants/{id}/events` 的 `{id}` 是 Feishu participant ID。
   - 不在这些 API 中使用 agent ID、Feishu open_id 或 app_id 作为 participant 入参。
 - Feishu service 内部 `apps map[string]AppConfig` 的 key 统一是 Feishu participant ID。
-  `appConfigForSenderLocked`、`appConfigForMentionLocked`、`appIDForMemberLocked` 等函数继续按
-  key 查 app config，但传入值必须是 Feishu participant ID。
+  `appConfigForSenderLocked`、`appIDForMemberLocked` 等函数继续按 key 查 app config，但传入值必须是
+  Feishu participant ID。@ agent 继续通过 `appConfigForMentionLocked` 解析 app-backed bot open_id；
+  @ human 则通过 participant 的 `channel_user_ref` 解析 Feishu open_id，不要求 human participant 有 app config。
 - `feishu.FileStore` 和旧 `Provider/Snapshot` 不再作为运行时配置持久来源；旧 toml 自动迁移暂不实现。
 - Feishu service 内部 `feishuManagerBotID = "u-manager"` 需要调整为 manager participant ID
   `manager`，否则 create room/list members 仍会按旧 key 找 app。

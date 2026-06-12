@@ -16,15 +16,15 @@ import (
 )
 
 type bindResult struct {
-	Status        string   `json:"status"`
-	Channel       string   `json:"channel"`
-	FeishuKind    string   `json:"feishu_kind"`
-	ParticipantID string   `json:"participant_id"`
-	AgentID       string   `json:"agent_id,omitempty"`
-	ConfigSaved   bool     `json:"config_saved"`
-	RestartStatus string   `json:"restart_status,omitempty"`
-	RestartError  string   `json:"restart_error,omitempty"`
-	Warnings      []string `json:"warnings,omitempty"`
+	Status          string   `json:"status"`
+	Channel         string   `json:"channel"`
+	ParticipantType string   `json:"participant_type"`
+	ParticipantID   string   `json:"participant_id"`
+	AgentID         string   `json:"agent_id,omitempty"`
+	ConfigSaved     bool     `json:"config_saved"`
+	RestartStatus   string   `json:"restart_status,omitempty"`
+	RestartError    string   `json:"restart_error,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
 }
 
 func (c cmd) runBind(ctx context.Context, run *command.Context, args []string, globals command.GlobalOptions) error {
@@ -83,11 +83,11 @@ func (c cmd) runBindFeishuHuman(ctx context.Context, run *command.Context, globa
 		return fmt.Errorf("bind feishu admin human participant_id=%q: %w", participantID, err)
 	}
 	return renderBindResult(globals.Output, run.Stdout, bindResult{
-		Status:        "configured",
-		Channel:       participantpkg.ChannelFeishu,
-		FeishuKind:    "human",
-		ParticipantID: item.ID,
-		ConfigSaved:   true,
+		Status:          "configured",
+		Channel:         participantpkg.ChannelFeishu,
+		ParticipantType: participantpkg.TypeHuman,
+		ParticipantID:   item.ID,
+		ConfigSaved:     true,
 	})
 }
 
@@ -119,13 +119,13 @@ func (c cmd) runBindFeishuBot(ctx context.Context, run *command.Context, globals
 	}
 
 	result := bindResult{
-		Status:        "configured",
-		Channel:       participantpkg.ChannelFeishu,
-		FeishuKind:    "bot",
-		ParticipantID: item.ID,
-		AgentID:       target.ID,
-		ConfigSaved:   true,
-		Warnings:      warnings,
+		Status:          "configured",
+		Channel:         participantpkg.ChannelFeishu,
+		ParticipantType: participantpkg.TypeAgent,
+		ParticipantID:   item.ID,
+		AgentID:         target.ID,
+		ConfigSaved:     true,
+		Warnings:        warnings,
 	}
 	if restart {
 		if strings.EqualFold(target.ID, agent.ManagerUserID) || strings.EqualFold(target.Role, agent.RoleManager) {
@@ -350,11 +350,11 @@ func renderBindResult(output string, w io.Writer, result bindResult) error {
 		return command.WriteJSON(w, result)
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "STATUS\tCHANNEL\tKIND\tPARTICIPANT_ID\tAGENT_ID\tCONFIG_SAVED\tRESTART\tRESTART_ERROR")
+	fmt.Fprintln(tw, "STATUS\tCHANNEL\tTYPE\tPARTICIPANT_ID\tAGENT_ID\tCONFIG_SAVED\tRESTART\tRESTART_ERROR")
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%t\t%s\t%s\n",
 		display(result.Status),
 		display(result.Channel),
-		display(result.FeishuKind),
+		display(result.ParticipantType),
 		display(result.ParticipantID),
 		display(result.AgentID),
 		result.ConfigSaved,

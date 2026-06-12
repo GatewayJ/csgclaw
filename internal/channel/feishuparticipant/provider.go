@@ -97,6 +97,19 @@ func (p *ParticipantConfigProvider) DefaultAdminOpenID() (string, bool) {
 	return openID, openID != ""
 }
 
+func (p *ParticipantConfigProvider) MentionOpenID(participantID string) (string, bool) {
+	item, ok := p.getParticipant(strings.TrimSpace(participantID))
+	if !ok {
+		return "", false
+	}
+	if strings.TrimSpace(item.Type) != participant.TypeHuman ||
+		strings.TrimSpace(item.ChannelUserKind) != participant.ChannelUserKindOpenID {
+		return "", false
+	}
+	openID := strings.TrimSpace(item.ChannelUserRef)
+	return openID, openID != ""
+}
+
 func (p *ParticipantConfigProvider) Snapshot() feishu.Snapshot {
 	store, err := p.openStore()
 	if err != nil {

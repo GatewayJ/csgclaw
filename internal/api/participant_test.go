@@ -798,8 +798,18 @@ func TestFeishuParticipantEventsRouteUsesParticipantChannelUserRef(t *testing.T)
 	<-done
 }
 
-func TestFeishuParticipantEventsRouteUsesMentionParticipantIDForAppIDParticipant(t *testing.T) {
-	feishuSvc := feishu.NewService()
+func TestFeishuParticipantEventsRouteUsesBotOpenIDForAppIDParticipant(t *testing.T) {
+	feishuSvc := feishu.NewServiceWithBotOpenIDResolver(
+		map[string]feishu.AppConfig{
+			"dev": {AppID: "cli_dev", AppSecret: "dev-secret"},
+		},
+		func(_ context.Context, app feishu.AppConfig) (feishu.BotInfo, error) {
+			if app.AppID != "cli_dev" {
+				t.Fatalf("resolve app_id = %q, want cli_dev", app.AppID)
+			}
+			return feishu.BotInfo{OpenID: "ou_dev"}, nil
+		},
+	)
 	participantSvc := participant.NewService(participant.NewMemoryStore([]apitypes.Participant{{
 		ID:              "dev",
 		Channel:         participant.ChannelFeishu,
@@ -835,10 +845,9 @@ func TestFeishuParticipantEventsRouteUsesMentionParticipantIDForAppIDParticipant
 		return strings.Contains(rec.Body.String(), ": connected")
 	})
 	feishuSvc.MessageBus().Publish(feishu.MessageEvent{
-		Type:         feishu.MessageEventTypeMessageCreated,
-		RoomID:       "oc_alpha",
-		SenderBotID:  "manager",
-		MentionBotID: "dev",
+		Type:        feishu.MessageEventTypeMessageCreated,
+		RoomID:      "oc_alpha",
+		SenderBotID: "manager",
 		Message: &im.Message{
 			ID:       "om_dev",
 			SenderID: "ou_manager",

@@ -421,7 +421,7 @@ func TestExecuteParticipantBindAdminHumanUsesParticipantAPI(t *testing.T) {
 	if call != 2 {
 		t.Fatalf("request count = %d, want 2", call)
 	}
-	if !strings.Contains(stdout.String(), `"participant_id": "admin"`) || !strings.Contains(stdout.String(), `"feishu_kind": "human"`) {
+	if !strings.Contains(stdout.String(), `"participant_id": "admin"`) || !strings.Contains(stdout.String(), `"participant_type": "human"`) {
 		t.Fatalf("stdout = %q, want admin bind result", stdout.String())
 	}
 }

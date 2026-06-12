@@ -43,6 +43,26 @@ func testBotInfoResolver(t *testing.T, openIDsByAppID map[string]string) func(co
 	}
 }
 
+type testFeishuConfigProvider struct {
+	bots           map[string]AppConfig
+	mentionOpenIDs map[string]string
+	adminOpenID    string
+}
+
+func (p testFeishuConfigProvider) BotConfig(participantID string) (AppConfig, bool) {
+	app, ok := p.bots[strings.TrimSpace(participantID)]
+	return app, ok
+}
+
+func (p testFeishuConfigProvider) MentionOpenID(participantID string) (string, bool) {
+	openID, ok := p.mentionOpenIDs[strings.TrimSpace(participantID)]
+	return openID, ok
+}
+
+func (p testFeishuConfigProvider) Snapshot() Snapshot {
+	return Snapshot{AdminOpenID: p.adminOpenID, Bots: p.bots}
+}
+
 func TestFeishuServiceKeepsNamedAppConfigs(t *testing.T) {
 	svc := NewService(map[string]AppConfig{
 		"manager": {
@@ -405,6 +425,43 @@ func TestFeishuSendMessageResolvesMentionApp(t *testing.T) {
 	}
 	if len(message.Mentions) != 1 || message.Mentions[0].ID != "ou_dev" || message.Mentions[0].Name != "u-dev" {
 		t.Fatalf("message mentions = %+v, want ou_dev", message.Mentions)
+	}
+}
+
+func TestFeishuSendMessageResolvesHumanMentionOpenID(t *testing.T) {
+	var gotReq SendMessageRequest
+	svc := NewServiceWithProvider(testFeishuConfigProvider{
+		bots: map[string]AppConfig{
+			"manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
+		},
+		mentionOpenIDs: map[string]string{
+			"admin": "ou_admin",
+		},
+	})
+	svc.sendMessage = func(_ context.Context, _ AppConfig, req SendMessageRequest) (SendMessageResponse, error) {
+		gotReq = req
+		return SendMessageResponse{MessageID: "om_admin", SenderOpenID: "ou_manager"}, nil
+	}
+	svc.rooms["oc_alpha"] = &im.Room{ID: "oc_alpha", Title: "alpha", Members: []string{"manager", "admin"}}
+
+	message, err := svc.SendMessage(im.CreateMessageRequest{
+		RoomID:    "oc_alpha",
+		SenderID:  "manager",
+		Content:   "hello admin",
+		MentionID: "admin",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+
+	if gotReq.MentionID != "admin" || gotReq.MentionOpenID != "ou_admin" {
+		t.Fatalf("send request = %+v, want human mention open_id", gotReq)
+	}
+	if gotReq.MentionAppConfig != (AppConfig{}) {
+		t.Fatalf("send request mention app = %+v, want zero app config for human mention", gotReq.MentionAppConfig)
+	}
+	if len(message.Mentions) != 1 || message.Mentions[0].ID != "ou_admin" || message.Mentions[0].Name != "admin" {
+		t.Fatalf("message mentions = %+v, want ou_admin", message.Mentions)
 	}
 }
 

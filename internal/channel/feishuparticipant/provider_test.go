@@ -82,6 +82,13 @@ func TestProviderReadsBotAndAdminConfigFromParticipants(t *testing.T) {
 	if !ok || adminOpenID != "ou_admin" {
 		t.Fatalf("DefaultAdminOpenID() = %q, ok=%v; want ou_admin", adminOpenID, ok)
 	}
+	adminOpenID, ok = provider.MentionOpenID("admin")
+	if !ok || adminOpenID != "ou_admin" {
+		t.Fatalf("MentionOpenID(admin) = %q, ok=%v; want ou_admin", adminOpenID, ok)
+	}
+	if openID, ok := provider.MentionOpenID("dev"); ok || openID != "" {
+		t.Fatalf("MentionOpenID(dev) = %q, ok=%v; want no human mention open_id for app-backed agent", openID, ok)
+	}
 	snapshot := provider.Snapshot()
 	if snapshot.AdminOpenID != "ou_admin" || snapshot.Bots[agent.ManagerParticipantID].AppID != "cli_manager" || snapshot.Bots["dev"].AppSecret != "dev-secret" {
 		t.Fatalf("Snapshot() = %+v, want participant-backed config", snapshot)

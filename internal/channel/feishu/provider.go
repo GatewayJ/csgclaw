@@ -12,6 +12,10 @@ type DefaultAdminOpenIDProvider interface {
 	DefaultAdminOpenID() (openID string, ok bool)
 }
 
+type ParticipantMentionProvider interface {
+	MentionOpenID(participantID string) (openID string, ok bool)
+}
+
 type SnapshotProvider interface {
 	Snapshot() Snapshot
 }
