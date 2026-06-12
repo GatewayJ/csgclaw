@@ -11,11 +11,11 @@ import (
 )
 
 var (
-	ErrStoreFactoryRequired  = errors.New("hub store factory is required")
-	ErrRegistryNotFound      = errors.New("hub registry not found")
-	ErrRegistryNotReadable   = errors.New("hub registry is not readable")
-	ErrRegistryNotWritable   = errors.New("hub registry is not writable")
-	ErrRegistryNotDeletable  = errors.New("hub registry is not deletable")
+	ErrStoreFactoryRequired = errors.New("hub store factory is required")
+	ErrRegistryNotFound     = errors.New("hub registry not found")
+	ErrRegistryNotReadable  = errors.New("hub registry is not readable")
+	ErrRegistryNotWritable  = errors.New("hub registry is not writable")
+	ErrRegistryNotDeletable = errors.New("hub registry is not deletable")
 )
 
 const templateIDNamespaceSeparator = "."
