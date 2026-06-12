@@ -504,24 +504,25 @@ csgclaw participant delete <id> [flags]
 `participant bind` 参数：
 
 - `--channel string`：仅支持 `feishu`，默认 `feishu`。
-- `--feishu-kind string`：`human` 或 `bot`。
-- `--admin`：绑定 Feishu 管理员 human。
-- `--open-id string`：当 `--feishu-kind human` 且 `--admin` 时必填。
+- `--subject string`：绑定主体，支持 `human` 或 `agent-app`。
+- `--profile string`：绑定配置档，例如 `admin`。
+- `--identity-kind string`：渠道身份类型，例如 `open_id`。
+- `--identity-ref string`：渠道身份引用，例如 Feishu open_id。
 - `--name string`：admin participant 的显示名，可选。
-- `--agent string`：bot 绑定的目标 Agent。
-- `--app-id string`：bot 的 Feishu app id。
+- `--agent-id string`：app 绑定的目标 Agent 名称或 ID。
+- `--app-ref string`：渠道 app/config 引用，例如 Feishu app_id。
 - `--app-secret-file string`：从文件读取 app secret。
 - `--app-secret-env string`：从环境变量读取 app secret。
 - `--app-secret-stdin`：从 stdin 读取 app secret。
-- `--restart`：保存后重建 worker。对 manager 生效时返回 `restart_status=manager_restart_required`，并由安全流程触发重建。
+- `--apply`：保存后让配置对 runtime 生效。对 worker 会执行 recreate；对 manager 生效时返回 `restart_status=manager_restart_required`，并由安全流程触发重建。
+- 兼容旧参数：`--feishu-kind`、`--admin`、`--open-id`、`--agent`、`--app-id`、`--restart`。
 
 `participant bind` 行为说明：
 
-- `--feishu-kind` 必须是 `human` 或 `bot`，且只允许一种。
-- `--feishu-kind human` 需要 `--admin` 和 `--open-id`。
-- `--feishu-kind bot` 需要 `--agent`、`--app-id`。
-- bot 绑定时，`--app-secret-file`、`--app-secret-env`、`--app-secret-stdin` 只能三选一。
-- `--restart` 默认关闭；不传时仅写配置。仅对 worker 生效为自动重建；manager 返回
+- `--subject` 必须是 `human` 或 `agent-app`，且只允许一种。
+- `--subject human` 当前需要 `--profile admin`；`--identity-kind` 默认是 `open_id`，并且必须传 `--identity-ref`。
+- `--subject agent-app` 需要 `--agent-id`、`--app-ref`，并且 `--app-secret-file`、`--app-secret-env`、`--app-secret-stdin` 只能三选一。
+- `--apply` 默认关闭；不传时仅写配置。仅对 worker 生效为自动重建；manager 返回
   `restart_status=manager_restart_required`，需要外部流程完成重建。
 - `pt bind` 与 `participant bind` 完全等价。
 
@@ -628,8 +629,8 @@ csgclaw message <subcommand> [flags]
 ```bash
 csgclaw participant list
 csgclaw participant create --name alice --bind create --role worker --model-id gpt-5.4-mini
-csgclaw participant bind --channel feishu --feishu-kind human --admin --open-id ou_xxx
-csgclaw pt bind --channel feishu --feishu-kind bot --agent u-manager --app-id cli_xxx --app-secret-env FEISHU_APP_SECRET
+csgclaw participant bind --channel feishu --subject human --profile admin --identity-ref ou_xxx
+csgclaw pt bind --channel feishu --subject agent-app --agent-id u-manager --app-ref cli_xxx --app-secret-env FEISHU_APP_SECRET
 csgclaw room create --title "release-room" --creator-id manager --member-ids manager,alice
 csgclaw member create --room-id room-1 --user-id alice --inviter-id manager
 csgclaw message list --room-id room-1
@@ -699,8 +700,8 @@ csgclaw-cli completion fish
 ```bash
 csgclaw-cli participant list --channel feishu --type agent
 csgclaw-cli pt create --name manager --channel feishu --type agent --bind create --role manager
-csgclaw-cli participant bind --channel feishu --feishu-kind human --admin --open-id ou_xxx
-csgclaw-cli pt bind --channel feishu --feishu-kind bot --agent u-manager --app-id cli_xxx --app-secret-stdin
+csgclaw-cli participant bind --channel feishu --subject human --profile admin --identity-ref ou_xxx
+csgclaw-cli pt bind --channel feishu --subject agent-app --agent-id u-manager --app-ref cli_xxx --app-secret-stdin
 csgclaw-cli room create --channel feishu --title "ops-room" --creator-id manager --member-ids manager,dev
 csgclaw-cli member list --channel feishu --room-id oc_x
 csgclaw-cli member create --channel feishu --room-id oc_x --user-id dev --inviter-id manager

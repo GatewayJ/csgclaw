@@ -109,10 +109,11 @@ def configure_csgclaw(args, state: dict, result: dict) -> dict:
                 "bind",
                 "--channel",
                 "feishu",
-                "--feishu-kind",
+                "--subject",
                 "human",
-                "--admin",
-                "--open-id",
+                "--profile",
+                "admin",
+                "--identity-ref",
                 candidate_admin_open_id,
             ],
         )
@@ -121,17 +122,17 @@ def configure_csgclaw(args, state: dict, result: dict) -> dict:
         "bind",
         "--channel",
         "feishu",
-        "--feishu-kind",
-        "bot",
-        "--agent",
+        "--subject",
+        "agent-app",
+        "--agent-id",
         agent_id,
-        "--app-id",
+        "--app-ref",
         result["app_id"],
         "--app-secret-stdin",
     ]
     role = resolve_role(args, state)
     if role == "worker" and args.recreate in ("auto", "worker"):
-        bot_bind_args.append("--restart")
+        bot_bind_args.append("--apply")
     response["bot_bind"] = csgclaw_cli_json(args, bot_bind_args, input_text=result["app_secret"])
     if agent_id == "u-manager":
         if candidate_admin_open_id:

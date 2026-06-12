@@ -127,10 +127,11 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
             "bind",
             "--channel",
             "feishu",
-            "--feishu-kind",
+            "--subject",
             "human",
-            "--admin",
-            "--open-id",
+            "--profile",
+            "admin",
+            "--identity-ref",
             open_id,
         ]
         admin_name = str(args.name or "").strip()
@@ -143,14 +144,14 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
         "bind",
         "--channel",
         "feishu",
-        "--feishu-kind",
-        "bot",
-        "--agent",
+        "--subject",
+        "agent-app",
+        "--agent-id",
         agent_id,
-        "--app-id",
+        "--app-ref",
         app_id,
         *secret_args,
-        "--restart",
+        "--apply",
     ]
     config["bot_bind"] = csgclaw_cli_json(args, bot_bind_args, input_text=input_text)
     output = {

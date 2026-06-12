@@ -47,23 +47,24 @@ Feishu skill
 新增 `csgclaw-cli pt bind`，专门完成“把外部 channel 身份绑定到 participant，并写入该
 channel 所需 app config”的流程。
 
-第一阶段只实现 Feishu，并且必须显式区分 Feishu human 和 Feishu bot。这里的
-`human|bot` 是 CLI 交互语义，落到 participant 里分别对应 `type=human|agent`。
+第一阶段只实现 Feishu，并且必须显式区分 human 管理员身份和 agent app 身份。这里的
+`human|agent-app` 是 CLI 交互语义，落到 participant 里分别对应 `type=human|agent`。
 
 ```bash
 csgclaw-cli pt bind \
   --channel feishu \
-  --feishu-kind bot \
-  --agent <agent-name-or-id> \
-  --app-id <cli_xxx> \
+  --subject agent-app \
+  --agent-id <agent-name-or-id> \
+  --app-ref <cli_xxx> \
   --app-secret-stdin \
-  [--restart]
+  [--apply]
 
 csgclaw-cli pt bind \
   --channel feishu \
-  --feishu-kind human \
-  --admin \
-  --open-id <ou_xxx> \
+  --subject human \
+  --profile admin \
+  --identity-kind open_id \
+  --identity-ref <ou_xxx> \
   [--name <display-name>]
 ```
 
@@ -85,14 +86,18 @@ participant ID 固定为 `admin`，用现有 `channel_user_ref` 保存 Feishu �
 | 参数 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `--channel` | 是 | 无 | 当前只接受 `feishu`。 |
-| `--feishu-kind` | 是 | 无 | `bot` 或 `human`，决定后续参数校验和 participant type。 |
-| `--agent` | bot 必填 | 无 | agent 名称或 ID。先按 ID 查，再按 `u-<name>` 查，再按唯一 `name` 查。 |
-| `--name` | human 可选；bot 不使用 | human 默认 `admin` | Feishu human participant 显示名。bot 显示名固定使用 agent.Name。 |
-| `--admin` | human 第一阶段必填 | false | 标记该 human 是默认群主 admin；本期只实现 `feishu:admin` human。 |
-| `--open-id` | human 必填 | 无 | Feishu 真人 open_id，写入 `channel_user_ref`，并设置 `channel_user_kind=open_id`。 |
-| `--app-id` | bot 必填 | 无 | Feishu app `client_id`/`app_id`，写入 `channel_app_config.app_id`。 |
-| `--app-secret-*` | bot 必填 | 无 | Feishu app secret，只读入内存，不打印；human 不接受 app secret。 |
-| `--restart` | bot 可选 | false | true 时配置写入后让 worker 重新物化 runtime env/config；manager 不会在当前进程内自动 recreate，而是返回 `manager_restart_required`。 |
+| `--subject` | 是 | 无 | `agent-app` 或 `human`，决定后续参数校验和 participant type。 |
+| `--agent-id` | agent-app 必填 | 无 | agent 名称或 ID。先按 ID 查，再按 `u-<name>` 查，再按唯一 `name` 查。 |
+| `--name` | human 可选；agent-app 不使用 | human 默认 `admin` | Feishu human participant 显示名。agent-app 显示名固定使用 agent.Name。 |
+| `--profile` | human 第一阶段必填 | 无 | 当前只支持 `admin`，标记该 human 是默认群主 admin。 |
+| `--identity-kind` | human 可选 | `open_id` | Feishu 真人身份类型，当前 human 只支持 `open_id`。 |
+| `--identity-ref` | human 必填 | 无 | Feishu 真人 open_id，写入 `channel_user_ref`，并设置 `channel_user_kind=open_id`。 |
+| `--app-ref` | agent-app 必填 | 无 | Feishu app `client_id`/`app_id`，写入 `channel_app_config.app_id`。 |
+| `--app-secret-*` | agent-app 必填 | 无 | Feishu app secret，只读入内存，不打印；human 不接受 app secret。 |
+| `--apply` | agent-app 可选 | false | true 时配置写入后让 worker 重新物化 runtime env/config；manager 不会在当前进程内自动 recreate，而是返回 `manager_restart_required`。 |
+
+兼容旧参数：`--feishu-kind`、`--agent`、`--admin`、`--open-id`、`--app-id`、`--restart`
+保留为 alias；新文档和脚本应优先使用上面的中性参数。
 
 ### 命令执行逻辑
 
@@ -110,7 +115,7 @@ participant create/update”。
 
 ```text
 Human bind:
-1. 要求 --feishu-kind human、--admin、--open-id。
+1. 要求 --subject human、--profile admin、--identity-ref；--identity-kind 默认 open_id。
 2. 创建或更新 Feishu admin human participant：
    - id = "admin"
    - channel = "feishu"
@@ -121,8 +126,8 @@ Human bind:
 3. 保存 participants.json。
 4. 不触发 agent recreate。
 
-Bot bind:
-1. 要求 --feishu-kind bot、--agent、--app-id 和一个 app_secret 来源。
+Agent app bind:
+1. 要求 --subject agent-app、--agent-id、--app-ref 和一个 app_secret 来源。
 2. 解析参数，读取 app_secret，禁止在 stdout/stderr 打印 secret。
 3. 调用 GET /api/v1/agents 或 GET /api/v1/agents/{id} 解析目标 agent：
    - "manager" / "u-manager" -> agent ID "u-manager"。
@@ -154,7 +159,7 @@ Bot bind:
    - 继续写入 canonical participant（例如 `feishu:dev`），并在 CLI/server 日志中记录 warning。
    - 后续由历史数据专项迁移统一处理旧 participant。
 9. 保存 participants.json。Feishu 发送、建群和 runtime 注入后续都直接读取该文件，不需要 reload。
-10. 根据 --restart 处理 agent：
+10. 根据 --apply 处理 agent：
    - worker：调用 POST /api/v1/agents/{agent_id}/recreate。
    - manager：保持现有安全边界，返回 action card 或要求浏览器侧 bootstrap replace；不在
      manager-hosted skill 进程里直接自杀式 recreate。
@@ -229,7 +234,7 @@ type FeishuChannelAppConfig struct {
 当前代码里仍有 bot info 能力：`internal/channel/feishu/service.go` 里的 `fetchBotInfo(...)`
 会调用 Feishu bot info API，`ResolveBotOpenID(...)` 会基于 app config 解析 bot 自身
 `open_id`。这个 bot open_id 和 `feishu:admin` human 的 `channel_user_ref` 不是同一个概念：
-前者是 bot app 的身份，后者是真人管理员身份。`pt bind --feishu-kind bot` 不再强制解析 bot open_id；bot participant
+前者是 bot app 的身份，后者是真人管理员身份。`pt bind --subject agent-app` 不再强制解析 bot open_id；bot participant
 统一写 `channel_user_kind=app_id`，app_id 的真实值保存在 `channel_app_config.app_id`。
 
 `channel_app_ref` 不是 Feishu app 凭证来源。它是 participant 架构里已有的非敏感 app scope
@@ -242,12 +247,12 @@ type FeishuChannelAppConfig struct {
 | --- | --- | --- |
 | `id` | bot 由 agent ID 推导；human 固定 `admin` | Feishu channel 内 participant key。bot 使用解析后的 agent ID 去掉开头 `u-`；manager 固定 `manager`；不从命令行读取 participant ID。 |
 | `channel` | `--channel` | 当前固定 `feishu`。 |
-| `type` | `--feishu-kind` | `bot -> agent`；`human -> human`。 |
+| `type` | `--subject` | `agent-app -> agent`；`human -> human`。 |
 | `name` | bot 使用 agent.Name；human 使用 `--name` 或 `admin` | 显示名，不参与 ID 推导。Feishu skill 默认不传 human name，因此管理员显示名为 `admin`。 |
-| `channel_user_ref` | human 使用 `--open-id`；bot 不写 | Feishu human 的真实 open_id。默认群主读取 `feishu:admin.channel_user_ref`。 |
+| `channel_user_ref` | human 使用 `--identity-ref`；agent-app 不写 | Feishu human 的真实 open_id。默认群主读取 `feishu:admin.channel_user_ref`。 |
 | `channel_user_kind` | human 固定 `open_id`；bot 固定 `app_id` | 描述 Feishu participant 的 channel 身份类型。 |
 | `channel_app_config` | Feishu skill/手动参数 | Feishu 专属结构；bot 保存 `app_id/app_secret`，human 不写。 |
-| `agent_id` | `--agent` 解析结果 | 只给 `type=agent` participant 写入，指向 runtime agent。 |
+| `agent_id` | `--agent-id` 解析结果 | 只给 `type=agent` participant 写入，指向 runtime agent。 |
 | `lifecycle_status` | participant service | 新建为 `active`。 |
 | `mentionable` | participant service | 默认 true。 |
 | `created_at` | participant service | 首次创建时间。 |
@@ -310,9 +315,9 @@ python .../feishu_register.py finalize --registration-id <id>
 ```bash
 csgclaw-cli --output json pt bind \
   --channel feishu \
-  --feishu-kind human \
-  --admin \
-  --open-id "$ADMIN_OPEN_ID"
+  --subject human \
+  --profile admin \
+  --identity-ref "$ADMIN_OPEN_ID"
 ```
 
 保存 bot app 凭证并绑定目标 agent：
@@ -320,9 +325,9 @@ csgclaw-cli --output json pt bind \
 ```bash
 printf '%s' "$APP_SECRET" | csgclaw-cli --output json pt bind \
   --channel feishu \
-  --feishu-kind bot \
-  --agent dev \
-  --app-id "$APP_ID" \
+  --subject agent-app \
+  --agent-id dev \
+  --app-ref "$APP_ID" \
   --app-secret-stdin
 ```
 
@@ -623,10 +628,10 @@ go test ./cli/serve ./internal/onboard
    `FeishuChannelAppConfig` 解析，非 Feishu participant 不写这个字段，也不改变现有行为。
    真实 secret 只在落盘和 server 内部读取时保留；所有对外响应统一脱敏
    `channel_app_config.app_secret`。
-3. Feishu bot 和 Feishu human 必须在 `pt bind` 命令层区分：
-   - `--feishu-kind bot` 写 `type=agent`，`channel_user_kind=app_id`，保存 app
+3. Feishu app 和 Feishu human 必须在 `pt bind` 命令层区分：
+   - `--subject agent-app` 写 `type=agent`，`channel_user_kind=app_id`，保存 app
      `app_id/app_secret`，并绑定 `agent_id`。
-   - `--feishu-kind human` 写 `type=human`，保存真人 `open_id`，不绑定 agent，不接收 app secret。
+   - `--subject human` 写 `type=human`，保存真人 `open_id`，不绑定 agent，不接收 app secret。
 4. Feishu 新结构只用 `channel_user_kind` 标记身份类型：human 的真人 open_id 写入
    `channel_user_ref`，bot 的 app_id/app_secret 写入 `channel_app_config`。
 5. 旧 `feishu.toml` 的 `[global] admin_open_id` 语义由 `feishu:admin` human participant

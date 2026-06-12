@@ -413,9 +413,10 @@ func TestExecuteParticipantBindAdminHumanUsesParticipantAPI(t *testing.T) {
 		"--output", "json",
 		"pt", "bind",
 		"--channel", "feishu",
-		"--feishu-kind", "human",
-		"--admin",
-		"--open-id", "ou_admin",
+		"--subject", "human",
+		"--profile", "admin",
+		"--identity-kind", "open_id",
+		"--identity-ref", "ou_admin",
 	})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -428,7 +429,7 @@ func TestExecuteParticipantBindAdminHumanUsesParticipantAPI(t *testing.T) {
 	}
 }
 
-func TestExecuteParticipantBindBotWritesConfigAndRecreatesWorkerWhenRestartFlagSet(t *testing.T) {
+func TestExecuteParticipantBindAgentAppWritesConfigAndRecreatesWorkerWhenApplyFlagSet(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	call := 0
 	app := &App{
@@ -489,11 +490,11 @@ func TestExecuteParticipantBindBotWritesConfigAndRecreatesWorkerWhenRestartFlagS
 		"--output", "json",
 		"pt", "bind",
 		"--channel", "feishu",
-		"--feishu-kind", "bot",
-		"--agent", "u-dev",
-		"--app-id", "cli_dev",
+		"--subject", "agent-app",
+		"--agent-id", "u-dev",
+		"--app-ref", "cli_dev",
 		"--app-secret-stdin",
-		"--restart",
+		"--apply",
 	})
 	if err != nil {
 		t.Fatalf("Execute() error = %v; stderr=%s", err, stderr.String())

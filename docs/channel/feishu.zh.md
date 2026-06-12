@@ -15,9 +15,10 @@ CSGClaw 不从 `config.toml` 读取飞书凭证。旧的 `channels/feishu.toml` 
 ```bash
 csgclaw-cli participant bind \
   --channel feishu \
-  --feishu-kind human \
-  --admin \
-  --open-id ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  --subject human \
+  --profile admin \
+  --identity-kind open_id \
+  --identity-ref ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 绑定 worker agent 的飞书应用。secret 从 stdin 读取，不会打印：
@@ -25,11 +26,11 @@ csgclaw-cli participant bind \
 ```bash
 printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
   --channel feishu \
-  --feishu-kind bot \
-  --agent u-dev \
-  --app-id cli_xxxxxxxxxxxxxxxx \
+  --subject agent-app \
+  --agent-id u-dev \
+  --app-ref cli_xxxxxxxxxxxxxxxx \
   --app-secret-stdin \
-  --restart
+  --apply
 ```
 
 绑定 manager 应用：
@@ -37,14 +38,14 @@ printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
 ```bash
 printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
   --channel feishu \
-  --feishu-kind bot \
-  --agent u-manager \
-  --app-id cli_xxxxxxxxxxxxxxxx \
+  --subject agent-app \
+  --agent-id u-manager \
+  --app-ref cli_xxxxxxxxxxxxxxxx \
   --app-secret-stdin \
-  --restart
+  --apply
 ```
 
-对 manager 使用 `--restart` 时会返回 `restart_status=manager_restart_required`；需要由 Web UI 触发安全的 manager rebuild。
+对 manager 使用 `--apply` 时会返回 `restart_status=manager_restart_required`；需要由 Web UI 触发安全的 manager rebuild。
 
 ## Participant 结构
 

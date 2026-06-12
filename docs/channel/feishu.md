@@ -16,9 +16,10 @@ Bind the default human Feishu administrator:
 ```bash
 csgclaw-cli participant bind \
   --channel feishu \
-  --feishu-kind human \
-  --admin \
-  --open-id ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  --subject human \
+  --profile admin \
+  --identity-kind open_id \
+  --identity-ref ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 Bind a worker agent app. The secret is read from stdin and is not printed:
@@ -26,11 +27,11 @@ Bind a worker agent app. The secret is read from stdin and is not printed:
 ```bash
 printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
   --channel feishu \
-  --feishu-kind bot \
-  --agent u-dev \
-  --app-id cli_xxxxxxxxxxxxxxxx \
+  --subject agent-app \
+  --agent-id u-dev \
+  --app-ref cli_xxxxxxxxxxxxxxxx \
   --app-secret-stdin \
-  --restart
+  --apply
 ```
 
 Bind the manager app:
@@ -38,14 +39,14 @@ Bind the manager app:
 ```bash
 printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
   --channel feishu \
-  --feishu-kind bot \
-  --agent u-manager \
-  --app-id cli_xxxxxxxxxxxxxxxx \
+  --subject agent-app \
+  --agent-id u-manager \
+  --app-ref cli_xxxxxxxxxxxxxxxx \
   --app-secret-stdin \
-  --restart
+  --apply
 ```
 
-For manager, `--restart` returns `restart_status=manager_restart_required`; the
+For manager, `--apply` returns `restart_status=manager_restart_required`; the
 Web UI must perform the safe manager rebuild action.
 
 ## Participant Shape

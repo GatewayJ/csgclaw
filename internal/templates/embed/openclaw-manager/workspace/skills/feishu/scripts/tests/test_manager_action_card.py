@@ -31,7 +31,7 @@ class ManagerActionCardTest(unittest.TestCase):
 
         def fake_csgclaw_cli_json(args, cli_args, input_text=None):
             calls.append((cli_args, input_text))
-            if "--feishu-kind" in cli_args and cli_args[cli_args.index("--feishu-kind") + 1] == "human":
+            if "--subject" in cli_args and cli_args[cli_args.index("--subject") + 1] == "human":
                 return {"participant_id": "admin", "config_saved": True}
             return {
                 "participant_id": "manager",
@@ -66,7 +66,7 @@ class ManagerActionCardTest(unittest.TestCase):
         self.assertEqual(payload["bot_id"], "u-manager")
         self.assertEqual(payload["config"]["bot_bind"]["restart_status"], "manager_restart_required")
         self.assertEqual(payload["actions"][0]["id"], "rebuild-manager")
-        self.assertTrue(any("--restart" in call[0] for call in calls))
+        self.assertTrue(any("--apply" in call[0] for call in calls))
         self.assertTrue(any("--app-secret-env" in call[0] for call in calls))
 
     def test_worker_finalize_uses_bind_restart_status(self):

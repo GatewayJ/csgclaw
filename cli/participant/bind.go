@@ -30,20 +30,27 @@ type bindResult struct {
 func (c cmd) runBind(ctx context.Context, run *command.Context, args []string, globals command.GlobalOptions) error {
 	fs := run.NewFlagSet(
 		c.Name()+" bind",
-		run.Program+" "+c.Name()+" bind --channel feishu --feishu-kind (human|bot) [flags]",
+		run.Program+" "+c.Name()+" bind --channel feishu --subject (human|agent-app) [flags]",
 		"Bind a channel identity to a participant.",
 	)
 	channelName := fs.String("channel", "feishu", "channel name; only feishu is supported")
-	feishuKind := fs.String("feishu-kind", "", "Feishu identity kind: human or bot")
-	agentRef := fs.String("agent", "", "agent name or id for Feishu bot binding")
-	name := fs.String("name", "", "participant display name for Feishu human binding")
-	admin := fs.Bool("admin", false, "bind the Feishu admin human participant")
-	openID := fs.String("open-id", "", "Feishu human open_id")
-	appID := fs.String("app-id", "", "Feishu app id for bot binding")
+	subject := fs.String("subject", "", "binding subject: human or agent-app")
+	profile := fs.String("profile", "", "binding profile such as admin")
+	identityKind := fs.String("identity-kind", "", "channel identity kind such as open_id")
+	identityRef := fs.String("identity-ref", "", "channel identity reference such as Feishu open_id")
+	agentID := fs.String("agent-id", "", "agent name or id for agent-app binding")
+	appRef := fs.String("app-ref", "", "channel app/config reference such as Feishu app_id")
+	name := fs.String("name", "", "participant display name for human binding")
 	secretFile := fs.String("app-secret-file", "", "read Feishu app secret from file")
 	secretEnv := fs.String("app-secret-env", "", "read Feishu app secret from environment variable")
 	secretStdin := fs.Bool("app-secret-stdin", false, "read Feishu app secret from stdin")
-	restart := fs.Bool("restart", false, "recreate worker after bot config is saved; manager returns restart_status=manager_restart_required")
+	apply := fs.Bool("apply", false, "apply saved app config to the runtime; workers are recreated and manager returns restart_status=manager_restart_required")
+	feishuKind := fs.String("feishu-kind", "", "deprecated alias for --subject: human or bot")
+	agentRef := fs.String("agent", "", "deprecated alias for --agent-id")
+	admin := fs.Bool("admin", false, "deprecated alias for --profile admin")
+	openID := fs.String("open-id", "", "deprecated alias for --identity-ref with --identity-kind open_id")
+	appID := fs.String("app-id", "", "deprecated alias for --app-ref")
+	restart := fs.Bool("restart", false, "deprecated alias for --apply")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -53,24 +60,164 @@ func (c cmd) runBind(ctx context.Context, run *command.Context, args []string, g
 	if normalizeChannel(*channelName) != participantpkg.ChannelFeishu {
 		return fmt.Errorf("%s bind currently supports only --channel feishu", c.Name())
 	}
-	kind := strings.ToLower(strings.TrimSpace(*feishuKind))
-	switch kind {
+	opts, err := resolveBindOptions(bindOptionInputs{
+		Subject:       *subject,
+		LegacyKind:    *feishuKind,
+		Profile:       *profile,
+		LegacyAdmin:   *admin,
+		IdentityKind:  *identityKind,
+		IdentityRef:   *identityRef,
+		LegacyOpenID:  *openID,
+		AgentID:       *agentID,
+		LegacyAgent:   *agentRef,
+		AppRef:        *appRef,
+		LegacyAppID:   *appID,
+		Apply:         *apply,
+		LegacyRestart: *restart,
+	})
+	if err != nil {
+		return err
+	}
+	switch opts.Subject {
 	case "human":
-		return c.runBindFeishuHuman(ctx, run, globals, *admin, *openID, *name)
-	case "bot":
-		return c.runBindFeishuBot(ctx, run, globals, *agentRef, *appID, *secretFile, *secretEnv, *secretStdin, *restart)
+		return c.runBindFeishuHuman(ctx, run, globals, opts.Profile, opts.IdentityKind, opts.IdentityRef, *name)
+	case "agent-app":
+		return c.runBindFeishuBot(ctx, run, globals, opts.AgentID, opts.AppRef, *secretFile, *secretEnv, *secretStdin, opts.Apply)
 	default:
-		return fmt.Errorf("--feishu-kind must be one of %q or %q", "human", "bot")
+		return fmt.Errorf("--subject must be one of %q or %q", "human", "agent-app")
 	}
 }
 
-func (c cmd) runBindFeishuHuman(ctx context.Context, run *command.Context, globals command.GlobalOptions, admin bool, openID, name string) error {
-	if !admin {
-		return fmt.Errorf("%s bind --feishu-kind human currently requires --admin", c.Name())
+type bindOptionInputs struct {
+	Subject       string
+	LegacyKind    string
+	Profile       string
+	LegacyAdmin   bool
+	IdentityKind  string
+	IdentityRef   string
+	LegacyOpenID  string
+	AgentID       string
+	LegacyAgent   string
+	AppRef        string
+	LegacyAppID   string
+	Apply         bool
+	LegacyRestart bool
+}
+
+type bindOptions struct {
+	Subject      string
+	Profile      string
+	IdentityKind string
+	IdentityRef  string
+	AgentID      string
+	AppRef       string
+	Apply        bool
+}
+
+func resolveBindOptions(in bindOptionInputs) (bindOptions, error) {
+	subject, err := resolveBindSubject(in.Subject, in.LegacyKind)
+	if err != nil {
+		return bindOptions{}, err
 	}
-	openID = strings.TrimSpace(openID)
-	if openID == "" {
-		return fmt.Errorf("%s bind --feishu-kind human requires --open-id", c.Name())
+	profile := strings.ToLower(strings.TrimSpace(in.Profile))
+	if in.LegacyAdmin {
+		if profile != "" && profile != "admin" {
+			return bindOptions{}, fmt.Errorf("--admin conflicts with --profile %q", profile)
+		}
+		profile = "admin"
+	}
+	identityKind := strings.ToLower(strings.TrimSpace(in.IdentityKind))
+	identityRef, err := resolveStringAlias("--identity-ref", in.IdentityRef, "--open-id", in.LegacyOpenID)
+	if err != nil {
+		return bindOptions{}, err
+	}
+	if strings.TrimSpace(in.LegacyOpenID) != "" {
+		if identityKind != "" && identityKind != participantpkg.ChannelUserKindOpenID {
+			return bindOptions{}, fmt.Errorf("--open-id conflicts with --identity-kind %q", identityKind)
+		}
+		identityKind = participantpkg.ChannelUserKindOpenID
+	}
+	agentID, err := resolveStringAlias("--agent-id", in.AgentID, "--agent", in.LegacyAgent)
+	if err != nil {
+		return bindOptions{}, err
+	}
+	appRef, err := resolveStringAlias("--app-ref", in.AppRef, "--app-id", in.LegacyAppID)
+	if err != nil {
+		return bindOptions{}, err
+	}
+	return bindOptions{
+		Subject:      subject,
+		Profile:      profile,
+		IdentityKind: identityKind,
+		IdentityRef:  identityRef,
+		AgentID:      agentID,
+		AppRef:       appRef,
+		Apply:        in.Apply || in.LegacyRestart,
+	}, nil
+}
+
+func resolveBindSubject(subject, legacyKind string) (string, error) {
+	subject = normalizeBindSubject(subject)
+	legacyKind = strings.ToLower(strings.TrimSpace(legacyKind))
+	legacySubject := ""
+	switch legacyKind {
+	case "":
+	case "human":
+		legacySubject = "human"
+	case "bot":
+		legacySubject = "agent-app"
+	default:
+		return "", fmt.Errorf("--feishu-kind must be one of %q or %q", "human", "bot")
+	}
+	if subject != "" && legacySubject != "" && subject != legacySubject {
+		return "", fmt.Errorf("--subject %q conflicts with --feishu-kind %q", subject, legacyKind)
+	}
+	if subject == "" {
+		subject = legacySubject
+	}
+	if subject == "" {
+		return "", fmt.Errorf("--subject must be one of %q or %q", "human", "agent-app")
+	}
+	return subject, nil
+}
+
+func normalizeBindSubject(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "human":
+		return "human"
+	case "agent-app", "agent_app", "agentapp", "bot":
+		return "agent-app"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func resolveStringAlias(primaryName, primaryValue, aliasName, aliasValue string) (string, error) {
+	primaryValue = strings.TrimSpace(primaryValue)
+	aliasValue = strings.TrimSpace(aliasValue)
+	if primaryValue != "" && aliasValue != "" && primaryValue != aliasValue {
+		return "", fmt.Errorf("%s conflicts with %s", primaryName, aliasName)
+	}
+	if primaryValue != "" {
+		return primaryValue, nil
+	}
+	return aliasValue, nil
+}
+
+func (c cmd) runBindFeishuHuman(ctx context.Context, run *command.Context, globals command.GlobalOptions, profile, identityKind, identityRef, name string) error {
+	if strings.TrimSpace(profile) != "admin" {
+		return fmt.Errorf("%s bind --subject human currently requires --profile admin", c.Name())
+	}
+	identityKind = strings.ToLower(strings.TrimSpace(identityKind))
+	if identityKind == "" {
+		identityKind = participantpkg.ChannelUserKindOpenID
+	}
+	if identityKind != participantpkg.ChannelUserKindOpenID {
+		return fmt.Errorf("%s bind --subject human currently supports only --identity-kind %s", c.Name(), participantpkg.ChannelUserKindOpenID)
+	}
+	identityRef = strings.TrimSpace(identityRef)
+	if identityRef == "" {
+		return fmt.Errorf("%s bind --subject human requires --identity-ref", c.Name())
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -78,7 +225,7 @@ func (c cmd) runBindFeishuHuman(ctx context.Context, run *command.Context, globa
 	}
 	client := run.APIClient(globals)
 	participantID := "admin"
-	item, err := upsertFeishuAdminParticipant(ctx, client, participantID, name, openID)
+	item, err := upsertFeishuAdminParticipant(ctx, client, participantID, name, identityRef)
 	if err != nil {
 		return fmt.Errorf("bind feishu admin human participant_id=%q: %w", participantID, err)
 	}
@@ -91,14 +238,14 @@ func (c cmd) runBindFeishuHuman(ctx context.Context, run *command.Context, globa
 	})
 }
 
-func (c cmd) runBindFeishuBot(ctx context.Context, run *command.Context, globals command.GlobalOptions, agentRef, appID, secretFile, secretEnv string, secretStdin bool, restart bool) error {
+func (c cmd) runBindFeishuBot(ctx context.Context, run *command.Context, globals command.GlobalOptions, agentRef, appID, secretFile, secretEnv string, secretStdin bool, apply bool) error {
 	agentRef = strings.TrimSpace(agentRef)
 	if agentRef == "" {
-		return fmt.Errorf("%s bind --feishu-kind bot requires --agent", c.Name())
+		return fmt.Errorf("%s bind --subject agent-app requires --agent-id", c.Name())
 	}
 	appID = strings.TrimSpace(appID)
 	if appID == "" {
-		return fmt.Errorf("%s bind --feishu-kind bot requires --app-id", c.Name())
+		return fmt.Errorf("%s bind --subject agent-app requires --app-ref", c.Name())
 	}
 	appSecret, err := readSecret(run.Stdin, secretFile, secretEnv, secretStdin)
 	if err != nil {
@@ -127,7 +274,7 @@ func (c cmd) runBindFeishuBot(ctx context.Context, run *command.Context, globals
 		ConfigSaved:     true,
 		Warnings:        warnings,
 	}
-	if restart {
+	if apply {
 		if strings.EqualFold(target.ID, agent.ManagerUserID) || strings.EqualFold(target.Role, agent.RoleManager) {
 			result.RestartStatus = "manager_restart_required"
 		} else {

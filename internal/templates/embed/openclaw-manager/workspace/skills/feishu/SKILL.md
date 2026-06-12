@@ -36,7 +36,7 @@ The script uses Feishu/Lark's accounts registration flow:
 4. poll with `action=poll`, `device_code=<...>`, `tp=ob_app`
 5. when the user completes app creation, receive `client_id` and `client_secret`
 6. map `client_id` -> CSGClaw `app_id`, and `client_secret` -> CSGClaw `app_secret`
-7. immediately pipe the secret to `csgclaw-cli participant bind --feishu-kind bot --app-secret-stdin` without printing it
+7. immediately pipe the secret to `csgclaw-cli participant bind --subject agent-app --app-secret-stdin` without printing it
 
 Do not add or require a public Feishu Open Platform HTTP webhook as the main inbound path. OpenClaw uses Feishu/Lark WebSocket mode for real inbound bot messages. CSGClaw's `/api/v1/channels/feishu/participants/{participant}/events` endpoint is an internal SSE bridge for CSGClaw manager-to-worker dispatch, not a Feishu public webhook.
 
@@ -113,7 +113,7 @@ If the user asks to **create/provision/add a new worker and connect it to Feishu
 1. Use `agent-creator` first to create the worker. That skill must run `hub list`, `hub get`, then `csgclaw-cli participant create --type agent --bind create --from-template ...`.
 2. Only after the worker agent exists, return to this Feishu skill and run the QR/manual credential flow for that existing agent.
 
-Do not run Feishu `start`, `finalize`, or `participant bind --feishu-kind bot` for a worker that does not exist yet. `participant bind` only attaches Feishu credentials to an existing agent; it does not create the worker.
+Do not run Feishu `start`, `finalize`, or `participant bind --subject agent-app` for a worker that does not exist yet. `participant bind` only attaches Feishu credentials to an existing agent; it does not create the worker.
 
 If the user does not specify an agent in the request, ask: "请明确要对接飞书的目标 Agent 名字（如 `manager`/`u-manager` 或 `dev`/`u-dev`）".
 Resolve target:
@@ -171,7 +171,7 @@ By default, `finalize` will:
 1. poll Feishu/Lark until credentials are available or timeout
 2. receive `client_id/client_secret`
 3. for `u-manager`, bind `feishu:admin` human to the registration `open_id`
-4. bind the Feishu bot participant through `csgclaw-cli participant bind --feishu-kind bot`
+4. bind the Feishu bot participant through `csgclaw-cli participant bind --subject agent-app`
 5. for worker targets, recreate the worker from the bind command so the new Feishu env/files take effect
    - if BoxLite reports `box with name '<name>' already exists` while CSGClaw reports `agent "<id>" not found`, stop and tell the user the host has a stale partial worker box; do not keep trying random API paths or host-only commands from inside manager
 6. for manager targets, print a `csgclaw.action_card` JSON payload with a whitelisted `rebuild-manager` action; the CSGClaw Web chat message should render the button to complete the window-triggered manager bootstrap replace flow.
@@ -225,11 +225,11 @@ Use `participant bind` to set manually:
 ```bash
 printf '%s' '[REDACTED]' | csgclaw-cli participant bind \
   --channel feishu \
-  --feishu-kind bot \
-  --agent u-dev \
-  --app-id cli_xxx \
+  --subject agent-app \
+  --agent-id u-dev \
+  --app-ref cli_xxx \
   --app-secret-stdin \
-  --restart
+  --apply
 ```
 
 For manager setup, use the wrapper so the final chat response is a browser action card:
@@ -247,7 +247,7 @@ Return the printed JSON object exactly as the chat response. Do not summarize it
 
 The script writes Feishu config through `csgclaw-cli participant bind` because sandboxed skills should not edit host files directly.
 
-For `u-manager`, `bind-manager` binds `feishu:admin` when `--open-id` is provided, binds `feishu:manager` with `--restart`, then prints a top-level action card:
+For `u-manager`, `bind-manager` binds `feishu:admin` when `--open-id` is provided, binds `feishu:manager` with `--apply`, then prints a top-level action card:
 
 ```bash
 printf '%s' '[REDACTED]' | python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py bind-manager --open-id ou_xxx --app-id cli_xxx --app-secret-stdin
@@ -280,7 +280,7 @@ Expected wrapper response shape:
 For workers, the bind command recreates the worker by default so the runtime picks up the updated Feishu credentials:
 
 ```bash
-printf '%s' '[REDACTED]' | csgclaw-cli participant bind --channel feishu --feishu-kind bot --agent u-dev --app-id cli_xxx --app-secret-stdin --restart
+printf '%s' '[REDACTED]' | csgclaw-cli participant bind --channel feishu --subject agent-app --agent-id u-dev --app-ref cli_xxx --app-secret-stdin --apply
 ```
 
 ## CLI Workflow for Manual Control
@@ -288,7 +288,7 @@ printf '%s' '[REDACTED]' | csgclaw-cli participant bind --channel feishu --feish
 Use `participant bind` for channel config. Use the helper script for manager rebuild because the manager must not recreate itself from the same manager-hosted run.
 
 ```bash
-printf '%s' '[REDACTED]' | csgclaw-cli participant bind --channel feishu --feishu-kind bot --agent u-dev --app-id cli_xxx --app-secret-stdin --restart
+printf '%s' '[REDACTED]' | csgclaw-cli participant bind --channel feishu --subject agent-app --agent-id u-dev --app-ref cli_xxx --app-secret-stdin --apply
 ```
 
 ## Worker One-Shot Recipe
