@@ -582,9 +582,9 @@ func configureFeishuService(feishuSvc *feishu.Service, svc *agent.Service) {
 	if feishuSvc == nil {
 		return
 	}
-	provider, ok := feishuSvc.ConfigProvider().(feishu.AgentCredentialProvider)
-	if !ok {
-		slog.Warn("skip feishu runtime wiring: provider does not resolve agent credentials")
+	provider := feishuSvc.ConfigProvider()
+	if provider == nil {
+		slog.Warn("skip feishu runtime wiring: provider is not configured")
 		return
 	}
 	runtimewiring.UpdatePicoClawFeishuProvider(svc, provider)

@@ -54,6 +54,15 @@ func (p testFeishuConfigProvider) BotConfig(participantID string) (AppConfig, bo
 	return app, ok
 }
 
+func (p testFeishuConfigProvider) BotConfigForAgent(string) (string, AppConfig, bool) {
+	return "", AppConfig{}, false
+}
+
+func (p testFeishuConfigProvider) DefaultAdminOpenID() (string, bool) {
+	openID := strings.TrimSpace(p.adminOpenID)
+	return openID, openID != ""
+}
+
 func (p testFeishuConfigProvider) MentionOpenID(participantID string) (string, bool) {
 	openID, ok := p.mentionOpenIDs[strings.TrimSpace(participantID)]
 	return openID, ok

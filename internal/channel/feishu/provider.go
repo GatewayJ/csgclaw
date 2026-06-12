@@ -1,26 +1,15 @@
 package feishu
 
-type BotCredentialProvider interface {
-	BotConfig(participantID string) (AppConfig, bool)
-}
-
+// AgentCredentialProvider is the narrow contract needed by sandbox runtimes.
 type AgentCredentialProvider interface {
 	BotConfigForAgent(agentID string) (participantID string, app AppConfig, ok bool)
 }
 
-type DefaultAdminOpenIDProvider interface {
-	DefaultAdminOpenID() (openID string, ok bool)
-}
-
-type ParticipantMentionProvider interface {
-	MentionOpenID(participantID string) (openID string, ok bool)
-}
-
-type SnapshotProvider interface {
-	Snapshot() Snapshot
-}
-
+// Provider is the complete configuration source used by the Feishu channel service.
 type Provider interface {
-	BotCredentialProvider
-	SnapshotProvider
+	AgentCredentialProvider
+	BotConfig(participantID string) (AppConfig, bool)
+	DefaultAdminOpenID() (openID string, ok bool)
+	MentionOpenID(participantID string) (openID string, ok bool)
+	Snapshot() Snapshot
 }

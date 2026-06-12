@@ -1534,11 +1534,7 @@ func (s *Service) participantMentionOpenIDLocked(participantID string) (string, 
 	if participantID == "" || s.configProvider == nil {
 		return "", false
 	}
-	provider, ok := s.configProvider.(ParticipantMentionProvider)
-	if !ok {
-		return "", false
-	}
-	openID, ok := provider.MentionOpenID(participantID)
+	openID, ok := s.configProvider.MentionOpenID(participantID)
 	openID = strings.TrimSpace(openID)
 	return openID, ok && openID != ""
 }
@@ -1565,12 +1561,10 @@ func (s *Service) appConfigByIDLocked(participantID string) (AppConfig, bool) {
 
 func (s *Service) defaultAdminOpenID(app AppConfig) string {
 	provider := s.configProviderSnapshot()
-	if adminProvider, ok := provider.(DefaultAdminOpenIDProvider); ok {
-		if openID, ok := adminProvider.DefaultAdminOpenID(); ok {
-			return openID
-		}
-	}
 	if provider != nil {
+		if openID, ok := provider.DefaultAdminOpenID(); ok {
+			return strings.TrimSpace(openID)
+		}
 		if snapshot := provider.Snapshot(); strings.TrimSpace(snapshot.AdminOpenID) != "" {
 			return strings.TrimSpace(snapshot.AdminOpenID)
 		}
