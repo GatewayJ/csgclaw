@@ -3,6 +3,7 @@ package codexbridge
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,11 @@ func (s *Service) StartBot(ctx context.Context, binding Binding) error {
 
 	if existing := s.workers[binding.BotID]; existing != nil {
 		if sameBinding(existing.binding, binding) {
+			slog.Debug("codex bridge bot already running",
+				"bot_id", binding.BotID,
+				"runtime_id", binding.RuntimeID,
+				"session_id", binding.SessionID,
+			)
 			return nil
 		}
 		existing.cancel()
@@ -113,6 +119,11 @@ func (s *Service) StartBot(ctx context.Context, binding Binding) error {
 		done:        make(chan struct{}),
 	}
 	s.workers[binding.BotID] = w
+	slog.Debug("codex bridge bot started",
+		"bot_id", binding.BotID,
+		"runtime_id", binding.RuntimeID,
+		"session_id", binding.SessionID,
+	)
 	go w.run(workerCtx)
 	return nil
 }
@@ -132,8 +143,10 @@ func (s *Service) StopBot(botID string) {
 	s.mu.Unlock()
 
 	if w != nil {
+		slog.Debug("codex bridge bot stopping", "bot_id", botID)
 		w.cancel()
 		<-w.done
+		slog.Debug("codex bridge bot stopped", "bot_id", botID)
 	}
 }
 
@@ -234,6 +247,7 @@ func (w *worker) enqueue(ctx context.Context, evt BotEvent) {
 }
 
 func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-chan runtimecodex.SessionEvent) error {
+	eventStartedAt := time.Now()
 	if cmd, ok, err := slashcommand.Parse(evt.Text); err == nil && ok && slashcommand.IsNewConversationCommand(cmd) {
 		return w.handleConversationReset(ctx, evt)
 	} else if err != nil {
@@ -251,9 +265,22 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 	}
 	req := runtimecodex.PromptRequest{
 		SessionID: sessionID,
-		Prompt:    []runtimecodex.PromptContentBlock{runtimecodex.TextBlock(w.promptText(evt))},
 		Meta:      cloneMeta(w.binding.PromptMeta),
 	}
+	promptText := w.promptText(evt)
+	req.Prompt = []runtimecodex.PromptContentBlock{runtimecodex.TextBlock(promptText)}
+	slog.Debug("codex bridge prompt start",
+		"bot_id", w.binding.BotID,
+		"runtime_id", w.binding.RuntimeID,
+		"session_id", sessionID,
+		"channel", strings.TrimSpace(evt.Channel),
+		"room_id", strings.TrimSpace(evt.RoomID),
+		"message_id", strings.TrimSpace(evt.MessageID),
+		"thread_root_id", strings.TrimSpace(evt.ThreadRootID),
+		"prompt_bytes", len(promptText),
+		"event_text_bytes", len(strings.TrimSpace(evt.Text)),
+		"has_thread_context", evt.ThreadContext != nil,
+	)
 	renderer := runtimebridge.NewTurnRenderer()
 	turnRootID := strings.TrimSpace(evt.ThreadRootID)
 	var generatedRootID string
@@ -276,8 +303,11 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 		return generatedRootID, nil
 	}
 	flushTurn := func() (string, error) {
-		if generatedRootID != "" {
-			return w.flushTurnWithFirstMessageID(ctx, evt.RoomID, "", generatedRootID, renderer)
+		if generatedRootID == "" {
+			return w.flushTurn(ctx, evt.RoomID, turnRootID, renderer)
+		}
+		if len(renderer.FinalMessages()) == 0 {
+			return w.flushTurnWithEmptyCompletion(ctx, evt.RoomID, generatedRootID, renderer)
 		}
 		return w.flushTurn(ctx, evt.RoomID, turnRootID, renderer)
 	}
@@ -287,7 +317,16 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 	}
 	promptDone := make(chan promptResult, 1)
 	go func() {
+		promptStartedAt := time.Now()
 		_, err := w.service.prompter.Prompt(ctx, runtimecodex.SessionHandle{RuntimeID: w.binding.RuntimeID}, req)
+		slog.Debug("codex bridge prompt returned",
+			"bot_id", w.binding.BotID,
+			"runtime_id", w.binding.RuntimeID,
+			"session_id", sessionID,
+			"message_id", strings.TrimSpace(evt.MessageID),
+			"duration", time.Since(promptStartedAt),
+			"error", err,
+		)
 		promptDone <- promptResult{err: err}
 	}()
 
@@ -323,6 +362,14 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 			}
 			renderer.ApplyText(event)
 			if isTerminalEvent(event.Kind) && promptReturned {
+				slog.Debug("codex bridge terminal event flush",
+					"bot_id", w.binding.BotID,
+					"runtime_id", w.binding.RuntimeID,
+					"session_id", sessionID,
+					"message_id", strings.TrimSpace(evt.MessageID),
+					"kind", string(event.Kind),
+					"elapsed", time.Since(eventStartedAt),
+				)
 				_, err := flushTurn()
 				return err
 			}
@@ -336,6 +383,13 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 			settleTimer.Reset(w.service.promptSettle)
 		case <-settleTimer.C:
 			if promptReturned {
+				slog.Debug("codex bridge settle flush",
+					"bot_id", w.binding.BotID,
+					"runtime_id", w.binding.RuntimeID,
+					"session_id", sessionID,
+					"message_id", strings.TrimSpace(evt.MessageID),
+					"elapsed", time.Since(eventStartedAt),
+				)
 				_, err := flushTurn()
 				return err
 			}
@@ -385,36 +439,31 @@ func (w *worker) clearContextCache(conversationKey string) {
 }
 
 func (w *worker) flushTurn(ctx context.Context, roomID, threadRootID string, renderer *runtimebridge.TurnRenderer) (string, error) {
-	return w.flushTurnWithFirstMessageID(ctx, roomID, threadRootID, "", renderer)
+	return w.flushTurnMessages(ctx, roomID, threadRootID, false, renderer)
 }
 
-func (w *worker) flushTurnWithFirstMessageID(ctx context.Context, roomID, threadRootID, firstMessageID string, renderer *runtimebridge.TurnRenderer) (string, error) {
+func (w *worker) flushTurnWithEmptyCompletion(ctx context.Context, roomID, threadRootID string, renderer *runtimebridge.TurnRenderer) (string, error) {
+	return w.flushTurnMessages(ctx, roomID, threadRootID, true, renderer)
+}
+
+func (w *worker) flushTurnMessages(ctx context.Context, roomID, threadRootID string, includeEmptyCompletion bool, renderer *runtimebridge.TurnRenderer) (string, error) {
 	var firstSentMessageID string
-	replaceMessageID := strings.TrimSpace(firstMessageID)
 	messages := renderer.FinalMessages()
-	if len(messages) == 0 && replaceMessageID != "" {
+	if len(messages) == 0 && includeEmptyCompletion {
 		messages = []string{turnCompleteText}
 	}
-	for idx, text := range messages {
+	for _, text := range messages {
 		req := SendMessageRequest{
 			RoomID:       roomID,
 			Text:         text,
 			ThreadRootID: strings.TrimSpace(threadRootID),
-		}
-		if idx == 0 && replaceMessageID != "" {
-			req.MessageID = replaceMessageID
-			req.ThreadRootID = ""
 		}
 		messageID, err := w.sendMessageRequest(ctx, req)
 		if err != nil {
 			return "", err
 		}
 		if firstSentMessageID == "" {
-			if req.MessageID != "" {
-				firstSentMessageID = req.MessageID
-			} else {
-				firstSentMessageID = messageID
-			}
+			firstSentMessageID = messageID
 		}
 	}
 	return firstSentMessageID, nil
@@ -432,7 +481,6 @@ func (w *worker) sendActivity(ctx context.Context, roomID, threadRootID string, 
 	_, err := w.sendMessageRequest(ctx, SendMessageRequest{
 		RoomID:       roomID,
 		Text:         activity.Text,
-		MessageID:    activity.MessageID,
 		ThreadRootID: strings.TrimSpace(threadRootID),
 	})
 	return err
@@ -440,15 +488,37 @@ func (w *worker) sendActivity(ctx context.Context, roomID, threadRootID string, 
 
 func (w *worker) sendMessageRequest(ctx context.Context, req SendMessageRequest) (string, error) {
 	req.Text = strings.TrimSpace(req.Text)
-	req.MessageID = strings.TrimSpace(req.MessageID)
 	req.ThreadRootID = strings.TrimSpace(req.ThreadRootID)
 	if req.Text == "" {
 		return "", nil
 	}
+	mode := "create"
+	if req.ThreadRootID != "" {
+		mode = "reply"
+	}
+	sendStartedAt := time.Now()
 	resp, err := w.service.client.SendMessage(ctx, w.binding.BotID, req)
 	if err != nil {
+		slog.Debug("codex bridge send message failed",
+			"bot_id", w.binding.BotID,
+			"room_id", strings.TrimSpace(req.RoomID),
+			"thread_root_id", strings.TrimSpace(req.ThreadRootID),
+			"mode", mode,
+			"text_bytes", len(req.Text),
+			"duration", time.Since(sendStartedAt),
+			"error", err,
+		)
 		return "", err
 	}
+	slog.Debug("codex bridge send message completed",
+		"bot_id", w.binding.BotID,
+		"room_id", strings.TrimSpace(req.RoomID),
+		"thread_root_id", strings.TrimSpace(req.ThreadRootID),
+		"sent_message_id", strings.TrimSpace(resp.MessageID),
+		"mode", mode,
+		"text_bytes", len(req.Text),
+		"duration", time.Since(sendStartedAt),
+	)
 	return strings.TrimSpace(resp.MessageID), nil
 }
 
@@ -471,28 +541,35 @@ func (w *worker) sessionID(ctx context.Context, evt BotEvent) (string, error) {
 func (w *worker) promptText(evt BotEvent) string {
 	text := strings.TrimSpace(evt.Text)
 	key := conversationKey(evt)
-	if key == "" || evt.ThreadContext == nil {
-		return text
-	}
 
-	w.mu.Lock()
-	_, sent := w.contextSent[key]
-	if !sent {
-		w.contextSent[key] = struct{}{}
-	}
-	w.mu.Unlock()
-	if sent {
-		return text
-	}
-
-	contextText := formatHiddenThreadContext(evt.ThreadContext)
+	contextText := joinHiddenContexts(
+		formatHiddenChannelContext(w.binding, evt),
+		formatHiddenThreadContext(evt.ThreadContext),
+	)
 	if contextText == "" {
 		return text
 	}
+
+	if key != "" {
+		w.mu.Lock()
+		_, sent := w.contextSent[key]
+		if !sent {
+			w.contextSent[key] = struct{}{}
+		}
+		w.mu.Unlock()
+		if sent {
+			return text
+		}
+	}
+
 	if text == "" {
 		return contextText
 	}
-	return contextText + "\n\nCurrent thread message:\n" + text
+	currentLabel := "Current message:\n"
+	if evt.ThreadContext != nil {
+		currentLabel = "Current thread message:\n"
+	}
+	return contextText + "\n\n" + currentLabel + text
 }
 
 func (w *worker) accept(evt BotEvent) bool {
@@ -580,6 +657,46 @@ func conversationKey(evt BotEvent) string {
 		return roomID
 	}
 	return roomID + ":" + threadRootID
+}
+
+func joinHiddenContexts(values ...string) string {
+	var parts []string
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func formatHiddenChannelContext(binding Binding, evt BotEvent) string {
+	channel := strings.TrimSpace(evt.Channel)
+	if channel == "" || strings.EqualFold(channel, localChannel) {
+		return ""
+	}
+	roomID := strings.TrimSpace(evt.RoomID)
+	participantID := strings.TrimSpace(evt.ParticipantID)
+	if participantID == "" {
+		participantID = strings.TrimSpace(binding.BotID)
+	}
+	var b strings.Builder
+	b.WriteString("Current channel context for CSGClaw CLI operations.\n")
+	b.WriteString("- channel: ")
+	b.WriteString(channel)
+	b.WriteByte('\n')
+	if roomID != "" {
+		b.WriteString("- room_id: ")
+		b.WriteString(roomID)
+		b.WriteByte('\n')
+	}
+	if participantID != "" {
+		b.WriteString("- participant_id: ")
+		b.WriteString(participantID)
+		b.WriteByte('\n')
+	}
+	b.WriteString("Use these values when a skill asks for <current_channel>, <target_room_id>, or message create/list channel flags.")
+	return strings.TrimSpace(b.String())
 }
 
 func formatHiddenThreadContext(context *BotThreadContext) string {

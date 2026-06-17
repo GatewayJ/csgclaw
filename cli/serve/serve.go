@@ -473,7 +473,7 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 	if serveOpts.NoAuthDetect && svc != nil {
 		svc.SetStartupProfileDetectionDisabled(true)
 	}
-	codexBridgeMgr, err := NewCodexBridgeManager(cfg, svc)
+	codexBridgeMgr, err := NewCodexBridgeManager(cfg, svc, feishuSvc)
 	if err != nil {
 		return err
 	}
@@ -914,6 +914,111 @@ func channelActivityDecider(m codexBridgeManager) api.ActivityDecider {
 	return runtimecodex.NewPermissionActivityDecider(csgclawchannel.ChannelID, decider)
 }
 
+type multiCodexBridgeManager struct {
+	managers []codexBridgeManager
+}
+
+func newCodexBridgeManager(cfg config.Config, svc *agent.Service, feishuSvc *feishu.Service) (codexBridgeManager, error) {
+	if svc == nil && feishuSvc == nil {
+		return nil, nil
+	}
+	csgclawManager, err := newServeCodexBridgeManager(cfg, svc)
+	if err != nil {
+		return nil, err
+	}
+	feishuManager, err := newServeFeishuCodexBridgeManager(cfg, svc, feishuSvc)
+	if err != nil {
+		return nil, err
+	}
+
+	managers := make([]codexBridgeManager, 0, 2)
+	if csgclawManager != nil {
+		managers = append(managers, csgclawManager)
+	}
+	if feishuManager != nil {
+		managers = append(managers, feishuManager)
+	}
+	if len(managers) == 0 {
+		return nil, nil
+	}
+	if len(managers) == 1 {
+		return managers[0], nil
+	}
+	return &multiCodexBridgeManager{managers: managers}, nil
+}
+
+func (m *multiCodexBridgeManager) Start(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	var outErr error
+	for _, manager := range m.managers {
+		if manager == nil {
+			continue
+		}
+		if err := manager.Start(ctx); err != nil {
+			outErr = errors.Join(outErr, err)
+		}
+	}
+	return outErr
+}
+
+func (m *multiCodexBridgeManager) EnsureAgent(ctx context.Context, a agent.Agent) error {
+	if m == nil {
+		return nil
+	}
+	var outErr error
+	for _, manager := range m.managers {
+		if manager == nil {
+			continue
+		}
+		if err := manager.EnsureAgent(ctx, a); err != nil {
+			outErr = errors.Join(outErr, err)
+		}
+	}
+	return outErr
+}
+
+func (m *multiCodexBridgeManager) StopAgent(agentID string) {
+	if m == nil {
+		return
+	}
+	for _, manager := range m.managers {
+		if manager != nil {
+			manager.StopAgent(agentID)
+		}
+	}
+}
+
+func (m *multiCodexBridgeManager) Close() {
+	if m == nil {
+		return
+	}
+	for _, manager := range m.managers {
+		if manager != nil {
+			manager.Close()
+		}
+	}
+}
+
+func (m *multiCodexBridgeManager) PermissionDecider() runtimecodex.PermissionDecider {
+	if m == nil {
+		return nil
+	}
+	for _, manager := range m.managers {
+		decider, ok := manager.(interface {
+			PermissionDecider() runtimecodex.PermissionDecider
+		})
+		if !ok {
+			continue
+		}
+		if decider.PermissionDecider() != nil {
+			return decider.PermissionDecider()
+		}
+	}
+	return nil
+}
+
 type serveCodexBridgeManager struct {
 	svc     *agent.Service
 	runtime *runtimecodex.Runtime
@@ -922,7 +1027,7 @@ type serveCodexBridgeManager struct {
 	active  map[string]bool
 }
 
-func newCodexBridgeManager(cfg config.Config, svc *agent.Service) (codexBridgeManager, error) {
+func newServeCodexBridgeManager(cfg config.Config, svc *agent.Service) (codexBridgeManager, error) {
 	if svc == nil {
 		return nil, nil
 	}
@@ -1063,16 +1168,190 @@ func (m *serveCodexBridgeManager) PermissionDecider() runtimecodex.PermissionDec
 	return m.runtime.PermissionBroker()
 }
 
-func (m *serveCodexBridgeManager) ensureSession(ctx context.Context, a agent.Agent) (*runtimecodex.Session, error) {
+type serveFeishuCodexBridgeManager struct {
+	svc      *agent.Service
+	runtime  *runtimecodex.Runtime
+	bridge   *codexbridge.Service
+	provider feishu.AgentCredentialProvider
+	mu       sync.Mutex
+	active   map[string]bool
+}
+
+func newServeFeishuCodexBridgeManager(cfg config.Config, svc *agent.Service, feishuSvc *feishu.Service) (codexBridgeManager, error) {
+	_ = cfg
+	if svc == nil || feishuSvc == nil {
+		return nil, nil
+	}
+	rt, err := svc.Runtime(agentruntime.KindCodex)
+	if err != nil {
+		return nil, nil
+	}
+	codexRuntime, ok := rt.(*runtimecodex.Runtime)
+	if !ok {
+		return nil, fmt.Errorf("runtime %q has unexpected type %T", agentruntime.KindCodex, rt)
+	}
+	events, ok := codexRuntime.EventSink().(*runtimecodex.EventSink)
+	if !ok || events == nil {
+		return nil, fmt.Errorf("runtime %q is missing codex event sink", agentruntime.KindCodex)
+	}
+	provider := feishuSvc.ConfigProvider()
+	if provider == nil {
+		return nil, nil
+	}
+	return &serveFeishuCodexBridgeManager{
+		svc:      svc,
+		runtime:  codexRuntime,
+		bridge:   codexbridge.NewService(feishu.NewBridgeClient(feishuSvc), codexRuntime.SessionManager(), events),
+		provider: provider,
+		active:   make(map[string]bool),
+	}, nil
+}
+
+func (m *serveFeishuCodexBridgeManager) Start(ctx context.Context) error {
+	if m == nil || m.svc == nil || m.runtime == nil || m.bridge == nil {
+		return nil
+	}
+	agents := m.svc.List()
+	var startErr error
+	for _, a := range agents {
+		if !m.shouldStartForAgent(a) {
+			continue
+		}
+		session, err := m.ensureSession(ctx, a)
+		if err != nil {
+			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", a.Name, err))
+			continue
+		}
+		participantID := strings.TrimSpace(feishuParticipantIDForAgent(a, m.provider))
+		if participantID == "" {
+			startErr = errors.Join(startErr, fmt.Errorf("%s: feishu participant not configured", a.Name))
+			continue
+		}
+		binding := codexBridgeBindingForAgent(a, session.SessionID)
+		binding.BotID = participantID
+		if err := m.bridge.StartBot(ctx, binding); err != nil {
+			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", a.Name, err))
+		}
+	}
+	return startErr
+}
+
+func (m *serveFeishuCodexBridgeManager) EnsureAgent(ctx context.Context, a agent.Agent) error {
+	if m == nil || m.svc == nil || m.runtime == nil || m.bridge == nil {
+		return nil
+	}
+	participantID := strings.TrimSpace(feishuParticipantIDForAgent(a, m.provider))
+	if !m.shouldStartForAgent(a) {
+		m.StopAgent(a.ID)
+		return nil
+	}
+	if participantID == "" {
+		m.StopAgent(a.ID)
+		return fmt.Errorf("feishu participant not configured for agent %s", a.Name)
+	}
+	if !m.beginEnsure(a.ID) {
+		return nil
+	}
+	defer m.finishEnsure(a.ID)
+
+	session, err := m.ensureSession(ctx, a)
+	if err != nil {
+		return err
+	}
+	m.stopAgentBridgeWithID(participantID, a)
+	binding := codexBridgeBindingForAgent(a, session.SessionID)
+	binding.BotID = participantID
+	return m.bridge.StartBot(ctx, binding)
+}
+
+func (m *serveFeishuCodexBridgeManager) shouldStartForAgent(a agent.Agent) bool {
+	if !shouldStartCodexBridge(a) {
+		return false
+	}
+	participantID := strings.TrimSpace(feishuParticipantIDForAgent(a, m.provider))
+	return participantID != ""
+}
+
+func (m *serveFeishuCodexBridgeManager) beginEnsure(agentID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return false
+	}
+	if m.active[agentID] {
+		return false
+	}
+	m.active[agentID] = true
+	return true
+}
+
+func (m *serveFeishuCodexBridgeManager) finishEnsure(agentID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return
+	}
+	delete(m.active, agentID)
+}
+
+func (m *serveFeishuCodexBridgeManager) StopAgent(agentID string) {
+	participantID := strings.TrimSpace(feishuParticipantIDForAgent(agent.Agent{ID: agentID}, m.provider))
+	if participantID != "" {
+		m.bridge.StopBot(participantID)
+		return
+	}
+	m.bridge.StopBot(strings.TrimSpace(agentID))
+	participantID = agent.ParticipantIDForAgent("", agentID)
+	if participantID != strings.TrimSpace(agentID) {
+		m.bridge.StopBot(participantID)
+	}
+}
+
+func (m *serveFeishuCodexBridgeManager) stopAgentBridgeWithID(participantID string, a agent.Agent) {
+	m.bridge.StopBot(strings.TrimSpace(participantID))
+	participantIDForProfile := strings.TrimSpace(feishuParticipantIDForAgent(a, m.provider))
+	if participantIDForProfile != "" && participantIDForProfile != strings.TrimSpace(participantID) {
+		m.bridge.StopBot(participantIDForProfile)
+	}
+}
+
+func (m *serveFeishuCodexBridgeManager) Close() {
+	if m == nil || m.bridge == nil {
+		return
+	}
+	m.bridge.Close()
+}
+
+func (m *serveFeishuCodexBridgeManager) PermissionDecider() runtimecodex.PermissionDecider {
+	if m == nil || m.runtime == nil {
+		return nil
+	}
+	return m.runtime.PermissionBroker()
+}
+
+func (m *serveFeishuCodexBridgeManager) ensureSession(ctx context.Context, a agent.Agent) (*runtimecodex.Session, error) {
 	handle := runtimecodex.SessionHandle{RuntimeID: strings.TrimSpace(a.RuntimeID)}
 	session, err := m.runtime.SessionManager().Session(handle)
 	if err == nil {
+		slog.Debug("feishu codex bridge session found",
+			"agent_id", strings.TrimSpace(a.ID),
+			"agent_name", strings.TrimSpace(a.Name),
+			"runtime_id", strings.TrimSpace(a.RuntimeID),
+			"session_id", strings.TrimSpace(session.SessionID),
+		)
 		return session, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 
+	slog.Warn("feishu codex bridge session missing; restarting agent runtime",
+		"agent_id", strings.TrimSpace(a.ID),
+		"agent_name", strings.TrimSpace(a.Name),
+		"runtime_id", strings.TrimSpace(a.RuntimeID),
+	)
 	if _, stopErr := m.svc.Stop(ctx, a.ID); stopErr != nil && !strings.Contains(stopErr.Error(), "not found") {
 		return nil, stopErr
 	}
@@ -1084,6 +1363,65 @@ func (m *serveCodexBridgeManager) ensureSession(ctx context.Context, a agent.Age
 	if err != nil {
 		return nil, err
 	}
+	slog.Debug("feishu codex bridge session restored",
+		"agent_id", strings.TrimSpace(updated.ID),
+		"agent_name", strings.TrimSpace(updated.Name),
+		"runtime_id", strings.TrimSpace(updated.RuntimeID),
+		"session_id", strings.TrimSpace(session.SessionID),
+	)
+	return session, nil
+}
+
+func feishuParticipantIDForAgent(a agent.Agent, provider feishu.AgentCredentialProvider) string {
+	agentID := strings.TrimSpace(a.ID)
+	if agentID == "" || provider == nil {
+		return ""
+	}
+	participantID, _, ok := provider.BotConfigForAgent(agentID)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(participantID)
+}
+
+func (m *serveCodexBridgeManager) ensureSession(ctx context.Context, a agent.Agent) (*runtimecodex.Session, error) {
+	handle := runtimecodex.SessionHandle{RuntimeID: strings.TrimSpace(a.RuntimeID)}
+	session, err := m.runtime.SessionManager().Session(handle)
+	if err == nil {
+		slog.Debug("csgclaw codex bridge session found",
+			"agent_id", strings.TrimSpace(a.ID),
+			"agent_name", strings.TrimSpace(a.Name),
+			"runtime_id", strings.TrimSpace(a.RuntimeID),
+			"session_id", strings.TrimSpace(session.SessionID),
+		)
+		return session, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	slog.Warn("csgclaw codex bridge session missing; restarting agent runtime",
+		"agent_id", strings.TrimSpace(a.ID),
+		"agent_name", strings.TrimSpace(a.Name),
+		"runtime_id", strings.TrimSpace(a.RuntimeID),
+	)
+	if _, stopErr := m.svc.Stop(ctx, a.ID); stopErr != nil && !strings.Contains(stopErr.Error(), "not found") {
+		return nil, stopErr
+	}
+	updated, startErr := m.svc.Start(ctx, a.ID)
+	if startErr != nil {
+		return nil, startErr
+	}
+	session, err = m.runtime.SessionManager().Session(runtimecodex.SessionHandle{RuntimeID: strings.TrimSpace(updated.RuntimeID)})
+	if err != nil {
+		return nil, err
+	}
+	slog.Debug("csgclaw codex bridge session restored",
+		"agent_id", strings.TrimSpace(updated.ID),
+		"agent_name", strings.TrimSpace(updated.Name),
+		"runtime_id", strings.TrimSpace(updated.RuntimeID),
+		"session_id", strings.TrimSpace(session.SessionID),
+	)
 	return session, nil
 }
 

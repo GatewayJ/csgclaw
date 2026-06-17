@@ -981,7 +981,7 @@ func TestServeForegroundStartsCodexBridgesAfterConfiguredAgents(t *testing.T) {
 		<-releaseAgents
 		return nil
 	}
-	NewCodexBridgeManager = func(config.Config, *agent.Service) (codexBridgeManager, error) {
+	NewCodexBridgeManager = func(config.Config, *agent.Service, *feishu.Service) (codexBridgeManager, error) {
 		return &fakeCodexBridgeManager{
 			start: func(context.Context) error {
 				select {
@@ -1608,7 +1608,7 @@ func stubServeDependencies(t *testing.T) func() {
 	NewLLMService = func(config.Config, *agent.Service) (*llm.Service, error) { return nil, nil }
 	EnsureBootstrapManager = func(context.Context, *agent.Service) error { return nil }
 	StartConfiguredAgents = func(context.Context, *agent.Service) error { return nil }
-	NewCodexBridgeManager = func(config.Config, *agent.Service) (codexBridgeManager, error) { return nil, nil }
+	NewCodexBridgeManager = func(config.Config, *agent.Service, *feishu.Service) (codexBridgeManager, error) { return nil, nil }
 	EnsureCLIProxy = func(context.Context) error { return nil }
 	ShutdownCLIProxy = func(context.Context) error { return nil }
 	CheckModelProvider = checkModelProvider

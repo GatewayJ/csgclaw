@@ -72,6 +72,7 @@ type SendMessageRequest struct {
 	ChatID           string
 	Content          string
 	UUID             string
+	ThreadRootID     string
 	MentionID        string
 	MentionOpenID    string
 	MentionAppConfig AppConfig
@@ -952,6 +953,33 @@ func defaultSendMessage(ctx context.Context, app AppConfig, req SendMessageReque
 	}
 
 	client := lark.NewClient(app.AppID, app.AppSecret)
+	if threadRootID := strings.TrimSpace(req.ThreadRootID); threadRootID != "" {
+		replyReq := larkim.NewReplyMessageReqBuilder().
+			MessageId(threadRootID).
+			Body(larkim.NewReplyMessageReqBodyBuilder().
+				MsgType("text").
+				Content(string(content)).
+				ReplyInThread(true).
+				Uuid(req.UUID).
+				Build()).
+			Build()
+		resp, err := client.Im.V1.Message.Reply(ctx, replyReq)
+		if err != nil {
+			return SendMessageResponse{}, fmt.Errorf("reply feishu message: %w", err)
+		}
+		if !resp.Success() {
+			return SendMessageResponse{}, fmt.Errorf("reply feishu message: code=%d msg=%s request_id=%s", resp.Code, resp.Msg, resp.RequestId())
+		}
+		if resp.Data == nil {
+			return SendMessageResponse{}, fmt.Errorf("reply feishu message: empty response data")
+		}
+		return SendMessageResponse{
+			MessageID:     larkcore.StringValue(resp.Data.MessageId),
+			SenderOpenID:  senderOpenID,
+			MentionOpenID: mentionOpenID,
+		}, nil
+	}
+
 	sendReq := larkim.NewCreateMessageReqBuilder().
 		ReceiveIdType("chat_id").
 		Body(larkim.NewCreateMessageReqBodyBuilder().
@@ -1027,6 +1055,22 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 	if content == "" {
 		return im.Message{}, fmt.Errorf("content is required")
 	}
+	var relatesTo *im.MessageRelation
+	var threadRootID string
+	if req.RelatesTo != nil {
+		relType := strings.TrimSpace(req.RelatesTo.RelType)
+		eventID := strings.TrimSpace(req.RelatesTo.EventID)
+		if relType != "" || eventID != "" {
+			if relType != im.RelationTypeThread {
+				return im.Message{}, fmt.Errorf("unsupported relation type")
+			}
+			if eventID == "" {
+				return im.Message{}, fmt.Errorf("relation event_id is required")
+			}
+			relatesTo = &im.MessageRelation{RelType: im.RelationTypeThread, EventID: eventID}
+			threadRootID = eventID
+		}
+	}
 
 	s.mu.RLock()
 	app, err := s.appConfigForSenderLocked(senderID)
@@ -1050,6 +1094,7 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 		ChatID:           roomID,
 		Content:          content,
 		UUID:             fallbackID,
+		ThreadRootID:     threadRootID,
 		MentionID:        mentionID,
 		MentionOpenID:    mentionOpenID,
 		MentionAppConfig: mentionApp,
@@ -1069,17 +1114,18 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 		return im.Message{}, fmt.Errorf("resolve feishu mention open_id: empty open_id for %q", mentionID)
 	}
 
-	messageID := strings.TrimSpace(sent.MessageID)
-	if messageID == "" {
-		messageID = fallbackID
+	sentMessageID := strings.TrimSpace(sent.MessageID)
+	if sentMessageID == "" {
+		sentMessageID = fallbackID
 	}
 	message := im.Message{
-		ID:        messageID,
+		ID:        sentMessageID,
 		SenderID:  senderOpenID,
 		Kind:      im.MessageKindMessage,
 		Content:   content,
 		CreatedAt: time.Now().UTC(),
 		Mentions:  nil,
+		RelatesTo: relatesTo,
 	}
 	if sentMentionOpenID != "" {
 		message.Mentions = []im.Mention{{ID: sentMentionOpenID, Name: mentionID}}

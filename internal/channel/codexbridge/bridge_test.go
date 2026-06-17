@@ -223,6 +223,47 @@ func TestServiceRoundTrip(t *testing.T) {
 	})
 }
 
+func TestServiceInjectsChannelContextForFeishuEvents(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{
+		Channel:       "feishu",
+		ParticipantID: "manager",
+		MessageID:     "om_1",
+		RoomID:        "oc_alpha",
+		ChatType:      "group",
+		Text:          "安排 dev 做一下",
+	}
+
+	sink := runtimecodex.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"manager": {{events: stream, errs: errs}},
+		},
+	}
+	prompter := &fakePrompter{}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "manager", RuntimeID: "rt-manager", SessionID: "sess-manager"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		texts := prompter.texts()
+		return len(texts) == 1 &&
+			strings.Contains(texts[0], "channel: feishu") &&
+			strings.Contains(texts[0], "room_id: oc_alpha") &&
+			strings.Contains(texts[0], "participant_id: manager") &&
+			strings.Contains(texts[0], "Current message:\n安排 dev 做一下")
+	})
+}
+
 func TestServiceEnsuresConversationSessionAndInjectsHiddenThreadContext(t *testing.T) {
 	t.Parallel()
 
@@ -340,17 +381,17 @@ func TestServiceUsesConversationScopedSessionsAndThreadReplies(t *testing.T) {
 	})
 }
 
-func TestServiceThreadsTopLevelToolCallsUnderFinalResponse(t *testing.T) {
+func TestServiceThreadsTopLevelToolCallsBesideFinalResponse(t *testing.T) {
 	for _, chatType := range []string{"direct", "group"} {
 		chatType := chatType
 		t.Run(chatType, func(t *testing.T) {
 			t.Parallel()
-			assertServiceThreadsTopLevelToolCallsUnderFinalResponse(t, chatType)
+			assertServiceThreadsTopLevelToolCallsBesideFinalResponse(t, chatType)
 		})
 	}
 }
 
-func assertServiceThreadsTopLevelToolCallsUnderFinalResponse(t *testing.T, chatType string) {
+func assertServiceThreadsTopLevelToolCallsBesideFinalResponse(t *testing.T, chatType string) {
 	t.Helper()
 	stream := make(chan BotEvent, 1)
 	errs := make(chan error)
@@ -420,7 +461,6 @@ func assertServiceThreadsTopLevelToolCallsUnderFinalResponse(t *testing.T, chatT
 			strings.Contains(records[2].Text, runtimebridge.AgentToolMsgType) &&
 			strings.Contains(records[2].Text, "command output") &&
 			records[3].RoomID == "room-1" &&
-			records[3].MessageID == "sent-1" &&
 			records[3].ThreadRootID == "" &&
 			records[3].Text == "done"
 	})
@@ -837,8 +877,8 @@ func TestServiceProjectsToolEventsAsAgentActivity(t *testing.T) {
 	if records[1].ThreadRootID != "sent-1" {
 		t.Fatalf("tool activity ThreadRootID = %q, want sent-1", records[1].ThreadRootID)
 	}
-	if records[2].Text != turnCompleteText || records[2].MessageID != "sent-1" || records[2].ThreadRootID != "" {
-		t.Fatalf("completion record = %+v, want root placeholder replacement", records[2])
+	if records[2].Text != turnCompleteText || records[2].ThreadRootID != "sent-1" {
+		t.Fatalf("completion record = %+v, want completion inside activity thread", records[2])
 	}
 	text := records[1].Text
 	if strings.Contains(text, "Running tool:") {
@@ -1048,9 +1088,6 @@ func TestServiceUsesStableMessageIDForPermissionDecisionActivity(t *testing.T) {
 	sent := client.sentRecords()
 	if sent[0].Text != turnPlaceholderText || sent[0].ThreadRootID != "" {
 		t.Fatalf("placeholder record = %+v, want top-level blank root", sent[0])
-	}
-	if sent[1].MessageID == "" || sent[1].MessageID != sent[2].MessageID {
-		t.Fatalf("permission message ids = %q / %q, want stable non-empty id", sent[1].MessageID, sent[2].MessageID)
 	}
 	if sent[1].ThreadRootID != "sent-1" || sent[2].ThreadRootID != "sent-1" {
 		t.Fatalf("permission thread roots = %q / %q, want sent-1", sent[1].ThreadRootID, sent[2].ThreadRootID)

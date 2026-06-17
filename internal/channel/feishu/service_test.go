@@ -370,6 +370,38 @@ func TestFeishuSendMessageUsesSenderAppAndStoresLocalMessage(t *testing.T) {
 	}
 }
 
+func TestFeishuSendMessagePassesThreadRootIDForReply(t *testing.T) {
+	var gotReq SendMessageRequest
+	svc := NewServiceWithSendMessage(
+		map[string]AppConfig{"manager": {AppID: "cli_manager", AppSecret: "manager-secret"}},
+		func(_ context.Context, _ AppConfig, req SendMessageRequest) (SendMessageResponse, error) {
+			gotReq = req
+			return SendMessageResponse{MessageID: "om_reply", SenderOpenID: "ou_manager"}, nil
+		},
+	)
+	svc.rooms["oc_alpha"] = &im.Room{ID: "oc_alpha", Title: "alpha", Members: []string{"u-manager"}}
+
+	message, err := svc.SendMessage(im.CreateMessageRequest{
+		RoomID:   "oc_alpha",
+		SenderID: "u-manager",
+		Content:  "thread reply",
+		RelatesTo: &im.MessageRelation{
+			RelType: im.RelationTypeThread,
+			EventID: "om_root",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+
+	if gotReq.ThreadRootID != "om_root" {
+		t.Fatalf("send request = %+v, want thread reply request", gotReq)
+	}
+	if message.RelatesTo == nil || message.RelatesTo.RelType != im.RelationTypeThread || message.RelatesTo.EventID != "om_root" {
+		t.Fatalf("message.RelatesTo = %+v, want thread relation", message.RelatesTo)
+	}
+}
+
 func TestFeishuSendMessageKeepsSlashShorthandAsPlainMessage(t *testing.T) {
 	var gotReq SendMessageRequest
 	svc := NewServiceWithSendMessage(

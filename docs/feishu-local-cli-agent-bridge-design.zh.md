@@ -504,7 +504,6 @@ type BotMessage struct {
     ChatID        string
     ThreadRootID  string
     Text          string
-    MessageID     string
 }
 
 type BotMessageResult struct {
@@ -518,6 +517,7 @@ Codex bridge 使用规则：
 - CSGClaw sink 继续使用现有 participant message API。
 - Feishu sink 使用 `feishu.Service.SendMessage()` 或其底层发送函数。
 - `ConversationID` 要保持与当前 `conversationKey(roomID, threadRootID)` 等价的稳定性。
+- 阶段一 outbound 只支持 create/reply，不支持按 `message_id` 更新同一条已发送消息；该能力后续作为独立任务评估。
 - `/new` 或 reset 仍应调用当前 Codex reset 语义，而不是新增一套 runtime-local 清理规则。
 
 ### 5.5 后续 BridgeCore 持久化模型
