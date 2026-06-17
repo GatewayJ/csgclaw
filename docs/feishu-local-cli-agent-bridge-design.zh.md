@@ -147,7 +147,7 @@ flowchart LR
         FeishuSvc["feishu.Service<br/>outbound + MessageBus"]
         AgentSvc["agent.Service"]
         RuntimeWiring["runtimewiring<br/>PicoClaw/OpenClaw/Codex"]
-        CodexMgr["serveCodexBridgeManager"]
+        CodexMgr["codexmanager.Manager"]
 
         Serve --> Provider
         Provider --> FeishuSvc
