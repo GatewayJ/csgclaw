@@ -28,10 +28,11 @@ import (
 	"csgclaw/internal/apitypes"
 	"csgclaw/internal/app/channelwiring"
 	"csgclaw/internal/app/runtimewiring"
-	"csgclaw/internal/channel/codexbridge"
 	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/channel/feishu/participantprovider"
+	"csgclaw/internal/channelbridge"
+	"csgclaw/internal/channelbridge/codexbridge"
 	"csgclaw/internal/cliproxy"
 	"csgclaw/internal/config"
 	"csgclaw/internal/hub"
@@ -1201,7 +1202,7 @@ func newServeFeishuCodexBridgeManager(cfg config.Config, svc *agent.Service, fei
 	return &serveFeishuCodexBridgeManager{
 		svc:      svc,
 		runtime:  codexRuntime,
-		bridge:   codexbridge.NewService(feishu.NewBridgeClient(feishuSvc), codexRuntime.SessionManager(), events),
+		bridge:   codexbridge.NewService(channelbridge.NewFeishuClient(feishuSvc), codexRuntime.SessionManager(), events),
 		provider: provider,
 		active:   make(map[string]bool),
 	}, nil

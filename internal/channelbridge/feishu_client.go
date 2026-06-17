@@ -1,8 +1,7 @@
-package feishu
+package channelbridge
 
 import (
 	"context"
-	channelbridge "csgclaw/internal/channel/bridge"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/im"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
@@ -25,23 +25,23 @@ var atMentionRegexp = regexp.MustCompile(`(?i)<at\s+user_id="([^"]+)"`)
 const defaultBridgeReconnectWait = 500 * time.Millisecond
 const bridgeThreadRelationType = "m.thread"
 
-// BridgeClient adapts Feishu events into channelbridge.BotEvent and sends responses to Feishu.
-type BridgeClient struct {
-	Svc           *Service
+// FeishuClient adapts Feishu events into BotEvent and sends responses to Feishu.
+type FeishuClient struct {
+	Svc           *feishu.Service
 	MentionOnly   bool
 	ReconnectWait time.Duration
 }
 
-func NewBridgeClient(svc *Service) *BridgeClient {
-	return &BridgeClient{
+func NewFeishuClient(svc *feishu.Service) *FeishuClient {
+	return &FeishuClient{
 		Svc:           svc,
 		MentionOnly:   true,
 		ReconnectWait: defaultBridgeReconnectWait,
 	}
 }
 
-func (c *BridgeClient) StreamEvents(ctx context.Context, botID, lastEventID string) (<-chan channelbridge.BotEvent, <-chan error) {
-	events := make(chan channelbridge.BotEvent, 16)
+func (c *FeishuClient) StreamEvents(ctx context.Context, botID, lastEventID string) (<-chan BotEvent, <-chan error) {
+	events := make(chan BotEvent, 16)
 	errs := make(chan error, 1)
 
 	go func() {
@@ -136,9 +136,9 @@ func (c *BridgeClient) StreamEvents(ctx context.Context, botID, lastEventID stri
 	return events, errs
 }
 
-func (c *BridgeClient) SendMessage(ctx context.Context, botID string, req channelbridge.SendMessageRequest) (channelbridge.SendMessageResponse, error) {
+func (c *FeishuClient) SendMessage(ctx context.Context, botID string, req SendMessageRequest) (SendMessageResponse, error) {
 	if c == nil || c.Svc == nil {
-		return channelbridge.SendMessageResponse{}, fmt.Errorf("feishu bridge send: service is required")
+		return SendMessageResponse{}, fmt.Errorf("feishu bridge send: service is required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -146,16 +146,16 @@ func (c *BridgeClient) SendMessage(ctx context.Context, botID string, req channe
 
 	senderID := strings.TrimSpace(botID)
 	if senderID == "" {
-		return channelbridge.SendMessageResponse{}, fmt.Errorf("feishu bridge send: bot id is required")
+		return SendMessageResponse{}, fmt.Errorf("feishu bridge send: bot id is required")
 	}
 	roomID := strings.TrimSpace(req.RoomID)
 	if roomID == "" {
-		return channelbridge.SendMessageResponse{}, fmt.Errorf("feishu bridge send: room id is required")
+		return SendMessageResponse{}, fmt.Errorf("feishu bridge send: room id is required")
 	}
 
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
-		return channelbridge.SendMessageResponse{}, nil
+		return SendMessageResponse{}, nil
 	}
 
 	var relatesTo *im.MessageRelation
@@ -187,7 +187,7 @@ func (c *BridgeClient) SendMessage(ctx context.Context, botID string, req channe
 			"duration", time.Since(sendStartedAt),
 			"error", err,
 		)
-		return channelbridge.SendMessageResponse{}, err
+		return SendMessageResponse{}, err
 	}
 	slog.Debug("feishu bridge send completed",
 		"participant_id", senderID,
@@ -198,16 +198,16 @@ func (c *BridgeClient) SendMessage(ctx context.Context, botID string, req channe
 		"text_bytes", len(text),
 		"duration", time.Since(sendStartedAt),
 	)
-	return channelbridge.SendMessageResponse{MessageID: strings.TrimSpace(message.ID)}, nil
+	return SendMessageResponse{MessageID: strings.TrimSpace(message.ID)}, nil
 }
 
-func (c *BridgeClient) emitBotEvent(
+func (c *FeishuClient) emitBotEvent(
 	ctx context.Context,
 	participantID string,
 	botOpenID string,
 	requireBotMention bool,
 	event *larkim.P2MessageReceiveV1,
-	out chan<- channelbridge.BotEvent,
+	out chan<- BotEvent,
 	lastEventID *string,
 	lastEventIDMu *sync.Mutex,
 ) {
@@ -264,7 +264,7 @@ func (c *BridgeClient) emitBotEvent(
 		stringValue(message.ThreadId),
 	)
 	threadRootID = strings.TrimSpace(threadRootID)
-	botEvent := channelbridge.BotEvent{
+	botEvent := BotEvent{
 		Channel:       "feishu",
 		ParticipantID: strings.TrimSpace(participantID),
 		MessageID:     messageID,

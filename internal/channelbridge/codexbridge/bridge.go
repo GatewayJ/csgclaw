@@ -9,7 +9,7 @@ import (
 	"time"
 
 	csgclawchannel "csgclaw/internal/channel/csgclaw"
-	"csgclaw/internal/channel/runtimebridge"
+	"csgclaw/internal/channelbridge/runtimebridge"
 	runtimecodex "csgclaw/internal/runtime/codex"
 	"csgclaw/internal/slashcommand"
 )

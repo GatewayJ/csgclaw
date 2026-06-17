@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	channelbridge "csgclaw/internal/channel/bridge"
+	"csgclaw/internal/channelbridge"
 )
 
 type BotEvent = channelbridge.BotEvent

@@ -23,7 +23,7 @@
 | Codex runtime 注册 | `cli/serve/serve.go` 中 `runtimewiring.WithCodexRuntime()` |
 | Codex app-server 启动参数 | `internal/codexcli/locator.go` 使用 `codex app-server --listen stdio://` |
 | Codex runtime 会话管理 | `internal/runtime/codex/runtime.go`、`internal/runtime/codex/appserver_manager.go` |
-| Codex bridge 事件处理 | `internal/channel/codexbridge/bridge.go` |
+| Codex bridge 事件处理 | `internal/channelbridge/codexbridge/bridge.go` |
 | participant API 路由 | `internal/api/router.go`、`internal/api/participant.go` |
 | participant message 当前限制 | `internal/api/participant.go` 只接受 `channel == csgclaw` |
 | Feishu outbound service | `internal/channel/feishu/service.go` |
@@ -344,7 +344,7 @@ type ChannelMessageSink interface {
 
 ### 4.7 Codex bridge source/sink 抽取边界
 
-当前 Codex 能力分布在 `internal/runtime/codex`、`internal/channel/codexbridge` 和 `internal/channel/runtimebridge`。
+当前 Codex 能力分布在 `internal/runtime/codex`、`internal/channelbridge/codexbridge` 和 `internal/channelbridge/runtimebridge`。
 
 现状：
 
@@ -394,7 +394,7 @@ type ChannelMessageSink interface {
 | `apitypes.Participant` | `internal/apitypes/participant.go` | channel 身份、agent binding、channel app config | Feishu participant 和 agent 绑定事实源 |
 | `im.ParticipantEvent` | `internal/im/participant_bridge.go` | CSGClaw participant SSE 事件 | 可参考 message、room、thread、sender、mention、context 字段 |
 | `im.ParticipantSendMessageRequest` | `internal/im/participant_bridge.go` | runtime 写回 CSGClaw IM | 可参考 room/chat/thread/text 解析逻辑 |
-| `codexbridge.BotEvent` | `internal/channel/codexbridge/sse_client.go` | Codex bridge 当前消费的 bot event | 阶段一可扩展为 channel-agnostic bot event，供 CSGClaw/Feishu source 共用 |
+| `channelbridge.BotEvent` | `internal/channelbridge/types.go` | Codex bridge 当前消费的 bot event | 已抽为 channel-agnostic bot event，供 CSGClaw/Feishu source 共用 |
 | `feishu.MessageEvent` | `internal/channel/feishu/bus.go` | Feishu outbound 后的内部 mention event | 只能作为 internal SSE 事件，不适合作为官方 Feishu inbound 模型 |
 | `runtimecodex.PromptRequest` | `internal/runtime/codex` | Codex session prompt 输入 | Codex bridge / turn handling 最终会转成 prompt request |
 
@@ -839,7 +839,7 @@ participant 仍是 channel identity、agent binding、channel app config 的事�
 - 增加 Feishu sink：把 `BotMessage` 转成 Feishu outbound 请求。
 - 不在 Feishu adapter 中直接启动 Codex、不管理 runtime session、不写 agent memory。
 
-#### `internal/channel/codexbridge/`
+#### `internal/channelbridge/codexbridge/`
 
 Codex bridge 已经包含用户可见的会话、renderer、hidden context、`/new` 和去重语义，但它当前也和 CSGClaw participant SSE、CSGClaw participant message API 耦合。阶段一不抽完整 RuntimeProcessor，只把 source/sink 从固定 HTTP client 中解耦出来。
 
@@ -977,7 +977,7 @@ Feishu 实现复用 `internal/channel/feishu/service.go`，CSGClaw IM 实现复�
 建议包含：
 
 - `RuntimeProcessor` 接口。
-- Codex RuntimeProcessor 实现，复用 `runtime/codex` 的 session manager、event sink、permission broker 和 `runtimebridge.TurnRenderer`。
+- Codex RuntimeProcessor 实现，复用 `runtime/codex` 的 session manager、event sink、permission broker 和 `channelbridge/runtimebridge.TurnRenderer`。
 - reset conversation 适配。
 - conversation key / room id / source metadata 的转换。
 - channel-agnostic turn processing contract，供 CSGClaw channel、Feishu channel 和未来 local CLI runtime 共同复用。
