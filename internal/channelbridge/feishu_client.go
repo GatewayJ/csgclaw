@@ -103,6 +103,12 @@ func (c *FeishuClient) StreamEvents(ctx context.Context, botID, lastEventID stri
 				OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 					c.emitBotEvent(ctx, botID, botOpenID, requireBotMention, event, events, &lastEventID, &lastEventIDMu)
 					return nil
+				}).
+				OnP2MessageReactionCreatedV1(func(context.Context, *larkim.P2MessageReactionCreatedV1) error {
+					return nil
+				}).
+				OnP2MessageReactionDeletedV1(func(context.Context, *larkim.P2MessageReactionDeletedV1) error {
+					return nil
 				})
 			wsClient := larkws.NewClient(
 				app.AppID,
@@ -153,7 +159,7 @@ func (c *FeishuClient) SendMessage(ctx context.Context, botID string, req SendMe
 		return SendMessageResponse{}, fmt.Errorf("feishu bridge send: room id is required")
 	}
 
-	text := strings.TrimSpace(req.Text)
+	text := strings.TrimSpace(formatFeishuBridgeMessageText(req.Text))
 	if text == "" {
 		return SendMessageResponse{}, nil
 	}
@@ -221,7 +227,7 @@ func (c *FeishuClient) UpdateMessage(ctx context.Context, botID string, req Upda
 	if messageID == "" {
 		return UpdateMessageResponse{}, fmt.Errorf("feishu bridge update: message id is required")
 	}
-	text := strings.TrimSpace(req.Text)
+	text := strings.TrimSpace(formatFeishuBridgeMessageText(req.Text))
 	if text == "" {
 		return UpdateMessageResponse{}, nil
 	}
