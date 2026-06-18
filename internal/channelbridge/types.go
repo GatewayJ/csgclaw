@@ -44,7 +44,40 @@ type SendMessageResponse struct {
 	MessageID string `json:"message_id"`
 }
 
+type UpdateMessageRequest struct {
+	RoomID    string `json:"room_id,omitempty"`
+	MessageID string `json:"message_id"`
+	Text      string `json:"text"`
+}
+
+type UpdateMessageResponse struct {
+	MessageID string `json:"message_id"`
+}
+
+type AddMessageReactionRequest struct {
+	MessageID string `json:"message_id"`
+	EmojiType string `json:"emoji_type,omitempty"`
+}
+
+type AddMessageReactionResponse struct {
+	ReactionID string `json:"reaction_id"`
+}
+
+type DeleteMessageReactionRequest struct {
+	MessageID  string `json:"message_id"`
+	ReactionID string `json:"reaction_id"`
+}
+
 type BotClient interface {
 	StreamEvents(ctx context.Context, botID, lastEventID string) (<-chan BotEvent, <-chan error)
 	SendMessage(ctx context.Context, botID string, req SendMessageRequest) (SendMessageResponse, error)
+}
+
+type MessageUpdater interface {
+	UpdateMessage(ctx context.Context, botID string, req UpdateMessageRequest) (UpdateMessageResponse, error)
+}
+
+type MessageReactor interface {
+	AddMessageReaction(ctx context.Context, botID string, req AddMessageReactionRequest) (AddMessageReactionResponse, error)
+	DeleteMessageReaction(ctx context.Context, botID string, req DeleteMessageReactionRequest) error
 }

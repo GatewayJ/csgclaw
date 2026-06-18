@@ -201,6 +201,153 @@ func (c *FeishuClient) SendMessage(ctx context.Context, botID string, req SendMe
 	return SendMessageResponse{MessageID: strings.TrimSpace(message.ID)}, nil
 }
 
+func (c *FeishuClient) UpdateMessage(ctx context.Context, botID string, req UpdateMessageRequest) (UpdateMessageResponse, error) {
+	if c == nil || c.Svc == nil {
+		return UpdateMessageResponse{}, fmt.Errorf("feishu bridge update: service is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	senderID := strings.TrimSpace(botID)
+	if senderID == "" {
+		return UpdateMessageResponse{}, fmt.Errorf("feishu bridge update: bot id is required")
+	}
+	roomID := strings.TrimSpace(req.RoomID)
+	if roomID == "" {
+		return UpdateMessageResponse{}, fmt.Errorf("feishu bridge update: room id is required")
+	}
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		return UpdateMessageResponse{}, fmt.Errorf("feishu bridge update: message id is required")
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		return UpdateMessageResponse{}, nil
+	}
+
+	updateStartedAt := time.Now()
+	message, err := c.Svc.UpdateMessageWithContext(ctx, feishu.UpdateMessageRequest{
+		RoomID:    roomID,
+		SenderID:  senderID,
+		MessageID: messageID,
+		Content:   text,
+	})
+	if err != nil {
+		slog.Warn("feishu bridge update failed",
+			"participant_id", senderID,
+			"room_id", roomID,
+			"message_id", messageID,
+			"text_bytes", len(text),
+			"duration", time.Since(updateStartedAt),
+			"error", err,
+		)
+		return UpdateMessageResponse{}, err
+	}
+	slog.Debug("feishu bridge update completed",
+		"participant_id", senderID,
+		"room_id", roomID,
+		"message_id", messageID,
+		"updated_message_id", strings.TrimSpace(message.ID),
+		"text_bytes", len(text),
+		"duration", time.Since(updateStartedAt),
+	)
+	return UpdateMessageResponse{MessageID: strings.TrimSpace(message.ID)}, nil
+}
+
+func (c *FeishuClient) AddMessageReaction(ctx context.Context, botID string, req AddMessageReactionRequest) (AddMessageReactionResponse, error) {
+	if c == nil || c.Svc == nil {
+		return AddMessageReactionResponse{}, fmt.Errorf("feishu bridge reaction: service is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	senderID := strings.TrimSpace(botID)
+	if senderID == "" {
+		return AddMessageReactionResponse{}, fmt.Errorf("feishu bridge reaction: bot id is required")
+	}
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		return AddMessageReactionResponse{}, fmt.Errorf("feishu bridge reaction: message id is required")
+	}
+	emojiType := strings.TrimSpace(req.EmojiType)
+	if emojiType == "" {
+		return AddMessageReactionResponse{}, fmt.Errorf("feishu bridge reaction: emoji type is required")
+	}
+
+	reactionStartedAt := time.Now()
+	reaction, err := c.Svc.CreateMessageReactionWithContext(ctx, feishu.CreateMessageReactionRequest{
+		SenderID:  senderID,
+		MessageID: messageID,
+		EmojiType: emojiType,
+	})
+	if err != nil {
+		slog.Warn("feishu bridge add reaction failed",
+			"participant_id", senderID,
+			"message_id", messageID,
+			"emoji_type", emojiType,
+			"duration", time.Since(reactionStartedAt),
+			"error", err,
+		)
+		return AddMessageReactionResponse{}, err
+	}
+	slog.Debug("feishu bridge add reaction completed",
+		"participant_id", senderID,
+		"message_id", messageID,
+		"reaction_id", strings.TrimSpace(reaction.ReactionID),
+		"emoji_type", emojiType,
+		"duration", time.Since(reactionStartedAt),
+	)
+	return AddMessageReactionResponse{ReactionID: strings.TrimSpace(reaction.ReactionID)}, nil
+}
+
+func (c *FeishuClient) DeleteMessageReaction(ctx context.Context, botID string, req DeleteMessageReactionRequest) error {
+	if c == nil || c.Svc == nil {
+		return fmt.Errorf("feishu bridge reaction delete: service is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	senderID := strings.TrimSpace(botID)
+	if senderID == "" {
+		return fmt.Errorf("feishu bridge reaction delete: bot id is required")
+	}
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		return fmt.Errorf("feishu bridge reaction delete: message id is required")
+	}
+	reactionID := strings.TrimSpace(req.ReactionID)
+	if reactionID == "" {
+		return fmt.Errorf("feishu bridge reaction delete: reaction id is required")
+	}
+
+	reactionStartedAt := time.Now()
+	err := c.Svc.DeleteMessageReactionWithContext(ctx, feishu.DeleteMessageReactionRequest{
+		SenderID:   senderID,
+		MessageID:  messageID,
+		ReactionID: reactionID,
+	})
+	if err != nil {
+		slog.Warn("feishu bridge delete reaction failed",
+			"participant_id", senderID,
+			"message_id", messageID,
+			"reaction_id", reactionID,
+			"duration", time.Since(reactionStartedAt),
+			"error", err,
+		)
+		return err
+	}
+	slog.Debug("feishu bridge delete reaction completed",
+		"participant_id", senderID,
+		"message_id", messageID,
+		"reaction_id", reactionID,
+		"duration", time.Since(reactionStartedAt),
+	)
+	return nil
+}
+
 func (c *FeishuClient) emitBotEvent(
 	ctx context.Context,
 	participantID string,

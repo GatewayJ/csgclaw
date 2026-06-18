@@ -15,12 +15,14 @@ import (
 )
 
 const (
-	defaultQueueSize    = 32
-	defaultSeenWindow   = 256
-	defaultPromptSettle = 150 * time.Millisecond
-	localChannel        = csgclawchannel.ChannelID
-	turnPlaceholderText = "\u200b"
-	turnCompleteText    = "Done."
+	defaultQueueSize          = 32
+	defaultSeenWindow         = 256
+	defaultPromptSettle       = 150 * time.Millisecond
+	localChannel              = csgclawchannel.ChannelID
+	turnPlaceholderText       = "\u200b"
+	turnCompleteText          = "Done."
+	processingPinEmoji        = "Pin"
+	processingReactionTimeout = 2 * time.Second
 )
 
 type Binding struct {
@@ -248,11 +250,15 @@ func (w *worker) enqueue(ctx context.Context, evt BotEvent) {
 
 func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-chan runtimecodex.SessionEvent) error {
 	eventStartedAt := time.Now()
+	cleanupProcessingReaction := w.startProcessingReaction(ctx, evt)
+	defer cleanupProcessingReaction(context.Background())
 	if cmd, ok, err := slashcommand.Parse(evt.Text); err == nil && ok && slashcommand.IsNewConversationCommand(cmd) {
+		cleanupProcessingReaction(ctx)
 		return w.handleConversationReset(ctx, evt)
 	} else if err != nil {
 		renderer := runtimebridge.NewTurnRenderer()
 		renderer.SetPromptError(err.Error())
+		cleanupProcessingReaction(ctx)
 		_, err := w.flushTurn(ctx, evt.RoomID, evt.ThreadRootID, renderer)
 		return err
 	}
@@ -260,6 +266,7 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 	if err != nil {
 		renderer := runtimebridge.NewTurnRenderer()
 		renderer.SetPromptError(err.Error())
+		cleanupProcessingReaction(ctx)
 		_, err := w.flushTurn(ctx, evt.RoomID, evt.ThreadRootID, renderer)
 		return err
 	}
@@ -303,8 +310,12 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 		return generatedRootID, nil
 	}
 	flushTurn := func() (string, error) {
+		cleanupProcessingReaction(ctx)
 		if generatedRootID == "" {
 			return w.flushTurn(ctx, evt.RoomID, turnRootID, renderer)
+		}
+		if w.canUpdateGeneratedTurnRoot(evt) {
+			return w.flushTurnByUpdatingRoot(ctx, evt.RoomID, generatedRootID, renderer)
 		}
 		if len(renderer.FinalMessages()) == 0 {
 			return w.flushTurnWithEmptyCompletion(ctx, evt.RoomID, generatedRootID, renderer)
@@ -446,12 +457,42 @@ func (w *worker) flushTurnWithEmptyCompletion(ctx context.Context, roomID, threa
 	return w.flushTurnMessages(ctx, roomID, threadRootID, true, renderer)
 }
 
+func (w *worker) flushTurnByUpdatingRoot(ctx context.Context, roomID, rootMessageID string, renderer *runtimebridge.TurnRenderer) (string, error) {
+	messages := renderer.FinalMessages()
+	if len(messages) == 0 {
+		messages = []string{turnCompleteText}
+	}
+	if len(messages) == 0 {
+		return strings.TrimSpace(rootMessageID), nil
+	}
+	if err := w.updateMessage(ctx, roomID, rootMessageID, messages[0]); err != nil {
+		slog.Warn("codex bridge update generated turn root failed; sending completion inside activity thread",
+			"bot_id", w.binding.BotID,
+			"room_id", strings.TrimSpace(roomID),
+			"message_id", strings.TrimSpace(rootMessageID),
+			"text_bytes", len(strings.TrimSpace(messages[0])),
+			"error", err,
+		)
+		return w.flushMessages(ctx, roomID, rootMessageID, messages)
+	}
+	if len(messages) > 1 {
+		if _, err := w.flushMessages(ctx, roomID, rootMessageID, messages[1:]); err != nil {
+			return "", err
+		}
+	}
+	return strings.TrimSpace(rootMessageID), nil
+}
+
 func (w *worker) flushTurnMessages(ctx context.Context, roomID, threadRootID string, includeEmptyCompletion bool, renderer *runtimebridge.TurnRenderer) (string, error) {
-	var firstSentMessageID string
 	messages := renderer.FinalMessages()
 	if len(messages) == 0 && includeEmptyCompletion {
 		messages = []string{turnCompleteText}
 	}
+	return w.flushMessages(ctx, roomID, threadRootID, messages)
+}
+
+func (w *worker) flushMessages(ctx context.Context, roomID, threadRootID string, messages []string) (string, error) {
+	var firstSentMessageID string
 	for _, text := range messages {
 		req := SendMessageRequest{
 			RoomID:       roomID,
@@ -469,6 +510,110 @@ func (w *worker) flushTurnMessages(ctx context.Context, roomID, threadRootID str
 	return firstSentMessageID, nil
 }
 
+func (w *worker) canUpdateGeneratedTurnRoot(evt BotEvent) bool {
+	if !strings.EqualFold(strings.TrimSpace(evt.Channel), "feishu") {
+		return false
+	}
+	_, ok := w.service.client.(MessageUpdater)
+	return ok
+}
+
+func (w *worker) startProcessingReaction(ctx context.Context, evt BotEvent) func(context.Context) {
+	if !strings.EqualFold(strings.TrimSpace(evt.Channel), "feishu") {
+		return func(context.Context) {}
+	}
+	messageID := strings.TrimSpace(evt.MessageID)
+	if messageID == "" {
+		return func(context.Context) {}
+	}
+	reactor, ok := w.service.client.(MessageReactor)
+	if !ok {
+		return func(context.Context) {}
+	}
+
+	addCtx, cancelAdd := contextWithDefaultTimeout(ctx, processingReactionTimeout)
+	resultCh := make(chan processingReactionResult, 1)
+	go func() {
+		defer cancelAdd()
+		resp, err := reactor.AddMessageReaction(addCtx, w.binding.BotID, AddMessageReactionRequest{
+			MessageID: messageID,
+			EmojiType: processingPinEmoji,
+		})
+		if err != nil {
+			slog.Debug("codex bridge add processing reaction failed",
+				"bot_id", w.binding.BotID,
+				"room_id", strings.TrimSpace(evt.RoomID),
+				"message_id", messageID,
+				"emoji_type", processingPinEmoji,
+				"error", err,
+			)
+			resultCh <- processingReactionResult{}
+			return
+		}
+		resultCh <- processingReactionResult{reactionID: strings.TrimSpace(resp.ReactionID)}
+	}()
+
+	var once sync.Once
+	return func(cleanupCtx context.Context) {
+		once.Do(func() {
+			cancelAdd()
+			go w.deleteProcessingReaction(cleanupCtx, evt, reactor, messageID, resultCh)
+		})
+	}
+}
+
+type processingReactionResult struct {
+	reactionID string
+}
+
+func (w *worker) deleteProcessingReaction(cleanupCtx context.Context, evt BotEvent, reactor MessageReactor, messageID string, resultCh <-chan processingReactionResult) {
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), processingReactionTimeout)
+	defer cancelWait()
+
+	var result processingReactionResult
+	select {
+	case result = <-resultCh:
+	case <-waitCtx.Done():
+		slog.Debug("codex bridge processing reaction cleanup timed out",
+			"bot_id", w.binding.BotID,
+			"room_id", strings.TrimSpace(evt.RoomID),
+			"message_id", messageID,
+			"emoji_type", processingPinEmoji,
+		)
+		return
+	}
+	reactionID := strings.TrimSpace(result.reactionID)
+	if reactionID == "" {
+		return
+	}
+
+	deleteCtx, cancelDelete := contextWithDefaultTimeout(cleanupCtx, processingReactionTimeout)
+	defer cancelDelete()
+	if err := reactor.DeleteMessageReaction(deleteCtx, w.binding.BotID, DeleteMessageReactionRequest{
+		MessageID:  messageID,
+		ReactionID: reactionID,
+	}); err != nil {
+		slog.Debug("codex bridge delete processing reaction failed",
+			"bot_id", w.binding.BotID,
+			"room_id", strings.TrimSpace(evt.RoomID),
+			"message_id", messageID,
+			"reaction_id", reactionID,
+			"emoji_type", processingPinEmoji,
+			"error", err,
+		)
+	}
+}
+
+func contextWithDefaultTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
 func (w *worker) sendMessage(ctx context.Context, roomID, threadRootID, text string) (string, error) {
 	return w.sendMessageRequest(ctx, SendMessageRequest{
 		RoomID:       roomID,
@@ -484,6 +629,44 @@ func (w *worker) sendActivity(ctx context.Context, roomID, threadRootID string, 
 		ThreadRootID: strings.TrimSpace(threadRootID),
 	})
 	return err
+}
+
+func (w *worker) updateMessage(ctx context.Context, roomID, messageID, text string) error {
+	text = strings.TrimSpace(text)
+	messageID = strings.TrimSpace(messageID)
+	if text == "" || messageID == "" {
+		return nil
+	}
+	updater, ok := w.service.client.(MessageUpdater)
+	if !ok {
+		return fmt.Errorf("message update is not supported")
+	}
+	updateStartedAt := time.Now()
+	resp, err := updater.UpdateMessage(ctx, w.binding.BotID, UpdateMessageRequest{
+		RoomID:    strings.TrimSpace(roomID),
+		MessageID: messageID,
+		Text:      text,
+	})
+	if err != nil {
+		slog.Debug("codex bridge update message failed",
+			"bot_id", w.binding.BotID,
+			"room_id", strings.TrimSpace(roomID),
+			"message_id", messageID,
+			"text_bytes", len(text),
+			"duration", time.Since(updateStartedAt),
+			"error", err,
+		)
+		return err
+	}
+	slog.Debug("codex bridge update message completed",
+		"bot_id", w.binding.BotID,
+		"room_id", strings.TrimSpace(roomID),
+		"message_id", messageID,
+		"updated_message_id", strings.TrimSpace(resp.MessageID),
+		"text_bytes", len(text),
+		"duration", time.Since(updateStartedAt),
+	)
+	return nil
 }
 
 func (w *worker) sendMessageRequest(ctx context.Context, req SendMessageRequest) (string, error) {
