@@ -1,6 +1,7 @@
 package feishu
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -529,10 +530,9 @@ func (s *Service) CreateRoom(req im.CreateRoomRequest) (im.Room, error) {
 	description := strings.TrimSpace(req.Description)
 
 	created, err := s.createChat(context.Background(), app, CreateChatRequest{
-		Title:        title,
-		Description:  description,
-		CreatorID:    adminOpenID,
-		MemberAppIDs: memberAppIDs,
+		Title:       title,
+		Description: description,
+		CreatorID:   adminOpenID,
 	})
 	if err != nil {
 		return im.Room{}, err
@@ -546,6 +546,15 @@ func (s *Service) CreateRoom(req im.CreateRoomRequest) (im.Room, error) {
 	}
 	if responseDescription := strings.TrimSpace(created.Description); responseDescription != "" {
 		description = responseDescription
+	}
+	if len(memberAppIDs) > 0 {
+		if err := s.addChatMembers(context.Background(), app, AddChatMembersRequest{
+			ChatID:       chatID,
+			MemberBotIDs: memberBotIDs,
+			MemberAppIDs: memberAppIDs,
+		}); err != nil {
+			return im.Room{}, fmt.Errorf("create feishu chat %s succeeded but add members failed: %w", chatID, err)
+		}
 	}
 
 	room := im.Room{
@@ -595,7 +604,17 @@ func defaultCreateChat(ctx context.Context, app AppConfig, req CreateChatRequest
 		return CreateChatResponse{}, fmt.Errorf("create feishu chat: %w", err)
 	}
 	if !resp.Success() {
-		return CreateChatResponse{}, fmt.Errorf("create feishu chat: code=%d msg=%s request_id=%s", resp.Code, resp.Msg, resp.RequestId())
+		return CreateChatResponse{}, fmt.Errorf(
+			"create feishu chat: code=%d msg=%s request_id=%s request_app_id=%s owner_open_id=%s bot_app_ids=%s response_data=%s response_body=%s",
+			resp.Code,
+			resp.Msg,
+			resp.RequestId(),
+			strings.TrimSpace(app.AppID),
+			req.CreatorID,
+			strings.Join(normalizeNonEmptyStrings(req.MemberAppIDs), ","),
+			feishuResponseData(resp.Data),
+			feishuResponseBody(resp.RawBody),
+		)
 	}
 	if resp.Data == nil {
 		return CreateChatResponse{}, fmt.Errorf("create feishu chat: empty response data")
@@ -617,7 +636,7 @@ func defaultAddChatMembers(ctx context.Context, app AppConfig, req AddChatMember
 	addReq := larkim.NewCreateChatMembersReqBuilder().
 		ChatId(req.ChatID).
 		MemberIdType("app_id").
-		SucceedType(0).
+		SucceedType(2).
 		Body(larkim.NewCreateChatMembersReqBodyBuilder().
 			IdList(memberAppIDs).
 			Build()).
@@ -628,9 +647,44 @@ func defaultAddChatMembers(ctx context.Context, app AppConfig, req AddChatMember
 		return fmt.Errorf("add feishu chat members: %w", err)
 	}
 	if !resp.Success() {
-		return fmt.Errorf("add feishu chat members: code=%d msg=%s request_id=%s", resp.Code, resp.Msg, resp.RequestId())
+		return fmt.Errorf(
+			"add feishu chat members: code=%d msg=%s request_id=%s request_app_id=%s chat_id=%s member_id_type=app_id succeed_type=2 member_app_ids=%s response_data=%s response_body=%s",
+			resp.Code,
+			resp.Msg,
+			resp.RequestId(),
+			strings.TrimSpace(app.AppID),
+			strings.TrimSpace(req.ChatID),
+			strings.Join(memberAppIDs, ","),
+			feishuResponseData(resp.Data),
+			feishuResponseBody(resp.RawBody),
+		)
 	}
 	return nil
+}
+
+func feishuResponseData(data any) string {
+	if data == nil {
+		return "null"
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Sprintf("%T", data)
+	}
+	return string(raw)
+}
+
+func feishuResponseBody(raw []byte) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return "null"
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err == nil {
+		if normalized, err := json.Marshal(value); err == nil {
+			return string(normalized)
+		}
+	}
+	return string(raw)
 }
 
 func defaultDeleteChat(ctx context.Context, app AppConfig, chatID string) error {

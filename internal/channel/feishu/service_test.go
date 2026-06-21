@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,37 @@ func TestFeishuServiceInitializesMessageBus(t *testing.T) {
 
 	if svc.MessageBus() == nil {
 		t.Fatal("MessageBus() = nil, want initialized bus")
+	}
+}
+
+func TestFeishuResponseDataSerializesFailureDetails(t *testing.T) {
+	got := feishuResponseData(map[string]any{
+		"invalid_id_list":          []string{"cli_bad"},
+		"not_existed_id_list":      []string{"cli_missing"},
+		"pending_approval_id_list": []string{"cli_pending"},
+	})
+
+	for _, want := range []string{"invalid_id_list", "cli_bad", "not_existed_id_list", "cli_missing", "pending_approval_id_list", "cli_pending"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("feishuResponseData() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFeishuResponseBodySerializesErrorDetails(t *testing.T) {
+	got := feishuResponseBody([]byte(`{
+		"code": 2200,
+		"msg": "Internal Error",
+		"error": {
+			"log_id": "log_123",
+			"troubleshooter": "https://open.feishu.cn/search?log_id=log_123"
+		}
+	}`))
+
+	for _, want := range []string{"Internal Error", "log_123", "troubleshooter"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("feishuResponseBody() = %q, want substring %q", got, want)
+		}
 	}
 }
 
@@ -265,7 +297,8 @@ func TestFeishuBotMembersInChatWithResolversIncludesConfiguredBots(t *testing.T)
 
 func TestFeishuCreateRoomUsesConfiguredAdminOpenID(t *testing.T) {
 	var gotCreatorID string
-	var gotMemberAppIDs []string
+	var gotCreateMemberAppIDs []string
+	var gotAddReq AddChatMembersRequest
 	svc := NewServiceWithCreateChatAndAddMembers(
 		map[string]AppConfig{
 			"manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"},
@@ -273,10 +306,13 @@ func TestFeishuCreateRoomUsesConfiguredAdminOpenID(t *testing.T) {
 		},
 		func(_ context.Context, _ AppConfig, req CreateChatRequest) (CreateChatResponse, error) {
 			gotCreatorID = req.CreatorID
-			gotMemberAppIDs = append([]string(nil), req.MemberAppIDs...)
+			gotCreateMemberAppIDs = append([]string(nil), req.MemberAppIDs...)
 			return CreateChatResponse{ChatID: "oc_alpha", Name: req.Title, Description: req.Description}, nil
 		},
-		func(context.Context, AppConfig, AddChatMembersRequest) error { return nil },
+		func(_ context.Context, _ AppConfig, req AddChatMembersRequest) error {
+			gotAddReq = req
+			return nil
+		},
 	)
 
 	if _, err := svc.CreateRoom(im.CreateRoomRequest{Title: "alpha", CreatorID: "u-manager", MemberIDs: []string{"u-dev"}}); err != nil {
@@ -286,8 +322,17 @@ func TestFeishuCreateRoomUsesConfiguredAdminOpenID(t *testing.T) {
 	if got, want := gotCreatorID, "ou_admin"; got != want {
 		t.Fatalf("create chat creator_id = %q, want %q", got, want)
 	}
-	if len(gotMemberAppIDs) != 1 || gotMemberAppIDs[0] != "cli_dev" {
-		t.Fatalf("create chat member app_ids = %+v, want [cli_dev]", gotMemberAppIDs)
+	if len(gotCreateMemberAppIDs) != 0 {
+		t.Fatalf("create chat member app_ids = %+v, want none", gotCreateMemberAppIDs)
+	}
+	if got, want := gotAddReq.ChatID, "oc_alpha"; got != want {
+		t.Fatalf("add members chat_id = %q, want %q", got, want)
+	}
+	if len(gotAddReq.MemberBotIDs) != 1 || gotAddReq.MemberBotIDs[0] != "u-dev" {
+		t.Fatalf("add member bot ids = %+v, want [u-dev]", gotAddReq.MemberBotIDs)
+	}
+	if len(gotAddReq.MemberAppIDs) != 1 || gotAddReq.MemberAppIDs[0] != "cli_dev" {
+		t.Fatalf("add members app_ids = %+v, want [cli_dev]", gotAddReq.MemberAppIDs)
 	}
 }
 
@@ -308,6 +353,35 @@ func TestFeishuCreateRoomRequiresConfiguredMemberBots(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), `feishu app is not configured for bot "u-dev"`) {
 		t.Fatalf("CreateRoom() error = %v, want configured bot error", err)
+	}
+}
+
+func TestFeishuCreateRoomReportsCreatedChatIDWhenAddMembersFails(t *testing.T) {
+	svc := NewServiceWithCreateChatAndAddMembers(
+		map[string]AppConfig{
+			"manager": {AppID: "cli_manager", AppSecret: "manager-secret", AdminOpenID: "ou_admin"},
+			"u-dev":   {AppID: "cli_dev", AppSecret: "dev-secret"},
+		},
+		func(_ context.Context, _ AppConfig, req CreateChatRequest) (CreateChatResponse, error) {
+			if len(req.MemberAppIDs) != 0 {
+				t.Fatalf("create chat member app_ids = %+v, want none", req.MemberAppIDs)
+			}
+			return CreateChatResponse{ChatID: "oc_alpha", Name: req.Title, Description: req.Description}, nil
+		},
+		func(context.Context, AppConfig, AddChatMembersRequest) error {
+			return fmt.Errorf("feishu add failed")
+		},
+	)
+
+	_, err := svc.CreateRoom(im.CreateRoomRequest{
+		Title:     "alpha",
+		CreatorID: "u-manager",
+		MemberIDs: []string{"u-dev"},
+	})
+	if err == nil ||
+		!strings.Contains(err.Error(), "create feishu chat oc_alpha succeeded but add members failed") ||
+		!strings.Contains(err.Error(), "feishu add failed") {
+		t.Fatalf("CreateRoom() error = %v, want created chat id and add failure", err)
 	}
 }
 
