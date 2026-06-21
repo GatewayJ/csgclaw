@@ -85,9 +85,9 @@ For new Feishu groups, after the manager and worker Feishu configs exist, prefer
 csgclaw-cli room create --title dev-ui-group --creator-id manager --member-ids manager,dev --channel feishu
 ```
 
-CSGClaw resolves those participant IDs to the configured Feishu app credentials during chat creation and avoids the separate `member create` path for new groups.
+CSGClaw creates the Feishu chat first, then resolves those participant IDs to configured Feishu app credentials and invites the worker bot apps. This keeps the created `chat_id` visible if the invite fails, but it still requires manager app group scopes for chat creation and member invites.
 
-For existing Feishu groups, `csgclaw-cli member list` and `member create` require manager app scopes such as:
+For Feishu group operations, `room create --member-ids`, `csgclaw-cli member list`, and `member create` require manager app scopes such as:
 
 - `im:chat:read`
 - `im:chat.members:read`

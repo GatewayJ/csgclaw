@@ -145,7 +145,7 @@ Do **not** post `@alex` plain text in the room instead of `--mention-id`.
 - When a **new** worker is needed, use `agent-creator`; do not run bare `participant create --bind create` from this skill.
 - Verify room membership with `member list` after adding a member when room presence matters.
 - A direct room cannot accept an added participant as a new member. Create a new room with `--member-ids` containing the existing DM participants and the new participant.
-- For Feishu, prefer `room create --member-ids` for new groups after Feishu credentials exist. Use `member create` only for an existing Feishu group; that path requires manager app scopes such as `im:chat.members:write_only` or `im:chat`.
+- For Feishu, prefer `room create --member-ids` for new groups after Feishu credentials exist; it creates the chat first, then invites configured worker bot apps. Use `member create` only for an existing Feishu group. Both paths require manager app scopes such as `im:chat.members:write_only` or `im:chat`.
 - Use participant IDs at the CLI boundary. For the local CSGClaw manager use `manager`; use `u-manager` only when calling an agent route or the Feishu credential config API field that still names its key `bot_id`.
 - Never notify a worker with plain-text `@name`; always use `message create --mention-id` and verify `<at user_id="...">` in `message list`.
 - Keep the response focused on the concrete CLI result instead of introducing external planning artifacts.
