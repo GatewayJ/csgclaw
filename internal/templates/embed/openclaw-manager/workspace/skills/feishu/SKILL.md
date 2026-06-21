@@ -170,7 +170,7 @@ By default, `finalize` will:
 
 1. poll Feishu/Lark until credentials are available or timeout
 2. receive `client_id/client_secret`
-3. bind `feishu:admin` human to the registration `open_id` when Feishu returns one
+3. for manager targets only, bind `feishu:admin` human to the registration `open_id` when Feishu returns one
 4. bind the Feishu bot participant through `csgclaw-cli participant bind --feishu-kind bot`
 5. for worker targets, recreate the worker from the bind command so the new Feishu env/files take effect
    - if BoxLite reports `box with name '<name>' already exists` while CSGClaw reports `agent "<id>" not found`, stop and tell the user the host has a stale partial worker box; do not keep trying random API paths or host-only commands from inside manager
@@ -184,6 +184,7 @@ python /home/node/.openclaw/workspace/skills/feishu/scripts/feishu_register.py f
 ```
 
 Use an exec/tool timeout of at least 600 seconds for this command. For workers, finalize should report `config.bot_bind.restart_status`; do not create a second worker or change the target agent ID.
+Worker finalize must not bind or overwrite `feishu:admin`, even when Feishu returns a registration `open_id`; `feishu:admin` belongs to the manager Feishu app scope.
 
 For manager, default finalize binds `feishu:admin` when Feishu returns `open_id`, binds `feishu:manager`, then prints a structured action card. Return the JSON object exactly as the chat message content: no leading sentence, no Markdown table, no bullet list, no ```json fence, and no explanatory wrapper. The CSGClaw Web frontend will render a "重建 Manager" button.
 The click is handled by the browser and calls the manager bootstrap replace surface (`POST /api/v1/agents` with `{"id":"u-manager","replace":true}`), not the hazardous generic recreate route.

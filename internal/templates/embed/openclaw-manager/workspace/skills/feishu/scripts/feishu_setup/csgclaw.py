@@ -100,8 +100,9 @@ def csgclaw_cli_json(args, cli_args: list[str], input_text: Optional[str] = None
 def configure_csgclaw(args, state: dict, result: dict) -> dict:
     agent_id = state["agent_id"]
     response: dict[str, Any] = {}
+    role = resolve_role(args, state)
     candidate_admin_open_id = str(result.get("open_id") or "").strip()
-    if candidate_admin_open_id:
+    if role == "manager" and candidate_admin_open_id:
         admin_bind_args = [
             "participant",
             "bind",
@@ -133,11 +134,10 @@ def configure_csgclaw(args, state: dict, result: dict) -> dict:
         result["app_id"],
         "--app-secret-stdin",
     ]
-    role = resolve_role(args, state)
     if role == "worker" and args.recreate in ("auto", "worker"):
         bot_bind_args.append("--restart")
     response["bot_bind"] = csgclaw_cli_json(args, bot_bind_args, input_text=result["app_secret"])
-    if candidate_admin_open_id:
+    if role == "manager" and candidate_admin_open_id:
         response["admin_open_id"] = candidate_admin_open_id
         response["admin_open_id_source"] = "registration"
     else:

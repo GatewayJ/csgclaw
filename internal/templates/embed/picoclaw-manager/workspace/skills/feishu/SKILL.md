@@ -75,6 +75,27 @@ Do not use this skill for generic Feishu webhook integrations or non-CSGClaw Fei
    - `POST /api/v1/channels/feishu/participants`
    - `POST /api/v1/agents/{id}/recreate`
 
+## Manager Group Permissions
+
+CSGClaw cannot silently grant Feishu/Lark app scopes from inside the PicoClaw runtime. Feishu group operations use the manager agent's Feishu bot app credentials, so the tenant admin must approve the required scopes in Feishu/Lark Open Platform.
+
+For new Feishu groups, after the manager and worker Feishu configs exist, prefer creating the group with all participant IDs already included:
+
+```bash
+csgclaw-cli room create --title dev-ui-group --creator-id manager --member-ids manager,dev --channel feishu
+```
+
+CSGClaw resolves those participant IDs to the configured Feishu app credentials during chat creation and avoids the separate `member create` path for new groups.
+
+For existing Feishu groups, `csgclaw-cli member list` and `member create` require manager app scopes such as:
+
+- `im:chat:read`
+- `im:chat.members:read`
+- `im:chat.members:write_only`
+- or the broader `im:chat`
+
+`finalize` prints `manager_group_scopes` and `manager_group_permission_url`. Send that URL to the user/admin when Feishu returns `Access denied` for group member inspection or adding a worker agent's Feishu bot app to an existing group.
+
 ## Safe Credential Rules
 
 1. Never print `app_secret`, `client_secret`, access tokens, verification tokens, encryption keys, or connection strings.
@@ -149,7 +170,7 @@ By default, `finalize` will:
 
 1. poll Feishu/Lark until credentials are available or timeout
 2. receive `client_id/client_secret`
-3. bind `feishu:admin` human to the registration `open_id` when Feishu returns one
+3. for manager targets only, bind `feishu:admin` human to the registration `open_id` when Feishu returns one
 4. bind the Feishu bot participant through `csgclaw-cli participant bind --feishu-kind bot`
 5. for worker targets, recreate the worker from the bind command so the new Feishu env/files take effect
    - if BoxLite reports `box with name '<name>' already exists` while CSGClaw reports `agent "<id>" not found`, stop and tell the user the host has a stale partial worker box; do not keep trying random API paths or host-only commands from inside manager
@@ -163,6 +184,7 @@ python /home/picoclaw/.picoclaw/workspace/skills/feishu/scripts/feishu_register.
 ```
 
 Use an exec/tool timeout of at least 600 seconds for this command. The bind command should report `restart_status`; do not create a second worker or change the target agent ID.
+Worker finalize must not bind or overwrite `feishu:admin`, even when Feishu returns a registration `open_id`; `feishu:admin` belongs to the manager Feishu app scope.
 
 For manager, default finalize binds `feishu:admin` when Feishu returns `open_id`, binds `feishu:manager`, then prints a structured action card. Return the JSON object exactly as the chat message content: no leading sentence, no Markdown table, no bullet list, no ```json fence, and no explanatory wrapper. The CSGClaw Web frontend will render a "重建 Manager" button.
 The click is handled by the browser and calls the manager bootstrap replace surface (`POST /api/v1/agents` with `{"id":"u-manager","replace":true}`), not the hazardous generic recreate route.

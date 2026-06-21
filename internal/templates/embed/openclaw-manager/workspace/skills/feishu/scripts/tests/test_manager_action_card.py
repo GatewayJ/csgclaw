@@ -69,14 +69,12 @@ class ManagerActionCardTest(unittest.TestCase):
         self.assertFalse(any("--restart" in call[0] for call in calls))
         self.assertTrue(any("--app-secret-env" in call[0] for call in calls))
 
-    def test_configure_worker_binds_admin_from_registration_open_id(self):
+    def test_configure_worker_skips_admin_from_registration_open_id(self):
         calls = []
         original_csgclaw_cli_json = csgclaw.csgclaw_cli_json
 
         def fake_csgclaw_cli_json(args, cli_args, input_text=None):
             calls.append((cli_args, input_text))
-            if "--feishu-kind" in cli_args and cli_args[cli_args.index("--feishu-kind") + 1] == "human":
-                return {"participant_id": "admin", "config_saved": True}
             return {
                 "participant_id": "dev",
                 "agent_id": "u-dev",
@@ -93,14 +91,13 @@ class ManagerActionCardTest(unittest.TestCase):
         finally:
             csgclaw.csgclaw_cli_json = original_csgclaw_cli_json
 
-        self.assertEqual(response["admin_bind"]["participant_id"], "admin")
-        self.assertEqual(response["admin_open_id"], "ou_admin")
-        self.assertEqual(response["admin_open_id_source"], "registration")
-        self.assertTrue(any("--feishu-kind" in call[0] and "human" in call[0] for call in calls))
+        self.assertNotIn("admin_bind", response)
+        self.assertNotIn("admin_open_id", response)
+        self.assertFalse(any("--feishu-kind" in call[0] and "human" in call[0] for call in calls))
         self.assertTrue(any("--restart" in call[0] for call in calls))
         self.assertTrue(any(call[1] == "secret-value" for call in calls))
 
-    def test_configure_worker_passes_admin_name_from_registration(self):
+    def test_configure_manager_passes_admin_name_from_registration(self):
         calls = []
         original_csgclaw_cli_json = csgclaw.csgclaw_cli_json
 
@@ -109,16 +106,16 @@ class ManagerActionCardTest(unittest.TestCase):
             if "--feishu-kind" in cli_args and cli_args[cli_args.index("--feishu-kind") + 1] == "human":
                 return {"participant_id": "admin", "config_saved": True}
             return {
-                "participant_id": "dev",
-                "agent_id": "u-dev",
-                "restart_status": "worker_recreated",
+                "participant_id": "manager",
+                "agent_id": "u-manager",
+                "restart_status": "restart_skipped",
             }
 
         csgclaw.csgclaw_cli_json = fake_csgclaw_cli_json
         try:
-            csgclaw.configure_csgclaw(
-                Namespace(role="worker", recreate="auto"),
-                {"agent_id": "u-dev", "role": "worker"},
+            response = csgclaw.configure_csgclaw(
+                Namespace(role="manager", recreate="auto"),
+                {"agent_id": "u-manager", "role": "manager"},
                 {"app_id": "cli_dev", "app_secret": "secret-value", "open_id": "ou_admin", "name": "龙韵"},
             )
         finally:
@@ -127,6 +124,9 @@ class ManagerActionCardTest(unittest.TestCase):
         admin_bind = next(call[0] for call in calls if "--feishu-kind" in call[0] and "human" in call[0])
         self.assertIn("--name", admin_bind)
         self.assertEqual(admin_bind[admin_bind.index("--name") + 1], "龙韵")
+        self.assertEqual(response["admin_bind"]["participant_id"], "admin")
+        self.assertEqual(response["admin_open_id"], "ou_admin")
+        self.assertEqual(response["admin_open_id_source"], "registration")
 
     def test_worker_finalize_uses_bind_restart_status(self):
         originals = {

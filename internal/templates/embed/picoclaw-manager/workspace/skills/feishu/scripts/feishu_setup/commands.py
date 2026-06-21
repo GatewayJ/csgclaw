@@ -8,8 +8,9 @@ import sys
 import time
 import uuid
 from typing import Any, Optional
+from urllib.parse import quote
 
-from .config import API_REQUEST_TIMEOUT, DEFAULT_EXPIRE_SECONDS
+from .config import API_REQUEST_TIMEOUT, DEFAULT_EXPIRE_SECONDS, MANAGER_GROUP_SCOPES, ONBOARD_OPEN_URLS
 from .csgclaw import (
     api_json,
     configure_csgclaw,
@@ -31,6 +32,54 @@ from .state import delete_state, load_state, save_state, state_path
 
 def eprint(*args: Any) -> None:
     print(*args, file=sys.stderr)
+
+
+def manager_group_permission_url(domain: str, app_id: str) -> str:
+    base = ONBOARD_OPEN_URLS.get(domain or "feishu", ONBOARD_OPEN_URLS["feishu"])
+    quoted_app_id = quote(app_id, safe="")
+    quoted_scopes = quote(",".join(MANAGER_GROUP_SCOPES), safe=",:")
+    return f"{base}/app/{quoted_app_id}/auth?q={quoted_scopes}&op_from=openapi&token_type=tenant"
+
+
+def resolve_manager_app_id(args: argparse.Namespace, state: dict, result: dict) -> str:
+    if state.get("agent_id") == "u-manager":
+        return str(result.get("app_id") or "").strip()
+    try:
+        participants = csgclaw_cli_json(args, ["participant", "list", "--channel", "feishu"])
+    except RuntimeError:
+        return ""
+    if not isinstance(participants, list):
+        return ""
+    for participant in participants:
+        if not isinstance(participant, dict):
+            continue
+        is_manager_participant = str(participant.get("id") or "").strip() == "manager"
+        is_manager_agent = str(participant.get("agent_id") or "").strip() == "u-manager"
+        if not (is_manager_participant or is_manager_agent):
+            continue
+        config = participant.get("channel_app_config")
+        if not isinstance(config, dict):
+            continue
+        app_id = str(config.get("app_id") or "").strip()
+        if app_id:
+            return app_id
+    return ""
+
+
+def add_manager_group_permission_info(args: argparse.Namespace, state: dict, result: dict, output: dict) -> None:
+    manager_app_id = resolve_manager_app_id(args, state, result)
+    domain = str(result.get("domain") or state.get("domain") or "feishu")
+    output["manager_group_scopes"] = MANAGER_GROUP_SCOPES
+    output["manager_group_permission_note"] = (
+        "Approve these scopes on the manager Feishu app when the manager needs to "
+        "create Feishu groups, inspect group members, or add worker bots to existing Feishu groups."
+    )
+    if manager_app_id:
+        output["manager_group_permission_app_id"] = manager_app_id
+        output["manager_group_permission_url"] = manager_group_permission_url(domain, manager_app_id)
+    else:
+        output["manager_group_permission_app_id"] = ""
+        output["manager_group_permission_url"] = ""
 
 
 def manager_secret_cli_args(args: argparse.Namespace) -> tuple[list[str], Optional[str]]:
@@ -103,9 +152,8 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
         *secret_args,
     ]
     config["bot_bind"] = csgclaw_cli_json(args, bot_bind_args, input_text=input_text)
-    setup_status = "configured"
     output = {
-        "status": setup_status,
+        "status": "configured",
         "agent_id": agent_id,
         "bot_id": agent_id,
         "role": "manager",
@@ -116,6 +164,13 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
         "config": public_result(config),
         "bot_ensured": True,
     }
+    add_manager_group_permission_info(
+        args,
+        {"agent_id": agent_id, "domain": args.domain},
+        {"app_id": app_id, "domain": args.domain, "open_id": open_id},
+        output,
+    )
+    setup_status = output["status"]
     recreated = manager_recreate_action_card(agent_id)
     output.update(recreated)
     output["setup_status"] = setup_status
@@ -245,6 +300,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "worker_recreate_policy": worker_recreate_policy,
         "recreate": public_result(recreated or {}),
     }
+    add_manager_group_permission_info(args, state, result, output)
     if isinstance(recreated, dict) and recreated.get("type") == "csgclaw.action_card":
         setup_status = output["status"]
         output.update(recreated)
