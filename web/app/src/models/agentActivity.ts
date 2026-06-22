@@ -94,7 +94,11 @@ export function isToolActivityMessage(message: IMMessage | null | undefined): bo
 
 export function actionOptionLabel(option: AgentActivityActionOption): string {
   const label = stringValue(option.label, option.kind, option.id);
-  if (optionScope(option) === "agent" && !/\bagent\b/i.test(label)) {
+  const scope = optionScope(option);
+  if (scope === "session" && !/\bsession\b/i.test(label)) {
+    return `${label} (this session)`;
+  }
+  if (scope === "agent" && !/\bagent\b/i.test(label)) {
     return `${label} (this agent)`;
   }
   return label;
@@ -200,7 +204,7 @@ function optionScope(option: AgentActivityActionOption): string {
 }
 
 function defaultOptionScope(kind: string): string {
-  return kind === "allow_always" ? "agent" : "";
+  return kind === "allow_always" ? "session" : "";
 }
 
 function isRecord(value: unknown): value is UnknownRecord {

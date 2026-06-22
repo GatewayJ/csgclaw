@@ -226,7 +226,7 @@ describe("MessageContent", () => {
     );
 
     expect(screen.getByText("Permission request")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Allow always \(this agent\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Allow always \(this session\)/ })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Allow once/ }));
 

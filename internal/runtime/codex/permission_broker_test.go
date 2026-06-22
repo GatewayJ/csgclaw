@@ -99,14 +99,14 @@ func TestPermissionBrokerDecideSelectsOption(t *testing.T) {
 	}
 }
 
-func TestNormalizePermissionOptionsMarksRememberedDecisionsAsAgentScoped(t *testing.T) {
+func TestNormalizePermissionOptionsMarksSessionDecisionsAsSessionScoped(t *testing.T) {
 	t.Parallel()
 
 	options := NormalizePermissionOptions([]ExternalPermissionOption{
 		{
 			ID:    "always",
 			Kind:  PermissionOptionKindAllowAlways,
-			Label: "Allow always",
+			Label: "Allow for session",
 		},
 		{
 			ID:    "once",
@@ -115,8 +115,11 @@ func TestNormalizePermissionOptionsMarksRememberedDecisionsAsAgentScoped(t *test
 		},
 	})
 
-	if options[0].Scope != activity.ActionOptionScopeAgent {
-		t.Fatalf("allow_always scope = %q, want %q", options[0].Scope, activity.ActionOptionScopeAgent)
+	if options[0].Label != "Allow for session" {
+		t.Fatalf("allow_always label = %q, want %q", options[0].Label, "Allow for session")
+	}
+	if options[0].Scope != activity.ActionOptionScopeSession {
+		t.Fatalf("allow_always scope = %q, want %q", options[0].Scope, activity.ActionOptionScopeSession)
 	}
 	if options[1].Scope != "" {
 		t.Fatalf("allow_once scope = %q, want empty", options[1].Scope)

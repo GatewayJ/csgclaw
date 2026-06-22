@@ -378,7 +378,7 @@ func permissionOptionAllows(kind string) bool {
 
 func permissionOptionScope(kind string) string {
 	if strings.TrimSpace(kind) == PermissionOptionKindAllowAlways {
-		return activity.ActionOptionScopeAgent
+		return activity.ActionOptionScopeSession
 	}
 	return ""
 }

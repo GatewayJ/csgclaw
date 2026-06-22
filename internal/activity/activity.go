@@ -18,7 +18,7 @@ type ActionStatus string
 const (
 	ActionKindPermission = "permission"
 
-	ActionOptionScopeAgent = "agent"
+	ActionOptionScopeSession = "session"
 
 	ActionStatusPending  ActionStatus = "pending"
 	ActionStatusAllowed  ActionStatus = "allowed"

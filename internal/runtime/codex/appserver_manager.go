@@ -537,7 +537,7 @@ func (m *appServerManager) handleAppServerToolApproval(runtimeID string, live *l
 		ToolTitle: appServerApprovalTitle(title, req),
 		Options: NormalizePermissionOptions([]ExternalPermissionOption{
 			{ID: "allow_once", Kind: PermissionOptionKindAllowOnce, Label: "Allow once"},
-			{ID: "allow_always", Kind: PermissionOptionKindAllowAlways, Label: "Allow always"},
+			{ID: "allow_always", Kind: PermissionOptionKindAllowAlways, Label: "Allow for session"},
 			{ID: "reject", Kind: "reject", Label: "Reject"},
 		}),
 	})
