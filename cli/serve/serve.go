@@ -954,13 +954,22 @@ func newCodexBridgeManager(cfg config.Config, svc *agent.Service, feishuSvc *fei
 			MentionOnly: true,
 		},
 	}
+	var feishuClient *channelbridge.FeishuClient
 	if feishuSvc != nil {
 		if provider := feishuSvc.ConfigProvider(); provider != nil {
-			opts.FeishuClient = channelbridge.NewFeishuClient(feishuSvc)
+			feishuClient = channelbridge.NewFeishuClient(feishuSvc)
+			opts.FeishuClient = feishuClient
 			opts.FeishuProvider = provider
 		}
 	}
-	return codexmanager.New(opts)
+	manager, err := codexmanager.New(opts)
+	if err != nil {
+		return nil, err
+	}
+	if feishuClient != nil {
+		feishuClient.ActivityDecider = channelActivityDecider(manager)
+	}
+	return manager, nil
 }
 
 func sandboxServiceOptions(cfg config.SandboxConfig) ([]agent.ServiceOption, error) {

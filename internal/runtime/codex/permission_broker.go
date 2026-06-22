@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultPermissionTimeout  = time.Minute
+	defaultPermissionTimeout  = 5 * time.Minute
 	defaultPermissionCacheTTL = 10 * time.Minute
 )
 

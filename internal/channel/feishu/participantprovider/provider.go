@@ -165,7 +165,10 @@ func appConfigFromParticipant(item apitypes.Participant) (feishu.AppConfig, bool
 	if appID == "" || appSecret == "" {
 		return feishu.AppConfig{}, false
 	}
-	return feishu.AppConfig{AppID: appID, AppSecret: appSecret}, true
+	return feishu.AppConfig{
+		AppID:     appID,
+		AppSecret: appSecret,
+	}, true
 }
 
 func channelAppConfigString(values map[string]any, key string) string {

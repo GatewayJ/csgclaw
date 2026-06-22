@@ -338,10 +338,7 @@ func upsertBotParticipantRemote(ctx context.Context, client bindAPIClient, parti
 			warnings = append(warnings, fmt.Sprintf("found noncanonical feishu participant %q for agent %q; keeping it and writing canonical participant %q", item.ID, target.ID, participantID))
 		}
 	}
-	cfg := map[string]any{
-		"app_id":     appID,
-		"app_secret": appSecret,
-	}
+	cfg := feishuBotAppConfig(appID, appSecret)
 	kind := participantpkg.ChannelUserKindAppID
 	displayName := strings.TrimSpace(target.Name)
 	if displayName == "" {
@@ -381,6 +378,13 @@ func upsertBotParticipantRemote(ctx context.Context, client bindAPIClient, parti
 		},
 	})
 	return created, warnings, err
+}
+
+func feishuBotAppConfig(appID, appSecret string) map[string]any {
+	return map[string]any{
+		"app_id": strings.TrimSpace(appID),
+		participantpkg.ChannelAppConfigAppSecretKey: strings.TrimSpace(appSecret),
+	}
 }
 
 func findParticipantByIDRemote(ctx context.Context, client bindAPIClient, channel, id string) (apitypes.Participant, bool, error) {

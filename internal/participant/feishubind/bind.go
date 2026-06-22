@@ -194,10 +194,7 @@ func upsertBotParticipant(ctx context.Context, participantSvc *participant.Servi
 			warnings = append(warnings, fmt.Sprintf("found noncanonical feishu participant %q for agent %q; keeping it and writing canonical participant %q", item.ID, target.ID, participantID))
 		}
 	}
-	cfg := map[string]any{
-		"app_id":     appID,
-		"app_secret": appSecret,
-	}
+	cfg := feishuBotAppConfig(appID, appSecret)
 	kind := participant.ChannelUserKindAppID
 	displayName := strings.TrimSpace(target.Name)
 	if displayName == "" {
@@ -243,6 +240,13 @@ func upsertBotParticipant(ctx context.Context, participantSvc *participant.Servi
 		},
 	})
 	return created, warnings, err
+}
+
+func feishuBotAppConfig(appID, appSecret string) map[string]any {
+	return map[string]any{
+		"app_id":                                 strings.TrimSpace(appID),
+		participant.ChannelAppConfigAppSecretKey: strings.TrimSpace(appSecret),
+	}
 }
 
 func findParticipantByID(participantSvc *participant.Service, channel, id string) (participant.Participant, bool, error) {

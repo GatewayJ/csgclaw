@@ -23,6 +23,37 @@ func TestPermissionBrokerRequestIDUsesProcessPrefix(t *testing.T) {
 	}
 }
 
+func TestPermissionBrokerDefaultTimeoutIsLongEnoughForRemoteApproval(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	broker := NewPermissionBroker(sink)
+	requestedAt := time.Date(2026, 6, 22, 10, 30, 0, 0, time.UTC)
+	resultCh := make(chan PermissionDecision, 1)
+	go func() {
+		decision, _ := broker.Request(context.Background(), PendingPermissionRequest{
+			ExecutionRef: activity.ExecutionRef{RuntimeID: "rt-1", SessionID: "sess-1"},
+			RequestedAt:  requestedAt,
+			Options:      []PermissionOptionSnapshot{{ID: "reject", Kind: "reject", Label: "Reject"}},
+		})
+		resultCh <- decision
+	}()
+
+	waitForRuntime(t, func() bool { return len(sink.snapshot()) == 1 })
+	event := sink.snapshot()[0]
+	snapshot, ok := event.Payload.(PermissionSnapshot)
+	if !ok {
+		t.Fatalf("permission payload = %T, want PermissionSnapshot", event.Payload)
+	}
+	if got := snapshot.ExpiresAt.Sub(requestedAt); got != 5*time.Minute {
+		t.Fatalf("default permission timeout = %s, want 5m", got)
+	}
+	if _, err := broker.Decide(context.Background(), event.ActionID, "reject"); err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	<-resultCh
+}
+
 func TestPermissionBrokerDecideSelectsOption(t *testing.T) {
 	t.Parallel()
 

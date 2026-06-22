@@ -32,6 +32,9 @@ printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
   --restart
 ```
 
+可交互飞书消息卡片按钮会通过已有长连接处理，不需要公网 HTTP callback URL。
+
+
 绑定 manager 应用：
 
 ```bash

@@ -3,6 +3,7 @@ package channelbridge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -10,11 +11,14 @@ import (
 	"sync"
 	"time"
 
+	"csgclaw/internal/activity"
 	"csgclaw/internal/channel/feishu"
+	"csgclaw/internal/channelbridge/runtimebridge"
 	"csgclaw/internal/im"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkdispatcher "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
+	larkcallback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 )
@@ -24,12 +28,14 @@ var atMentionRegexp = regexp.MustCompile(`(?i)<at\s+user_id="([^"]+)"`)
 
 const defaultBridgeReconnectWait = 500 * time.Millisecond
 const bridgeThreadRelationType = "m.thread"
+const feishuPermissionDecisionActionType = "csgclaw.permission_decision"
 
 // FeishuClient adapts Feishu events into BotEvent and sends responses to Feishu.
 type FeishuClient struct {
-	Svc           *feishu.Service
-	MentionOnly   bool
-	ReconnectWait time.Duration
+	Svc             *feishu.Service
+	MentionOnly     bool
+	ReconnectWait   time.Duration
+	ActivityDecider activity.ActivityDecider
 }
 
 func NewFeishuClient(svc *feishu.Service) *FeishuClient {
@@ -109,6 +115,9 @@ func (c *FeishuClient) StreamEvents(ctx context.Context, botID, lastEventID stri
 				}).
 				OnP2MessageReactionDeletedV1(func(context.Context, *larkim.P2MessageReactionDeletedV1) error {
 					return nil
+				}).
+				OnP2CardActionTrigger(func(ctx context.Context, event *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error) {
+					return c.handleCardActionTrigger(ctx, event)
 				})
 			wsClient := larkws.NewClient(
 				app.AppID,
@@ -159,8 +168,10 @@ func (c *FeishuClient) SendMessage(ctx context.Context, botID string, req SendMe
 		return SendMessageResponse{}, fmt.Errorf("feishu bridge send: room id is required")
 	}
 
-	text := strings.TrimSpace(formatFeishuBridgeMessageText(req.Text))
-	if text == "" {
+	formatted := formatFeishuBridgeMessage(req.Text)
+	text := strings.TrimSpace(formatted.Text)
+	card := strings.TrimSpace(formatted.Card)
+	if text == "" && card == "" {
 		return SendMessageResponse{}, nil
 	}
 
@@ -177,12 +188,23 @@ func (c *FeishuClient) SendMessage(ctx context.Context, botID string, req SendMe
 		mode = "reply"
 	}
 	sendStartedAt := time.Now()
-	message, err := c.Svc.SendMessage(im.CreateMessageRequest{
-		RoomID:    roomID,
-		SenderID:  senderID,
-		Content:   text,
-		RelatesTo: relatesTo,
-	})
+	var message im.Message
+	var err error
+	if card != "" {
+		message, err = c.Svc.SendInteractiveMessage(ctx, feishu.SendInteractiveMessageRequest{
+			SenderID:     senderID,
+			ChatID:       roomID,
+			Content:      card,
+			ThreadRootID: strings.TrimSpace(req.ThreadRootID),
+		})
+	} else {
+		message, err = c.Svc.SendMessage(im.CreateMessageRequest{
+			RoomID:    roomID,
+			SenderID:  senderID,
+			Content:   text,
+			RelatesTo: relatesTo,
+		})
+	}
 	if err != nil {
 		slog.Warn("feishu bridge send failed",
 			"participant_id", senderID,
@@ -190,6 +212,7 @@ func (c *FeishuClient) SendMessage(ctx context.Context, botID string, req SendMe
 			"thread_root_id", strings.TrimSpace(req.ThreadRootID),
 			"mode", mode,
 			"text_bytes", len(text),
+			"card_bytes", len(card),
 			"duration", time.Since(sendStartedAt),
 			"error", err,
 		)
@@ -202,6 +225,7 @@ func (c *FeishuClient) SendMessage(ctx context.Context, botID string, req SendMe
 		"thread_root_id", strings.TrimSpace(req.ThreadRootID),
 		"mode", mode,
 		"text_bytes", len(text),
+		"card_bytes", len(card),
 		"duration", time.Since(sendStartedAt),
 	)
 	return SendMessageResponse{MessageID: strings.TrimSpace(message.ID)}, nil
@@ -227,17 +251,26 @@ func (c *FeishuClient) UpdateMessage(ctx context.Context, botID string, req Upda
 	if messageID == "" {
 		return UpdateMessageResponse{}, fmt.Errorf("feishu bridge update: message id is required")
 	}
-	text := strings.TrimSpace(formatFeishuBridgeMessageText(req.Text))
-	if text == "" {
+	formatted := formatFeishuBridgeMessage(req.Text)
+	text := strings.TrimSpace(formatted.Text)
+	card := strings.TrimSpace(formatted.Card)
+	if text == "" && card == "" {
 		return UpdateMessageResponse{}, nil
+	}
+	content := text
+	messageType := ""
+	if card != "" {
+		content = card
+		messageType = "interactive"
 	}
 
 	updateStartedAt := time.Now()
 	message, err := c.Svc.UpdateMessageWithContext(ctx, feishu.UpdateMessageRequest{
-		RoomID:    roomID,
-		SenderID:  senderID,
-		MessageID: messageID,
-		Content:   text,
+		RoomID:      roomID,
+		SenderID:    senderID,
+		MessageID:   messageID,
+		Content:     content,
+		MessageType: messageType,
 	})
 	if err != nil {
 		slog.Warn("feishu bridge update failed",
@@ -245,6 +278,7 @@ func (c *FeishuClient) UpdateMessage(ctx context.Context, botID string, req Upda
 			"room_id", roomID,
 			"message_id", messageID,
 			"text_bytes", len(text),
+			"card_bytes", len(card),
 			"duration", time.Since(updateStartedAt),
 			"error", err,
 		)
@@ -256,6 +290,7 @@ func (c *FeishuClient) UpdateMessage(ctx context.Context, botID string, req Upda
 		"message_id", messageID,
 		"updated_message_id", strings.TrimSpace(message.ID),
 		"text_bytes", len(text),
+		"card_bytes", len(card),
 		"duration", time.Since(updateStartedAt),
 	)
 	return UpdateMessageResponse{MessageID: strings.TrimSpace(message.ID)}, nil
@@ -352,6 +387,127 @@ func (c *FeishuClient) DeleteMessageReaction(ctx context.Context, botID string, 
 		"duration", time.Since(reactionStartedAt),
 	)
 	return nil
+}
+
+func (c *FeishuClient) handleCardActionTrigger(ctx context.Context, event *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error) {
+	if c == nil || c.ActivityDecider == nil {
+		return feishuCardActionToast("error", "Activity decisions are not configured"), nil
+	}
+	if event == nil || event.Event == nil || event.Event.Action == nil {
+		return feishuCardActionToast("error", "Missing card action"), nil
+	}
+
+	value := event.Event.Action.Value
+	if !strings.EqualFold(feishuCardActionString(value, "type"), feishuPermissionDecisionActionType) {
+		return feishuCardActionToast("error", "Unsupported card action"), nil
+	}
+	channel := feishuCardActionString(value, "channel")
+	activityID := feishuCardActionString(value, "activity_id")
+	optionID := feishuCardActionString(value, "option_id")
+	if channel == "" || activityID == "" || optionID == "" {
+		return feishuCardActionToast("error", "Invalid permission action"), nil
+	}
+
+	snapshot, err := c.ActivityDecider.Decide(ctx, activity.ActivityDecisionRequest{
+		Channel:    channel,
+		ActivityID: activityID,
+		OptionID:   optionID,
+	})
+	switch {
+	case err == nil:
+		resp := feishuCardActionToast("success", "Decision submitted")
+		resp.Card = feishuPermissionSnapshotCallbackCard(channel, snapshot)
+		return resp, nil
+	case errors.Is(err, activity.ErrActionAlreadyDecided):
+		resp := feishuCardActionToast("warning", "This request was already decided")
+		resp.Card = feishuPermissionSnapshotCallbackCard(channel, snapshot)
+		return resp, nil
+	case errors.Is(err, activity.ErrActionGone):
+		resp := feishuCardActionToast("warning", "This request is no longer pending")
+		resp.Card = feishuPermissionSnapshotCallbackCard(channel, snapshot)
+		return resp, nil
+	case errors.Is(err, activity.ErrActionInvalidOption), errors.Is(err, activity.ErrActionNotFound):
+		return feishuCardActionToast("error", err.Error()), nil
+	default:
+		return nil, err
+	}
+}
+
+func feishuCardActionString(values map[string]interface{}, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	value, ok := values[key]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
+func feishuPermissionSnapshotCallbackCard(channel string, snapshot activity.ActivitySnapshot) *larkcallback.Card {
+	card := renderFeishuPermissionActivityCardData(feishuActivityMessage{
+		Channel: strings.TrimSpace(channel),
+		Content: feishuActivityContent{
+			MsgType: runtimebridge.AgentActionMsgType,
+			Action:  feishuActivityActionFromSnapshot(snapshot),
+		},
+	})
+	if card == nil {
+		return nil
+	}
+	return &larkcallback.Card{
+		Type: "raw",
+		Data: card,
+	}
+}
+
+func feishuActivityActionFromSnapshot(snapshot activity.ActivitySnapshot) feishuActivityAction {
+	options := make([]feishuActivityOption, 0, len(snapshot.Options))
+	for _, option := range snapshot.Options {
+		options = append(options, feishuActivityOption{
+			ID:    strings.TrimSpace(option.ID),
+			Kind:  strings.TrimSpace(option.Kind),
+			Label: strings.TrimSpace(option.Label),
+			Scope: strings.TrimSpace(option.Scope),
+		})
+	}
+	var decision *feishuActivityDecision
+	if snapshot.Decision != nil {
+		decision = &feishuActivityDecision{
+			OptionID: strings.TrimSpace(snapshot.Decision.OptionID),
+			Kind:     strings.TrimSpace(snapshot.Decision.Kind),
+		}
+	}
+	return feishuActivityAction{
+		ID:          strings.TrimSpace(snapshot.ID),
+		Kind:        strings.TrimSpace(snapshot.Kind),
+		Title:       strings.TrimSpace(snapshot.Title),
+		Status:      string(snapshot.Status),
+		RequestedAt: formatFeishuActivityTime(snapshot.RequestedAt),
+		ExpiresAt:   formatFeishuActivityTime(snapshot.ExpiresAt),
+		Options:     options,
+		Decision:    decision,
+	}
+}
+
+func formatFeishuActivityTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+func feishuCardActionToast(kind, content string) *larkcallback.CardActionTriggerResponse {
+	return &larkcallback.CardActionTriggerResponse{
+		Toast: &larkcallback.Toast{
+			Type:    strings.TrimSpace(kind),
+			Content: strings.TrimSpace(content),
+		},
+	}
 }
 
 func (c *FeishuClient) emitBotEvent(

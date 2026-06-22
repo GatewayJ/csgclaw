@@ -14,7 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"csgclaw/internal/activity"
 	"csgclaw/internal/codexcli"
+	agentruntime "csgclaw/internal/runtime"
 )
 
 const appServerStopTimeout = 3 * time.Second
@@ -93,7 +95,6 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 		appClient:            appClient,
 		conversationSessions: make(map[string]string),
 		turnWaiters:          make(map[string]*appServerTurnWaiter),
-		fallbackCompleted:    make(map[string]struct{}),
 	}
 	appClient.onNotification = func(note appServerNotification) {
 		m.handleAppServerNotification(spec.RuntimeID, live, note)
@@ -191,6 +192,9 @@ func (m *appServerManager) Session(handle SessionHandle) (*Session, error) {
 }
 
 func (m *appServerManager) Prompt(ctx context.Context, handle SessionHandle, req PromptRequest) (PromptResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	runtimeID := strings.TrimSpace(handle.RuntimeID)
 	live, err := m.ensureLiveSession(ctx, handle)
 	if err != nil {
@@ -210,14 +214,19 @@ func (m *appServerManager) Prompt(ctx context.Context, handle SessionHandle, req
 		return PromptResponse{}, err
 	}
 
-	waiter, err := live.registerAppServerTurnWaiter(sessionID)
+	turnCtx, cancelTurn := context.WithCancel(ctx)
+	waiter, err := live.registerAppServerTurnWaiter(turnCtx, sessionID)
 	if err != nil {
+		cancelTurn()
 		if m.deps.EventSink != nil {
 			m.deps.EventSink.Publish(promptFailedEvent(runtimeID, sessionID, err))
 		}
 		return PromptResponse{}, err
 	}
-	defer live.removeAppServerTurnWaiter(sessionID, waiter)
+	defer func() {
+		cancelTurn()
+		live.removeAppServerTurnWaiter(sessionID, waiter)
+	}()
 
 	params := appServerTurnStartParams(live.spec, sessionID, promptText)
 	turnStartAt := time.Now()
@@ -487,12 +496,12 @@ func appServerTurnStartParams(spec SessionSpec, threadID string, prompt string) 
 	return params
 }
 
-func (m *appServerManager) handleAppServerServerRequest(_ string, _ *liveSession, req appServerServerRequest) (any, error) {
+func (m *appServerManager) handleAppServerServerRequest(runtimeID string, live *liveSession, req appServerServerRequest) (any, error) {
 	switch strings.TrimSpace(req.Method) {
 	case "item/commandExecution/requestApproval", "execCommandApproval":
-		return map[string]any{"decision": "accept"}, nil
+		return m.handleAppServerToolApproval(runtimeID, live, req, "Run shell command", "exec_command")
 	case "item/fileChange/requestApproval", "applyPatchApproval":
-		return map[string]any{"decision": "accept"}, nil
+		return m.handleAppServerToolApproval(runtimeID, live, req, "Apply patch", "patch_apply")
 	case "mcpServer/elicitation/request":
 		return map[string]any{
 			"action":  "accept",
@@ -502,6 +511,118 @@ func (m *appServerManager) handleAppServerServerRequest(_ string, _ *liveSession
 	default:
 		return nil, fmt.Errorf("unhandled server request: %s", strings.TrimSpace(req.Method))
 	}
+}
+
+func (m *appServerManager) handleAppServerToolApproval(runtimeID string, live *liveSession, req appServerServerRequest, title string, toolKind string) (any, error) {
+	sessionID := m.appServerApprovalSessionID(live, req)
+	if m.deps.Permission == nil || strings.TrimSpace(runtimeID) == "" || sessionID == "" {
+		return appServerApprovalResponse(true), nil
+	}
+	approvalCtx := live.appServerTurnContext(sessionID)
+	if approvalCtx == nil {
+		approvalCtx = context.Background()
+	}
+
+	live.notifyAppServerPermissionWait(sessionID, true)
+	defer live.notifyAppServerPermissionWait(sessionID, false)
+
+	decision, err := m.deps.Permission.Request(approvalCtx, PendingPermissionRequest{
+		ExecutionRef: activity.ExecutionRef{
+			RuntimeKind: agentruntime.KindCodex,
+			RuntimeID:   strings.TrimSpace(runtimeID),
+			SessionID:   sessionID,
+			ToolCallID:  appServerApprovalToolCallID(req),
+			ToolKind:    strings.TrimSpace(toolKind),
+		},
+		ToolTitle: appServerApprovalTitle(title, req),
+		Options: NormalizePermissionOptions([]ExternalPermissionOption{
+			{ID: "allow_once", Kind: PermissionOptionKindAllowOnce, Label: "Allow once"},
+			{ID: "allow_always", Kind: PermissionOptionKindAllowAlways, Label: "Allow always"},
+			{ID: "reject", Kind: "reject", Label: "Reject"},
+		}),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return appServerApprovalDecisionResponse(decision.Snapshot.Status), nil
+}
+
+func appServerApprovalResponse(allowed bool) map[string]any {
+	if allowed {
+		return map[string]any{"decision": "accept"}
+	}
+	return map[string]any{"decision": "decline"}
+}
+
+func appServerApprovalDecisionResponse(status PermissionStatus) map[string]any {
+	switch status {
+	case PermissionStatusAllowed:
+		return map[string]any{"decision": "accept"}
+	case PermissionStatusCanceled, PermissionStatusExpired:
+		return map[string]any{"decision": "cancel"}
+	default:
+		return map[string]any{"decision": "decline"}
+	}
+}
+
+func (m *appServerManager) appServerApprovalSessionID(live *liveSession, req appServerServerRequest) string {
+	if live == nil {
+		return ""
+	}
+	params := appServerServerRequestParams(req)
+	if threadID := appServerNotificationThreadID(params); threadID != "" && live != nil && live.appServerTracksThread(threadID) {
+		return threadID
+	}
+	if threadID := live.activeAppServerTurnThreadID(); threadID != "" {
+		return threadID
+	}
+	return m.appServerPrimaryThreadID(live)
+}
+
+func appServerApprovalToolCallID(req appServerServerRequest) string {
+	params := appServerServerRequestParams(req)
+	for _, key := range []string{"itemId", "item_id", "callId", "call_id", "id"} {
+		if value := appServerString(params, key); value != "" {
+			return value
+		}
+	}
+	if itemID := appServerNestedString(params, "item", "id"); itemID != "" {
+		return itemID
+	}
+	return ""
+}
+
+func appServerApprovalTitle(base string, req appServerServerRequest) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "Run tool"
+	}
+	params := appServerServerRequestParams(req)
+	summary := firstPermissionText(
+		appServerString(params, "command"),
+		appServerString(params, "cmd"),
+		appServerNestedString(params, "item", "command"),
+		appServerString(params, "path"),
+		appServerString(params, "file"),
+		appServerString(params, "filename"),
+		appServerNestedString(params, "item", "path"),
+		appServerNestedString(params, "item", "file"),
+	)
+	if summary == "" {
+		return base
+	}
+	return base + ": " + truncateSummary(summary, 160)
+}
+
+func appServerServerRequestParams(req appServerServerRequest) map[string]any {
+	var params map[string]any
+	if len(req.Params) > 0 && string(req.Params) != "null" {
+		_ = json.Unmarshal(req.Params, &params)
+	}
+	if params == nil {
+		params = map[string]any{}
+	}
+	return params
 }
 
 func appServerReasoningConfig(effort string) map[string]any {
@@ -596,6 +717,7 @@ func (m *appServerManager) persistedThreadID(spec SessionSpec) string {
 }
 
 type appServerTurnWaiter struct {
+	ctx           context.Context
 	threadID      string
 	turnID        string
 	ch            chan appServerTurnResult
@@ -606,19 +728,24 @@ type appServerTurnWaiter struct {
 }
 
 type appServerTurnResult struct {
-	success    bool
-	stopReason string
-	err        error
-	turnID     string
-	activity   string
-	started    bool
-	progress   bool
+	success           bool
+	stopReason        string
+	err               error
+	turnID            string
+	activity          string
+	started           bool
+	progress          bool
+	permissionPending bool
+	permissionDone    bool
 }
 
-func (s *liveSession) registerAppServerTurnWaiter(threadID string) (*appServerTurnWaiter, error) {
+func (s *liveSession) registerAppServerTurnWaiter(ctx context.Context, threadID string) (*appServerTurnWaiter, error) {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
 		return nil, fmt.Errorf("thread id is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -629,6 +756,7 @@ func (s *liveSession) registerAppServerTurnWaiter(threadID string) (*appServerTu
 		return nil, fmt.Errorf("codex turn already in progress for thread %s", threadID)
 	}
 	waiter := &appServerTurnWaiter{
+		ctx:           ctx,
 		threadID:      threadID,
 		ch:            make(chan appServerTurnResult, 8),
 		lastActivity:  "turn/start",
@@ -636,6 +764,35 @@ func (s *liveSession) registerAppServerTurnWaiter(threadID string) (*appServerTu
 	}
 	s.turnWaiters[threadID] = waiter
 	return waiter, nil
+}
+
+func (s *liveSession) appServerTurnContext(threadID string) context.Context {
+	if s == nil {
+		return nil
+	}
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	waiter := s.turnWaiters[threadID]
+	if waiter == nil {
+		return nil
+	}
+	return waiter.ctx
+}
+
+func (s *liveSession) notifyAppServerPermissionWait(threadID string, pending bool) {
+	result := appServerTurnResult{
+		activity:          "permission:pending",
+		permissionPending: pending,
+		permissionDone:    !pending,
+	}
+	if !pending {
+		result.activity = "permission:resolved"
+	}
+	s.notifyAppServerTurn(threadID, result)
 }
 
 func (s *liveSession) removeAppServerTurnWaiter(threadID string, waiter *appServerTurnWaiter) {
@@ -679,31 +836,19 @@ func (s *liveSession) notifyAppServerTurn(threadID string, result appServerTurnR
 	return true
 }
 
-func (s *liveSession) markFallbackCompleted(threadID string) {
-	threadID = strings.TrimSpace(threadID)
-	if threadID == "" {
-		return
+func (s *liveSession) activeAppServerTurnThreadID() string {
+	if s == nil {
+		return ""
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.fallbackCompleted == nil {
-		s.fallbackCompleted = make(map[string]struct{})
+	if len(s.turnWaiters) != 1 {
+		return ""
 	}
-	s.fallbackCompleted[threadID] = struct{}{}
-}
-
-func (s *liveSession) consumeFallbackCompleted(threadID string) bool {
-	threadID = strings.TrimSpace(threadID)
-	if threadID == "" {
-		return false
+	for threadID := range s.turnWaiters {
+		return strings.TrimSpace(threadID)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.fallbackCompleted[threadID]; !ok {
-		return false
-	}
-	delete(s.fallbackCompleted, threadID)
-	return true
+	return ""
 }
 
 func (w *appServerTurnWaiter) setTurnID(turnID string) {
@@ -725,11 +870,24 @@ func (m *appServerManager) waitAppServerTurn(ctx context.Context, live *liveSess
 	}
 	semanticTimer := time.NewTimer(semanticTimeout)
 	defer semanticTimer.Stop()
+	semanticC := semanticTimer.C
 
 	var noProgressTimer *time.Timer
 	var noProgressC <-chan time.Time
+	permissionPending := false
 	waitStartedAt := time.Now()
 	lastActivityAt := waitStartedAt
+	startNoProgress := func() {
+		if noProgressTimeout <= 0 || noProgressC != nil || permissionPending {
+			return
+		}
+		if noProgressTimer == nil {
+			noProgressTimer = time.NewTimer(noProgressTimeout)
+		} else {
+			noProgressTimer.Reset(noProgressTimeout)
+		}
+		noProgressC = noProgressTimer.C
+	}
 	stopNoProgress := func() {
 		if noProgressTimer == nil {
 			return
@@ -744,14 +902,22 @@ func (m *appServerManager) waitAppServerTurn(ctx context.Context, live *liveSess
 	}
 	defer stopNoProgress()
 
-	resetSemantic := func() {
+	stopSemantic := func() {
 		if !semanticTimer.Stop() {
 			select {
 			case <-semanticTimer.C:
 			default:
 			}
 		}
+		semanticC = nil
+	}
+	resetSemantic := func() {
+		if permissionPending {
+			return
+		}
+		stopSemantic()
 		semanticTimer.Reset(semanticTimeout)
+		semanticC = semanticTimer.C
 	}
 
 	for {
@@ -775,9 +941,20 @@ func (m *appServerManager) waitAppServerTurn(ctx context.Context, live *liveSess
 				lastActivityAt = now
 				resetSemantic()
 			}
-			if result.started && noProgressTimeout > 0 && noProgressTimer == nil {
-				noProgressTimer = time.NewTimer(noProgressTimeout)
-				noProgressC = noProgressTimer.C
+			if result.permissionPending {
+				permissionPending = true
+				stopNoProgress()
+				stopSemantic()
+			}
+			if result.permissionDone {
+				permissionPending = false
+				resetSemantic()
+				if waiter.started && !waiter.progress {
+					startNoProgress()
+				}
+			}
+			if result.started {
+				startNoProgress()
 			}
 			if result.progress {
 				stopNoProgress()
@@ -803,7 +980,7 @@ func (m *appServerManager) waitAppServerTurn(ctx context.Context, live *liveSess
 				)
 			}
 			return PromptResponse{}, m.appServerTurnTimeoutError(live, waiter, "codex app-server no progress timeout", noProgressTimeout)
-		case <-semanticTimer.C:
+		case <-semanticC:
 			if live.appClient != nil {
 				live.appClient.logDebug("codex app-server turn semantic inactivity timeout",
 					"runtime_id", strings.TrimSpace(live.spec.RuntimeID),

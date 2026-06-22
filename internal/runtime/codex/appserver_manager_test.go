@@ -191,8 +191,8 @@ func TestAppServerManagerPromptCompletesTurn(t *testing.T) {
 	}
 }
 
-func TestAppServerManagerPromptCompletesOnAgentMessageWithoutTurnCompleted(t *testing.T) {
-	withAppServerHelperCommand(t, "prompt-agent-message-complete")
+func TestAppServerManagerPromptCompletesOnIdleStatusWithoutTurnCompleted(t *testing.T) {
+	withAppServerHelperCommand(t, "prompt-idle-status-complete")
 	dir := t.TempDir()
 	spec := testAppServerSessionSpec(dir)
 	sink := &recordingSink{}
@@ -373,36 +373,206 @@ func TestAppServerManagerAutoAcceptsMCPElicitation(t *testing.T) {
 	t.Cleanup(func() { _ = manager.Stop(context.Background(), SessionHandle{RuntimeID: spec.RuntimeID}) })
 }
 
-func TestAppServerManagerPromptAutoAcceptDoesNotBlockLifecycle(t *testing.T) {
+func TestAppServerManagerPromptApprovalUsesPermissionBroker(t *testing.T) {
 	withAppServerHelperCommand(t, "prompt-approval-complete")
 	dir := t.TempDir()
 	spec := testAppServerSessionSpec(dir)
 	sink := &recordingSink{}
-	manager := newAppServerManager(testAppServerManagerDepsWithSink(sink))
+	deps := testAppServerManagerDepsWithSink(sink)
+	broker := NewPermissionBroker(sink)
+	deps.Permission = broker
+	manager := newAppServerManager(deps)
 	session, err := manager.Start(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	t.Cleanup(func() { _ = manager.Stop(context.Background(), SessionHandle{RuntimeID: spec.RuntimeID}) })
 
-	resp, err := manager.Prompt(context.Background(), SessionHandle{RuntimeID: spec.RuntimeID}, PromptRequest{
+	decisionErr := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			for _, event := range sink.snapshot() {
+				if event.Kind == SessionEventPermissionRequest && event.ActionID != "" {
+					_, err := broker.Decide(context.Background(), event.ActionID, "allow_once")
+					decisionErr <- err
+					return
+				}
+			}
+			time.Sleep(time.Millisecond)
+		}
+		decisionErr <- fmt.Errorf("permission request was not published")
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resp, err := manager.Prompt(ctx, SessionHandle{RuntimeID: spec.RuntimeID}, PromptRequest{
 		SessionID: session.SessionID,
 		Prompt:    []PromptContentBlock{TextBlock("hello with approval")},
 	})
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
+	if err := <-decisionErr; err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
 	if resp.StopReason != StopReasonEndTurn {
 		t.Fatalf("StopReason = %q, want %q", resp.StopReason, StopReasonEndTurn)
 	}
 
-	waitForRuntime(t, func() bool { return len(sink.snapshot()) >= 2 })
+	waitForRuntime(t, func() bool { return len(sink.snapshot()) >= 4 })
 	events := sink.snapshot()
-	if len(events) != 2 ||
+	if len(events) < 4 ||
 		events[0].Kind != SessionEventTextDelta ||
-		events[1].Kind != SessionEventPromptCompleted {
-		t.Fatalf("events = %#v, want text delta then prompt completed", events)
+		events[0].Text != "preparing approval" ||
+		events[1].Kind != SessionEventPermissionRequest ||
+		events[1].ActionStatus != string(PermissionStatusPending) ||
+		events[1].SessionID != session.SessionID ||
+		!strings.Contains(events[1].ToolTitle, "go test ./...") ||
+		events[2].Kind != SessionEventPermissionDecision ||
+		events[2].ActionStatus != string(PermissionStatusAllowed) ||
+		events[3].Kind != SessionEventPromptCompleted {
+		t.Fatalf("events = %#v, want text delta then permission request/decision and prompt completed", events)
 	}
+	if snapshot, ok := events[1].Payload.(PermissionSnapshot); !ok || !hasPermissionOptions(snapshot.Options, "allow_once", "allow_always", "reject") {
+		t.Fatalf("permission payload = %#v, want allow once, allow always, and reject", events[1].Payload)
+	}
+}
+
+func TestAppServerManagerPromptApprovalPausesTurnTimeouts(t *testing.T) {
+	withAppServerHelperCommand(t, "prompt-approval-wait-without-progress")
+	originalSemantic := appServerSemanticInactivityTimeout
+	originalNoProgress := appServerFirstTurnNoProgressTimeout
+	appServerSemanticInactivityTimeout = 40 * time.Millisecond
+	appServerFirstTurnNoProgressTimeout = 20 * time.Millisecond
+	t.Cleanup(func() {
+		appServerSemanticInactivityTimeout = originalSemantic
+		appServerFirstTurnNoProgressTimeout = originalNoProgress
+	})
+
+	dir := t.TempDir()
+	spec := testAppServerSessionSpec(dir)
+	sink := &recordingSink{}
+	deps := testAppServerManagerDepsWithSink(sink)
+	broker := NewPermissionBroker(sink)
+	deps.Permission = broker
+	manager := newAppServerManager(deps)
+	session, err := manager.Start(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Stop(context.Background(), SessionHandle{RuntimeID: spec.RuntimeID}) })
+
+	decisionErr := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			for _, event := range sink.snapshot() {
+				if event.Kind == SessionEventPermissionRequest && event.ActionID != "" {
+					time.Sleep(80 * time.Millisecond)
+					_, err := broker.Decide(context.Background(), event.ActionID, "allow_once")
+					decisionErr <- err
+					return
+				}
+			}
+			time.Sleep(time.Millisecond)
+		}
+		decisionErr <- fmt.Errorf("permission request was not published")
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resp, err := manager.Prompt(ctx, SessionHandle{RuntimeID: spec.RuntimeID}, PromptRequest{
+		SessionID: session.SessionID,
+		Prompt:    []PromptContentBlock{TextBlock("hello slow approval")},
+	})
+	if err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if err := <-decisionErr; err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if resp.StopReason != StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, StopReasonEndTurn)
+	}
+	for _, event := range sink.snapshot() {
+		if event.Kind == SessionEventPromptFailed {
+			t.Fatalf("events = %#v, want approval wait without prompt timeout", sink.snapshot())
+		}
+	}
+}
+
+func TestAppServerManagerPromptApprovalCancelsWithTurnContext(t *testing.T) {
+	withAppServerHelperCommand(t, "prompt-approval-cancel")
+	dir := t.TempDir()
+	spec := testAppServerSessionSpec(dir)
+	sink := &recordingSink{}
+	deps := testAppServerManagerDepsWithSink(sink)
+	broker := NewPermissionBroker(sink)
+	deps.Permission = broker
+	manager := newAppServerManager(deps)
+	session, err := manager.Start(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Stop(context.Background(), SessionHandle{RuntimeID: spec.RuntimeID}) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, err = manager.Prompt(ctx, SessionHandle{RuntimeID: spec.RuntimeID}, PromptRequest{
+		SessionID: session.SessionID,
+		Prompt:    []PromptContentBlock{TextBlock("hello cancel approval")},
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Prompt() error = %v, want context deadline exceeded", err)
+	}
+
+	waitForRuntime(t, func() bool {
+		for _, event := range sink.snapshot() {
+			if event.Kind == SessionEventPermissionDecision && event.ActionStatus == string(PermissionStatusCanceled) {
+				return true
+			}
+		}
+		return false
+	})
+	for _, event := range sink.snapshot() {
+		if event.Kind == SessionEventPermissionRequest {
+			if snapshot, ok := event.Payload.(PermissionSnapshot); !ok || !hasPermissionOptions(snapshot.Options, "allow_once", "allow_always", "reject") {
+				t.Fatalf("permission payload = %#v, want allow once, allow always, and reject", event.Payload)
+			}
+		}
+	}
+}
+
+func TestAppServerApprovalResponseUsesCurrentCodexDecisionNames(t *testing.T) {
+	if got := appServerApprovalResponse(false)["decision"]; got != "decline" {
+		t.Fatalf("rejected approval decision = %#v, want decline", got)
+	}
+	if got := appServerApprovalDecisionResponse(PermissionStatusRejected)["decision"]; got != "decline" {
+		t.Fatalf("rejected permission status decision = %#v, want decline", got)
+	}
+	if got := appServerApprovalDecisionResponse(PermissionStatusCanceled)["decision"]; got != "cancel" {
+		t.Fatalf("canceled permission status decision = %#v, want cancel", got)
+	}
+	if got := appServerApprovalDecisionResponse(PermissionStatusExpired)["decision"]; got != "cancel" {
+		t.Fatalf("expired permission status decision = %#v, want cancel", got)
+	}
+}
+
+func hasPermissionOptions(options []PermissionOptionSnapshot, want ...string) bool {
+	if len(options) != len(want) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(options))
+	for _, option := range options {
+		seen[strings.TrimSpace(option.ID)] = struct{}{}
+	}
+	for _, id := range want {
+		if _, ok := seen[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func TestAppServerEventAdapterRawTextAndToolEvents(t *testing.T) {
@@ -785,7 +955,7 @@ func TestAppServerManagerHelperProcess(t *testing.T) {
 				return nil, false
 			}
 		})
-	case "prompt-agent-message-complete":
+	case "prompt-idle-status-complete":
 		runAppServerHelper(t, func(index int, msg map[string]any) (map[string]any, bool) {
 			switch msg["method"] {
 			case "thread/start":
@@ -794,6 +964,7 @@ func TestAppServerManagerHelperProcess(t *testing.T) {
 				assertTurnStartParams(t, msg, "main-thread", "medium", "hello codex")
 				writeRPCNotification(t, "turn/started", map[string]any{"threadId": "main-thread", "turn": map[string]any{"id": "turn-1"}})
 				writeRPCNotification(t, "item/completed", map[string]any{"threadId": "main-thread", "item": map[string]any{"id": "item-1", "type": "agentMessage", "text": "done"}})
+				writeRPCNotification(t, "thread/status/changed", map[string]any{"threadId": "main-thread", "status": map[string]any{"type": "idle"}})
 				return rpcResult(msg["id"], map[string]any{"turnId": "turn-1"}), true
 			default:
 				return nil, false
@@ -928,8 +1099,6 @@ func TestAppServerManagerHelperProcess(t *testing.T) {
 					}
 				})
 				awaitingApproval = false
-				writeRPCNotification(t, "turn/started", map[string]any{"threadId": "main-thread", "turn": map[string]any{"id": "turn-approval"}})
-				writeRPCNotification(t, "item/completed", map[string]any{"threadId": "main-thread", "item": map[string]any{"id": "item-approval", "type": "agentMessage", "text": "approved"}})
 				writeRPCNotification(t, "turn/completed", map[string]any{"threadId": "main-thread", "turn": map[string]any{"id": "turn-approval", "status": "completed"}})
 				return nil, false
 			}
@@ -938,9 +1107,61 @@ func TestAppServerManagerHelperProcess(t *testing.T) {
 				return rpcResult(msg["id"], map[string]any{"threadId": "main-thread"}), true
 			case "turn/start":
 				assertTurnStartParams(t, msg, "main-thread", "medium", "hello with approval")
+				writeRPCNotification(t, "turn/started", map[string]any{"threadId": "main-thread", "turn": map[string]any{"id": "turn-approval"}})
+				writeRPCNotification(t, "item/completed", map[string]any{"threadId": "main-thread", "item": map[string]any{"id": "item-preapproval", "type": "agentMessage", "text": "preparing approval"}})
 				awaitingApproval = true
-				writeRPCServerRequest(t, 9001, "item/commandExecution/requestApproval", map[string]any{})
+				writeRPCServerRequest(t, 9001, "item/commandExecution/requestApproval", map[string]any{"command": "go test ./..."})
 				return rpcResult(msg["id"], map[string]any{"turnId": "turn-approval"}), true
+			default:
+				return nil, false
+			}
+		})
+	case "prompt-approval-wait-without-progress":
+		awaitingApproval := false
+		runAppServerHelper(t, func(index int, msg map[string]any) (map[string]any, bool) {
+			if awaitingApproval {
+				assertServerRequestResponse(t, msg, 9001, func(result map[string]any) {
+					if got := result["decision"]; got != "accept" {
+						t.Fatalf("slow approval decision = %#v, want accept", got)
+					}
+				})
+				awaitingApproval = false
+				writeRPCNotification(t, "turn/completed", map[string]any{"threadId": "main-thread", "turn": map[string]any{"id": "turn-slow-approval", "status": "completed"}})
+				return nil, false
+			}
+			switch msg["method"] {
+			case "thread/start":
+				return rpcResult(msg["id"], map[string]any{"threadId": "main-thread"}), true
+			case "turn/start":
+				assertTurnStartParams(t, msg, "main-thread", "medium", "hello slow approval")
+				writeRPCNotification(t, "turn/started", map[string]any{"threadId": "main-thread", "turn": map[string]any{"id": "turn-slow-approval"}})
+				awaitingApproval = true
+				writeRPCServerRequest(t, 9001, "item/commandExecution/requestApproval", map[string]any{"command": "go test ./..."})
+				return rpcResult(msg["id"], map[string]any{"turnId": "turn-slow-approval"}), true
+			default:
+				return nil, false
+			}
+		})
+	case "prompt-approval-cancel":
+		awaitingApproval := false
+		runAppServerHelper(t, func(index int, msg map[string]any) (map[string]any, bool) {
+			if awaitingApproval {
+				assertServerRequestResponse(t, msg, 9001, func(result map[string]any) {
+					if got := result["decision"]; got != "cancel" {
+						t.Fatalf("canceled approval decision = %#v, want cancel", got)
+					}
+				})
+				awaitingApproval = false
+				return nil, false
+			}
+			switch msg["method"] {
+			case "thread/start":
+				return rpcResult(msg["id"], map[string]any{"threadId": "main-thread"}), true
+			case "turn/start":
+				assertTurnStartParams(t, msg, "main-thread", "medium", "hello cancel approval")
+				awaitingApproval = true
+				writeRPCServerRequest(t, 9001, "item/commandExecution/requestApproval", map[string]any{"command": "go test ./..."})
+				return rpcResult(msg["id"], map[string]any{"turnId": "turn-approval-cancel"}), true
 			default:
 				return nil, false
 			}

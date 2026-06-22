@@ -111,14 +111,16 @@ func (s *Service) StartBot(ctx context.Context, binding Binding) error {
 	}
 	workerCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	w := &worker{
-		service:     s,
-		binding:     binding,
-		queue:       make(chan BotEvent, s.queueSize),
-		queued:      make(map[string]struct{}),
-		contextSent: make(map[string]struct{}),
-		seen:        newRecentSet(s.seenWindow),
-		cancel:      cancel,
-		done:        make(chan struct{}),
+		service:          s,
+		binding:          binding,
+		queue:            make(chan BotEvent, s.queueSize),
+		queued:           make(map[string]struct{}),
+		contextSent:      make(map[string]struct{}),
+		activityMessages: make(map[string]string),
+		activityLimit:    s.seenWindow,
+		seen:             newRecentSet(s.seenWindow),
+		cancel:           cancel,
+		done:             make(chan struct{}),
 	}
 	s.workers[binding.BotID] = w
 	slog.Debug("codex bridge bot started",
@@ -185,6 +187,10 @@ type worker struct {
 	processing  string
 	lastEvent   string
 	contextSent map[string]struct{}
+
+	activityMessages map[string]string
+	activityOrder    []string
+	activityLimit    int
 }
 
 func (w *worker) run(ctx context.Context) {
@@ -363,11 +369,18 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent, runtimeEvents <-
 				continue
 			}
 			if renderedActivity, ok := renderer.RenderActivity(event, localChannel, evt.RoomID, w.binding.BotID); ok {
-				threadRootID, err := ensureActivityThreadRoot()
-				if err != nil {
-					return err
+				threadRootID := turnRootID
+				if threadRootID == "" && !sendActivityAtTopLevel(event) {
+					var err error
+					threadRootID, err = ensureActivityThreadRoot()
+					if err != nil {
+						return err
+					}
 				}
-				if err := w.sendActivity(ctx, evt.RoomID, threadRootID, renderedActivity); err != nil {
+				if shouldSkipUntrackedActivityUpdate(event) && w.activityMessageID(renderedActivity.MessageID) == "" {
+					continue
+				}
+				if err := w.sendActivity(ctx, evt.RoomID, threadRootID, event, renderedActivity); err != nil {
 					return err
 				}
 			}
@@ -622,13 +635,98 @@ func (w *worker) sendMessage(ctx context.Context, roomID, threadRootID, text str
 	})
 }
 
-func (w *worker) sendActivity(ctx context.Context, roomID, threadRootID string, activity runtimebridge.RenderedActivity) error {
-	_, err := w.sendMessageRequest(ctx, SendMessageRequest{
+func (w *worker) sendActivity(ctx context.Context, roomID, threadRootID string, event runtimecodex.SessionEvent, activity runtimebridge.RenderedActivity) error {
+	activityID := strings.TrimSpace(activity.MessageID)
+	if messageID := w.activityMessageID(activityID); messageID != "" {
+		if err := w.updateMessage(ctx, roomID, messageID, activity.Text); err != nil {
+			slog.Warn("codex bridge activity update failed",
+				"bot_id", w.binding.BotID,
+				"room_id", strings.TrimSpace(roomID),
+				"message_id", messageID,
+				"activity_id", activityID,
+				"error", err,
+			)
+			if shouldSuppressActivityFallbackOnUpdateFailure(event) {
+				w.deleteActivityMessageID(activityID)
+				return nil
+			}
+		} else {
+			if activityEventIsTerminal(event) {
+				w.deleteActivityMessageID(activityID)
+			}
+			return nil
+		}
+	}
+
+	messageID, err := w.sendMessageRequest(ctx, SendMessageRequest{
 		RoomID:       roomID,
 		Text:         activity.Text,
 		ThreadRootID: strings.TrimSpace(threadRootID),
 	})
+	if err == nil && shouldTrackActivityMessage(event) && activityID != "" && strings.TrimSpace(messageID) != "" {
+		w.setActivityMessageID(activityID, messageID)
+	}
 	return err
+}
+
+func (w *worker) activityMessageID(activityID string) string {
+	activityID = strings.TrimSpace(activityID)
+	if activityID == "" {
+		return ""
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.TrimSpace(w.activityMessages[activityID])
+}
+
+func (w *worker) setActivityMessageID(activityID string, messageID string) {
+	activityID = strings.TrimSpace(activityID)
+	messageID = strings.TrimSpace(messageID)
+	if activityID == "" || messageID == "" {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.activityMessages == nil {
+		w.activityMessages = make(map[string]string)
+	}
+	if _, ok := w.activityMessages[activityID]; !ok {
+		w.activityOrder = append(w.activityOrder, activityID)
+	}
+	w.activityMessages[activityID] = messageID
+	w.pruneActivityMessagesLocked()
+}
+
+func (w *worker) deleteActivityMessageID(activityID string) {
+	activityID = strings.TrimSpace(activityID)
+	if activityID == "" {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.activityMessages, activityID)
+	w.deleteActivityOrderLocked(activityID)
+}
+
+func (w *worker) pruneActivityMessagesLocked() {
+	limit := w.activityLimit
+	if limit <= 0 {
+		limit = defaultSeenWindow
+	}
+	for len(w.activityOrder) > limit {
+		oldest := w.activityOrder[0]
+		w.activityOrder = w.activityOrder[1:]
+		delete(w.activityMessages, oldest)
+	}
+}
+
+func (w *worker) deleteActivityOrderLocked(activityID string) {
+	for i, item := range w.activityOrder {
+		if item == activityID {
+			w.activityOrder = append(w.activityOrder[:i], w.activityOrder[i+1:]...)
+			return
+		}
+	}
 }
 
 func (w *worker) updateMessage(ctx context.Context, roomID, messageID, text string) error {
@@ -813,6 +911,47 @@ func matchesSession(event runtimecodex.SessionEvent, runtimeID, sessionID string
 		return false
 	}
 	return strings.TrimSpace(event.SessionID) == strings.TrimSpace(sessionID)
+}
+
+func sendActivityAtTopLevel(event runtimecodex.SessionEvent) bool {
+	switch event.Kind {
+	case runtimecodex.SessionEventPermissionRequest, runtimecodex.SessionEventPermissionDecision:
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldSkipUntrackedActivityUpdate(event runtimecodex.SessionEvent) bool {
+	return event.Kind == runtimecodex.SessionEventPermissionDecision
+}
+
+func shouldSuppressActivityFallbackOnUpdateFailure(event runtimecodex.SessionEvent) bool {
+	return event.Kind == runtimecodex.SessionEventPermissionDecision
+}
+
+func shouldTrackActivityMessage(event runtimecodex.SessionEvent) bool {
+	return !activityEventIsTerminal(event)
+}
+
+func activityEventIsTerminal(event runtimecodex.SessionEvent) bool {
+	switch event.Kind {
+	case runtimecodex.SessionEventPermissionDecision:
+		return true
+	case runtimecodex.SessionEventToolCallUpdate:
+		return toolActivityStatusIsTerminal(event.ToolStatus)
+	default:
+		return false
+	}
+}
+
+func toolActivityStatusIsTerminal(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "failed", "canceled", "cancelled", "error", "errored":
+		return true
+	default:
+		return false
+	}
 }
 
 func sessionIDForEvent(binding Binding, evt BotEvent) string {

@@ -33,6 +33,10 @@ printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
   --restart
 ```
 
+Interactive Feishu card button clicks are handled over the existing long
+connection and do not require a public HTTP callback URL.
+
+
 Bind the manager app:
 
 ```bash

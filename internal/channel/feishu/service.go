@@ -87,11 +87,22 @@ type SendMessageResponse struct {
 
 type SendMessageFunc func(context.Context, AppConfig, SendMessageRequest) (SendMessageResponse, error)
 
+type SendInteractiveMessageRequest struct {
+	SenderID     string
+	ChatID       string
+	Content      string
+	UUID         string
+	ThreadRootID string
+}
+
+type SendInteractiveMessageFunc func(context.Context, AppConfig, SendInteractiveMessageRequest) (SendMessageResponse, error)
+
 type UpdateMessageRequest struct {
-	RoomID    string
-	SenderID  string
-	MessageID string
-	Content   string
+	RoomID      string
+	SenderID    string
+	MessageID   string
+	Content     string
+	MessageType string
 }
 
 type UpdateMessageResponse struct {
@@ -121,24 +132,25 @@ type DeleteMessageReactionRequest struct {
 type DeleteMessageReactionFunc func(context.Context, AppConfig, DeleteMessageReactionRequest) error
 
 type Service struct {
-	mu                    sync.RWMutex
-	users                 map[string]im.User
-	byHandle              map[string]string
-	rooms                 map[string]*im.Room
-	apps                  map[string]AppConfig
-	resolveBotInfo        func(context.Context, AppConfig) (BotInfo, error)
-	createChat            CreateChatFunc
-	addChatMembers        AddChatMembersFunc
-	listChatMembers       ListChatMembersFunc
-	listChats             ListChatsFunc
-	listRoomMessages      ListRoomMessagesFunc
-	deleteChat            DeleteChatFunc
-	sendMessage           SendMessageFunc
-	updateMessage         UpdateMessageFunc
-	createMessageReaction CreateMessageReactionFunc
-	deleteMessageReaction DeleteMessageReactionFunc
-	messageBus            *MessageBus
-	configProvider        Provider
+	mu                     sync.RWMutex
+	users                  map[string]im.User
+	byHandle               map[string]string
+	rooms                  map[string]*im.Room
+	apps                   map[string]AppConfig
+	resolveBotInfo         func(context.Context, AppConfig) (BotInfo, error)
+	createChat             CreateChatFunc
+	addChatMembers         AddChatMembersFunc
+	listChatMembers        ListChatMembersFunc
+	listChats              ListChatsFunc
+	listRoomMessages       ListRoomMessagesFunc
+	deleteChat             DeleteChatFunc
+	sendMessage            SendMessageFunc
+	sendInteractiveMessage SendInteractiveMessageFunc
+	updateMessage          UpdateMessageFunc
+	createMessageReaction  CreateMessageReactionFunc
+	deleteMessageReaction  DeleteMessageReactionFunc
+	messageBus             *MessageBus
+	configProvider         Provider
 }
 
 func NewService(apps ...map[string]AppConfig) *Service {
@@ -149,22 +161,23 @@ func NewService(apps ...map[string]AppConfig) *Service {
 		}
 	}
 	return &Service{
-		users:                 make(map[string]im.User),
-		byHandle:              make(map[string]string),
-		rooms:                 make(map[string]*im.Room),
-		apps:                  configuredApps,
-		resolveBotInfo:        fetchBotInfo,
-		createChat:            defaultCreateChat,
-		addChatMembers:        defaultAddChatMembers,
-		listChatMembers:       defaultListChatMembers,
-		listChats:             defaultListChats,
-		listRoomMessages:      defaultListRoomMessages,
-		deleteChat:            defaultDeleteChat,
-		sendMessage:           defaultSendMessage,
-		updateMessage:         defaultUpdateMessage,
-		createMessageReaction: defaultCreateMessageReaction,
-		deleteMessageReaction: defaultDeleteMessageReaction,
-		messageBus:            NewMessageBus(),
+		users:                  make(map[string]im.User),
+		byHandle:               make(map[string]string),
+		rooms:                  make(map[string]*im.Room),
+		apps:                   configuredApps,
+		resolveBotInfo:         fetchBotInfo,
+		createChat:             defaultCreateChat,
+		addChatMembers:         defaultAddChatMembers,
+		listChatMembers:        defaultListChatMembers,
+		listChats:              defaultListChats,
+		listRoomMessages:       defaultListRoomMessages,
+		deleteChat:             defaultDeleteChat,
+		sendMessage:            defaultSendMessage,
+		sendInteractiveMessage: defaultSendInteractiveMessage,
+		updateMessage:          defaultUpdateMessage,
+		createMessageReaction:  defaultCreateMessageReaction,
+		deleteMessageReaction:  defaultDeleteMessageReaction,
+		messageBus:             NewMessageBus(),
 	}
 }
 
@@ -236,6 +249,14 @@ func NewServiceWithSendMessage(apps map[string]AppConfig, sendMessage SendMessag
 	svc := NewService(apps)
 	if sendMessage != nil {
 		svc.sendMessage = sendMessage
+	}
+	return svc
+}
+
+func NewServiceWithInteractiveMessage(apps map[string]AppConfig, sendInteractiveMessage SendInteractiveMessageFunc) *Service {
+	svc := NewService(apps)
+	if sendInteractiveMessage != nil {
+		svc.sendInteractiveMessage = sendInteractiveMessage
 	}
 	return svc
 }
@@ -1117,21 +1138,100 @@ func defaultSendMessage(ctx context.Context, app AppConfig, req SendMessageReque
 	}, nil
 }
 
+func defaultSendInteractiveMessage(ctx context.Context, app AppConfig, req SendInteractiveMessageRequest) (SendMessageResponse, error) {
+	senderInfo, err := fetchBotInfo(ctx, app)
+	if err != nil {
+		return SendMessageResponse{}, err
+	}
+	senderOpenID := senderInfo.OpenID
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
+		return SendMessageResponse{}, fmt.Errorf("interactive content is required")
+	}
+
+	client := lark.NewClient(app.AppID, app.AppSecret)
+	if threadRootID := strings.TrimSpace(req.ThreadRootID); threadRootID != "" {
+		replyReq := larkim.NewReplyMessageReqBuilder().
+			MessageId(threadRootID).
+			Body(larkim.NewReplyMessageReqBodyBuilder().
+				MsgType("interactive").
+				Content(content).
+				ReplyInThread(true).
+				Uuid(req.UUID).
+				Build()).
+			Build()
+		resp, err := client.Im.V1.Message.Reply(ctx, replyReq)
+		if err != nil {
+			return SendMessageResponse{}, fmt.Errorf("reply feishu interactive message: %w", err)
+		}
+		if !resp.Success() {
+			return SendMessageResponse{}, fmt.Errorf("reply feishu interactive message: code=%d msg=%s request_id=%s", resp.Code, resp.Msg, resp.RequestId())
+		}
+		if resp.Data == nil {
+			return SendMessageResponse{}, fmt.Errorf("reply feishu interactive message: empty response data")
+		}
+		return SendMessageResponse{
+			MessageID:    larkcore.StringValue(resp.Data.MessageId),
+			SenderOpenID: senderOpenID,
+		}, nil
+	}
+
+	sendReq := larkim.NewCreateMessageReqBuilder().
+		ReceiveIdType("chat_id").
+		Body(larkim.NewCreateMessageReqBodyBuilder().
+			ReceiveId(req.ChatID).
+			MsgType("interactive").
+			Content(content).
+			Uuid(req.UUID).
+			Build()).
+		Build()
+
+	resp, err := client.Im.V1.Message.Create(ctx, sendReq)
+	if err != nil {
+		return SendMessageResponse{}, fmt.Errorf("send feishu interactive message: %w", err)
+	}
+	if !resp.Success() {
+		return SendMessageResponse{}, fmt.Errorf("send feishu interactive message: code=%d msg=%s request_id=%s", resp.Code, resp.Msg, resp.RequestId())
+	}
+	if resp.Data == nil {
+		return SendMessageResponse{}, fmt.Errorf("send feishu interactive message: empty response data")
+	}
+	return SendMessageResponse{
+		MessageID:    larkcore.StringValue(resp.Data.MessageId),
+		SenderOpenID: senderOpenID,
+	}, nil
+}
+
 func defaultUpdateMessage(ctx context.Context, app AppConfig, req UpdateMessageRequest) (UpdateMessageResponse, error) {
 	messageID := strings.TrimSpace(req.MessageID)
 	if messageID == "" {
 		return UpdateMessageResponse{}, fmt.Errorf("message_id is required")
 	}
-	content, err := feishuTextMessageContent(req.Content, "", "")
-	if err != nil {
-		return UpdateMessageResponse{}, fmt.Errorf("encode feishu message content: %w", err)
+	messageType := strings.TrimSpace(req.MessageType)
+	if messageType == "" {
+		messageType = larkim.MsgTypeText
+	}
+	content := strings.TrimSpace(req.Content)
+	switch messageType {
+	case larkim.MsgTypeText:
+		encoded, err := feishuTextMessageContent(content, "", "")
+		if err != nil {
+			return UpdateMessageResponse{}, fmt.Errorf("encode feishu message content: %w", err)
+		}
+		content = encoded
+	case "interactive":
+		if content == "" {
+			return UpdateMessageResponse{}, fmt.Errorf("interactive content is required")
+		}
+	default:
+		return UpdateMessageResponse{}, fmt.Errorf("unsupported feishu message type %q", messageType)
 	}
 
 	client := lark.NewClient(app.AppID, app.AppSecret)
 	updateReq := larkim.NewUpdateMessageReqBuilder().
 		MessageId(messageID).
 		Body(larkim.NewUpdateMessageReqBodyBuilder().
-			MsgType("text").
+			MsgType(messageType).
 			Content(content).
 			Build()).
 		Build()
@@ -1367,6 +1467,76 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 	return message, nil
 }
 
+func (s *Service) SendInteractiveMessage(ctx context.Context, req SendInteractiveMessageRequest) (im.Message, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	roomID := strings.TrimSpace(req.ChatID)
+	content := strings.TrimSpace(req.Content)
+	if roomID == "" {
+		return im.Message{}, fmt.Errorf("chat_id is required")
+	}
+	if content == "" {
+		return im.Message{}, fmt.Errorf("content is required")
+	}
+
+	senderID := strings.TrimSpace(req.SenderID)
+	if senderID == "" {
+		return im.Message{}, fmt.Errorf("sender_id is required")
+	}
+	s.mu.RLock()
+	app, err := s.appConfigForSenderLocked(senderID)
+	s.mu.RUnlock()
+	if err != nil {
+		return im.Message{}, err
+	}
+
+	var relatesTo *im.MessageRelation
+	threadRootID := strings.TrimSpace(req.ThreadRootID)
+	if threadRootID != "" {
+		relatesTo = &im.MessageRelation{RelType: im.RelationTypeThread, EventID: threadRootID}
+	}
+
+	fallbackID := strings.TrimSpace(req.UUID)
+	if fallbackID == "" {
+		fallbackID = fmt.Sprintf("msg-%d", time.Now().UTC().UnixNano())
+	}
+	sent, err := s.sendInteractiveMessage(ctx, app, SendInteractiveMessageRequest{
+		SenderID:     senderID,
+		ChatID:       roomID,
+		Content:      content,
+		UUID:         fallbackID,
+		ThreadRootID: threadRootID,
+	})
+	if err != nil {
+		return im.Message{}, err
+	}
+	senderOpenID := strings.TrimSpace(sent.SenderOpenID)
+	if senderOpenID == "" {
+		return im.Message{}, fmt.Errorf("resolve feishu sender open_id: empty open_id for %q", senderID)
+	}
+
+	sentMessageID := strings.TrimSpace(sent.MessageID)
+	if sentMessageID == "" {
+		sentMessageID = fallbackID
+	}
+	message := im.Message{
+		ID:        sentMessageID,
+		SenderID:  senderOpenID,
+		Kind:      im.MessageKindMessage,
+		Content:   content,
+		CreatedAt: time.Now().UTC(),
+		RelatesTo: relatesTo,
+	}
+
+	s.mu.Lock()
+	if room, ok := s.rooms[roomID]; ok {
+		room.Messages = append(room.Messages, message)
+	}
+	s.mu.Unlock()
+	return message, nil
+}
+
 func (s *Service) UpdateMessage(req UpdateMessageRequest) (im.Message, error) {
 	return s.UpdateMessageWithContext(context.Background(), req)
 }
@@ -1379,6 +1549,7 @@ func (s *Service) UpdateMessageWithContext(ctx context.Context, req UpdateMessag
 	senderID := strings.TrimSpace(req.SenderID)
 	messageID := strings.TrimSpace(req.MessageID)
 	content := strings.TrimSpace(req.Content)
+	messageType := strings.TrimSpace(req.MessageType)
 	if roomID == "" {
 		return im.Message{}, fmt.Errorf("room_id is required")
 	}
@@ -1400,10 +1571,11 @@ func (s *Service) UpdateMessageWithContext(ctx context.Context, req UpdateMessag
 	}
 
 	updated, err := s.updateMessage(ctx, app, UpdateMessageRequest{
-		RoomID:    roomID,
-		SenderID:  senderID,
-		MessageID: messageID,
-		Content:   content,
+		RoomID:      roomID,
+		SenderID:    senderID,
+		MessageID:   messageID,
+		Content:     content,
+		MessageType: messageType,
 	})
 	if err != nil {
 		return im.Message{}, err

@@ -556,21 +556,121 @@ func assertServiceThreadsTopLevelToolCallsBesideFinalResponse(t *testing.T, chat
 
 	waitFor(t, func() bool {
 		records := client.sentRecords()
-		return len(records) == 4 &&
+		updates := client.updates()
+		return len(records) == 3 &&
+			len(updates) == 1 &&
 			records[0].RoomID == "room-1" &&
 			records[0].ThreadRootID == "" &&
 			records[0].Text == turnPlaceholderText &&
 			records[1].RoomID == "room-1" &&
 			records[1].ThreadRootID == "sent-1" &&
 			strings.Contains(records[1].Text, runtimebridge.AgentToolMsgType) &&
+			updates[0].req.RoomID == "room-1" &&
+			updates[0].req.MessageID == "sent-2" &&
+			strings.Contains(updates[0].req.Text, runtimebridge.AgentToolMsgType) &&
+			strings.Contains(updates[0].req.Text, "command output") &&
 			records[2].RoomID == "room-1" &&
-			records[2].ThreadRootID == "sent-1" &&
-			strings.Contains(records[2].Text, runtimebridge.AgentToolMsgType) &&
-			strings.Contains(records[2].Text, "command output") &&
-			records[3].RoomID == "room-1" &&
-			records[3].ThreadRootID == "" &&
-			records[3].Text == "done"
+			records[2].ThreadRootID == "" &&
+			records[2].Text == "done"
 	})
+}
+
+func TestServiceSendsToolActivityFallbackWhenUpdateFails(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", ChatType: "group", Text: "run it"}
+
+	sink := runtimecodex.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+		updateErr: errors.New("update failed"),
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req runtimecodex.PromptRequest) error {
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:  handle.RuntimeID,
+				SessionID:  req.SessionID,
+				Kind:       runtimecodex.SessionEventToolCallStart,
+				ToolCallID: "tool-1",
+				ToolTitle:  "Run shell command",
+				ToolStatus: "pending",
+				Payload:    map[string]any{"tool_call_id": "tool-1", "title": "Run shell command", "status": "pending"},
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:         handle.RuntimeID,
+				SessionID:         req.SessionID,
+				Kind:              runtimecodex.SessionEventToolCallUpdate,
+				ToolCallID:        "tool-1",
+				ToolStatus:        "completed",
+				ToolOutputSummary: "command output",
+				Payload:           map[string]any{"tool_call_id": "tool-1", "status": "completed", "raw_output": "command output"},
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: req.SessionID,
+				Kind:      runtimecodex.SessionEventTextDelta,
+				Text:      "done",
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID: handle.RuntimeID,
+				SessionID: req.SessionID,
+				Kind:      runtimecodex.SessionEventPromptCompleted,
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		return len(client.sentRecords()) == 4 && len(client.updates()) == 1
+	})
+	records := client.sentRecords()
+	if records[2].ThreadRootID != "sent-1" ||
+		!strings.Contains(records[2].Text, runtimebridge.AgentToolMsgType) ||
+		!strings.Contains(records[2].Text, "command output") {
+		t.Fatalf("fallback tool record = %+v, want completed tool activity inside generated root", records[2])
+	}
+	if records[3].Text != "done" {
+		t.Fatalf("final record = %+v, want final response preserved", records[3])
+	}
+}
+
+func TestWorkerBoundsActivityMessageIDs(t *testing.T) {
+	t.Parallel()
+
+	w := &worker{
+		activityMessages: make(map[string]string),
+		activityLimit:    2,
+	}
+	w.setActivityMessageID("act-1", "msg-1")
+	w.setActivityMessageID("act-2", "msg-2")
+	w.setActivityMessageID("act-3", "msg-3")
+
+	if got := w.activityMessageID("act-1"); got != "" {
+		t.Fatalf("act-1 message id = %q, want pruned", got)
+	}
+	if got := w.activityMessageID("act-2"); got != "msg-2" {
+		t.Fatalf("act-2 message id = %q, want msg-2", got)
+	}
+	if got := w.activityMessageID("act-3"); got != "msg-3" {
+		t.Fatalf("act-3 message id = %q, want msg-3", got)
+	}
+	w.deleteActivityMessageID("act-2")
+	if got := w.activityMessageID("act-2"); got != "" {
+		t.Fatalf("act-2 message id after delete = %q, want empty", got)
+	}
 }
 
 func TestServiceAddsAndRemovesFeishuProcessingPinAroundFinalReply(t *testing.T) {
@@ -1458,14 +1558,11 @@ func TestServiceProjectsPermissionEventsAsAgentActivity(t *testing.T) {
 	defer svc.Close()
 
 	waitFor(t, func() bool {
-		return len(client.sentRecords()) == 2
+		return len(client.sentRecords()) == 1
 	})
 	records := client.sentRecords()
-	if records[0].Text != turnPlaceholderText || records[0].ThreadRootID != "" {
-		t.Fatalf("placeholder record = %+v, want top-level blank root", records[0])
-	}
-	if records[1].ThreadRootID != "sent-1" {
-		t.Fatalf("permission activity ThreadRootID = %q, want sent-1", records[1].ThreadRootID)
+	if records[0].ThreadRootID != "" {
+		t.Fatalf("permission activity ThreadRootID = %q, want top-level message", records[0].ThreadRootID)
 	}
 	var payload struct {
 		Type    string `json:"type"`
@@ -1482,7 +1579,7 @@ func TestServiceProjectsPermissionEventsAsAgentActivity(t *testing.T) {
 			} `json:"action"`
 		} `json:"content"`
 	}
-	if err := json.Unmarshal([]byte(records[1].Text), &payload); err != nil {
+	if err := json.Unmarshal([]byte(records[0].Text), &payload); err != nil {
 		t.Fatalf("permission activity json decode: %v", err)
 	}
 	if payload.Type != runtimebridge.AgentActivityType || payload.Content.MsgType != runtimebridge.AgentActionMsgType {
@@ -1573,17 +1670,103 @@ func TestServiceUsesStableMessageIDForPermissionDecisionActivity(t *testing.T) {
 	defer svc.Close()
 
 	waitFor(t, func() bool {
-		return len(client.sentRecords()) == 3
+		return len(client.sentRecords()) == 1 && len(client.updates()) == 1
 	})
 	sent := client.sentRecords()
-	if sent[0].Text != turnPlaceholderText || sent[0].ThreadRootID != "" {
-		t.Fatalf("placeholder record = %+v, want top-level blank root", sent[0])
+	if sent[0].ThreadRootID != "" {
+		t.Fatalf("permission thread root = %q, want top-level message", sent[0].ThreadRootID)
 	}
-	if sent[1].ThreadRootID != "sent-1" || sent[2].ThreadRootID != "sent-1" {
-		t.Fatalf("permission thread roots = %q / %q, want sent-1", sent[1].ThreadRootID, sent[2].ThreadRootID)
+	updates := client.updates()
+	if updates[0].req.MessageID != "sent-1" || !strings.Contains(updates[0].req.Text, `"status":"allowed"`) {
+		t.Fatalf("decision update = %+v, want sent-1 allowed status", updates[0])
 	}
-	if !strings.Contains(sent[2].Text, `"status":"allowed"`) {
-		t.Fatalf("decision activity = %s, want allowed status", sent[2].Text)
+}
+
+func TestServiceDoesNotSendDuplicatePermissionDecisionWhenUpdateFails(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan BotEvent, 1)
+	errs := make(chan error)
+	close(errs)
+	stream <- BotEvent{MessageID: "m-1", RoomID: "room-1", Text: "hello"}
+
+	now := time.Now().UTC()
+	sink := runtimecodex.NewEventSink()
+	client := &fakeBotClient{
+		streams: map[string][]streamResult{
+			"u-codex": {{events: stream, errs: errs}},
+		},
+		updateErr: errors.New("update failed"),
+	}
+	prompter := &fakePrompter{
+		prompt: func(_ context.Context, handle runtimecodex.SessionHandle, req runtimecodex.PromptRequest) error {
+			pending := runtimecodex.PermissionSnapshot{
+				ID:          "perm-1",
+				Title:       "Run shell command",
+				Status:      runtimecodex.PermissionStatusPending,
+				RequestedAt: now,
+				ExpiresAt:   now.Add(time.Minute),
+				Options: []runtimecodex.PermissionOptionSnapshot{
+					{ID: "once", Kind: "allow_once", Label: "Allow once"},
+				},
+			}
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:    handle.RuntimeID,
+				SessionID:    req.SessionID,
+				Kind:         runtimecodex.SessionEventPermissionRequest,
+				ReceivedAt:   now,
+				ToolCallID:   "tool-1",
+				ToolTitle:    "Run shell command",
+				ActionID:     "perm-1",
+				ActionStatus: string(runtimecodex.PermissionStatusPending),
+				Payload:      pending,
+			})
+			decided := pending
+			decided.Status = runtimecodex.PermissionStatusAllowed
+			decided.Decision = &runtimecodex.PermissionDecisionSnapshot{
+				OptionID:  "once",
+				Kind:      "allow_once",
+				DecidedAt: now.Add(time.Second),
+			}
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:        handle.RuntimeID,
+				SessionID:        req.SessionID,
+				Kind:             runtimecodex.SessionEventPermissionDecision,
+				ReceivedAt:       now.Add(time.Second),
+				ToolCallID:       "tool-1",
+				ToolTitle:        "Run shell command",
+				ActionID:         "perm-1",
+				ActionStatus:     string(runtimecodex.PermissionStatusAllowed),
+				ActionOptionID:   "once",
+				ActionOptionKind: "allow_once",
+				Payload:          decided,
+			})
+			sink.Publish(runtimecodex.SessionEvent{
+				RuntimeID:  handle.RuntimeID,
+				SessionID:  req.SessionID,
+				Kind:       runtimecodex.SessionEventPromptCompleted,
+				ReceivedAt: time.Now().UTC(),
+			})
+			return nil
+		},
+	}
+
+	svc := NewService(client, prompter, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartBot(ctx, Binding{BotID: "u-codex", RuntimeID: "rt-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("StartBot() error = %v", err)
+	}
+	defer svc.Close()
+
+	waitFor(t, func() bool {
+		return len(client.sentRecords()) == 1 && len(client.updates()) == 1
+	})
+	if sent := client.sentRecords(); len(sent) != 1 {
+		t.Fatalf("sent records = %d, want only original permission request", len(sent))
+	}
+	if updates := client.updates(); updates[0].req.MessageID != "sent-1" || !strings.Contains(updates[0].req.Text, `"status":"allowed"`) {
+		t.Fatalf("decision update = %+v, want attempted update to sent-1", updates[0])
 	}
 }
 
