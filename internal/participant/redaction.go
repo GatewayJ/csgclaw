@@ -6,10 +6,8 @@ import (
 )
 
 const (
-	ChannelAppConfigAppSecretKey         = "app_secret"
-	ChannelAppConfigVerificationTokenKey = "verification_token"
-	ChannelAppConfigEncryptKeyKey        = "encrypt_key"
-	RedactedSecretValue                  = "present"
+	ChannelAppConfigAppSecretKey = "app_secret"
+	RedactedSecretValue          = "present"
 )
 
 func RedactChannelAppConfig(values map[string]any) map[string]any {
@@ -18,7 +16,7 @@ func RedactChannelAppConfig(values map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(values))
 	for key, value := range values {
-		if isSecretChannelAppConfigKey(key) &&
+		if strings.EqualFold(strings.TrimSpace(key), ChannelAppConfigAppSecretKey) &&
 			strings.TrimSpace(fmt.Sprint(value)) != "" {
 			out[key] = RedactedSecretValue
 			continue
@@ -26,13 +24,4 @@ func RedactChannelAppConfig(values map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
-}
-
-func isSecretChannelAppConfigKey(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(key)) {
-	case ChannelAppConfigAppSecretKey, ChannelAppConfigVerificationTokenKey, ChannelAppConfigEncryptKeyKey:
-		return true
-	default:
-		return false
-	}
 }
