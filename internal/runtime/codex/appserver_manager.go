@@ -516,7 +516,7 @@ func (m *appServerManager) handleAppServerServerRequest(runtimeID string, live *
 func (m *appServerManager) handleAppServerToolApproval(runtimeID string, live *liveSession, req appServerServerRequest, title string, toolKind string) (any, error) {
 	sessionID := m.appServerApprovalSessionID(live, req)
 	if m.deps.Permission == nil || strings.TrimSpace(runtimeID) == "" || sessionID == "" {
-		return appServerApprovalResponse(true), nil
+		return appServerApprovalResponse(req.Method, true), nil
 	}
 	approvalCtx := live.appServerTurnContext(sessionID)
 	if approvalCtx == nil {
@@ -544,24 +544,73 @@ func (m *appServerManager) handleAppServerToolApproval(runtimeID string, live *l
 	if err != nil {
 		return nil, err
 	}
-	return appServerApprovalDecisionResponse(decision.Snapshot.Status), nil
+	return appServerApprovalDecisionResponse(req.Method, decision.Snapshot), nil
 }
 
-func appServerApprovalResponse(allowed bool) map[string]any {
+func appServerApprovalResponse(method string, allowed bool) map[string]any {
 	if allowed {
-		return map[string]any{"decision": "accept"}
+		return map[string]any{"decision": appServerApprovalAcceptDecision(method, false)}
 	}
-	return map[string]any{"decision": "decline"}
+	return map[string]any{"decision": appServerApprovalRejectDecision(method)}
 }
 
-func appServerApprovalDecisionResponse(status PermissionStatus) map[string]any {
-	switch status {
+func appServerApprovalDecisionResponse(method string, snapshot PermissionSnapshot) map[string]any {
+	switch snapshot.Status {
 	case PermissionStatusAllowed:
-		return map[string]any{"decision": "accept"}
-	case PermissionStatusCanceled, PermissionStatusExpired:
-		return map[string]any{"decision": "cancel"}
+		return map[string]any{"decision": appServerApprovalAcceptDecision(method, permissionDecisionAllowsForSession(snapshot))}
+	case PermissionStatusCanceled:
+		return map[string]any{"decision": appServerApprovalCancelDecision(method)}
+	case PermissionStatusExpired:
+		return map[string]any{"decision": appServerApprovalExpiredDecision(method)}
 	default:
-		return map[string]any{"decision": "decline"}
+		return map[string]any{"decision": appServerApprovalRejectDecision(method)}
+	}
+}
+
+func permissionDecisionAllowsForSession(snapshot PermissionSnapshot) bool {
+	return snapshot.Decision != nil && strings.TrimSpace(snapshot.Decision.Kind) == PermissionOptionKindAllowAlways
+}
+
+func appServerApprovalAcceptDecision(method string, forSession bool) string {
+	if appServerApprovalUsesLegacyDecisionNames(method) {
+		if forSession {
+			return "approved_for_session"
+		}
+		return "approved"
+	}
+	if forSession {
+		return "acceptForSession"
+	}
+	return "accept"
+}
+
+func appServerApprovalRejectDecision(method string) string {
+	if appServerApprovalUsesLegacyDecisionNames(method) {
+		return "denied"
+	}
+	return "decline"
+}
+
+func appServerApprovalCancelDecision(method string) string {
+	if appServerApprovalUsesLegacyDecisionNames(method) {
+		return "abort"
+	}
+	return "cancel"
+}
+
+func appServerApprovalExpiredDecision(method string) string {
+	if appServerApprovalUsesLegacyDecisionNames(method) {
+		return "timed_out"
+	}
+	return "cancel"
+}
+
+func appServerApprovalUsesLegacyDecisionNames(method string) bool {
+	switch strings.TrimSpace(method) {
+	case "execCommandApproval", "applyPatchApproval":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -394,7 +394,7 @@ func TestAppServerManagerPromptApprovalUsesPermissionBroker(t *testing.T) {
 		for time.Now().Before(deadline) {
 			for _, event := range sink.snapshot() {
 				if event.Kind == SessionEventPermissionRequest && event.ActionID != "" {
-					_, err := broker.Decide(context.Background(), event.ActionID, "allow_once")
+					_, err := broker.Decide(context.Background(), event.ActionID, "allow_always")
 					decisionErr <- err
 					return
 				}
@@ -545,17 +545,47 @@ func TestAppServerManagerPromptApprovalCancelsWithTurnContext(t *testing.T) {
 }
 
 func TestAppServerApprovalResponseUsesCurrentCodexDecisionNames(t *testing.T) {
-	if got := appServerApprovalResponse(false)["decision"]; got != "decline" {
+	if got := appServerApprovalResponse("item/commandExecution/requestApproval", false)["decision"]; got != "decline" {
 		t.Fatalf("rejected approval decision = %#v, want decline", got)
 	}
-	if got := appServerApprovalDecisionResponse(PermissionStatusRejected)["decision"]; got != "decline" {
+	if got := appServerApprovalDecisionResponse("item/commandExecution/requestApproval", PermissionSnapshot{Status: PermissionStatusRejected})["decision"]; got != "decline" {
 		t.Fatalf("rejected permission status decision = %#v, want decline", got)
 	}
-	if got := appServerApprovalDecisionResponse(PermissionStatusCanceled)["decision"]; got != "cancel" {
+	if got := appServerApprovalDecisionResponse("item/commandExecution/requestApproval", PermissionSnapshot{Status: PermissionStatusCanceled})["decision"]; got != "cancel" {
 		t.Fatalf("canceled permission status decision = %#v, want cancel", got)
 	}
-	if got := appServerApprovalDecisionResponse(PermissionStatusExpired)["decision"]; got != "cancel" {
+	if got := appServerApprovalDecisionResponse("item/commandExecution/requestApproval", PermissionSnapshot{Status: PermissionStatusExpired})["decision"]; got != "cancel" {
 		t.Fatalf("expired permission status decision = %#v, want cancel", got)
+	}
+	if got := appServerApprovalDecisionResponse("item/commandExecution/requestApproval", PermissionSnapshot{
+		Status:   PermissionStatusAllowed,
+		Decision: &PermissionDecisionSnapshot{Kind: PermissionOptionKindAllowOnce},
+	})["decision"]; got != "accept" {
+		t.Fatalf("allow once permission decision = %#v, want accept", got)
+	}
+	if got := appServerApprovalDecisionResponse("item/commandExecution/requestApproval", PermissionSnapshot{
+		Status:   PermissionStatusAllowed,
+		Decision: &PermissionDecisionSnapshot{Kind: PermissionOptionKindAllowAlways},
+	})["decision"]; got != "acceptForSession" {
+		t.Fatalf("allow always permission decision = %#v, want acceptForSession", got)
+	}
+	if got := appServerApprovalResponse("applyPatchApproval", true)["decision"]; got != "approved" {
+		t.Fatalf("legacy auto approval decision = %#v, want approved", got)
+	}
+	if got := appServerApprovalDecisionResponse("execCommandApproval", PermissionSnapshot{Status: PermissionStatusRejected})["decision"]; got != "denied" {
+		t.Fatalf("legacy rejected permission decision = %#v, want denied", got)
+	}
+	if got := appServerApprovalDecisionResponse("execCommandApproval", PermissionSnapshot{Status: PermissionStatusCanceled})["decision"]; got != "abort" {
+		t.Fatalf("legacy canceled permission decision = %#v, want abort", got)
+	}
+	if got := appServerApprovalDecisionResponse("execCommandApproval", PermissionSnapshot{Status: PermissionStatusExpired})["decision"]; got != "timed_out" {
+		t.Fatalf("legacy expired permission decision = %#v, want timed_out", got)
+	}
+	if got := appServerApprovalDecisionResponse("execCommandApproval", PermissionSnapshot{
+		Status:   PermissionStatusAllowed,
+		Decision: &PermissionDecisionSnapshot{Kind: PermissionOptionKindAllowAlways},
+	})["decision"]; got != "approved_for_session" {
+		t.Fatalf("legacy allow always permission decision = %#v, want approved_for_session", got)
 	}
 }
 
@@ -1046,8 +1076,8 @@ func TestAppServerManagerHelperProcess(t *testing.T) {
 		runAppServerHelper(t, func(index int, msg map[string]any) (map[string]any, bool) {
 			if awaitingApproval {
 				assertServerRequestResponse(t, msg, 9001, func(result map[string]any) {
-					if got := result["decision"]; got != "accept" {
-						t.Fatalf("file approval decision = %#v, want accept", got)
+					if got := result["decision"]; got != "approved" {
+						t.Fatalf("file approval decision = %#v, want approved", got)
 					}
 				})
 				awaitingApproval = false
@@ -1094,8 +1124,8 @@ func TestAppServerManagerHelperProcess(t *testing.T) {
 		runAppServerHelper(t, func(index int, msg map[string]any) (map[string]any, bool) {
 			if awaitingApproval {
 				assertServerRequestResponse(t, msg, 9001, func(result map[string]any) {
-					if got := result["decision"]; got != "accept" {
-						t.Fatalf("turn approval decision = %#v, want accept", got)
+					if got := result["decision"]; got != "acceptForSession" {
+						t.Fatalf("turn approval decision = %#v, want acceptForSession", got)
 					}
 				})
 				awaitingApproval = false
