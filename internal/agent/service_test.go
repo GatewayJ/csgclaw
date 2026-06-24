@@ -1633,6 +1633,132 @@ func TestCreateWorkerPassesWorkspaceOverlayToProvision(t *testing.T) {
 	}
 }
 
+func TestCreateWorkerInstallsDefaultSystemSkills(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	SetTestHooks(
+		func(_ *Service, _ string) (sandbox.Runtime, error) { return &fakeRuntime{}, nil },
+		func(_ *Service, _ context.Context, _ sandbox.Runtime, _ string, name, botID string, _ AgentProfile) (sandbox.Instance, sandbox.Info, error) {
+			if name != "alice" || botID != "u-alice" {
+				t.Fatalf("createGatewayBox() name=%q botID=%q, want alice/u-alice", name, botID)
+			}
+			info := sandbox.Info{
+				ID:        "box-alice",
+				Name:      name,
+				State:     sandbox.StateRunning,
+				CreatedAt: time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+			}
+			return &fakeInfoInstance{info: info}, info, nil
+		},
+	)
+	t.Cleanup(ResetTestHooks)
+
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindOpenClawSandbox}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	_, err = svc.CreateWorker(context.Background(), CreateAgentSpec{
+		ID:          "u-alice",
+		Name:        "alice",
+		RuntimeKind: RuntimeKindOpenClawSandbox,
+		Image:       "worker-image:test",
+		AgentProfile: AgentProfile{
+			Name:            "alice",
+			Provider:        ProviderAPI,
+			BaseURL:         "https://api.example/v1",
+			APIKey:          "api-key",
+			ModelID:         "gpt-4.1",
+			ProfileComplete: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorker() error = %v", err)
+	}
+	skillsRoot, err := svc.agentSkillsRoot("alice", RuntimeKindOpenClawSandbox)
+	if err != nil {
+		t.Fatalf("agentSkillsRoot() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(skillsRoot, "skill-installer", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(skill-installer) error = %v", err)
+	}
+	if !strings.Contains(string(data), "registry skill search") {
+		t.Fatalf("skill-installer content = %q, want system skill instructions", string(data))
+	}
+}
+
+func TestPreserveWorkspaceSkillsDropsDefaultSystemSkills(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindOpenClawSandbox}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	skillsRoot, err := svc.agentSkillsRoot("alice", RuntimeKindOpenClawSandbox)
+	if err != nil {
+		t.Fatalf("agentSkillsRoot() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(skillsRoot, "skill-installer"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(skill-installer) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsRoot, "skill-installer", "SKILL.md"), []byte("# Old installer\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(old installer) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(skillsRoot, "custom"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(custom) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsRoot, "custom", "SKILL.md"), []byte("# Custom\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(custom) error = %v", err)
+	}
+
+	restore, cleanup, err := svc.prepareWorkspaceSkillsPreservation("alice", RuntimeKindOpenClawSandbox, RuntimeKindOpenClawSandbox, RoleWorker)
+	if err != nil {
+		t.Fatalf("prepareWorkspaceSkillsPreservation() error = %v", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	agentHome, err := agentHomeDir("alice")
+	if err != nil {
+		t.Fatalf("agentHomeDir() error = %v", err)
+	}
+	if err := os.RemoveAll(agentHome); err != nil {
+		t.Fatalf("RemoveAll(agent home) error = %v", err)
+	}
+	if restore == nil {
+		t.Fatal("restore = nil, want preservation restore")
+	}
+	if err := restore(); err != nil {
+		t.Fatalf("restore() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(skillsRoot, "custom", "SKILL.md")); err != nil {
+		t.Fatalf("custom skill was not restored: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(skillsRoot, "skill-installer", "SKILL.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old skill-installer restored unexpectedly, err=%v", err)
+	}
+	if err := svc.installDefaultSystemSkills("alice", RuntimeKindOpenClawSandbox, RoleWorker); err != nil {
+		t.Fatalf("installDefaultSystemSkills() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(skillsRoot, "skill-installer", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(new installer) error = %v", err)
+	}
+	if !strings.Contains(string(data), "registry skill search") {
+		t.Fatalf("new skill-installer content = %q, want system skill instructions", string(data))
+	}
+}
+
 func TestRecreateTriggersLifecycleObserver(t *testing.T) {
 	observer := &fakeLifecycleObserver{}
 	svc, err := NewService(
@@ -4084,6 +4210,71 @@ func TestStartProvisionsRuntimeBeforeStart(t *testing.T) {
 	}
 	if got, want := strings.Join(callOrder, ","), "provision,start"; got != want {
 		t.Fatalf("call order = %q, want %q", got, want)
+	}
+}
+
+func TestStartInstallsDefaultSystemSkillsAfterProvision(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var callOrder []string
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{
+			ListenAddr:       "0.0.0.0:18080",
+			AdvertiseBaseURL: "http://127.0.0.1:18080",
+			AccessToken:      "shared-token",
+		}, "manager-image:test", "",
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindOpenClawSandbox,
+			provision: func(_ context.Context, req agentruntime.ProvisionRequest) error {
+				callOrder = append(callOrder, "provision")
+				if req.RuntimeID != "rt-u-alice" || req.AgentID != "u-alice" || req.AgentName != "alice" {
+					t.Fatalf("Provision() request = %+v, want alice runtime identity", req)
+				}
+				if req.Gateway == nil {
+					t.Fatalf("Provision() gateway = nil, want gateway request")
+				}
+				return nil
+			},
+			start: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+				callOrder = append(callOrder, "start")
+				return agentruntime.StateRunning, nil
+			},
+			info: func(_ context.Context, h agentruntime.Handle) (agentruntime.Info, error) {
+				return agentruntime.Info{HandleID: h.HandleID, State: agentruntime.StateRunning}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-alice"] = Agent{
+		ID:              "u-alice",
+		Name:            "alice",
+		Role:            RoleWorker,
+		RuntimeID:       "rt-u-alice",
+		RuntimeKind:     RuntimeKindOpenClawSandbox,
+		BoxID:           "box-alice",
+		Status:          string(agentruntime.StateStopped),
+		AgentProfile:    AgentProfile{Name: "alice", Provider: ProviderAPI, BaseURL: "https://api.example/v1", APIKey: "api-key", ModelID: "gpt-4.1", ProfileComplete: true},
+		ProfileComplete: true,
+	}
+
+	if _, err := svc.Start(context.Background(), "u-alice"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if got, want := strings.Join(callOrder, ","), "provision,start"; got != want {
+		t.Fatalf("call order = %q, want %q", got, want)
+	}
+	skillsRoot, err := svc.agentSkillsRoot("alice", RuntimeKindOpenClawSandbox)
+	if err != nil {
+		t.Fatalf("agentSkillsRoot() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(skillsRoot, "skill-installer", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(skill-installer) error = %v", err)
+	}
+	if !strings.Contains(string(data), "registry skill search") {
+		t.Fatalf("skill-installer content = %q, want system skill instructions", string(data))
 	}
 }
 

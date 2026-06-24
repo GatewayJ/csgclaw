@@ -163,7 +163,7 @@ func (s *Service) prepareWorkspaceSkillsPreservation(agentName, sourceRuntimeKin
 		return nil, nil, err
 	}
 
-	templateNames, err := templateWorkspaceSkillNames(targetRuntimeKind, role)
+	templateNames, err := managedWorkspaceSkillNames(targetRuntimeKind, role)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -200,7 +200,7 @@ func (s *Service) refreshGatewayTemplateSkills(agentName, runtimeKind, role stri
 	if err != nil {
 		return err
 	}
-	templateNames, err := templateWorkspaceSkillNames(runtimeKind, role)
+	templateNames, err := managedWorkspaceSkillNames(runtimeKind, role)
 	if err != nil {
 		return err
 	}
@@ -241,6 +241,21 @@ func templateWorkspaceSkillNames(runtimeKind, role string) (map[string]struct{},
 		if name != "" {
 			names[name] = struct{}{}
 		}
+	}
+	return names, nil
+}
+
+func managedWorkspaceSkillNames(runtimeKind, role string) (map[string]struct{}, error) {
+	names, err := templateWorkspaceSkillNames(runtimeKind, role)
+	if err != nil {
+		return nil, err
+	}
+	systemNames, err := defaultSystemSkillNames(runtimeKind, role)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range systemNames {
+		names[name] = struct{}{}
 	}
 	return names, nil
 }

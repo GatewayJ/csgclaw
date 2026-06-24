@@ -716,13 +716,13 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 	if err := s.refreshGatewayTemplateSkills(got.Name, runtimeKind, recreateTemplateRole(got)); err != nil {
 		return Agent{}, fmt.Errorf("refresh gateway template skills: %w", err)
 	}
-	if err := s.provisionRuntime(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
+	if err := s.provisionRuntimeWithDefaultSystemSkills(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
 		RuntimeID:     createSpec.RuntimeID,
 		AgentID:       createSpec.AgentID,
 		ParticipantID: participantIDForAgent(createSpec.AgentName, createSpec.AgentID),
 		AgentName:     createSpec.AgentName,
 		Profile:       runtimeProfile,
-	}); err != nil {
+	}, recreateTemplateRole(got)); err != nil {
 		return Agent{}, fmt.Errorf("provision agent runtime: %w", err)
 	}
 	handle, err := runtimeImpl.New(ctx, createSpec)

@@ -151,6 +151,7 @@ export function HubDetailPane({
     skillDeleteBusy = false,
   } = hub?.detailPaneProps ?? EMPTY_HUB_DETAIL_PROPS;
   const canDeleteTemplate = isDeletableHubTemplate(selectedTemplate);
+  const canDeleteSkill = Boolean(selectedSkill && !selectedSkill.readonly && selectedSkill.source !== "system");
   const workspaceEntries = selectedTemplate?.workspace?.entries ?? EMPTY_WORKSPACE_ENTRIES;
   const skillEntries = skillTree?.entries ?? EMPTY_WORKSPACE_ENTRIES;
   const activeResourceType = useMemo(() => {
@@ -315,19 +316,29 @@ export function HubDetailPane({
                     <div className="hub-inspector-copy">
                       <h2>{selectedSkill.name}</h2>
                       <p>{selectedSkill.description || selectedSkill.name}</p>
+                      {selectedSkill.readonly || selectedSkill.source === "system" ? (
+                        <div className="hub-inspector-badge-row">
+                          <span className="mini-badge template-source-badge">
+                            <span className="template-source-badge-dot" aria-hidden="true"></span>
+                            {t("hubSkillSystemBadge")}
+                          </span>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
-                  <div className="hub-template-actions">
-                    <Button
-                      className="hub-skill-delete-button"
-                      variant="outlineDanger"
-                      size="md"
-                      disabled={skillDeleteBusy}
-                      onClick={() => setDeleteSkillDialogOpen(true)}
-                    >
-                      {t("hubDeleteSkill")}
-                    </Button>
-                  </div>
+                  {canDeleteSkill ? (
+                    <div className="hub-template-actions">
+                      <Button
+                        className="hub-skill-delete-button"
+                        variant="outlineDanger"
+                        size="md"
+                        disabled={skillDeleteBusy}
+                        onClick={() => setDeleteSkillDialogOpen(true)}
+                      >
+                        {t("hubDeleteSkill")}
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 

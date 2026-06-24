@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	skillsystem "csgclaw/internal/skill/system"
 )
 
 const maxArchiveBytes int64 = 64 << 20
@@ -54,6 +56,9 @@ func InstallArchive(root, filename string, archive []byte) (SkillSummary, error)
 	summary, err := summarizeSkillDir(skillDir, skillName)
 	if err != nil {
 		return SkillSummary{}, err
+	}
+	if skillsystem.IsName(summary.Name) {
+		return SkillSummary{}, fmt.Errorf("%w: %s", ErrSkillAlreadyExists, summary.Name)
 	}
 
 	destDir := filepath.Join(root, summary.Name)

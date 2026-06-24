@@ -876,7 +876,10 @@ export function AgentDetailPane({
                         }}
                       />
                       <span className="agent-skill-candidate-copy">
-                        <span className="agent-skill-name">{skill.name}</span>
+                        <span className="agent-skill-name">
+                          {skill.name}
+                          {skill.readonly || skill.source === "system" ? ` · ${t("hubSkillSystemBadge")}` : ""}
+                        </span>
                         <span className="agent-skill-description">{skill.description || "-"}</span>
                       </span>
                     </label>

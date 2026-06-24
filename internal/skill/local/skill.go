@@ -2,7 +2,9 @@ package local
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +16,8 @@ import (
 )
 
 const skillFileName = "SKILL.md"
+
+var ErrSkillInvalid = errors.New("skill directory must contain SKILL.md")
 
 type SkillSummary struct {
 	Name        string `json:"name"`
@@ -73,31 +77,58 @@ func Delete(root, name string) error {
 	if root == "" {
 		return fmt.Errorf("skills root is required")
 	}
+	cleanName, err := NormalizeName(name)
+	if err != nil {
+		return err
+	}
+	skillDir, err := ResolveDir(root, cleanName)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(skillDir)
+}
+
+func NormalizeName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("skill name is required")
+		return "", fmt.Errorf("skill name is required")
 	}
 	cleanName := filepath.Clean(name)
 	if cleanName == "." || cleanName == ".." || cleanName != filepath.Base(cleanName) {
-		return fmt.Errorf("invalid skill name %q", name)
+		return "", fmt.Errorf("invalid skill name %q", name)
+	}
+	return cleanName, nil
+}
+
+func ResolveDir(root, name string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("skills root is required")
+	}
+	cleanName, err := NormalizeName(name)
+	if err != nil {
+		return "", err
 	}
 	skillDir := filepath.Join(root, cleanName)
 	info, err := os.Stat(skillDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !info.IsDir() {
-		return os.ErrNotExist
+		return "", ErrSkillInvalid
 	}
 	skillFile := filepath.Join(skillDir, skillFileName)
-	fileInfo, err := os.Stat(skillFile)
+	fileInfo, err := os.Lstat(skillFile)
 	if err != nil {
-		return err
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrSkillInvalid
+		}
+		return "", err
 	}
-	if fileInfo.IsDir() {
-		return os.ErrNotExist
+	if !fileInfo.Mode().IsRegular() || fileInfo.IsDir() || fileInfo.Mode()&fs.ModeSymlink != 0 {
+		return "", ErrSkillInvalid
 	}
-	return os.RemoveAll(skillDir)
+	return skillDir, nil
 }
 
 func skillDescription(path string) (string, error) {

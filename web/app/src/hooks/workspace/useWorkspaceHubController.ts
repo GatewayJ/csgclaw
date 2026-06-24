@@ -109,7 +109,7 @@ export function useWorkspaceHubController({
   const deleteSkill = useCallback(
     async (skill: SkillSummary | null | undefined): Promise<boolean> => {
       const name = String(skill?.name || "").trim();
-      if (!name) {
+      if (!name || skill?.readonly || skill?.source === "system") {
         return false;
       }
       setSkillDeleteBusy(true);

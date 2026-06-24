@@ -554,13 +554,13 @@ func (s *Service) ensureManager(ctx context.Context, forceRecreate bool, imageOv
 		if err != nil {
 			return err
 		}
-		if err := s.provisionRuntime(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
+		if err := s.provisionRuntimeWithDefaultSystemSkills(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
 			RuntimeID:     runtimeIDForAgentID(ManagerUserID),
 			AgentID:       ManagerUserID,
 			ParticipantID: ManagerParticipantID,
 			AgentName:     ManagerName,
 			Profile:       s.runtimeProfileForKind(runtimeKind, ManagerUserID, ManagerName, "", startProfile),
-		}); err != nil {
+		}, RoleManager); err != nil {
 			return fmt.Errorf("provision bootstrap manager runtime: %w", err)
 		}
 		return nil
@@ -1624,14 +1624,14 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		return Agent{}, err
 	}
 	runtimeProfile := s.runtimeProfileForKind(runtimeKind, id, name, description, runtimeResolvedProfile)
-	if err := s.provisionRuntime(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
+	if err := s.provisionRuntimeWithDefaultSystemSkills(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
 		RuntimeID:        runtimeIDForAgentID(id),
 		AgentID:          id,
 		ParticipantID:    participantIDForAgent(name, id),
 		AgentName:        name,
 		Profile:          runtimeProfile,
 		WorkspaceOverlay: strings.TrimSpace(spec.FromTemplate),
-	}); err != nil {
+	}, RoleWorker); err != nil {
 		return Agent{}, fmt.Errorf("provision worker runtime: %w", err)
 	}
 	if testCreateGatewayBoxHook != nil && isGatewayRuntimeKind(runtimeKind) {
@@ -1824,18 +1824,28 @@ func (s *Service) provisionRuntime(ctx context.Context, rt agentruntime.Runtime,
 	return provisioner.Provision(ctx, req)
 }
 
+func (s *Service) provisionRuntimeWithDefaultSystemSkills(ctx context.Context, rt agentruntime.Runtime, runtimeKind string, req agentruntime.ProvisionRequest, role string) error {
+	if err := s.provisionRuntime(ctx, rt, runtimeKind, req); err != nil {
+		return err
+	}
+	if err := s.installDefaultSystemSkills(req.AgentName, runtimeKind, role); err != nil {
+		return fmt.Errorf("install default system skills: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) provisionRuntimeForAgent(ctx context.Context, rt agentruntime.Runtime, got Agent, workspaceOverlay string) error {
 	if s == nil || rt == nil {
 		return nil
 	}
-	return s.provisionRuntime(ctx, rt, strings.TrimSpace(got.RuntimeKind), agentruntime.ProvisionRequest{
+	return s.provisionRuntimeWithDefaultSystemSkills(ctx, rt, strings.TrimSpace(got.RuntimeKind), agentruntime.ProvisionRequest{
 		RuntimeID:        normalizeRuntimeID(got.RuntimeID, got.ID),
 		AgentID:          strings.TrimSpace(got.ID),
 		ParticipantID:    participantIDForAgent(got.Name, got.ID),
 		AgentName:        strings.TrimSpace(got.Name),
 		Profile:          s.runtimeProfileForAgent(got),
 		WorkspaceOverlay: strings.TrimSpace(workspaceOverlay),
-	})
+	}, recreateTemplateRole(got))
 }
 
 func participantIDForAgent(agentName, agentID string) string {

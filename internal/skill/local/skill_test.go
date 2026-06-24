@@ -114,6 +114,17 @@ func TestInstallArchiveRejectsDuplicate(t *testing.T) {
 	}
 }
 
+func TestInstallArchiveRejectsSystemSkillName(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := InstallArchive(root, "skill-installer.zip", mustZip(t, map[string]string{
+		"skill-installer/SKILL.md": "# Skill Installer\n",
+	}))
+	if !errors.Is(err, ErrSkillAlreadyExists) {
+		t.Fatalf("InstallArchive() error = %v, want ErrSkillAlreadyExists", err)
+	}
+}
+
 func TestInstallArchiveRejectsInvalidShape(t *testing.T) {
 	root := t.TempDir()
 
