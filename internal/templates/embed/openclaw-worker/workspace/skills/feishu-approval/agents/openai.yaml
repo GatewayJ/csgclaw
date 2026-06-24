@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feishu Approval"
+  short_description: "Query, submit, recall, comment, and process Feishu approvals"
+  default_prompt: "Use $feishu-approval to query Feishu approval records, inspect details or task lists, prepare confirmed approval submissions, recall/cancel instances, add comments, and approve or reject tasks while keeping user OAuth and app/admin permissions separate."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lark CLI"
+  short_description: "Operate general 飞书/Feishu and Lark resources through lark-cli"
+  default_prompt: "Use $lark-cli to operate general 飞书/Feishu or Lark resources through lark-cli with agent-local configuration and OAuth guidance. For native approval workflows, prefer $feishu-approval."
