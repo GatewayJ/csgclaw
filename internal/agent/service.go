@@ -554,7 +554,7 @@ func (s *Service) ensureManager(ctx context.Context, forceRecreate bool, imageOv
 		if err != nil {
 			return err
 		}
-		if err := s.provisionRuntimeWithDefaultSystemSkills(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
+		if err := s.provisionRuntime(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
 			RuntimeID:     runtimeIDForAgentID(ManagerUserID),
 			AgentID:       ManagerUserID,
 			ParticipantID: ManagerParticipantID,
@@ -1624,7 +1624,7 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		return Agent{}, err
 	}
 	runtimeProfile := s.runtimeProfileForKind(runtimeKind, id, name, description, runtimeResolvedProfile)
-	if err := s.provisionRuntimeWithDefaultSystemSkills(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
+	if err := s.provisionRuntime(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
 		RuntimeID:        runtimeIDForAgentID(id),
 		AgentID:          id,
 		ParticipantID:    participantIDForAgent(name, id),
@@ -1806,7 +1806,7 @@ func isResolvedWorkspacePath(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func (s *Service) provisionRuntime(ctx context.Context, rt agentruntime.Runtime, runtimeKind string, req agentruntime.ProvisionRequest) error {
+func (s *Service) provisionRuntimeRequest(ctx context.Context, rt agentruntime.Runtime, runtimeKind string, req agentruntime.ProvisionRequest) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is required")
 	}
@@ -1824,8 +1824,8 @@ func (s *Service) provisionRuntime(ctx context.Context, rt agentruntime.Runtime,
 	return provisioner.Provision(ctx, req)
 }
 
-func (s *Service) provisionRuntimeWithDefaultSystemSkills(ctx context.Context, rt agentruntime.Runtime, runtimeKind string, req agentruntime.ProvisionRequest) error {
-	if err := s.provisionRuntime(ctx, rt, runtimeKind, req); err != nil {
+func (s *Service) provisionRuntime(ctx context.Context, rt agentruntime.Runtime, runtimeKind string, req agentruntime.ProvisionRequest) error {
+	if err := s.provisionRuntimeRequest(ctx, rt, runtimeKind, req); err != nil {
 		return err
 	}
 	if err := s.installDefaultSystemSkills(req.AgentName, runtimeKind); err != nil {
@@ -1838,7 +1838,7 @@ func (s *Service) provisionRuntimeForAgent(ctx context.Context, rt agentruntime.
 	if s == nil || rt == nil {
 		return nil
 	}
-	return s.provisionRuntimeWithDefaultSystemSkills(ctx, rt, strings.TrimSpace(got.RuntimeKind), agentruntime.ProvisionRequest{
+	return s.provisionRuntime(ctx, rt, strings.TrimSpace(got.RuntimeKind), agentruntime.ProvisionRequest{
 		RuntimeID:        normalizeRuntimeID(got.RuntimeID, got.ID),
 		AgentID:          strings.TrimSpace(got.ID),
 		ParticipantID:    participantIDForAgent(got.Name, got.ID),
