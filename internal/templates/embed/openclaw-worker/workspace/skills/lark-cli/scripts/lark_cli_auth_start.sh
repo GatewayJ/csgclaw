@@ -6,7 +6,8 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lark_cli_common.sh"
 
 usage() {
-  printf '%s\n' "Usage: $0 [--no-wait] [--json] [--domain <domain>] [--scope <scope>]... [-- <extra lark-cli args>]" >&2
+  printf '%s\n' "Usage: $0 [--no-wait] [--json] [--domain <domain>] [--scope <scope-list>]... [-- <extra lark-cli args>]" >&2
+  printf '%s\n' "Note: lark-cli auth login --scope is a single string; repeated wrapper --scope values are merged before invoking lark-cli." >&2
 }
 
 lark_cli_init_context
@@ -17,7 +18,17 @@ auth_scope_signature() {
     printf ''
     return 0
   fi
-  printf '%s' "$scopes" | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+  auth_scope_list "$scopes" | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+}
+
+auth_scope_list() {
+  local scopes="$1"
+  printf '%s\n' "$scopes" | awk '{ gsub(/,/, " "); for (i = 1; i <= NF; i++) print $i }'
+}
+
+auth_scope_argument() {
+  local scopes="$1"
+  auth_scope_list "$scopes" | tr '\n' ' ' | sed 's/[[:space:]]*$//'
 }
 
 auth_generate_session_id() {
@@ -114,6 +125,7 @@ runner_command="$(lark_cli_runner_display)"
 cmd=(auth login --no-wait --json)
 AUTH_DOMAIN=""
 AUTH_SCOPES=""
+AUTH_SCOPE_ARG=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -130,7 +142,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --scope)
       if [ "$#" -lt 2 ]; then usage; exit 2; fi
-      cmd+=(--scope "$2")
       if [ -n "$AUTH_SCOPES" ]; then
         AUTH_SCOPES="$AUTH_SCOPES $2"
       else
@@ -156,6 +167,17 @@ while [ "$#" -gt 0 ]; do
     ;;
     esac
 done
+
+AUTH_SCOPE_ARG="$(auth_scope_argument "$AUTH_SCOPES")"
+if [ -n "$AUTH_SCOPES" ] && [ -z "$AUTH_SCOPE_ARG" ]; then
+  printf 'Empty --scope value\n' >&2
+  usage
+  exit 2
+fi
+if [ -n "$AUTH_SCOPE_ARG" ]; then
+  AUTH_SCOPES="$AUTH_SCOPE_ARG"
+  cmd+=(--scope "$AUTH_SCOPE_ARG")
+fi
 
 if [ -z "${AUTH_DOMAIN}" ]; then
   AUTH_DOMAIN="feishu"

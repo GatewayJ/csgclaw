@@ -26,6 +26,8 @@ serviceaccount:approval:approvals:read
 
 This bundle covers initiated/history/detail reads, current user's task list, task approve/reject, recall/cancel operations, and the current user's visible approval definition catalog. It is requested through the `lark-cli` OAuth URL, not through the Open Platform app permission page.
 
+The `lark-cli auth login --scope` flag is a single string value. Approval helpers must pass this bundle as one space-separated scope-list to `lark_cli_auth_start.sh`, not as repeated `--scope` flags.
+
 For app-identity approval operations, generate one Feishu Open Platform tenant link for the app approval bundle:
 
 ```bash

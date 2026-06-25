@@ -51,13 +51,19 @@ When a task needs user identity, start OAuth without blocking:
 bash scripts/lark_cli_auth_start.sh --no-wait --json --scope <required_user_scope>
 ```
 
+When multiple user scopes are required, pass them as one quoted space- or comma-separated value:
+
+```bash
+bash scripts/lark_cli_auth_start.sh --no-wait --json --scope "<scope_1> <scope_2>"
+```
+
 Send the returned `verification_url` to the user exactly as returned. After the user says authorization is complete, finish with:
 
 ```bash
 bash scripts/lark_cli_auth_complete.sh
 ```
 
-The start script saves the pending OAuth state under the agent-local config directory. It is the only supported OAuth-start entrypoint and internally forces `lark-cli auth login --no-wait --json`. Do not expose the `device_code` in public chat. Pass `--device-code` only if the saved state is unavailable.
+The start script saves the pending OAuth state under the agent-local config directory. It is the only supported OAuth-start entrypoint and internally forces `lark-cli auth login --no-wait --json`. Underlying `lark-cli auth login --scope` is a single string flag, so the wrapper coalesces repeated `--scope` values into one scope-list before invoking `lark-cli`. Do not expose the `device_code` in public chat. Pass `--device-code` only if the saved state is unavailable.
 
 If the tool runner says the auth-start command is still running, keep polling the same process until it returns JSON. Never respond with an authorization link before the command finishes. Never switch to `auth login --recommend`, `auth qrcode`, or naked `npx ... auth` while waiting. Never hand-compose OAuth URLs; do not use `https://open.feishu.cn/open-apis/authen/authenticate...`, do not reuse an app_id from memory, and do not add app/tenant scopes to a user OAuth link.
 

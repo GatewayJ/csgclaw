@@ -10,11 +10,19 @@ Start without blocking:
 bash scripts/lark_cli_auth_start.sh --no-wait --json --scope <required_user_scope>
 ```
 
+For multiple user scopes, pass one quoted space- or comma-separated scope list:
+
+```bash
+bash scripts/lark_cli_auth_start.sh --no-wait --json --scope "<required_user_scope_1> <required_user_scope_2>"
+```
+
 The underlying command is:
 
 ```bash
 lark-cli auth login --scope <required_user_scope> --no-wait --json
 ```
+
+`lark-cli auth login --scope` is a single string flag, not a repeatable flag. Do not call the underlying CLI with multiple `--scope` flags; merge scopes into the one value accepted by `--scope`. The wrapper accepts repeated `--scope` values only as a compatibility convenience and coalesces them before invoking `lark-cli`.
 
 Do not run the underlying command directly. The wrapper is the only supported OAuth-start entrypoint because it preserves the agent-local config directory and pending state file. Never use `auth login --recommend`, `auth qrcode`, `bash scripts/lark_cli_run.sh auth login ...`, or naked `npx -y @larksuite/cli@latest auth ...` for user authorization.
 
@@ -57,8 +65,7 @@ User-scope recovery:
 bash scripts/lark_cli_auth_start.sh \
   --no-wait \
   --json \
-  --scope <missing_user_scope_1> \
-  --scope <missing_user_scope_2>
+  --scope "<missing_user_scope_1> <missing_user_scope_2>"
 ```
 
 For Feishu approval workflows, prefer the `feishu-approval` scripts. They request the grouped approval user OAuth bundle when an approval user-scope gap is detected.

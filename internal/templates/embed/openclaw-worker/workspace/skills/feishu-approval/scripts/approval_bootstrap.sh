@@ -6,11 +6,11 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/approval_common.sh"
 
 usage() {
-  printf '%s\n' "Usage: $0 --mode bot|user [--scope <scope>...]"
+  printf '%s\n' "Usage: $0 --mode bot|user [--scope <additional-scope-list>]"
+  printf '%s\n' "Note: user mode requests the grouped approval OAuth bundle; pass any additional scopes as one space- or comma-separated value."
   printf '%s\n' "Examples:"
   printf '%s\n' "  $0 --mode bot"
   printf '%s\n' "  $0 --mode user"
-  printf '%s\n' "  $0 --mode user --scope approval:instance:read --scope approval:task:read"
 }
 
 mode="bot"

@@ -124,10 +124,7 @@ approval_ensure_user_scope() {
 
   auth="$(approval_lark_script lark_cli_auth_start.sh)"
   local args=(--no-wait --json)
-  local scope
-  for scope in $scopes; do
-    args+=(--scope "$scope")
-  done
+  args+=(--scope "$scopes")
   approval_run_script "$auth" "${args[@]}"
   return 2
 }
@@ -137,10 +134,7 @@ approval_request_user_scope() {
   local auth
   auth="$(approval_lark_script lark_cli_auth_start.sh)"
   local args=(--no-wait --json)
-  local scope
-  for scope in $scopes; do
-    args+=(--scope "$scope")
-  done
+  args+=(--scope "$scopes")
   approval_run_script "$auth" "${args[@]}"
 }
 
