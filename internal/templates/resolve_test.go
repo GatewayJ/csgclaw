@@ -71,6 +71,9 @@ func TestOpenClawWorkerLarkCLIScopeUsage(t *testing.T) {
 	if !strings.Contains(approvalCommon, `args+=(--scope "$scopes")`) {
 		t.Fatal("approval_common.sh should pass the grouped approval OAuth bundle as one --scope value")
 	}
+	if !strings.Contains(approvalCommon, "approval:instance:read approval:task:read approval:task:write approval:instance:write serviceaccount:approval:approvals:read") {
+		t.Fatal("approval_common.sh should keep the expected grouped approval OAuth scope bundle")
+	}
 
 	authRef := readTemplateFile(t, OpenClawWorkerRoot+"/workspace/skills/lark-cli/references/auth.md")
 	if strings.Contains(authRef, "--scope <missing_user_scope_1> \\\n  --scope <missing_user_scope_2>") {
@@ -90,6 +93,24 @@ func TestOpenClawWorkerFeishuApprovalReferences(t *testing.T) {
 			t.Fatalf("feishu-approval SKILL.md should reference %s", ref)
 		}
 		readTemplateFile(t, OpenClawWorkerRoot+"/workspace/skills/feishu-approval/"+ref)
+	}
+}
+
+func TestOpenClawWorkerFeishuApprovalCancelUsesBotIdentity(t *testing.T) {
+	cancel := readTemplateFile(t, OpenClawWorkerRoot+"/workspace/skills/feishu-approval/scripts/approval_cancel_instance.sh")
+	if strings.Contains(cancel, `approval_run_user_scoped "$(approval_user_oauth_scopes)" api POST /open-apis/approval/v4/instances/cancel`) {
+		t.Fatal("approval_cancel_instance.sh must not call cancel API with user identity")
+	}
+	if !strings.Contains(cancel, `approval_bootstrap bot`) || !strings.Contains(cancel, `--as bot`) {
+		t.Fatal("approval_cancel_instance.sh should call cancel API with bot identity")
+	}
+
+	oauthRecovery := readTemplateFile(t, OpenClawWorkerRoot+"/workspace/skills/feishu-approval/references/oauth-recovery.md")
+	if !strings.Contains(oauthRecovery, `bash skills/feishu-approval/scripts/approval_auth_complete.sh`) {
+		t.Fatal("oauth recovery should document the approval-specific auth completion wrapper")
+	}
+	if !strings.Contains(oauthRecovery, "Do not run `bash skills/feishu-approval/scripts/lark_cli_auth_complete.sh`") {
+		t.Fatal("oauth recovery should explicitly forbid the non-existent feishu-approval lark_cli_auth_complete.sh path")
 	}
 }
 

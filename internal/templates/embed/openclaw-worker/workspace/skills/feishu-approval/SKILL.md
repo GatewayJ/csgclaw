@@ -42,7 +42,7 @@ choose the matching bundled approval script
 | View approval instance details | Get instance details | user OAuth for read-only user requests |
 | Query current user's approval tasks | List tasks | user OAuth |
 | Approve or reject a task | Identify task, confirm action, decide task | user OAuth |
-| Recall/cancel the user's own approval | Identify instance, confirm action, cancel instance | user OAuth |
+| Recall/cancel the user's own approval | Identify instance, confirm action, cancel instance | app/bot with current operator `open_id` |
 | Add an approval comment | Identify instance, confirm comment, comment instance | app/bot with current operator `open_id` |
 | List approvals visible/launchable to the user | List definitions catalog only when explicitly requested | user OAuth |
 | Prepare a new approval or resubmission | Read current definition schema, build payload, preview, submit | app/bot |
@@ -50,8 +50,8 @@ choose the matching bundled approval script
 
 ## Identity Rules
 
-- User identity operations use the grouped `lark-cli` OAuth link: initiated/detail reads, task list, approve/reject, recall/cancel, and the current user's visible approval definition catalog.
-- App identity operations use Open Platform console links with `token_type=tenant`: definition schema reads, new approval instance creation, and approval comments.
+- User identity operations use the grouped `lark-cli` OAuth link: initiated/detail reads, task list, approve/reject, and the current user's visible approval definition catalog.
+- App identity operations use Open Platform console links with `token_type=tenant`: definition schema reads, new approval instance creation, approval comments, and recall/cancel calls that carry the current operator's `open_id`.
 - New approval submission is an app/bot action. User OAuth cannot submit `POST /approval/v4/instances`.
 - For resubmission or "参考我上次那个审批再提交" flows, prefer a known previous instance or the user's initiated approvals before listing the full definition catalog.
 - For "我曾经发起过哪些审批" or similar, run the initiated-list path first. Do not ask an extra "同意授权" question after the user has already asked to query approvals.

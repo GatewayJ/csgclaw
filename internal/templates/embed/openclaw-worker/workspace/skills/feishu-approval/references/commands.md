@@ -12,7 +12,7 @@ bash skills/feishu-approval/scripts/approval_bootstrap.sh --mode bot
 bash skills/feishu-approval/scripts/approval_bootstrap.sh --mode user
 ```
 
-Use `--mode user` for user-token flows (initiated/list/detail/tasks/cancel/approve/reject) and `--mode bot` for bot-token flows (definitions/schema/create/comment).
+Use `--mode user` for user-token flows (initiated/list/detail/tasks/approve/reject) and `--mode bot` for bot-token flows (definitions/schema/create/comment/cancel).
 
 ## List Approvals Initiated By Current User
 
@@ -99,7 +99,7 @@ Do not approve or reject without `--yes`; the script intentionally returns `conf
 
 ## Recall Or Cancel An Approval Instance
 
-Uses the grouped user approval OAuth bundle when auth is needed.
+Uses app/bot identity for the cancel API. If `--open-id` is not provided, the helper may use user OAuth only to discover the current operator's open_id.
 
 Ask the user to confirm the exact instance first, then run:
 
@@ -110,7 +110,7 @@ bash skills/feishu-approval/scripts/approval_cancel_instance.sh \
   --yes
 ```
 
-Pass `--open-id <ou_xxx>` only when it is the current user's open_id. Do not call raw `/approval/v4/instances/cancel`; the script supplies `user_id_type=open_id` and the required body shape.
+Pass `--open-id <ou_xxx>` only when it is the current user's open_id. Do not call raw `/approval/v4/instances/cancel`; the script uses the bot token, supplies `user_id_type=open_id`, and sends the required body shape.
 
 ## Add Approval Instance Comment
 

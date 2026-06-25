@@ -9,7 +9,7 @@
 | "我有哪些待审批任务" | `approval tasks query` | user OAuth | `approval:task:read` |
 | "同意/拒绝" | `approval tasks approve/reject` | user OAuth | `approval:task:write` |
 | "加签/转交/退回" | approval task write command | user OAuth | `approval:task:write` |
-| "撤回我的审批" | `approval instances cancel` | user OAuth | `approval:instance:write` |
+| "撤回我的审批" | `POST /open-apis/approval/v4/instances/cancel` | app/tenant with current operator `open_id` | `approval:instance` |
 | "查询我可见/可发起的审批定义列表" | `GET /open-apis/approval/v4/approvals` | user OAuth | `serviceaccount:approval:approvals:read` |
 | "查看审批定义/表单字段/节点" | `GET /open-apis/approval/v4/approvals/:approval_code` | app/tenant | `approval:approval:readonly` |
 | "提交一个新的审批实例" | `POST /open-apis/approval/v4/instances` | app/tenant | `approval:instance` |
@@ -24,7 +24,7 @@ approval:instance:read approval:task:read approval:task:write approval:instance:
 serviceaccount:approval:approvals:read
 ```
 
-This bundle covers initiated/history/detail reads, current user's task list, task approve/reject, recall/cancel operations, and the current user's visible approval definition catalog. It is requested through the `lark-cli` OAuth URL, not through the Open Platform app permission page.
+This bundle covers initiated/history/detail reads, current user's task list, task approve/reject, and the current user's visible approval definition catalog. It is requested through the `lark-cli` OAuth URL, not through the Open Platform app permission page. Recall/cancel uses the app/bot token with the current operator's `open_id`; user OAuth is only used to discover that `open_id` when it is not already known.
 
 The `lark-cli auth login --scope` flag is a single string value. Approval helpers must pass this bundle as one space-separated scope-list to `lark_cli_auth_start.sh`, not as repeated `--scope` flags.
 
@@ -33,7 +33,7 @@ For app-identity approval operations, generate one Feishu Open Platform tenant l
 The app/tenant bundle is:
 
 - `approval:approval:readonly`: read approval definition form fields and nodes.
-- `approval:instance`: create native approval instances with the app/bot token.
+- `approval:instance`: create or recall/cancel native approval instances with the app/bot token.
 
 Approval comments use a separate app/tenant scope.
 

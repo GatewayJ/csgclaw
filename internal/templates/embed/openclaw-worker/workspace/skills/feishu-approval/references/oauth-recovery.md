@@ -16,6 +16,8 @@ When a script returns `oauth-pending`:
 bash skills/feishu-approval/scripts/approval_auth_complete.sh
 ```
 
+This approval-specific path is intentional. Do not run `bash skills/feishu-approval/scripts/lark_cli_auth_complete.sh`; that file does not exist. Do not switch to `bash skills/lark-cli/scripts/lark_cli_auth_complete.sh` unless the approval wrapper itself is missing.
+
 4. If it returns `user-ready`, rerun the original approval command.
 5. If it still returns `oauth-pending`, ask the user to finish browser authorization. If the link expired, rerun the original approval command to generate a fresh `verification_url`.
 
