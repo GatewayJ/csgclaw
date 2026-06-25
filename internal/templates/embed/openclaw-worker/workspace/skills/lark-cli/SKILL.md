@@ -19,6 +19,21 @@ For native approval workflows inside OpenClaw, switch to `skills/feishu-approval
 bash scripts/lark_cli_ready.sh
 ```
 
+```text
+Feishu/Lark request
+        |
+        v
+  lark_cli_ready.sh
+        |
+        +-- ready / bot-ready / user-ready --> use helper scripts
+        |
+        +-- not-installed ------------------> report missing lark-cli or Node/npm/npx
+        |
+        +-- not-configured -----------------> let ready bind, then ask for Feishu participant binding if it still fails
+        |
+        +-- check-failed --------------------> inspect doctor output; do not start OAuth loops
+```
+
 2. The unified readiness script already runs bootstrap + binding + doctor in one path. In managed OpenClaw workers, it reads `~/.openclaw/openclaw.json` directly via `lark_cli_bind_app.sh`. If readiness returns `reusable_app_credentials_missing` or `openclaw_bind_failed`, do not ask for App ID/App Secret; ask for a Feishu participant binding and restart/recreate the agent.
 
 3. Use `bash scripts/lark_cli_doctor.sh` only for diagnostic re-checks or when you specifically need detailed offline doctor output after readiness succeeds or before deep troubleshooting.
@@ -46,6 +61,19 @@ bash scripts/lark_cli_ready.sh
 ## Authorization Flow
 
 When a task needs user identity, start OAuth without blocking:
+
+```text
+needs user identity
+        |
+        v
+lark_cli_auth_start.sh --no-wait --json --scope "<scope-list>"
+        |
+        +-- oauth-pending / verification_url --> send URL only, wait for user
+        |
+        +-- command still running ------------> keep polling same process
+        |
+        +-- user says authorized -------------> lark_cli_auth_complete.sh -> rerun original command
+```
 
 ```bash
 bash scripts/lark_cli_auth_start.sh --no-wait --json --scope <required_user_scope>

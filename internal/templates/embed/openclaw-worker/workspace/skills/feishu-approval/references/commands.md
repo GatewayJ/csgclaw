@@ -1,5 +1,7 @@
 # Commands
 
+This file is the single source for `feishu-approval` script command shapes. For `oauth-pending`, still-running commands, and OpenClaw binding failures, follow `oauth-recovery.md`.
+
 ## Preflight
 
 Approval scripts already include readiness checks. If a command is first run after restart, optionally warm-start one mode before the first call:
@@ -10,7 +12,7 @@ bash skills/feishu-approval/scripts/approval_bootstrap.sh --mode bot
 bash skills/feishu-approval/scripts/approval_bootstrap.sh --mode user
 ```
 
-Use `--mode user` for user-token flows (initiated/list/detail/tasks/cancel/approve/reject) and `--mode bot` for bot-token flows (definitions/schema/create/comment). If it returns `not-configured` for OpenClaw participant reasons, ask the user to bind/recreate/restart the agent instead of requesting app secrets.
+Use `--mode user` for user-token flows (initiated/list/detail/tasks/cancel/approve/reject) and `--mode bot` for bot-token flows (definitions/schema/create/comment).
 
 ## List Approvals Initiated By Current User
 
@@ -19,18 +21,6 @@ Uses the grouped user approval OAuth bundle when auth is needed; do not generate
 ```bash
 bash skills/feishu-approval/scripts/approval_list_initiated.sh
 ```
-
-If this returns `oauth-pending`, send only `verification_url` to the user and wait for "已授权". Then complete the saved device flow:
-
-```bash
-bash skills/feishu-approval/scripts/approval_auth_complete.sh
-```
-
-After it returns `user-ready`, rerun the original `approval_list_initiated.sh` command. Do not run raw `lark_cli_run.sh auth login`, `config bind`, `auth login --recommend`, `auth qrcode`, or naked `npx -y @larksuite/cli@latest auth ...` commands.
-
-If the tool runner reports `Command still running`, keep polling the same process. Do not send a link until the script returns JSON. Never switch to `auth login --recommend` or `auth qrcode` while waiting. The only valid OAuth link is the exact `verification_url` field from `oauth-pending`; never compose `open.feishu.cn/open-apis/authen/authenticate` links or add app/tenant scopes to the user OAuth URL.
-
-If it returns `not-configured` with `reason=openclaw_bind_failed` or `reason=reusable_app_credentials_missing`, the script already attempted automatic OpenClaw binding. Do not ask for App ID or App Secret; ask the user to bind/recreate/restart the OpenClaw agent so `~/.openclaw/openclaw.json` contains the Feishu app.
 
 Optional filters:
 
@@ -41,9 +31,7 @@ bash skills/feishu-approval/scripts/approval_list_initiated.sh \
   --page-limit 5
 ```
 
-Summarize the result by approval name, group, status, key summaries, instance code, and timestamps when available.
-
-The script normalizes list output to `items[]` and includes `status_label`; do not display raw numeric status codes when a label is present.
+Summarize the result by approval name, group, status, key summaries, instance code, and timestamps when available. The script normalizes list output to `items[]` and includes `status_label`; do not display raw numeric status codes when a label is present.
 
 ## Get Approval Instance Details
 
@@ -51,12 +39,6 @@ Uses the grouped user approval OAuth bundle when auth is needed.
 
 ```bash
 bash skills/feishu-approval/scripts/approval_get_instance.sh --instance-code <instance_code>
-```
-
-If this returns `oauth-pending`, use the same completion step:
-
-```bash
-bash skills/feishu-approval/scripts/approval_auth_complete.sh
 ```
 
 Use details to inspect the original form payload before preparing a resubmission.
@@ -83,7 +65,7 @@ Use task list fields `task_id`, `instance_code`, `title`, `initiator_name`, `sum
 
 ## List Approval Definitions Visible To Current User
 
-Use this for full visible approval catalog requests. It uses the grouped user approval OAuth bundle, which includes `serviceaccount:approval:approvals:read`:
+Use this only for full visible approval catalog requests. It uses the grouped user approval OAuth bundle, which includes `serviceaccount:approval:approvals:read`:
 
 ```bash
 bash skills/feishu-approval/scripts/approval_list_definitions.sh
@@ -145,15 +127,9 @@ bash skills/feishu-approval/scripts/approval_comment_instance.sh \
 
 Pass `--open-id <ou_xxx>` only when it is the current comment operator's open_id. The script sends `user_id_type=open_id` and wraps the comment as Feishu's required `content` JSON string. Do not reuse an arbitrary initiator open_id, and do not use `user_id_type=user_id` for comments unless an API error explicitly requires it, because that path needs `contact:user.employee_id:readonly`.
 
-If app comment permission is missing, generate:
-
-```bash
-bash skills/feishu-approval/scripts/approval_permission_link.sh --purpose comment
-```
-
 ## Get Approval Definition Schema
 
-Use this before constructing a brand-new payload, when form options may have changed, or after Feishu returns parameter errors such as `1390001` or `1395001`:
+Use this before constructing a brand-new payload, when form options may have changed, or after Feishu returns parameter errors such as `1390001` or `1395001`.
 
 Uses app/tenant scope `approval:approval:readonly`. If missing, the helper returns a `token_type=tenant` link for the grouped app approval bundle: `approval:approval:readonly` and `approval:instance`.
 
@@ -183,10 +159,18 @@ If the command returns missing app scopes, stop and show the missing scopes. Do 
 
 If the command returns `invalid-payload` or `form-parameter-error`, stop after reporting the reason and log ID. Do not rewrite the payload repeatedly, do not call raw `lark_cli_run.sh api POST`, and do not web search for form examples. For generic `1395001` on payloads with amount controls, check the amount min/max range before changing value formats.
 
-For app/admin approval permission errors, generate the grouped app/tenant permission link:
+## Generate App/Tenant Permission Links
+
+Use these commands only for app/admin permission recovery. User OAuth scopes are requested separately by auth links.
 
 ```bash
 bash skills/feishu-approval/scripts/approval_permission_link.sh --purpose app
+bash skills/feishu-approval/scripts/approval_permission_link.sh --purpose comment
+bash skills/feishu-approval/scripts/approval_permission_link.sh --purpose all
 ```
 
-Send the generated `console_url` and the scope list to the user/admin. This link requests tenant app scopes with `token_type=tenant`. User OAuth scopes are requested separately by auth links.
+- `app`: grouped app approval bundle for definition reads and submissions.
+- `comment`: approval comment permission only.
+- `all`: app bundle plus comment permission; use only when the user explicitly wants all app-side approval actions approved together.
+
+Send the generated `console_url` and scope list to the user/admin. These links request tenant app scopes with `token_type=tenant`.

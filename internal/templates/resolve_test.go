@@ -78,6 +78,21 @@ func TestOpenClawWorkerLarkCLIScopeUsage(t *testing.T) {
 	}
 }
 
+func TestOpenClawWorkerFeishuApprovalReferences(t *testing.T) {
+	skill := readTemplateFile(t, OpenClawWorkerRoot+"/workspace/skills/feishu-approval/SKILL.md")
+	for _, ref := range []string{
+		"references/commands.md",
+		"references/oauth-recovery.md",
+		"references/minimal-permissions.md",
+		"references/submission.md",
+	} {
+		if !strings.Contains(skill, ref) {
+			t.Fatalf("feishu-approval SKILL.md should reference %s", ref)
+		}
+		readTemplateFile(t, OpenClawWorkerRoot+"/workspace/skills/feishu-approval/"+ref)
+	}
+}
+
 func readTemplateFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := fs.ReadFile(FS(), path)

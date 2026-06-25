@@ -28,42 +28,22 @@ This bundle covers initiated/history/detail reads, current user's task list, tas
 
 The `lark-cli auth login --scope` flag is a single string value. Approval helpers must pass this bundle as one space-separated scope-list to `lark_cli_auth_start.sh`, not as repeated `--scope` flags.
 
-For app-identity approval operations, generate one Feishu Open Platform tenant link for the app approval bundle:
-
-```bash
-bash skills/feishu-approval/scripts/approval_permission_link.sh --purpose app
-```
+For app-identity approval operations, generate one Feishu Open Platform tenant link for the app approval bundle. Use the permission-link commands in `commands.md`.
 
 The app/tenant bundle is:
 
 - `approval:approval:readonly`: read approval definition form fields and nodes.
 - `approval:instance`: create native approval instances with the app/bot token.
 
-Approval comments use a separate app/tenant scope:
-
-```bash
-bash skills/feishu-approval/scripts/approval_permission_link.sh --purpose comment
-```
+Approval comments use a separate app/tenant scope.
 
 The comment helper uses `user_id_type=open_id` for the comment operator. Do not request `contact:user.employee_id:readonly` just to add approval comments.
 
 The generated `console_url` includes `token_type=tenant`; this is required for bot/app calls that use `tenant_access_token`.
 
-The script also accepts aliases for common app-side requests:
+The permission-link script also accepts aliases for common app-side requests. `definition` and `submit` map to the app/tenant bundle (`approval:approval:readonly`, `approval:instance`). `all` requests that bundle plus `approval:instance.comment`; use it only when the user explicitly wants submission/schema and comments covered in one admin request.
 
-```bash
-bash skills/feishu-approval/scripts/approval_permission_link.sh --purpose definition
-bash skills/feishu-approval/scripts/approval_permission_link.sh --purpose submit
-bash skills/feishu-approval/scripts/approval_permission_link.sh --purpose all
-```
-
-`definition` and `submit` map to the app/tenant bundle (`approval:approval:readonly`, `approval:instance`). `all` requests that bundle plus `approval:instance.comment`; use it only when the user explicitly wants submission/schema and comments covered in one admin request.
-
-For user-visible approval definition catalogs, use the same grouped user OAuth bundle:
-
-```bash
-bash skills/feishu-approval/scripts/approval_list_definitions.sh
-```
+For user-visible approval definition catalogs, use the same grouped user OAuth bundle. Use the list-definitions command in `commands.md`.
 
 The catalog API uses `serviceaccount:approval:approvals:read`. Despite the `serviceaccount:` prefix, this scope is part of the grouped user OAuth flow for listing approval definitions visible to the current user.
 
@@ -80,24 +60,10 @@ The catalog API uses `serviceaccount:approval:approvals:read`. Despite the `serv
 
 ## Practical Discovery Strategy
 
-When the user asks to resubmit or continue from a known previous approval, first use their previously initiated approvals:
-
-```bash
-bash skills/feishu-approval/scripts/approval_list_initiated.sh
-```
-
-This reveals approval names and `definition_code` values that the user has actually used. If OAuth is needed, the script requests the grouped user approval OAuth bundle once.
+When the user asks to resubmit or continue from a known previous approval, first use their previously initiated approvals. This reveals approval names and `definition_code` values that the user has actually used. If OAuth is needed, the script requests the grouped user approval OAuth bundle once.
 
 If the user asks for a full catalog of visible approval definitions, use `approval_list_definitions.sh`. If OAuth is needed, request the grouped user approval OAuth bundle; do not generate an app/admin permission link for this catalog query.
 
 If the user has already asked to query their approval records, showing the grouped user approval OAuth authorization URL is enough. Do not add a separate "同意授权" round before generating the URL.
 
-Only show the OAuth URL after a script returns `oauth-pending`. If the command is still running, keep polling it. Approval user OAuth must start through `lark_cli_auth_start.sh --no-wait --json`, normally via the approval scripts. Do not run `auth login --recommend`, `auth qrcode`, or naked `npx -y @larksuite/cli@latest auth ...`. Do not hand-compose `open.feishu.cn/open-apis/authen/authenticate` URLs, do not reuse an app_id from memory, and do not put app/tenant scopes such as `approval:approval:readonly` into the user OAuth link.
-
-After the user says "已授权", complete the saved device flow with:
-
-```bash
-bash skills/feishu-approval/scripts/approval_auth_complete.sh
-```
-
-Only after this returns `user-ready` should the agent rerun the original approval command.
+Only show the OAuth URL after a script returns `oauth-pending`; follow `oauth-recovery.md` for pending links, still-running commands, and saved device-flow completion.
