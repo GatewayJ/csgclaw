@@ -2,7 +2,7 @@ package system
 
 import "embed"
 
-const skillsRoot = "embed/system-skills"
+const skillsRoot = "embed"
 
-//go:embed embed/system-skills
+//go:embed embed
 var skillsFS embed.FS

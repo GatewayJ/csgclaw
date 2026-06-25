@@ -38,8 +38,8 @@ func TestResolveSource(t *testing.T) {
 
 func TestListRejectsEmbeddedDirectoryWithoutSkillFile(t *testing.T) {
 	_, err := listFS(fstest.MapFS{
-		"embed/system-skills/broken/README.md": {Data: []byte("# Broken\n")},
-	}, "embed/system-skills")
+		"embed/broken/README.md": {Data: []byte("# Broken\n")},
+	}, "embed")
 	if err == nil || !strings.Contains(err.Error(), "SKILL.md") {
 		t.Fatalf("listFS() error = %v, want missing SKILL.md error", err)
 	}
