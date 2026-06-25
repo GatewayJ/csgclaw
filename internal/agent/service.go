@@ -560,7 +560,7 @@ func (s *Service) ensureManager(ctx context.Context, forceRecreate bool, imageOv
 			ParticipantID: ManagerParticipantID,
 			AgentName:     ManagerName,
 			Profile:       s.runtimeProfileForKind(runtimeKind, ManagerUserID, ManagerName, "", startProfile),
-		}, RoleManager); err != nil {
+		}); err != nil {
 			return fmt.Errorf("provision bootstrap manager runtime: %w", err)
 		}
 		return nil
@@ -1631,7 +1631,7 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		AgentName:        name,
 		Profile:          runtimeProfile,
 		WorkspaceOverlay: strings.TrimSpace(spec.FromTemplate),
-	}, RoleWorker); err != nil {
+	}); err != nil {
 		return Agent{}, fmt.Errorf("provision worker runtime: %w", err)
 	}
 	if testCreateGatewayBoxHook != nil && isGatewayRuntimeKind(runtimeKind) {
@@ -1824,11 +1824,11 @@ func (s *Service) provisionRuntime(ctx context.Context, rt agentruntime.Runtime,
 	return provisioner.Provision(ctx, req)
 }
 
-func (s *Service) provisionRuntimeWithDefaultSystemSkills(ctx context.Context, rt agentruntime.Runtime, runtimeKind string, req agentruntime.ProvisionRequest, role string) error {
+func (s *Service) provisionRuntimeWithDefaultSystemSkills(ctx context.Context, rt agentruntime.Runtime, runtimeKind string, req agentruntime.ProvisionRequest) error {
 	if err := s.provisionRuntime(ctx, rt, runtimeKind, req); err != nil {
 		return err
 	}
-	if err := s.installDefaultSystemSkills(req.AgentName, runtimeKind, role); err != nil {
+	if err := s.installDefaultSystemSkills(req.AgentName, runtimeKind); err != nil {
 		return fmt.Errorf("install default system skills: %w", err)
 	}
 	return nil
@@ -1845,7 +1845,7 @@ func (s *Service) provisionRuntimeForAgent(ctx context.Context, rt agentruntime.
 		AgentName:        strings.TrimSpace(got.Name),
 		Profile:          s.runtimeProfileForAgent(got),
 		WorkspaceOverlay: strings.TrimSpace(workspaceOverlay),
-	}, recreateTemplateRole(got))
+	})
 }
 
 func participantIDForAgent(agentName, agentID string) string {

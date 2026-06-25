@@ -250,7 +250,7 @@ func managedWorkspaceSkillNames(runtimeKind, role string) (map[string]struct{}, 
 	if err != nil {
 		return nil, err
 	}
-	systemNames, err := defaultSystemSkillNames(runtimeKind, role)
+	systemNames, err := defaultSystemSkillNames()
 	if err != nil {
 		return nil, err
 	}

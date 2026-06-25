@@ -722,7 +722,7 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 		ParticipantID: participantIDForAgent(createSpec.AgentName, createSpec.AgentID),
 		AgentName:     createSpec.AgentName,
 		Profile:       runtimeProfile,
-	}, recreateTemplateRole(got)); err != nil {
+	}); err != nil {
 		return Agent{}, fmt.Errorf("provision agent runtime: %w", err)
 	}
 	handle, err := runtimeImpl.New(ctx, createSpec)

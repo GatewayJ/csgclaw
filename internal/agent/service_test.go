@@ -1747,7 +1747,7 @@ func TestPreserveWorkspaceSkillsDropsDefaultSystemSkills(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(skillsRoot, "skill-installer", "SKILL.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("old skill-installer restored unexpectedly, err=%v", err)
 	}
-	if err := svc.installDefaultSystemSkills("alice", RuntimeKindOpenClawSandbox, RoleWorker); err != nil {
+	if err := svc.installDefaultSystemSkills("alice", RuntimeKindOpenClawSandbox); err != nil {
 		t.Fatalf("installDefaultSystemSkills() error = %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(skillsRoot, "skill-installer", "SKILL.md"))
