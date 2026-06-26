@@ -323,7 +323,7 @@ func TestEnsureAgentWorkspaceCopiesEmbeddedTemplate(t *testing.T) {
 		filepath.Join(root, "AGENT.md"),
 		filepath.Join(root, "SOUL.md"),
 		filepath.Join(root, "memory", "MEMORY.md"),
-		filepath.Join(root, "skills", "skill-creator", "SKILL.md"),
+		filepath.Join(root, "skills", "agent-teams", "SKILL.md"),
 	} {
 		if info, err := os.Stat(path); err != nil {
 			t.Fatalf("os.Stat(%q) error = %v", path, err)
