@@ -857,7 +857,7 @@ export const messages = {
     hubSkillUploadSubmitting: "Uploading...",
     hubSkillUploadSubmit: "Upload",
     hubSkillUploadFailed: "Failed to upload the skill. Please try again later.",
-    hubSkillSystemBadge: "Built-in",
+    hubSkillSystemBadge: "builtin",
     hubAllTab: "All",
     hubTemplateCountSuffix: "Agent templates",
     hubSourceLabel: "Source",
