@@ -2,7 +2,7 @@
 
 本文档约束 CSGClaw 为 agent 增加 MCP 能力的实现方案。文件名保留 OpenClaw 历史语境，但方案本身按通用 runtime 能力设计：MCP 配置先存入 agent 的 `runtime_options.mcp`，再由各 runtime adapter 在 provision/recreate 阶段渲染为对应运行时的原生配置。
 
-阶段一采用“变更后需要重建”的策略：MCP 配置保存后进入 CSGClaw 持久化状态，并标记 agent 需要重建；执行 agent recreate 后，新 runtime 进程加载最新 MCP 配置。暂不处理运行中配置写入触发的 hot reload race，只在关键路径打日志，方便后续分析。
+阶段一沿用现有 gateway runtime 配置变更路径：MCP 配置保存后进入 CSGClaw 持久化状态，并立即触发现有 agent recreate 流程；recreate 成功后，新 runtime 进程加载最新 MCP 配置，`env_restart_required` 被清除。recreate 失败时，已保存的 MCP 配置保留在 agent state 中，`env_restart_required` 继续为 true，用户可通过现有“重建”动作重试。阶段一不依赖 runtime hot reload。
 
 ## 1. 目标与边界
 
@@ -11,7 +11,7 @@
 - 所有 runtime kind 使用统一 API 形态：`runtime_options.mcp`。
 - MCP 配置由 CSGClaw 管理，随 agent create/update 持久化。
 - 创建 agent 时，MCP 配置随首次 provision 生效。
-- 修改已有 agent 的 MCP 配置后，标记“需要重建”，通过现有 agent recreate 流程生效。
+- 修改已有 agent 的 MCP 配置后，后端通过现有 agent recreate 流程自动生效。
 - runtime adapter 负责把 `runtime_options.mcp` 转成原生配置；OpenClaw adapter 渲染到 `mcp.servers`。
 
 非目标：
@@ -233,7 +233,10 @@ type RuntimeMCPPolicy interface {
 
 阶段一默认策略：
 
-- `runtime_options.mcp` 变更后需要重建。
+- `runtime_options.mcp` 变更后需要通过 recreate 生效。
+- 后端保存已有 agent 的 MCP 配置后，立即调用现有 recreate 流程。
+- recreate 成功后清除 `env_restart_required`。
+- recreate 失败时保留 `env_restart_required = true`，让用户可通过现有重建动作重试。
 - 不依赖 runtime hot reload。
 - 如果某个 runtime adapter 已确认支持安全热应用，可以后续单独改 policy。
 
@@ -249,39 +252,43 @@ PicoClaw/Codex/其它 runtime：
 - 由对应 runtime adapter 渲染为其原生 MCP 配置或启动参数。
 - 不允许静默忽略已保存 MCP 配置；如果 adapter 暂无可生效路径，应在 validate/provision 阶段返回明确错误，避免用户误以为配置已经生效。
 
-### 4.4 保存与重建
+### 4.4 保存与自动重建
 
 保存已有 agent 的 MCP 配置时：
 
 1. 合并并校验新的 `runtime_options`。
 2. 校验 `runtime_options.mcp` 的 JSON 和 server entry。
 3. 持久化到 agent state。
-4. 如果 `runtime_options.mcp` 发生变化，设置 `agent_profile.env_restart_required = true`。
-5. 不主动 stop running runtime。
-6. 不依赖 runtime hot reload。
+4. 如果 `runtime_options.mcp` 发生变化，设置 `agent_profile.env_restart_required = true`，作为持久化重建标记。
+5. 对支持 MCP 渲染的 gateway runtime，立即调用现有 `Service.Recreate`。
+6. `Recreate` 成功后，新 runtime 进程加载最新 MCP 配置，`persistRecreatedAgent` 清除 `env_restart_required`。
+7. `Recreate` 失败时，返回错误；已保存 MCP 配置保留，`env_restart_required` 保留为 true，用户可通过现有 recreate action 重试。
+8. 不依赖 runtime hot reload。
 
 生效方式：
 
-1. 用户点击“重建”或“保存并重建”。
-2. 后端调用现有 `POST /api/v1/agents/{id}/recreate`。
-3. `Service.Recreate` 删除旧 runtime handle。
-4. `Provision` 使用最新 `Agent.RuntimeOptions` 重新生成 runtime 原生配置。
-5. 新 runtime 进程启动并加载 MCP。
-6. `persistRecreatedAgent` 成功后清除 `env_restart_required`。
+1. 用户保存 MCP 配置。
+2. 后端持久化最新 `Agent.RuntimeOptions`。
+3. 后端调用现有 `Service.Recreate`。
+4. `Service.Recreate` 删除旧 runtime handle。
+5. `Provision` 使用最新 `Agent.RuntimeOptions` 重新生成 runtime 原生配置。
+6. 新 runtime 进程启动并加载 MCP。
+7. `persistRecreatedAgent` 成功后清除 `env_restart_required`。
 
 这不是重启 CSGClaw server，而是重建该 agent 的 runtime 进程。
 
 ### 4.5 与现有 profile 热同步路径的关系
 
-当前 gateway runtime 的 profile runtime input 变化时，CSGClaw 已有 `syncGatewayHostConfig` 路径会重写 host config。阶段一暂不处理这条路径和 MCP 变更之间的 hot reload race。
+当前 gateway runtime 的 profile runtime input 变化时，CSGClaw 已有 `syncGatewayHostConfig` 路径会重写 host config。因为 OpenClaw 配置是从 embedded defaults 重新渲染，而不是读旧文件做增量修改，所以该路径也必须接收当前 agent 的 `runtime_options`，并在重写 host config 时保留/渲染 `runtime_options.mcp`。否则 profile 热同步会把已经生效的 `mcp.servers` 覆盖掉。
 
 实现要求：
 
-- 保持现有 `syncGatewayHostConfig` 行为。
-- 不因为 MCP pending 状态阻塞 profile 配置热同步。
-- 在 `syncGatewayHostConfig` 即将写 host config 时，如果当前 agent 配置了 `runtime_options.mcp` 或 `env_restart_required = true`，打印结构化日志。
+- 保持现有 `syncGatewayHostConfig` 的 profile 热同步能力。
+- `syncGatewayHostConfig` 调用 OpenClaw/PicoClaw `EnsureConfig` 时必须传入当前 `Agent.RuntimeOptions`。
+- `EnsureConfig`/`renderConfig` 每次写 host config 都应根据当前 `runtime_options.mcp` 渲染 runtime 原生 MCP 配置。
+- 如果当前 agent 配置了 `runtime_options.mcp` 或 `env_restart_required = true`，打印结构化日志。
 - 日志至少包含 `agent_id`、`agent_name`、`runtime_kind`、`mcp_configured`、`env_restart_required`、`stage`。
-- 日志不要求解决 race，只要求后续能定位“保存 MCP 后是否又发生了 host config 写入”。
+- 日志用于定位“保存 MCP 后是否又发生了 host config 写入”，但正确性必须由重新渲染 MCP 保证。
 
 建议日志点：
 
@@ -290,6 +297,8 @@ PicoClaw/Codex/其它 runtime：
 - runtime provision 开始渲染 MCP。
 - runtime provision 写入原生配置成功。
 - `syncGatewayHostConfig` 在 MCP configured 或 restart required 状态下执行。
+- recreate 成功。
+- recreate 失败且保留 `env_restart_required`。
 
 ## 5. API 设计
 
@@ -360,12 +369,12 @@ PicoClaw/Codex/其它 runtime：
 }
 ```
 
-成功返回沿用现有 agent response，`runtime_options` 中包含当前 MCP 配置：
+成功返回沿用现有 agent response，`runtime_options` 中包含当前 MCP 配置。已有 agent 的 MCP 变更会在返回前尝试自动 recreate；如果 recreate 成功，`env_restart_required` 为 false 或省略：
 
 ```json
 {
   "agent_profile": {
-    "env_restart_required": true
+    "env_restart_required": false
   },
   "runtime_options": {
     "mcp": {
@@ -375,7 +384,7 @@ PicoClaw/Codex/其它 runtime：
 }
 ```
 
-前端继续使用已有 `env_restart_required` badge 和 recreate action。
+如果 update 已持久化但 recreate 失败，后端返回错误；前端应刷新 agent 状态并继续使用已有 `env_restart_required` badge 和 recreate action 作为重试入口。
 
 ## 6. 前端 UI 设计
 
@@ -399,8 +408,8 @@ MCPRuntimeOptionsPanel
 
 - 标题：`MCP Servers`
 - JSON 编辑器：textarea 或轻量 code editor，保存前做 JSON parse。
-- 操作按钮：保存、保存并重建、清除配置、取消。
-- 状态提示：有未生效变更时显示“重建后生效”，并提供“重建”按钮。
+- 操作按钮：保存、清除配置、取消。
+- 状态提示：保存时提示会自动重建 runtime；如果后端返回 recreate 失败，刷新 agent 并显示现有 `env_restart_required` badge 和“重建”按钮。
 
 创建 agent 时：
 
@@ -413,28 +422,30 @@ MCPRuntimeOptionsPanel
 - 默认把现有 `runtime_options.mcp` 填回编辑器。
 - 用户保存时，前端将编辑后的 MCP 合并回完整 `runtime_options` 后提交。
 - 用户选择“清除配置”后，提交合并后的 `runtime_options`，其中 `mcp` 为 `null` 或删除 `mcp` key。
-- 保存成功但未重建时，使用现有 `profileRestartRequired` badge，并在详情页 runtime section 展示重建 CTA。
+- 保存成功表示后端已完成自动 recreate 并刷新为新 runtime。
+- 保存失败时刷新 agent；如果 `env_restart_required` 为 true，使用现有 `profileRestartRequired` badge，并在详情页 runtime section 展示重建 CTA。
 
-### 6.3 重建交互
+### 6.3 自动重建交互
 
-MCP 修改保存后，前端不自动刷新或假装生效。
+MCP 修改保存后，后端负责自动重建 runtime；前端不再提供专门的“保存并重建”主流程。
 
 推荐交互：
 
 1. 用户点击“保存”：
    - 保存合并后的 `runtime_options`。
-   - 返回 agent response。
-   - 显示 `Recreate required` badge。
-   - 在 MCP 区域显示“已保存，重建后生效”状态。
-2. 用户点击“保存并重建”：
-   - 先调用 update。
-   - update 成功后调用 `POST /api/v1/agents/{id}/recreate`。
-   - recreate 成功后刷新 agent 列表和详情。
+   - 后端自动调用 recreate。
+   - update 成功返回 agent response。
+   - 刷新 agent 列表和详情。
+   - 不显示 `Recreate required` badge。
+2. update 返回错误：
+   - 展示错误。
+   - 刷新 agent 列表和详情。
+   - 如果刷新后的 agent 仍有 `env_restart_required`，显示现有重建 CTA。
 3. 用户点击已有 agent action 的“重建”：
    - 复用现有 recreate action。
    - 成功后 `env_restart_required` 清除。
 
-如果 agent 正在运行，保存 MCP 配置不停止当前 runtime。当前 runtime 继续使用旧 MCP 配置，直到 recreate 完成。
+如果 agent 正在运行，保存 MCP 配置会触发 runtime recreate。当前路径会重建该 agent 的 runtime 进程，不依赖 hot reload。
 
 ## 7. 验证计划
 
@@ -444,11 +455,13 @@ MCP 修改保存后，前端不自动刷新或假装生效。
 - 非 object server entry 报错。
 - 缺少 `command` 和 `url` 的 server entry 报错。
 - 保存 MCP 时保留其它 runtime options。
-- MCP 配置变更后 agent 标记 `env_restart_required`。
+- MCP 配置变更后先标记 `env_restart_required`，随后自动调用 `Recreate`。
 - `Recreate` 后重新 provision，并把最新 MCP 传给 runtime adapter。
+- 自动 `Recreate` 成功后清除 `env_restart_required`。
+- 自动 `Recreate` 失败后保留已保存的 `runtime_options.mcp` 和 `env_restart_required = true`。
 - `openclawsandbox.renderConfig` 能把 `runtime_options.mcp.mcpServers` 渲染为 `mcp.servers`。
 - OpenClaw `null` 清除和空集合渲染行为正确。
-- `syncGatewayHostConfig` 在 MCP configured 或 restart required 状态下会打出可诊断日志。
+- `syncGatewayHostConfig` 在 MCP configured 或 restart required 状态下会打出可诊断日志，并且重写 host config 时不会丢失 MCP 配置。
 
 前端测试：
 
@@ -457,24 +470,27 @@ MCP 修改保存后，前端不自动刷新或假装生效。
 - 保存 MCP 时不覆盖其它 runtime options。
 - 替换 MCP 时提交合并后的 `runtime_options`。
 - 清除 MCP 时提交合并后的 `runtime_options`。
-- 保存并重建按顺序调用 update 和 recreate。
+- 保存已有 agent 的 MCP 配置时只调用 update；recreate 由后端自动完成。
+- update 失败后刷新 agent，并能展示现有 recreate required 状态。
 
 手工验证：
 
 1. 创建 agent，带一个 stdio MCP server。
 2. 对 OpenClaw agent，检查宿主机 `~/.csgclaw/agents/<agent>/.openclaw/openclaw.json` 包含 `mcp.servers`。
 3. 启动 agent 后确认 runtime 能看到 MCP tool。
-4. 修改 MCP 配置并只保存，确认 UI 标记需要重建，旧 runtime 不被停止。
-5. 点击重建，确认新配置生效，`env_restart_required` 清除。
-6. 在 MCP pending 状态下修改 profile，确认日志能看到 host config sync 记录。
+4. 修改 MCP 配置并保存，确认后端自动重建 runtime。
+5. 自动重建成功后确认新配置生效，`env_restart_required` 清除。
+6. 模拟 recreate 失败，确认已保存 MCP 配置保留，`env_restart_required` 为 true，现有重建 action 可恢复。
+7. MCP 配置生效后修改 profile，确认 host config sync 不会丢失 `mcp.servers`，并能看到诊断日志。
 
 ## 8. 实施顺序
 
 1. 增加 `runtime_options.mcp` parser/validator 和共享 helper。
 2. 扩展 provision request，把 `Agent.RuntimeOptions` 传到 runtime provision 边界。
-3. 增加通用 MCP restart policy：`runtime_options.mcp` 变化后标记 `env_restart_required`。
+3. 增加通用 MCP recreate policy：`runtime_options.mcp` 变化后标记 `env_restart_required`，并对已支持的 gateway runtime 自动调用现有 `Recreate`。
 4. 增加关键路径结构化日志，尤其是 MCP save/provision 和 gateway host config sync。
 5. 实现 OpenClaw adapter，把 `runtime_options.mcp.mcpServers` 渲染到 `openclaw.json` 的 `mcp.servers`。
-6. 接入其它 runtime adapter 的 MCP 原生渲染路径；没有可生效路径时返回明确错误，不静默忽略。
-7. 接入前端 Agent 创建/详情页 MCP runtime options UI。
-8. 补充 `docs/api.zh.md` 和相关英文 API 文档。
+6. 让 `syncGatewayHostConfig` 重写 host config 时也传入并渲染当前 `Agent.RuntimeOptions`，避免 profile 热同步丢失 MCP。
+7. 接入其它 runtime adapter 的 MCP 原生渲染路径；没有可生效路径时返回明确错误，不静默忽略。
+8. 接入前端 Agent 创建/详情页 MCP runtime options UI。
+9. 补充 `docs/api.zh.md` 和相关英文 API 文档。
