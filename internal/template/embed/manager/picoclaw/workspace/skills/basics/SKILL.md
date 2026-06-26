@@ -44,10 +44,11 @@ For hub template selection and `--from-template` creation, use `agent-creator` i
 Create a room:
 
 ```bash
-csgclaw-cli room create --title test-room --creator-id manager --member-ids manager,dev --channel csgclaw
+csgclaw-cli room create --title test-room --creator-id admin --member-ids manager,<worker-participant-id> --channel csgclaw
 ```
 
-Use CSGClaw participant IDs in CSGClaw-channel room, member, and message commands. The default manager participant is `manager`; its backing agent ID is `u-manager`.
+Use CSGClaw participant IDs in CSGClaw-channel room, member, and message commands. The default human requester is `admin`; use the actual requester participant ID if it is different. The default manager participant is `manager`; its backing agent ID is `u-manager`.
+Resolve worker participant IDs with `participant list` before using them. Do not copy sample names unless they appear as real participant IDs.
 
 List rooms and check whether a room is direct:
 
@@ -83,9 +84,9 @@ If the current room is direct in the local `csgclaw` channel, do not try to add 
 
 ```bash
 csgclaw-cli room create \
-  --title "manager-dev-alex" \
-  --creator-id manager \
-  --member-ids manager,dev,alex \
+  --title "admin-manager-workers" \
+  --creator-id admin \
+  --member-ids manager,<worker-participant-id>,<another-worker-participant-id> \
   --channel csgclaw
 ```
 
@@ -93,9 +94,9 @@ For Feishu, use the configured Feishu participant IDs:
 
 ```bash
 csgclaw-cli room create \
-  --title "manager-dev-alex" \
-  --creator-id manager \
-  --member-ids manager,dev,alex \
+  --title "admin-manager-workers" \
+  --creator-id admin \
+  --member-ids manager,<worker-participant-id>,<another-worker-participant-id> \
   --channel feishu
 ```
 
@@ -144,6 +145,8 @@ Do **not** post `@alex` plain text in the room instead of `--mention-id`.
 - When a **new** worker is needed, use `agent-creator`; do not run bare `participant create --bind create` from this skill.
 - Verify room membership with `member list` after adding a member when room presence matters.
 - A direct room cannot accept an added participant as a new member. Create a new room with `--member-ids` containing the existing DM participants and the new participant.
+- When creating a room from a direct/private chat with admin or another human requester, preserve the requester as `--creator-id` (default `admin`) and include `manager` plus the requested participants in `--member-ids`. Do not use `manager` as the creator just because the manager runs the CLI command.
+- Replace `<worker-participant-id>` placeholders with actual IDs from `participant list`; a display name such as `dev` or `qa` is not necessarily a valid participant ID.
 - For Feishu, prefer `room create --member-ids` for new groups after Feishu credentials exist; it creates the chat first, then invites configured worker bot apps. Use `member create` only for an existing Feishu group. Both paths require manager app scopes such as `im:chat.members:write_only` or `im:chat`.
 - Use participant IDs at the CLI boundary. For the local CSGClaw manager use `manager`; use `u-manager` only when calling an agent route or the Feishu credential config API field that still names its key `bot_id`.
 - Never notify a worker with plain-text `@name`; always use `message create --mention-id` and verify `<at user_id="...">` in `message list`.

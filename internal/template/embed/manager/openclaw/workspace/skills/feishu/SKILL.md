@@ -82,10 +82,11 @@ CSGClaw cannot silently grant Feishu/Lark app scopes from inside the OpenClaw ru
 For new Feishu groups, after the manager and worker Feishu configs exist, prefer creating the group with all participant IDs already included:
 
 ```bash
-csgclaw-cli room create --title dev-ui-group --creator-id manager --member-ids manager,dev --channel feishu
+csgclaw-cli room create --title worker-group --creator-id admin --member-ids manager,<worker-participant-id> --channel feishu
 ```
 
 CSGClaw creates the Feishu chat first, then resolves those participant IDs to configured Feishu app credentials and invites the worker bot apps. This keeps the created `chat_id` visible if the invite fails, but it still requires manager app group scopes for chat creation and member invites.
+When creating the group from a direct/private request, keep the human requester as `--creator-id` (default `admin`) so the requester is recorded in the CSGClaw room members. Include `manager` plus the requested worker participant IDs in `--member-ids`, and replace `<worker-participant-id>` with IDs from `participant list`.
 
 For Feishu group operations, `room create --member-ids`, `csgclaw-cli member list`, and `member create` require manager app scopes such as:
 
