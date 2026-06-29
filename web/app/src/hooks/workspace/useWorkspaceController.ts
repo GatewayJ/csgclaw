@@ -12,7 +12,7 @@ import {
 } from "@/models/conversations";
 import { isAgentRunning, resolveAgentAvatarFallback, resolveAgentChannelUserID } from "@/models/agents";
 import { MANAGER_AGENT_ID, MANAGER_AGENT_NAME, MANAGER_PARTICIPANT_ID } from "@/shared/constants/agents";
-import { WorkspacePaneTypes, paneFromLocation } from "@/models/routing";
+import { WorkspacePaneTypes, WorkspaceTabs, paneFromLocation } from "@/models/routing";
 import { useWorkspaceUiStore } from "./workspaceUiStore";
 import { useWorkspaceData } from "./useWorkspaceData";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation";
@@ -211,11 +211,13 @@ export function useWorkspaceController() {
     selectHub,
     selectTasks,
     setCollapsedWorkspaceGroups,
+    setIsSidebarCollapsed,
     setWorkspaceTab,
     t,
     theme,
     workspaceTab,
   });
+  const auth = useAuthController(t);
   const { hub, refreshHubTemplates } = useWorkspaceHubController({
     hubLoaded,
     hubTemplates,
@@ -238,7 +240,6 @@ export function useWorkspaceController() {
     refreshWorkspaceAppVersion,
     t,
   });
-  const auth = useAuthController(t);
   const agent = useAgentController({
     activeConversationId,
     activePane,
@@ -634,7 +635,7 @@ export function useWorkspaceController() {
       hub,
       onSelectHubSkill: selectHubSkill,
       onSelectHubTemplate: selectHubTemplate,
-      onSelectHub: selectHub,
+      onSelectHub: () => shell.selectWorkspaceTab(WorkspaceTabs.hub),
       onSelectTask: selectTasks,
       onOpenCreateTask: task.openCreateTaskModal,
       onViewTaskDetails: task.openParentTaskDetail,

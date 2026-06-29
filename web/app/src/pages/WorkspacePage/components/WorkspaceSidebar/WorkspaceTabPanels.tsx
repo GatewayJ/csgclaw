@@ -1,22 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent } from "react";
-import { FileCode2, Plus, UploadCloud } from "lucide-react";
-import {
-  Button,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogRoot,
-  DialogTitle,
-} from "@/components/ui";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { DragEvent } from "react";
+import { FileCode2, Plus } from "lucide-react";
 import { HubIcon, UsersIcon } from "@/components/ui/Icons";
 import { isDirectConversation, resolveConversationUser } from "@/models/conversations";
 import { modelProviderAvatarPath, providerStatusTone, type ModelProvider } from "@/models/modelProviders";
 import { WorkspacePaneTypes, WorkspaceTabs } from "@/models/routing";
 import { displayTeam } from "@/models/tasks";
+import { skillSourceBadgeName } from "@/models/skillhub";
 import { localizeTemplateSourceTag } from "@/shared/i18n";
 import { WORKSPACE_SECTION_ORDER_STORAGE_KEY } from "@/shared/storage/keys";
+import { SkillUploadDialog } from "./SkillUploadDialog";
 import {
   WorkspaceAgentRow,
   WorkspaceComputerRow,
@@ -132,135 +125,6 @@ const DEFAULT_SECTION_ORDERS = {
     AgentSectionIds.teams,
   ],
 } as const;
-
-type SkillUploadDialogProps = {
-  busy: boolean;
-  error: string;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (file: File) => Promise<unknown>;
-  open: boolean;
-  t: WorkspaceTabPanelsProps["t"];
-};
-
-function SkillUploadDialog({ open, onOpenChange, onSubmit, busy, error, t }: SkillUploadDialogProps) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [localError, setLocalError] = useState("");
-  const [dragOver, setDragOver] = useState(false);
-
-  useEffect(() => {
-    if (!open) {
-      setSelectedFile(null);
-      setLocalError("");
-      setDragOver(false);
-    }
-  }, [open]);
-
-  const setFile = useCallback(
-    (file: File | null | undefined) => {
-      if (!file) {
-        return;
-      }
-      if (
-        !String(file.name || "")
-          .toLowerCase()
-          .endsWith(".zip")
-      ) {
-        setSelectedFile(null);
-        setLocalError(t("hubSkillUploadDropHint"));
-        return;
-      }
-      setSelectedFile(file);
-      setLocalError("");
-    },
-    [t],
-  );
-
-  const handleFileChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      setFile(event.target.files?.[0] ?? null);
-      event.target.value = "";
-    },
-    [setFile],
-  );
-
-  const handleDrop = useCallback(
-    (event: DragEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      setDragOver(false);
-      setFile(event.dataTransfer.files?.[0] ?? null);
-    },
-    [setFile],
-  );
-
-  const handleSubmit = useCallback(async () => {
-    if (!selectedFile) {
-      setLocalError(t("hubSkillUploadDropHint"));
-      return;
-    }
-    const result = await onSubmit(selectedFile);
-    if (result) {
-      onOpenChange(false);
-    }
-  }, [onOpenChange, onSubmit, selectedFile, t]);
-
-  return (
-    <DialogRoot open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="hub-skill-upload-dialog">
-        <DialogHeader>
-          <div>
-            <DialogTitle>{t("hubSkillUpload")}</DialogTitle>
-            <DialogDescription>{t("hubSkillUploadSubtitle")}</DialogDescription>
-          </div>
-        </DialogHeader>
-        <DialogBody className="hub-skill-upload-body">
-          <button
-            type="button"
-            className={`hub-skill-upload-dropzone ${dragOver ? "drag-over" : ""} ${localError || error ? "error" : ""}`}
-            onClick={() => inputRef.current?.click()}
-            onDragEnter={(event) => {
-              event.preventDefault();
-              setDragOver(true);
-            }}
-            onDragLeave={(event) => {
-              event.preventDefault();
-              setDragOver(false);
-            }}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragOver(true);
-            }}
-            onDrop={handleDrop}
-          >
-            <span className="hub-skill-upload-icon" aria-hidden="true">
-              <UploadCloud size={20} strokeWidth={1.8} />
-            </span>
-            <span className="hub-skill-upload-copy">
-              <strong>{t("hubSkillUploadDropTitle")}</strong>
-              <small>{selectedFile ? selectedFile.name : t("hubSkillUploadDropHint")}</small>
-            </span>
-          </button>
-          <input
-            ref={inputRef}
-            className="hub-skill-upload-input"
-            type="file"
-            accept=".zip,application/zip"
-            onChange={handleFileChange}
-          />
-          {localError || error ? <div className="form-error">{localError || error}</div> : null}
-          <div className="hub-skill-upload-actions">
-            <Button variant="secondaryGray" size="md" onClick={() => onOpenChange(false)} disabled={busy}>
-              {t("close")}
-            </Button>
-            <Button variant="primary" size="md" onClick={() => void handleSubmit()} loading={busy} disabled={busy}>
-              {busy ? t("hubSkillUploadSubmitting") : t("hubSkillUploadSubmit")}
-            </Button>
-          </div>
-        </DialogBody>
-      </DialogContent>
-    </DialogRoot>
-  );
-}
 
 function orderEquals(left: readonly SectionId[], right: readonly SectionId[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
@@ -861,7 +725,7 @@ export function WorkspaceTabPanels({
           >
             {hubSkills.length ? (
               hubSkills.map((item) => {
-                const isSystemSkill = Boolean(item.readonly || item.source === "system");
+                const sourceBadgeName = skillSourceBadgeName(item);
                 return (
                   <button
                     key={item.name}
@@ -877,10 +741,10 @@ export function WorkspaceTabPanels({
                       <span className="workspace-row-title truncate">{item.name}</span>
                       <span className="workspace-row-meta truncate">{item.description || item.name}</span>
                     </span>
-                    {isSystemSkill ? (
+                    {sourceBadgeName ? (
                       <span className="mini-badge template-source-badge">
                         <span className="template-source-badge-dot" aria-hidden="true"></span>
-                        {t("hubSkillSystemBadge")}
+                        {localizeTemplateSourceTag(sourceBadgeName, locale)}
                       </span>
                     ) : null}
                   </button>
@@ -898,6 +762,20 @@ export function WorkspaceTabPanels({
             onSubmit={(file) => hub?.uploadSkill?.(file)}
             busy={hubUploadBusy}
             error={hubUploadError}
+            locale={locale}
+            onInstallRemoteSkill={hub?.installRemoteSkill}
+            onLoadMoreRemoteSkills={hub?.loadMoreRemoteSkills}
+            remoteInstallBusy={hub?.remoteInstallBusy || ""}
+            remoteInstallError={hub?.remoteInstallError || ""}
+            remoteSkillsHasMore={Boolean(hub?.remoteSkillsHasMore)}
+            remoteSkills={hub?.remoteSkills ?? []}
+            remoteSkillsLoading={Boolean(hub?.remoteSkillsLoading)}
+            remoteSkillsLoadingMore={Boolean(hub?.remoteSkillsLoadingMore)}
+            remoteSkillsSearch={hub?.remoteSkillsSearch || ""}
+            remoteSkillsError={hub?.remoteSkillsError || ""}
+            onRefreshRemoteSkills={hub?.refetchRemoteSkills}
+            onRemoteSkillsSearchChange={hub?.setRemoteSkillsSearch}
+            onRemoteVisibleChange={hub?.setRemoteSkillsEnabled}
             t={t}
           />
         </div>
