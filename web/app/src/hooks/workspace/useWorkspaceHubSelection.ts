@@ -136,7 +136,10 @@ export function useWorkspaceHubSelection({
   const refetchHubTemplateDetail = hubTemplateDetailQuery.refetch;
   const refetchHubWorkspace = hubWorkspaceQuery.refetch;
   const refetchSkills = skillsQuery.refetch;
-  const refetchRemoteSkills = officialSkillsQuery.refetch;
+  const refetchOfficialSkills = officialSkillsQuery.refetch;
+  const refetchRemoteSkills = useCallback(async () => {
+    await Promise.all([refetchSkills(), refetchOfficialSkills()]);
+  }, [refetchOfficialSkills, refetchSkills]);
   const refetchSkillTree = skillTreeQuery.refetch;
   const loadMoreRemoteSkills = useCallback(async () => {
     if (!remoteSkillsEnabled || !officialSkillsQuery.hasNextPage || officialSkillsQuery.isFetchingNextPage) {
@@ -144,6 +147,13 @@ export function useWorkspaceHubSelection({
     }
     await officialSkillsQuery.fetchNextPage();
   }, [officialSkillsQuery, remoteSkillsEnabled]);
+
+  useEffect(() => {
+    if (!remoteSkillsEnabled) {
+      return;
+    }
+    void refetchSkills();
+  }, [refetchSkills, remoteSkillsEnabled]);
 
   const selectedHubTemplateView =
     hubTemplateDetailQuery.data?.id === selectedHubTemplateId ? hubTemplateDetailQuery.data : selectedHubTemplate;
@@ -234,8 +244,12 @@ export function useWorkspaceHubSelection({
     remoteSkillsEnabled && officialSkillsQuery.error
       ? errorMessage(officialSkillsQuery.error, t("resourcesSkillRemoteSkillsLoadFailed"))
       : "";
-  const skillTreeError = skillTreeQuery.error ? errorMessage(skillTreeQuery.error, t("resourcesSkillFilesLoadFailed")) : "";
-  const skillFileError = skillFileQuery.error ? errorMessage(skillFileQuery.error, t("resourcesSkillFileLoadFailed")) : "";
+  const skillTreeError = skillTreeQuery.error
+    ? errorMessage(skillTreeQuery.error, t("resourcesSkillFilesLoadFailed"))
+    : "";
+  const skillFileError = skillFileQuery.error
+    ? errorMessage(skillFileQuery.error, t("resourcesSkillFileLoadFailed"))
+    : "";
 
   const retry = useCallback(async () => {
     if (refreshTemplates) {

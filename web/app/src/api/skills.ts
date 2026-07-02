@@ -1,7 +1,7 @@
 import { del, get, request } from "@/api/client";
 import { fetchServerConfig } from "@/api/config";
 import { normalizeConfigSettings } from "@/models/configSettings";
-import { SKILL_SOURCE_OFFICIAL } from "@/models/skillhub";
+import { SKILL_SOURCE_OFFICIAL, skillNameFromRemotePath } from "@/models/skillhub";
 import type { SkillFile, SkillSummary, SkillTree } from "@/models/skillhub";
 
 const SKILLS_PATH = "api/v1/skills";
@@ -134,7 +134,8 @@ function normalizeAgenticHubSkill(record: unknown, source: string): SkillSummary
     return null;
   }
   const values = record as Record<string, unknown>;
-  const name = stringFromUnknown(values.name) || stringFromUnknown(values.nickname) || skillNameFromPath(values.path);
+  const name =
+    stringFromUnknown(values.name) || stringFromUnknown(values.nickname) || skillNameFromRemotePath(values.path);
   const remotePath = stringFromUnknown(values.path);
   if (!name) {
     return null;
@@ -150,18 +151,6 @@ function normalizeAgenticHubSkill(record: unknown, source: string): SkillSummary
     remotePath: remotePath || undefined,
     source,
   };
-}
-
-function skillNameFromPath(value: unknown): string {
-  const path = stringFromUnknown(value);
-  if (!path) {
-    return "";
-  }
-  const parts = path
-    .split("/")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return parts.at(-1) || "";
 }
 
 function stringFromUnknown(value: unknown): string {

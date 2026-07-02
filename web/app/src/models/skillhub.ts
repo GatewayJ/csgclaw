@@ -61,6 +61,29 @@ export function hasSkillName(
   return (skills || []).some((item) => normalizeSkillName(item?.name) === value);
 }
 
+export function hasInstalledRemoteSkill(
+  installedSkills: readonly SkillSummary[] | null | undefined,
+  remoteSkill: SkillSummary | null | undefined,
+): boolean {
+  const installedName = remoteSkillInstalledName(remoteSkill);
+  return hasSkillName(installedSkills, installedName);
+}
+
+function remoteSkillInstalledName(skill: SkillSummary | null | undefined): string {
+  const remotePathName = skillNameFromRemotePath(skill?.remotePath);
+  return remotePathName || normalizeSkillName(skill?.name);
+}
+
+export function skillNameFromRemotePath(value: unknown): string {
+  return (
+    String(value || "")
+      .split("/")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .at(-1) || ""
+  );
+}
+
 function normalizeSkillName(value: unknown): string {
   return String(value || "").trim();
 }

@@ -16,6 +16,7 @@ const labels: Record<string, string> = {
   resourcesSkillsLabel: "Skills",
   resourcesSkillRemoteInstallFailed: "Install failed",
   resourcesSkillRemoteInstallAction: "Install",
+  resourcesSkillRemoteInstalled: "Installed",
   resourcesSkillRemoteInstallTab: "Remote install",
   resourcesSkillRemoteInstalling: "Installing",
   resourcesSkillRemoteSearchPlaceholder: "Search remote skills",
@@ -400,5 +401,69 @@ describe("WorkspaceTabPanels", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Install" }));
     expect(installRemoteSkill).toHaveBeenCalledWith(expect.objectContaining({ remotePath: "AIWizards/agent-builder" }));
+  });
+
+  it("disables remote skill install actions for locally installed skills", () => {
+    const installRemoteSkill = vi.fn(async () => ({ name: "agent-builder" }));
+    const remoteHub = {
+      ...hub,
+      installRemoteSkill,
+      remoteInstallBusy: "",
+      remoteInstallError: "",
+      remoteSkillsHasMore: false,
+      remoteSkillsLoadingMore: false,
+      remoteSkillsSearch: "",
+      skills: [{ name: "agent-builder", description: "Already installed" }],
+    } as unknown as WorkspaceSidebarProps["hub"];
+
+    render(
+      <WorkspaceTabPanels
+        activePane={{ type: WorkspacePaneTypes.hub, id: "hub" }}
+        activeThreadRootID=""
+        agentItems={[managerAgent]}
+        agentsError=""
+        channels={[]}
+        collapsedWorkspaceGroups={{}}
+        currentUserID="u-admin"
+        directMessages={[]}
+        hub={remoteHub}
+        locale="en"
+        notificationAgentItems={[]}
+        onCreateAgent={() => {}}
+        onCreateNotificationParticipant={() => {}}
+        onCreateRoom={() => {}}
+        onOpenCreateTask={() => {}}
+        onOpenCreateTeam={() => {}}
+        onPreviewAgent={() => {}}
+        onPreviewUser={() => {}}
+        onSelectAgent={() => {}}
+        onSelectComputer={() => {}}
+        onSelectConversation={() => {}}
+        onSelectHuman={() => {}}
+        onSelectHubSkill={() => {}}
+        onSelectHubTemplate={() => {}}
+        onSelectTask={() => {}}
+        onSelectTeam={() => {}}
+        onSelectThread={() => {}}
+        onToggleWorkspaceGroup={() => {}}
+        onViewTaskDetails={() => {}}
+        t={t}
+        taskCount={0}
+        taskItems={[]}
+        teams={[]}
+        threadGroups={[]}
+        usersById={new Map()}
+        workerAgentItems={[managerAgent]}
+        workspaceTab={WorkspaceTabs.hub}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload skill" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Remote install/ }));
+
+    const installedButton = screen.getByRole("button", { name: "Installed" });
+    expect(installedButton).toBeDisabled();
+    fireEvent.click(installedButton);
+    expect(installRemoteSkill).not.toHaveBeenCalled();
   });
 });

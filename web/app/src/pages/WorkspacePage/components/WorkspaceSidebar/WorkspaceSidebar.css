@@ -229,6 +229,24 @@
   text-align: center;
 }
 
+.hub-skill-remote-install-button {
+  width: 128px;
+  min-width: 128px;
+  flex-shrink: 0;
+}
+
+.hub-skill-remote-install-button.installed:disabled {
+  border-color: var(--gray-300);
+  background: var(--gray-100);
+  color: var(--gray-600);
+}
+
+:root[data-theme="dark"] .hub-skill-remote-install-button.installed:disabled {
+  border-color: color-mix(in srgb, var(--gray-300) 18%, transparent);
+  background: color-mix(in srgb, var(--gray-300) 10%, transparent);
+  color: var(--gray-300);
+}
+
 @media (max-width: 560px) {
   .hub-skill-remote-row {
     grid-template-columns: auto minmax(0, 1fr) auto;

@@ -692,9 +692,7 @@ export function WorkspaceTabPanels({
                   <button
                     key={item.id}
                     className={`workspace-row hub-template-row ${
-                      resourcesPaneActive &&
-                      selectedHubTemplateId === item.id &&
-                      selectedHubResourceType === "template"
+                      resourcesPaneActive && selectedHubTemplateId === item.id && selectedHubResourceType === "template"
                         ? "active"
                         : ""
                     }`}
@@ -735,9 +733,7 @@ export function WorkspaceTabPanels({
                   <button
                     key={item.name}
                     className={`workspace-row hub-template-row hub-skill-row ${
-                      resourcesPaneActive &&
-                      selectedHubSkillName === item.name &&
-                      selectedHubResourceType === "skill"
+                      resourcesPaneActive && selectedHubSkillName === item.name && selectedHubResourceType === "skill"
                         ? "active"
                         : ""
                     }`}
@@ -772,6 +768,7 @@ export function WorkspaceTabPanels({
             onSubmit={(file) => hub?.uploadSkill?.(file)}
             busy={resourcesUploadBusy}
             error={resourcesUploadError}
+            installedSkills={resourcesSkills}
             locale={locale}
             onInstallRemoteSkill={hub?.installRemoteSkill}
             onLoadMoreRemoteSkills={hub?.loadMoreRemoteSkills}

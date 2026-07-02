@@ -12,12 +12,14 @@ import {
   TextInput,
 } from "@/components/ui";
 import type { LocaleCode, TranslateFn } from "@/models/conversations";
+import { hasInstalledRemoteSkill } from "@/models/skillhub";
 import type { SkillSummary } from "@/models/skillhub";
 import { localizeTemplateSourceTag } from "@/shared/i18n";
 
 export type SkillUploadDialogProps = {
   busy: boolean;
   error: string;
+  installedSkills: readonly SkillSummary[];
   locale: LocaleCode;
   onInstallRemoteSkill?: (skill: SkillSummary) => Promise<unknown>;
   onLoadMoreRemoteSkills?: () => Promise<unknown>;
@@ -51,6 +53,7 @@ export function SkillUploadDialog({
   onSubmit,
   busy,
   error,
+  installedSkills,
   locale,
   remoteInstallBusy,
   remoteInstallError,
@@ -131,7 +134,7 @@ export function SkillUploadDialog({
 
   const handleRemoteInstall = useCallback(
     async (skill: SkillSummary) => {
-      if (!onInstallRemoteSkill) {
+      if (!onInstallRemoteSkill || hasInstalledRemoteSkill(installedSkills, skill)) {
         return;
       }
       const result = await onInstallRemoteSkill(skill);
@@ -139,7 +142,7 @@ export function SkillUploadDialog({
         onOpenChange(false);
       }
     },
-    [onInstallRemoteSkill, onOpenChange],
+    [installedSkills, onInstallRemoteSkill, onOpenChange],
   );
 
   const handleRemoteListScroll = useCallback(
@@ -255,32 +258,42 @@ export function SkillUploadDialog({
               ) : remoteSkills.length ? (
                 <>
                   <div className="hub-skill-remote-list" onScroll={handleRemoteListScroll}>
-                    {remoteSkills.map((item) => (
-                      <div className="hub-skill-remote-row" key={item.remotePath || item.name}>
-                        <span className="hub-skill-remote-icon" aria-hidden="true">
-                          <FileCode2 size={16} strokeWidth={2} />
-                        </span>
-                        <span className="hub-skill-remote-main">
-                          <span className="hub-skill-remote-title truncate">{item.name}</span>
-                          <span className="hub-skill-remote-meta truncate">{item.description || item.remotePath}</span>
-                        </span>
-                        <span className="mini-badge template-source-badge">
-                          <span className="template-source-badge-dot" aria-hidden="true"></span>
-                          {localizeTemplateSourceTag("official", locale)}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          loading={remoteInstallBusy === (item.remotePath || item.name)}
-                          disabled={!onInstallRemoteSkill || Boolean(remoteInstallBusy)}
-                          onClick={() => void handleRemoteInstall(item)}
-                        >
-                          {remoteInstallBusy === (item.remotePath || item.name)
-                            ? t("resourcesSkillRemoteInstalling")
-                            : t("resourcesSkillRemoteInstallAction")}
-                        </Button>
-                      </div>
-                    ))}
+                    {remoteSkills.map((item) => {
+                      const remoteKey = item.remotePath || item.name;
+                      const installed = hasInstalledRemoteSkill(installedSkills, item);
+                      const installing = remoteInstallBusy === remoteKey;
+                      return (
+                        <div className="hub-skill-remote-row" key={remoteKey}>
+                          <span className="hub-skill-remote-icon" aria-hidden="true">
+                            <FileCode2 size={16} strokeWidth={2} />
+                          </span>
+                          <span className="hub-skill-remote-main">
+                            <span className="hub-skill-remote-title truncate">{item.name}</span>
+                            <span className="hub-skill-remote-meta truncate">
+                              {item.description || item.remotePath}
+                            </span>
+                          </span>
+                          <span className="mini-badge template-source-badge">
+                            <span className="template-source-badge-dot" aria-hidden="true"></span>
+                            {localizeTemplateSourceTag("official", locale)}
+                          </span>
+                          <Button
+                            className={`hub-skill-remote-install-button ${installed ? "installed" : ""}`}
+                            size="sm"
+                            variant={installed ? "secondaryGray" : "primary"}
+                            loading={!installed && installing}
+                            disabled={installed || !onInstallRemoteSkill || Boolean(remoteInstallBusy)}
+                            onClick={() => void handleRemoteInstall(item)}
+                          >
+                            {installed
+                              ? t("resourcesSkillRemoteInstalled")
+                              : installing
+                                ? t("resourcesSkillRemoteInstalling")
+                                : t("resourcesSkillRemoteInstallAction")}
+                          </Button>
+                        </div>
+                      );
+                    })}
                     {remoteSkillsLoadingMore ? (
                       <div className="hub-skill-remote-list-state">{t("resourcesSkillRemoteSkillsLoading")}</div>
                     ) : null}

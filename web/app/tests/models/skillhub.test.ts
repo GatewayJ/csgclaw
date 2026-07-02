@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isReadonlySkill, skillSourceBadgeName } from "@/models/skillhub";
+import {
+  hasInstalledRemoteSkill,
+  isReadonlySkill,
+  skillNameFromRemotePath,
+  skillSourceBadgeName,
+} from "@/models/skillhub";
 
 describe("skill hub helpers", () => {
   it("treats official and system skills as readonly", () => {
@@ -18,5 +23,28 @@ describe("skill hub helpers", () => {
     expect(skillSourceBadgeName({ name: "readonly", readonly: true })).toBe("builtin");
     expect(skillSourceBadgeName({ name: "local" })).toBe("local");
     expect(skillSourceBadgeName(null)).toBe("");
+  });
+
+  it("matches installed remote skills by the remote path skill name", () => {
+    const installedSkills = [{ name: "agent-builder" }, { name: "local-only" }];
+
+    expect(
+      hasInstalledRemoteSkill(installedSkills, {
+        name: "Agent Builder",
+        remotePath: "AIWizards/agent-builder",
+      }),
+    ).toBe(true);
+    expect(
+      hasInstalledRemoteSkill(installedSkills, {
+        name: "missing",
+        remotePath: "AIWizards/missing",
+      }),
+    ).toBe(false);
+  });
+
+  it("extracts the installed skill name from remote paths", () => {
+    expect(skillNameFromRemotePath("AIWizards/agent-builder")).toBe("agent-builder");
+    expect(skillNameFromRemotePath(" owner / nested / skill ")).toBe("skill");
+    expect(skillNameFromRemotePath("")).toBe("");
   });
 });
