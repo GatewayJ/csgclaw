@@ -18,6 +18,7 @@ import { AGENT_PROFILE_ACTIVE_TAB_STORAGE_KEY } from "@/shared/storage/keys";
 import {
   EnvKeyValueEditor,
   FieldHelpTooltip,
+  MCPRuntimeOptionsPanel,
   ModelOptionLabel,
   NotifierControls,
   requiredFieldLabel,
@@ -43,6 +44,7 @@ import {
   isManagerAgent,
   isNotifierRuntimeDraftOnAgentPage,
   runtimeOptionSchemasForAgent,
+  supportsMCPRuntimeOptions,
 } from "@/models/agents";
 import type { AgentDraft, AgentLike } from "@/models/agents";
 import {
@@ -209,6 +211,7 @@ export function AgentDetailPane({
   const [selectedSkillNames, setSelectedSkillNames] = useState<string[]>([]);
   const [deleteSkillDialogOpen, setDeleteSkillDialogOpen] = useState(false);
   const [skillPendingDelete, setSkillPendingDelete] = useState<SlashSkillOption | null>(null);
+  const [mcpRuntimeOptionsInvalid, setMcpRuntimeOptionsInvalid] = useState(false);
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const isManager = isManagerAgent(item);
@@ -225,7 +228,7 @@ export function AgentDetailPane({
   const canPublish = runtimeKind === "picoclaw_sandbox" || runtimeKind === "openclaw_sandbox";
   const hasUnsavedChanges =
     hasUnsavedChangesProp ?? Boolean(draft && savedDraft && JSON.stringify(draft) !== JSON.stringify(savedDraft));
-  const saveDisabled = agentProfilePageSaveDisabled(draft, item, { saving, savedDraft });
+  const saveDisabled = agentProfilePageSaveDisabled(draft, item, { saving, savedDraft }) || mcpRuntimeOptionsInvalid;
   const updateDraft = (patch: Partial<AgentDraft>) => onDraftChange?.({ ...(draft || agentToDraft(item)), ...patch });
   const runtimeOptionSchemas = runtimeOptionSchemasForAgent(draft?.runtime_kind || runtimeKind, item);
   const fallbackProviderID = String(draft?.model_provider_id || "").trim();
@@ -251,6 +254,9 @@ export function AgentDetailPane({
   const selectedProviderModels = selectedProvider?.models ?? [];
   const selectedModelValue = draft?.model_id || "";
   const isNotifierDraft = Boolean(draft && isNotifierRuntimeDraftOnAgentPage(draft, item));
+  const showMCPRuntimeOptions = Boolean(
+    draft && !isNotifierDraft && supportsMCPRuntimeOptions(draft.runtime_kind || item.runtime_kind),
+  );
   const profileTabs = useMemo(
     () =>
       draft
@@ -303,6 +309,18 @@ export function AgentDetailPane({
       setSelectedSkillNames([]);
     }
   }, [addSkillsDialogOpen]);
+
+  useEffect(() => {
+    if (visibleActiveProfileTab && activeProfileTab !== visibleActiveProfileTab) {
+      setActiveProfileTab(visibleActiveProfileTab);
+    }
+  }, [activeProfileTab, visibleActiveProfileTab]);
+
+  useEffect(() => {
+    if (!showMCPRuntimeOptions) {
+      setMcpRuntimeOptionsInvalid(false);
+    }
+  }, [showMCPRuntimeOptions]);
 
   async function handleAddSkillsConfirm(): Promise<void> {
     if (!selectedSkillNames.length) {
@@ -612,6 +630,19 @@ export function AgentDetailPane({
                 onDisconnectFeishu={onDisconnectFeishu}
               />
             ) : null}
+            {visibleActiveProfileTab === "runtime" ? (
+              <AgentRuntimePanel
+                draft={draft}
+                item={item}
+                locale={locale}
+                runtimeKind={runtimeKind}
+                runtimeOptionSchemas={runtimeOptionSchemas}
+                t={t}
+                onDraftChange={onDraftChange}
+                onMCPRuntimeOptionsInvalidChange={setMcpRuntimeOptionsInvalid}
+                showMCPRuntimeOptions={showMCPRuntimeOptions}
+              />
+            ) : null}
 
             {visibleActiveProfileTab === "instructions" && !isNotifierDraft ? (
               <AgentInstructionsPanel draft={draft} t={t} updateDraft={updateDraft} />
@@ -787,8 +818,10 @@ type AgentRuntimePanelProps = {
   item: AgentLike;
   locale: LocaleCode;
   onDraftChange?: (draft: AgentDraft) => void;
+  onMCPRuntimeOptionsInvalidChange: (invalid: boolean) => void;
   runtimeKind: string;
   runtimeOptionSchemas: RuntimeOptionSchemaList;
+  showMCPRuntimeOptions: boolean;
   t: TranslateFn;
 };
 
@@ -797,8 +830,10 @@ function AgentRuntimePanel({
   item,
   locale,
   onDraftChange,
+  onMCPRuntimeOptionsInvalidChange,
   runtimeKind,
   runtimeOptionSchemas,
+  showMCPRuntimeOptions,
   t,
 }: AgentRuntimePanelProps) {
   const isNotifierDraft = isNotifierRuntimeDraftOnAgentPage(draft, item);
@@ -843,6 +878,14 @@ function AgentRuntimePanel({
               schemas={runtimeOptionSchemas}
               onDraftChange={onDraftChange || (() => {})}
               embedded
+            />
+          ) : null}
+          {showMCPRuntimeOptions ? (
+            <MCPRuntimeOptionsPanel
+              draft={draft}
+              t={t}
+              onDraftChange={onDraftChange || (() => {})}
+              onInvalidChange={onMCPRuntimeOptionsInvalidChange}
             />
           ) : null}
         </div>

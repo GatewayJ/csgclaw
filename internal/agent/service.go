@@ -1382,10 +1382,13 @@ func (s *Service) replace(ctx context.Context, req CreateRequest) (Agent, error)
 		return s.ensureManager(ctx, true, "", "")
 	}
 	if shouldCreateWorkerSpec(spec) || strings.EqualFold(existing.Role, RoleWorker) {
+		spec.Role = RoleWorker
+		if err := s.validateReplaceWorkerSpecBeforeDelete(ctx, spec); err != nil {
+			return Agent{}, err
+		}
 		if err := s.Delete(ctx, existing.ID); err != nil {
 			return Agent{}, err
 		}
-		spec.Role = RoleWorker
 		return s.CreateWorker(ctx, spec)
 	}
 
@@ -1397,6 +1400,24 @@ func (s *Service) replace(ctx context.Context, req CreateRequest) (Agent, error)
 
 func managerRuntimeRequested(spec CreateAgentSpec) bool {
 	return strings.TrimSpace(spec.RuntimeKind) != "" || strings.TrimSpace(spec.RuntimeName) != "" || spec.SandboxEnabled
+}
+
+func (s *Service) validateReplaceWorkerSpecBeforeDelete(ctx context.Context, spec CreateAgentSpec) error {
+	runtimeKind := strings.TrimSpace(spec.RuntimeKind)
+	switch {
+	case runtimeKind == "":
+		return fmt.Errorf("runtime_kind is required")
+	case isGatewayRuntimeKind(runtimeKind) && strings.TrimSpace(spec.Image) == "":
+		return fmt.Errorf("image is required for runtime_kind %q", runtimeKind)
+	}
+	if _, err := s.runtimeForKind(runtimeKind); err != nil {
+		return err
+	}
+	resolvedProfile, err := s.profileForCreateRequest(ctx, &spec)
+	if err != nil {
+		return err
+	}
+	return s.validateRuntimeConfig(ctx, runtimeKind, runtimeConfigSnapshotForAgent(s.hydrateProfileFromCatalog(resolvedProfile), spec.RuntimeOptions))
 }
 
 func (s *Service) managerImageOverrideForReplace(ctx context.Context, existing Agent, runtimeKind string) string {
@@ -2108,6 +2129,9 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 	if err != nil {
 		return Agent{}, err
 	}
+	if err := validateMCPRuntimeOptionSupport(runtimeKind, spec.RuntimeOptions); err != nil {
+		return Agent{}, err
+	}
 	resolvedProfile, err := s.profileForCreateRequest(ctx, &spec)
 	if err != nil {
 		return Agent{}, err
@@ -2124,6 +2148,7 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		AgentName:        name,
 		Instructions:     instructions,
 		Profile:          runtimeProfile,
+		RuntimeOptions:   utils.CloneAnyMap(spec.RuntimeOptions),
 		WorkspaceOverlay: strings.TrimSpace(spec.FromTemplate),
 	}); err != nil {
 		return Agent{}, fmt.Errorf("provision worker runtime: %w", err)
@@ -2345,6 +2370,7 @@ func (s *Service) provisionRuntimeForAgent(ctx context.Context, rt agentruntime.
 		AgentName:        strings.TrimSpace(got.Name),
 		Instructions:     strings.TrimSpace(got.Instructions),
 		Profile:          s.runtimeProfileForAgent(got),
+		RuntimeOptions:   utils.CloneAnyMap(got.RuntimeOptions),
 		WorkspaceOverlay: strings.TrimSpace(workspaceOverlay),
 	})
 }

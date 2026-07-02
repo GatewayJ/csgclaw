@@ -6,6 +6,7 @@ import {
   EnvKeyValueEditor,
   FieldHelpTooltip,
   isBlank,
+  MCPRuntimeOptionsPanel,
   ModelOptionLabel,
   NotifierControls,
   requiredFieldLabel,
@@ -28,6 +29,7 @@ import {
   pickDefaultAgentTemplate,
   defaultWorkerImageForRuntime,
   runtimeOptionSchemasForAgent,
+  supportsMCPRuntimeOptions,
   templateMatchesRuntime,
   workerSelectableTemplates,
 } from "@/models/agents";
@@ -106,6 +108,7 @@ export function AgentProfileModal({
   onSave,
 }: AgentProfileModalProps) {
   const [isEditorScrolling, setIsEditorScrolling] = useState(false);
+  const [mcpRuntimeOptionsInvalid, setMcpRuntimeOptionsInvalid] = useState(false);
   const editorScrollTimerRef = useRef<number | null>(null);
   const lastTemplateIDRef = useRef("");
   const createBotKind = agentModalMode === "create" ? agentCreateBotKind : undefined;
@@ -115,6 +118,7 @@ export function AgentProfileModal({
   const missingRequiredEnv = isTemplateCreate && agentDraftMissingRequiredEnv(agentDraft);
   const isCustomCreate = isWorkerCreate && agentCreateMode === "custom";
   const templateLocked = agentCreateTemplateLocked(agentDraft, agentModalMode);
+  const showMCPRuntimeOptions = !isNotificationContext && supportsMCPRuntimeOptions(agentDraft.runtime_kind);
   const runtimeOptionSchemas = isNotificationContext
     ? []
     : runtimeOptionSchemasForAgent(
@@ -261,6 +265,12 @@ export function AgentProfileModal({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!showMCPRuntimeOptions) {
+      setMcpRuntimeOptionsInvalid(false);
+    }
+  }, [showMCPRuntimeOptions]);
 
   function onEditorShellScroll() {
     setIsEditorScrolling(true);
@@ -599,6 +609,14 @@ export function AgentProfileModal({
                       embedded
                     />
                   ) : null}
+                  {showMCPRuntimeOptions ? (
+                    <MCPRuntimeOptionsPanel
+                      draft={agentDraft}
+                      t={t}
+                      onDraftChange={onAgentDraftChange}
+                      onInvalidChange={setMcpRuntimeOptionsInvalid}
+                    />
+                  ) : null}
                 </div>
               </div>
             </section>
@@ -769,6 +787,7 @@ export function AgentProfileModal({
             size="md"
             disabled={
               agentBusy ||
+              mcpRuntimeOptionsInvalid ||
               isBlank(agentDraft.name) ||
               (isNotificationContext
                 ? !notifierFormIsComplete(agentDraft, editingAgent)

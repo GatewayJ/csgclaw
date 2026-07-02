@@ -164,12 +164,12 @@ func (s *Service) syncGatewayAfterProfileChange(ctx context.Context, id string, 
 		_, err := s.EnsureManager(ctx, false)
 		return err
 	}
-	if gatewayProfileRuntimeRestartRequired(previous, normalized) {
-		return s.syncGatewayHostConfig(got, runtimeNormalized)
-	}
 	if restartRequired {
 		_, err := s.Recreate(ctx, id)
 		return err
+	}
+	if gatewayProfileRuntimeRestartRequired(previous, normalized) {
+		return s.syncGatewayHostConfig(got, runtimeNormalized)
 	}
 	return nil
 }
@@ -192,7 +192,7 @@ func (s *Service) syncGatewayHostConfig(got Agent, profile AgentProfile) error {
 			return err
 		}
 		feishuProvider := s.currentFeishuProviderForRuntime(RuntimeKindOpenClawSandbox)
-		if _, err := openclawsandbox.EnsureConfig(agentHome, participantID, got.ID, s.server, modelCfg, resolveManagerBaseURL, feishuProvider); err != nil {
+		if _, err := openclawsandbox.EnsureConfigWithRuntimeOptions(agentHome, participantID, got.ID, s.server, modelCfg, got.RuntimeOptions, resolveManagerBaseURL, feishuProvider); err != nil {
 			return fmt.Errorf("sync gateway openclaw config: %w", err)
 		}
 	default:
@@ -359,6 +359,10 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 				req.RuntimeOptions = &empty
 			}
 			patch = *req.RuntimeOptions
+			if err := validateMCPRuntimeOptionSupport(runtimeKind, patch); err != nil {
+				s.mu.Unlock()
+				return Agent{}, err
+			}
 		}
 		mergedFlat := runtimeOptionsAfterPatch(current.RuntimeKind, current.RuntimeOptions, nil)
 		if runtimeOptionsUpdated {
@@ -502,6 +506,17 @@ func runtimeConfigSnapshotForAgent(profile AgentProfile, options map[string]any)
 	}
 }
 
+func validateMCPRuntimeOptionSupport(runtimeKind string, options map[string]any) error {
+	_, ok := options[agentruntime.RuntimeOptionMCPKey]
+	if !ok {
+		return nil
+	}
+	if strings.TrimSpace(runtimeKind) == RuntimeKindOpenClawSandbox {
+		return nil
+	}
+	return fmt.Errorf("runtime_options.%s is only supported for runtime_kind %q", agentruntime.RuntimeOptionMCPKey, RuntimeKindOpenClawSandbox)
+}
+
 func (s *Service) hydrateProfileFromCatalog(profile AgentProfile) AgentProfile {
 	if s == nil {
 		return profile
@@ -573,6 +588,9 @@ func (s *Service) validateRuntimeConfig(ctx context.Context, runtimeKind string,
 	runtimeKind = strings.TrimSpace(runtimeKind)
 	if runtimeKind == "" {
 		return nil
+	}
+	if err := validateMCPRuntimeOptionSupport(runtimeKind, current.Options); err != nil {
+		return err
 	}
 	rt, err := s.runtimeForKind(runtimeKind)
 	if err != nil {
@@ -797,12 +815,13 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 		return Agent{}, fmt.Errorf("refresh gateway template skills: %w", err)
 	}
 	if err := s.provisionRuntime(ctx, runtimeImpl, runtimeKind, agentruntime.ProvisionRequest{
-		RuntimeID:     createSpec.RuntimeID,
-		AgentID:       createSpec.AgentID,
-		ParticipantID: participantIDForAgent(createSpec.AgentName, createSpec.AgentID),
-		AgentName:     createSpec.AgentName,
-		Instructions:  strings.TrimSpace(got.Instructions),
-		Profile:       runtimeProfile,
+		RuntimeID:      createSpec.RuntimeID,
+		AgentID:        createSpec.AgentID,
+		ParticipantID:  participantIDForAgent(createSpec.AgentName, createSpec.AgentID),
+		AgentName:      createSpec.AgentName,
+		Instructions:   strings.TrimSpace(got.Instructions),
+		Profile:        runtimeProfile,
+		RuntimeOptions: utils.CloneAnyMap(got.RuntimeOptions),
 	}); err != nil {
 		return Agent{}, fmt.Errorf("provision agent runtime: %w", err)
 	}

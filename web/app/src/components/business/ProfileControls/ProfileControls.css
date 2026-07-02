@@ -70,6 +70,57 @@
   background: var(--danger);
 }
 
+.mcp-runtime-options-panel {
+  min-width: 0;
+}
+
+.mcp-runtime-options-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mcp-runtime-options-header > label {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--text-sm-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-sm-line-height);
+}
+
+.mcp-runtime-options-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-runtime-options-textarea {
+  min-height: 168px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  resize: vertical;
+}
+
+@media (max-width: 680px) {
+  .mcp-runtime-options-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mcp-runtime-options-actions {
+    width: 100%;
+  }
+
+  .mcp-runtime-options-actions .btn {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
 .field .field-label {
   display: inline-flex;
   align-items: center;

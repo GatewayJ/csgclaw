@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { AgentDetailPane, AgentRow, AgentView, NotificationParticipantDetailPane } from "@/pages/AgentPage/components";
@@ -59,6 +59,13 @@ const labels: Record<string, string> = {
   profileRuntimeKind: "Runtime",
   profileRuntimeSection: "Runtime environment",
   close: "Close",
+  profileMCPServers: "MCP Servers",
+  profileMCPServersHint: 'Recommended shape: {"mcpServers":{...}}.',
+  profileMCPServersPlaceholder: '{\n  "mcpServers": {}\n}',
+  profileMCPServersUseExample: "Use example",
+  profileMCPServersClear: "Clear config",
+  profileMCPServersInvalidJSON: "Enter a valid JSON object.",
+  profileMCPServersObjectRequired: "MCP config must be a JSON object.",
   agentName: "Name",
   agentDescription: "Description",
   agentImage: "Image",
@@ -797,6 +804,80 @@ describe("agent action visibility", () => {
 
     expect(container.querySelector("#agent-profile-runtime")).toBeInTheDocument();
     expect(screen.queryByLabelText("Image")).not.toBeInTheDocument();
+  });
+
+  it("edits MCP runtime options in the detail runtime section for OpenClaw agents", async () => {
+    const user = userEvent.setup();
+    const onDraftChange = vi.fn();
+    const item = {
+      ...worker,
+      runtime_kind: "openclaw_sandbox",
+      runtime_options: {
+        local_workspace_dir: "/tmp/project",
+        mcp: {
+          mcpServers: {
+            existing: {
+              command: "node",
+            },
+          },
+        },
+      },
+    };
+
+    render(
+      <AgentDetailPane
+        item={item}
+        t={t}
+        activeRoom={null}
+        busyKey=""
+        error=""
+        draft={agentToDraft(item)}
+        models={[]}
+        modelBusy={false}
+        saving={false}
+        publishBusy={false}
+        saveError=""
+        authStatuses={{}}
+        authBusyProvider=""
+        notifierWebhookPublicOrigin="http://127.0.0.1:18080"
+        onDraftChange={onDraftChange}
+        onSave={vi.fn()}
+        onPublish={vi.fn()}
+        onProviderLogin={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        onRecreate={vi.fn()}
+        onDelete={vi.fn()}
+        onInvite={vi.fn()}
+        onOpenDM={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Runtime environment" }));
+
+    const editor = screen.getByLabelText("MCP Servers");
+    expect((editor as HTMLTextAreaElement).value).toContain('"existing"');
+
+    fireEvent.input(editor, {
+      target: {
+        value: '{"mcpServers":{"context7":{"command":"npx"}}}',
+      },
+    });
+
+    expect(onDraftChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        runtime_options: {
+          local_workspace_dir: "/tmp/project",
+          mcp: {
+            mcpServers: {
+              context7: {
+                command: "npx",
+              },
+            },
+          },
+        },
+      }),
+    );
   });
 
   it("shows a saved status instead of a save button when the draft is unchanged", () => {
