@@ -32,6 +32,7 @@ import (
 	"csgclaw/internal/runtime/picoclawsandbox"
 	"csgclaw/internal/sandbox"
 	"csgclaw/internal/sandbox/sandboxtest"
+	skilllocal "csgclaw/internal/skill/local"
 	skillsystem "csgclaw/internal/skill/system"
 	hub "csgclaw/internal/template"
 )
@@ -2932,6 +2933,13 @@ func TestHandleSkillDeleteAllowsLocalSkillWithSystemName(t *testing.T) {
 func TestHandleSkillUpload(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	root := filepath.Join(home, ".csgclaw", "skills")
+	if err := skilllocal.WriteRemoteMetadata(root, "alpha", skilllocal.RemoteMetadata{
+		RemoteSource: "https://opencsg-stg.example.test",
+		RemotePath:   "owner/alpha",
+	}); err != nil {
+		t.Fatalf("WriteRemoteMetadata() error = %v", err)
+	}
 
 	srv := &Handler{}
 	req := newSkillUploadRequest(t, "alpha.zip", map[string]string{
@@ -2945,17 +2953,34 @@ func TestHandleSkillUpload(t *testing.T) {
 		t.Fatalf("upload status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
 	var skill struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+		RemoteSource string `json:"remoteSource"`
+		RemotePath   string `json:"remotePath"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&skill); err != nil {
 		t.Fatalf("decode upload response: %v", err)
 	}
-	if skill.Name != "alpha" || skill.Description != "Alpha skill" {
+	if skill.Name != "alpha" || skill.Description != "Alpha skill" || skill.RemoteSource != "" || skill.RemotePath != "" {
 		t.Fatalf("uploaded skill = %+v, want alpha summary", skill)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".csgclaw", "skills", "alpha", "SKILL.md")); err != nil {
 		t.Fatalf("installed SKILL.md missing: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/skills", nil)
+	rec = httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var skills []skillsystem.SkillSummary
+	if err := json.NewDecoder(rec.Body).Decode(&skills); err != nil {
+		t.Fatalf("decode skills response: %v", err)
+	}
+	for _, item := range skills {
+		if item.Name == "alpha" && (item.RemoteSource != "" || item.RemotePath != "") {
+			t.Fatalf("listed skill = %+v, want local upload without remote identity", item)
+		}
 	}
 }
 
@@ -3068,13 +3093,18 @@ enabled = true
 		t.Fatalf("install status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
 	var skill struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+		RemoteSource string `json:"remoteSource"`
+		RemotePath   string `json:"remotePath"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&skill); err != nil {
 		t.Fatalf("decode install response: %v", err)
 	}
-	if skill.Name != "agent-builder" || skill.Description != "Build agents" {
+	if skill.Name != "agent-builder" ||
+		skill.Description != "Build agents" ||
+		skill.RemoteSource != officialHub.URL ||
+		skill.RemotePath != "AIWizards/agent-builder" {
 		t.Fatalf("installed skill = %+v, want agent-builder summary", skill)
 	}
 	skillRoot := filepath.Join(home, ".csgclaw", "skills", "agent-builder")
@@ -3090,6 +3120,27 @@ enabled = true
 	}
 	if rootTreePages != 2 {
 		t.Fatalf("root tree pages = %d, want 2", rootTreePages)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/skills", nil)
+	rec = httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var skills []skillsystem.SkillSummary
+	if err := json.NewDecoder(rec.Body).Decode(&skills); err != nil {
+		t.Fatalf("decode skills response: %v", err)
+	}
+	var listed skillsystem.SkillSummary
+	for _, item := range skills {
+		if item.Name == "agent-builder" {
+			listed = item
+			break
+		}
+	}
+	if listed.RemoteSource != officialHub.URL || listed.RemotePath != "AIWizards/agent-builder" {
+		t.Fatalf("listed remote identity = %q/%q, want %q/AIWizards/agent-builder", listed.RemoteSource, listed.RemotePath, officialHub.URL)
 	}
 }
 

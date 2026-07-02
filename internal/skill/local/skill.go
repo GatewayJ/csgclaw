@@ -2,6 +2,7 @@ package local
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,8 +21,15 @@ const skillFileName = "SKILL.md"
 var ErrSkillInvalid = errors.New("skill directory must contain SKILL.md")
 
 type SkillSummary struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	RemoteSource string `json:"remoteSource,omitempty"`
+	RemotePath   string `json:"remotePath,omitempty"`
+}
+
+type RemoteMetadata struct {
+	RemoteSource string `json:"remote_source,omitempty"`
+	RemotePath   string `json:"remote_path"`
 }
 
 func SkillsRoot() (string, error) {
@@ -61,9 +69,12 @@ func List(root string) ([]SkillSummary, error) {
 		if err != nil {
 			return nil, err
 		}
+		remoteMetadata := readRemoteMetadata(root, entry.Name())
 		items = append(items, SkillSummary{
-			Name:        entry.Name(),
-			Description: description,
+			Name:         entry.Name(),
+			Description:  description,
+			RemoteSource: remoteMetadata.RemoteSource,
+			RemotePath:   remoteMetadata.RemotePath,
 		})
 	}
 	slices.SortFunc(items, func(left, right SkillSummary) int {
@@ -85,7 +96,40 @@ func Delete(root, name string) error {
 	if err != nil {
 		return err
 	}
+	if err := deleteRemoteMetadata(root, cleanName); err != nil {
+		return err
+	}
 	return os.RemoveAll(skillDir)
+}
+
+func WriteRemoteMetadata(root, name string, metadata RemoteMetadata) error {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return fmt.Errorf("skills root is required")
+	}
+	cleanName, err := NormalizeName(name)
+	if err != nil {
+		return err
+	}
+	remotePath := strings.TrimSpace(metadata.RemotePath)
+	if remotePath == "" {
+		return deleteRemoteMetadata(root, cleanName)
+	}
+	metadata.RemoteSource = strings.TrimSpace(metadata.RemoteSource)
+	metadata.RemotePath = remotePath
+	dir := remoteMetadataDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create remote skill metadata dir: %w", err)
+	}
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal remote skill metadata: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(remoteMetadataPath(root, cleanName), data, 0o644); err != nil {
+		return fmt.Errorf("write remote skill metadata: %w", err)
+	}
+	return nil
 }
 
 func NormalizeName(name string) (string, error) {
@@ -147,6 +191,44 @@ func skillDescription(path string) (string, error) {
 		return "", fmt.Errorf("parse skill frontmatter %q: %w", path, err)
 	}
 	return strings.TrimSpace(meta.Description), nil
+}
+
+func readRemoteMetadata(root, name string) RemoteMetadata {
+	cleanName, err := NormalizeName(name)
+	if err != nil {
+		return RemoteMetadata{}
+	}
+	data, err := os.ReadFile(remoteMetadataPath(root, cleanName))
+	if err != nil {
+		return RemoteMetadata{}
+	}
+	var metadata RemoteMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return RemoteMetadata{}
+	}
+	metadata.RemoteSource = strings.TrimSpace(metadata.RemoteSource)
+	metadata.RemotePath = strings.TrimSpace(metadata.RemotePath)
+	return metadata
+}
+
+func deleteRemoteMetadata(root, name string) error {
+	cleanName, err := NormalizeName(name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(remoteMetadataPath(root, cleanName)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("delete remote skill metadata: %w", err)
+	}
+	return nil
+}
+
+func remoteMetadataDir(root string) string {
+	root = filepath.Clean(root)
+	return filepath.Join(filepath.Dir(root), "."+filepath.Base(root)+"-remote-skills")
+}
+
+func remoteMetadataPath(root, name string) string {
+	return filepath.Join(remoteMetadataDir(root), name+".json")
 }
 
 func extractFrontmatter(data []byte) ([]byte, bool) {

@@ -75,6 +75,10 @@ func InstallArchive(root, filename string, archive []byte) (SkillSummary, error)
 		_ = os.RemoveAll(destDir)
 		return SkillSummary{}, err
 	}
+	if err := deleteRemoteMetadata(root, summary.Name); err != nil {
+		_ = os.RemoveAll(destDir)
+		return SkillSummary{}, err
+	}
 	return summary, nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"csgclaw/internal/config"
@@ -42,7 +43,7 @@ func (h *Handler) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	baseURL := strings.TrimRight(strings.TrimSpace(config.UserSettingsFromConfig(cfg).HubOfficialURL), "/")
+	baseURL := normalizeRemoteSource(config.UserSettingsFromConfig(cfg).HubOfficialURL)
 	if baseURL == "" {
 		http.Error(w, "official Hub URL is not configured", http.StatusBadRequest)
 		return
@@ -61,7 +62,32 @@ func (h *Handler) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 		writeSkillInstallError(w, err)
 		return
 	}
+	item.RemoteSource = baseURL
+	item.RemotePath = remotePath
+	if err := skilllocal.WriteRemoteMetadata(root, item.Name, skilllocal.RemoteMetadata{
+		RemoteSource: baseURL,
+		RemotePath:   remotePath,
+	}); err != nil {
+		_ = skilllocal.Delete(root, item.Name)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func normalizeRemoteSource(value string) string {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimRight(raw, "/")
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 func writeSkillInstallError(w http.ResponseWriter, err error) {

@@ -64,7 +64,14 @@ const hub: WorkspaceSidebarProps["hub"] = {
   selectedHubTemplateId: "",
   selectedHubResourceType: "skill",
   selectedHubSkillName: "demo-skill",
-  remoteSkills: [{ name: "agent-builder", description: "Build agents", remotePath: "AIWizards/agent-builder" }],
+  remoteSkills: [
+    {
+      name: "agent-builder",
+      description: "Build agents",
+      remoteSource: "https://opencsg-stg.example.test",
+      remotePath: "AIWizards/agent-builder",
+    },
+  ],
   remoteSkillsError: "",
   remoteSkillsLoading: false,
   skills: [{ name: "demo-skill", description: "Demo skill" }],
@@ -413,7 +420,14 @@ describe("WorkspaceTabPanels", () => {
       remoteSkillsHasMore: false,
       remoteSkillsLoadingMore: false,
       remoteSkillsSearch: "",
-      skills: [{ name: "agent-builder", description: "Already installed" }],
+      skills: [
+        {
+          name: "agent-builder",
+          description: "Already installed",
+          remoteSource: "https://opencsg-stg.example.test",
+          remotePath: "AIWizards/agent-builder",
+        },
+      ],
     } as unknown as WorkspaceSidebarProps["hub"];
 
     render(
@@ -465,5 +479,69 @@ describe("WorkspaceTabPanels", () => {
     expect(installedButton).toBeDisabled();
     fireEvent.click(installedButton);
     expect(installRemoteSkill).not.toHaveBeenCalled();
+  });
+
+  it("keeps remote skill install enabled for same-name local skills without remote identity", () => {
+    const installRemoteSkill = vi.fn(async () => ({ name: "agent-builder" }));
+    const remoteHub = {
+      ...hub,
+      installRemoteSkill,
+      remoteInstallBusy: "",
+      remoteInstallError: "",
+      remoteSkillsHasMore: false,
+      remoteSkillsLoadingMore: false,
+      remoteSkillsSearch: "",
+      skills: [{ name: "agent-builder", description: "Local skill with same name" }],
+    } as unknown as WorkspaceSidebarProps["hub"];
+
+    render(
+      <WorkspaceTabPanels
+        activePane={{ type: WorkspacePaneTypes.hub, id: "hub" }}
+        activeThreadRootID=""
+        agentItems={[managerAgent]}
+        agentsError=""
+        channels={[]}
+        collapsedWorkspaceGroups={{}}
+        currentUserID="u-admin"
+        directMessages={[]}
+        hub={remoteHub}
+        locale="en"
+        notificationAgentItems={[]}
+        onCreateAgent={() => {}}
+        onCreateNotificationParticipant={() => {}}
+        onCreateRoom={() => {}}
+        onOpenCreateTask={() => {}}
+        onOpenCreateTeam={() => {}}
+        onPreviewAgent={() => {}}
+        onPreviewUser={() => {}}
+        onSelectAgent={() => {}}
+        onSelectComputer={() => {}}
+        onSelectConversation={() => {}}
+        onSelectHuman={() => {}}
+        onSelectHubSkill={() => {}}
+        onSelectHubTemplate={() => {}}
+        onSelectTask={() => {}}
+        onSelectTeam={() => {}}
+        onSelectThread={() => {}}
+        onToggleWorkspaceGroup={() => {}}
+        onViewTaskDetails={() => {}}
+        t={t}
+        taskCount={0}
+        taskItems={[]}
+        teams={[]}
+        threadGroups={[]}
+        usersById={new Map()}
+        workerAgentItems={[managerAgent]}
+        workspaceTab={WorkspaceTabs.hub}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload skill" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Remote install/ }));
+
+    const installButton = screen.getByRole("button", { name: "Install" });
+    expect(installButton).toBeEnabled();
+    fireEvent.click(installButton);
+    expect(installRemoteSkill).toHaveBeenCalledWith(expect.objectContaining({ remotePath: "AIWizards/agent-builder" }));
   });
 });

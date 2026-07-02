@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,16 +50,46 @@ func TestListParsesBlockScalarDescription(t *testing.T) {
 	}
 }
 
+func TestListIncludesRemoteMetadata(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "alpha", "SKILL.md"), "# Alpha\n")
+	if err := WriteRemoteMetadata(root, "alpha", RemoteMetadata{
+		RemoteSource: "https://opencsg-stg.example.test",
+		RemotePath:   "owner/alpha",
+	}); err != nil {
+		t.Fatalf("WriteRemoteMetadata() error = %v", err)
+	}
+
+	got, err := List(root)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 1 ||
+		got[0].RemoteSource != "https://opencsg-stg.example.test" ||
+		got[0].RemotePath != "owner/alpha" {
+		t.Fatalf("List() = %+v, want alpha with remote metadata", got)
+	}
+	if rel, err := filepath.Rel(root, remoteMetadataDir(root)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("remote metadata dir %q should not be inside skills root %q", remoteMetadataDir(root), root)
+	}
+}
+
 func TestDeleteRemovesSkillDirectory(t *testing.T) {
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, "alpha", "SKILL.md"), "# Alpha\n")
 	mustWriteFile(t, filepath.Join(root, "alpha", "scripts", "run.sh"), "#!/bin/sh\necho hi\n")
+	if err := WriteRemoteMetadata(root, "alpha", RemoteMetadata{RemoteSource: "https://opencsg-stg.example.test", RemotePath: "owner/alpha"}); err != nil {
+		t.Fatalf("WriteRemoteMetadata() error = %v", err)
+	}
 
 	if err := Delete(root, "alpha"); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "alpha")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("alpha still exists, err = %v", err)
+	}
+	if _, err := os.Stat(remoteMetadataPath(root, "alpha")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("alpha remote metadata still exists, err = %v", err)
 	}
 }
 
@@ -86,6 +117,9 @@ func mustWriteFile(t *testing.T, path, content string) {
 
 func TestInstallArchive(t *testing.T) {
 	root := t.TempDir()
+	if err := WriteRemoteMetadata(root, "alpha", RemoteMetadata{RemoteSource: "https://opencsg-stg.example.test", RemotePath: "owner/alpha"}); err != nil {
+		t.Fatalf("WriteRemoteMetadata() error = %v", err)
+	}
 
 	got, err := InstallArchive(root, "alpha.zip", mustZip(t, map[string]string{
 		"alpha/SKILL.md":       "---\ndescription: First skill\n---\n# Alpha\n",
@@ -99,6 +133,13 @@ func TestInstallArchive(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "alpha", "SKILL.md")); err != nil {
 		t.Fatalf("installed SKILL.md missing: %v", err)
+	}
+	listed, err := List(root)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].RemoteSource != "" || listed[0].RemotePath != "" {
+		t.Fatalf("List() = %+v, want local install without stale remote metadata", listed)
 	}
 }
 

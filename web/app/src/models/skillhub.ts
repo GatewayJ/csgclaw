@@ -11,6 +11,7 @@ export type SkillSummary = {
   name: string;
   readonly?: boolean;
   remoteRef?: string;
+  remoteSource?: string;
   remotePath?: string;
   source?: string;
 };
@@ -65,13 +66,21 @@ export function hasInstalledRemoteSkill(
   installedSkills: readonly SkillSummary[] | null | undefined,
   remoteSkill: SkillSummary | null | undefined,
 ): boolean {
-  const installedName = remoteSkillInstalledName(remoteSkill);
-  return hasSkillName(installedSkills, installedName);
-}
-
-function remoteSkillInstalledName(skill: SkillSummary | null | undefined): string {
-  const remotePathName = skillNameFromRemotePath(skill?.remotePath);
-  return remotePathName || normalizeSkillName(skill?.name);
+  const remotePath = normalizeRemotePath(remoteSkill?.remotePath);
+  if (!remotePath) {
+    return false;
+  }
+  const remoteSource = normalizeRemoteSource(remoteSkill?.remoteSource);
+  return (installedSkills || []).some((item) => {
+    if (normalizeRemotePath(item?.remotePath) !== remotePath) {
+      return false;
+    }
+    const installedSource = normalizeRemoteSource(item?.remoteSource);
+    if (remoteSource || installedSource) {
+      return remoteSource === installedSource;
+    }
+    return true;
+  });
 }
 
 export function skillNameFromRemotePath(value: unknown): string {
@@ -82,6 +91,16 @@ export function skillNameFromRemotePath(value: unknown): string {
       .filter(Boolean)
       .at(-1) || ""
   );
+}
+
+function normalizeRemotePath(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function normalizeRemoteSource(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .replace(/\/+$/, "");
 }
 
 function normalizeSkillName(value: unknown): string {
