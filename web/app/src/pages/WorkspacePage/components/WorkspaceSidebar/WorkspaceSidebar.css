@@ -103,6 +103,11 @@
   line-height: 18px;
 }
 
+:root[data-theme="dark"] .hub-skill-upload-copy strong,
+:root[data-theme="dark"] .hub-skill-upload-copy small {
+  color: var(--white);
+}
+
 .hub-skill-upload-input {
   display: none;
 }
@@ -160,6 +165,11 @@
   background: var(--white);
 }
 
+:root[data-theme="dark"] .hub-skill-remote-row {
+  border-color: var(--gray-700);
+  background: var(--panel-soft);
+}
+
 .hub-skill-remote-list-state {
   display: flex;
   align-items: center;
@@ -198,6 +208,11 @@
   color: var(--gray-600);
   font-size: 12px;
   line-height: 18px;
+}
+
+:root[data-theme="dark"] .hub-skill-remote-title,
+:root[data-theme="dark"] .hub-skill-remote-meta {
+  color: var(--white);
 }
 
 .hub-skill-remote-state {
