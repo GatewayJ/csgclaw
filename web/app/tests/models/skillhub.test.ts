@@ -25,41 +25,19 @@ describe("skill hub helpers", () => {
     expect(skillSourceBadgeName(null)).toBe("");
   });
 
-  it("matches installed remote skills by remote identity instead of local name", () => {
-    const installedSkills = [
-      {
-        name: "agent-builder",
-        remoteSource: "https://opencsg-stg.example.test",
-        remotePath: "AIWizards/agent-builder",
-      },
-      { name: "local-only" },
-    ];
+  it("matches installed remote skills by the remote path skill name", () => {
+    const installedSkills = [{ name: "agent-builder" }, { name: "local-only" }];
 
     expect(
       hasInstalledRemoteSkill(installedSkills, {
         name: "Agent Builder",
-        remoteSource: "https://opencsg-stg.example.test/",
         remotePath: "AIWizards/agent-builder",
       }),
     ).toBe(true);
     expect(
       hasInstalledRemoteSkill(installedSkills, {
-        name: "local-only",
-        remotePath: "another-owner/local-only",
-      }),
-    ).toBe(false);
-    expect(
-      hasInstalledRemoteSkill(installedSkills, {
-        name: "agent-builder",
-        remoteSource: "https://another-hub.example.test",
-        remotePath: "AIWizards/agent-builder",
-      }),
-    ).toBe(false);
-    expect(
-      hasInstalledRemoteSkill(installedSkills, {
-        name: "agent-builder",
-        remoteSource: "https://opencsg-stg.example.test",
-        remotePath: "AIWizards//agent-builder",
+        name: "missing",
+        remotePath: "AIWizards/missing",
       }),
     ).toBe(false);
   });

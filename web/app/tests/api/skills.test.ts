@@ -63,7 +63,6 @@ describe("skills API", () => {
         name: "agent-builder",
         readonly: true,
         remoteRef: "dev",
-        remoteSource: "https://opencsg-stg.example.test",
         remotePath: "AIWizards/agent-builder",
         source: "official",
       },
@@ -107,7 +106,6 @@ describe("skills API", () => {
       items: [
         {
           name: "page-two-skill",
-          remoteSource: "https://opencsg-stg.example.test",
           remotePath: "AIWizards/page-two-skill",
           source: "official",
         },

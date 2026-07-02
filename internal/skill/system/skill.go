@@ -20,12 +20,10 @@ const (
 )
 
 type SkillSummary struct {
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	Source       string `json:"source,omitempty"`
-	Readonly     bool   `json:"readonly,omitempty"`
-	RemoteSource string `json:"remoteSource,omitempty"`
-	RemotePath   string `json:"remotePath,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Readonly    bool   `json:"readonly,omitempty"`
 }
 
 type SkillSource struct {

@@ -285,11 +285,7 @@ export function SkillUploadDialog({
                             disabled={installed || !onInstallRemoteSkill || Boolean(remoteInstallBusy)}
                             onClick={() => void handleRemoteInstall(item)}
                           >
-                            {installed
-                              ? t("resourcesSkillRemoteInstalled")
-                              : installing
-                                ? t("resourcesSkillRemoteInstalling")
-                                : t("resourcesSkillRemoteInstallAction")}
+                            {installing ? t("resourcesSkillRemoteInstalling") : t("resourcesSkillRemoteInstallAction")}
                           </Button>
                         </div>
                       );
