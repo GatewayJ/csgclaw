@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { AgentProfileModal } from "@/pages/WorkspacePage/components";
@@ -31,7 +31,14 @@ const labels: Record<string, string> = {
   modelProviderModelSearch: "Search models",
   modelProviderNoModels: "No models",
   profileRuntimeOptions: "Runtime Options",
-  profileProvider: "Model Provider",
+  profileMCPServers: "MCP Servers",
+  profileMCPServersHint: 'Recommended shape: {"mcpServers":{...}}.',
+  profileMCPServersPlaceholder: '{\n  "mcpServers": {}\n}',
+  profileMCPServersUseExample: "Use example",
+  profileMCPServersClear: "Clear config",
+  profileMCPServersInvalidJSON: "Enter a valid JSON object.",
+  profileMCPServersObjectRequired: "MCP config must be a JSON object.",
+  profileProvider: "Provider",
   profileRuntimeKind: "Runtime",
   profileEnv: "Environment",
   profileSandboxEnabled: "Sandbox",
@@ -46,6 +53,8 @@ const labels: Record<string, string> = {
   statusDisabled: "Disabled",
   templateLabel: "Template",
   templateNone: "No template",
+  agentCreateSave: "Create",
+  agentUpdateSave: "Save",
 };
 
 function t(key: string, params?: Record<string, string | number>): string {
@@ -1066,6 +1075,123 @@ describe("AgentProfileModal", () => {
         sandbox_enabled: true,
       }),
     );
+  });
+
+  it("edits MCP runtime options only for OpenClaw agent drafts", async () => {
+    const user = userEvent.setup();
+    const onAgentDraftChange = vi.fn();
+    const openclawDraft = {
+      ...agentToDraft({ ...worker, runtime_kind: "openclaw_sandbox" }),
+      model_provider_id: "api",
+      runtime_kind: "openclaw_sandbox",
+      runtime_options: {
+        local_workspace_dir: "/tmp/project",
+        mcp: {
+          mcpServers: {
+            existing: {
+              command: "node",
+            },
+          },
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <AgentProfileModal
+        t={t}
+        agentModalMode="create"
+        editingAgent={null}
+        agentDraft={openclawDraft}
+        locale="en"
+        onAgentDraftChange={onAgentDraftChange}
+        onAgentModelsReset={vi.fn()}
+        hubTemplates={[]}
+        bootstrapConfig={{}}
+        managerAgent={null}
+        agentModels={[]}
+        agentModelBusy={false}
+        authStatuses={{}}
+        authBusyProvider=""
+        agentCreateBotKind="worker"
+        agentCreateMode="custom"
+        onAgentCreateBotKindChange={vi.fn()}
+        notifierWebhookPublicOrigin="http://127.0.0.1:18080"
+        onProviderLogin={vi.fn()}
+        agentError=""
+        agentProgress={null}
+        agentBusy={false}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    const editor = screen.getByLabelText("MCP Servers");
+    expect((editor as HTMLTextAreaElement).value).toContain('"existing"');
+
+    fireEvent.input(editor, {
+      target: {
+        value: '{"mcpServers":{"context7":{"command":"npx"}}}',
+      },
+    });
+
+    expect(onAgentDraftChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        runtime_options: {
+          local_workspace_dir: "/tmp/project",
+          mcp: {
+            mcpServers: {
+              context7: {
+                command: "npx",
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Clear config" }));
+
+    expect(onAgentDraftChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        runtime_options: {
+          local_workspace_dir: "/tmp/project",
+        },
+      }),
+    );
+
+    rerender(
+      <AgentProfileModal
+        t={t}
+        agentModalMode="create"
+        editingAgent={null}
+        agentDraft={{
+          ...openclawDraft,
+          runtime_kind: "picoclaw_sandbox",
+        }}
+        locale="en"
+        onAgentDraftChange={onAgentDraftChange}
+        onAgentModelsReset={vi.fn()}
+        hubTemplates={[]}
+        bootstrapConfig={{}}
+        managerAgent={null}
+        agentModels={[]}
+        agentModelBusy={false}
+        authStatuses={{}}
+        authBusyProvider=""
+        agentCreateBotKind="worker"
+        agentCreateMode="custom"
+        onAgentCreateBotKindChange={vi.fn()}
+        notifierWebhookPublicOrigin="http://127.0.0.1:18080"
+        onProviderLogin={vi.fn()}
+        agentError=""
+        agentProgress={null}
+        agentBusy={false}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByLabelText("MCP Servers")).not.toBeInTheDocument();
   });
 
   it("shows provider logos only in the provider field, not in the model field", () => {

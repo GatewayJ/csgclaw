@@ -31,12 +31,14 @@ import {
   mergeAgentIntoList,
   isNotificationBotAgent,
   mapToEnvRows,
+  mcpRuntimeOptionsText,
   partitionWorkspaceAgentItems,
   notifierComputedPullRoutes,
   notifierFormIsComplete,
   notifierThirdPartyRelayWebhookURL,
   normalizeAuthProviderName,
   normalizeRuntimeKind,
+  parseMCPRuntimeOptionsText,
   notificationPushWebhookPathForBot,
   parseJSONMap,
   pickDefaultAgentTemplate,
@@ -48,9 +50,12 @@ import {
   resolveAgentAvatarSource,
   runtimeImageForKind,
   runtimeOptionSchemasForAgent,
+  setMCPRuntimeOptions,
   localizedRuntimeOptionLabel,
   localizedRuntimeOptionDescription,
   isAgentUpgradeNeeded,
+  supportsMCPRuntimeOptions,
+  supportsMCPRuntimeOptions,
   shouldWaitForManagerRuntimeAfterProfileSave,
   workerSelectableTemplates,
 } from "@/models/agents";
@@ -526,6 +531,47 @@ describe("agent model helpers", () => {
         "en",
       ),
     ).toBe("Leave empty to use the default agent workspace.");
+  });
+
+  it("parses and saves OpenClaw MCP runtime options under runtime_options.mcp", () => {
+    const parsed = parseMCPRuntimeOptionsText('{"mcpServers":{"context7":{"command":"npx","args":["-y"]}}}');
+
+    expect(parsed).toEqual({
+      ok: true,
+      value: {
+        mcpServers: {
+          context7: {
+            command: "npx",
+            args: ["-y"],
+          },
+        },
+      },
+    });
+    expect(parseMCPRuntimeOptionsText("")).toEqual({ ok: true, value: null });
+    expect(parseMCPRuntimeOptionsText("[1]")).toEqual({ ok: false, error: "object_required" });
+    expect(parseMCPRuntimeOptionsText("{")).toEqual({ ok: false, error: "invalid_json" });
+    expect(supportsMCPRuntimeOptions("openclaw_sandbox")).toBe(true);
+    expect(supportsMCPRuntimeOptions("picoclaw_sandbox")).toBe(false);
+
+    const runtimeOptions = setMCPRuntimeOptions(
+      { local_workspace_dir: "/tmp/project" },
+      { mcpServers: { context7: { command: "npx" } } },
+    );
+    expect(runtimeOptions).toEqual({
+      local_workspace_dir: "/tmp/project",
+      mcp: {
+        mcpServers: {
+          context7: {
+            command: "npx",
+          },
+        },
+      },
+    });
+    expect(mcpRuntimeOptionsText(runtimeOptions)).toContain('"mcpServers"');
+    expect(draftRuntimeOptionsForSave({ runtime_options: runtimeOptions })).toEqual(runtimeOptions);
+    expect(setMCPRuntimeOptions(runtimeOptions, null)).toEqual({
+      local_workspace_dir: "/tmp/project",
+    });
   });
 
   it("selects runtime-specific templates and images", () => {

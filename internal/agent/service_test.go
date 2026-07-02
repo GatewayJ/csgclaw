@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1611,6 +1612,360 @@ func TestUpdateCodexLocalWorkspaceDirMarksRunningRuntimeForRestart(t *testing.T)
 	}
 	if len(observer.stopCalls) != 1 || observer.stopCalls[0] != "u-dev" {
 		t.Fatalf("StopAgent() calls = %+v, want [u-dev]", observer.stopCalls)
+	}
+}
+
+func TestUpdateOpenClawMCPRuntimeOptionsRecreatesAndProvisionsLatestOptions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	var provisionCalls []agentruntime.ProvisionRequest
+	reconcileCalls := 0
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{
+			ListenAddr:       "127.0.0.1:18080",
+			AdvertiseBaseURL: "http://127.0.0.1:18080",
+			AccessToken:      "shared-token",
+		},
+		"openclaw-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindOpenClawSandbox,
+			restart: func(change agentruntime.RuntimeConfigChange) (bool, error) {
+				return !reflect.DeepEqual(change.Previous.Options["mcp"], change.Current.Options["mcp"]), nil
+			},
+			reconcile: func(context.Context, agentruntime.Handle, agentruntime.RuntimeConfigChange) error {
+				reconcileCalls++
+				return nil
+			},
+			provision: func(_ context.Context, req agentruntime.ProvisionRequest) error {
+				provisionCalls = append(provisionCalls, req)
+				return nil
+			},
+			new: func(_ context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
+				return agentruntime.Handle{RuntimeID: spec.RuntimeID, HandleID: "openclaw-box-new"}, nil
+			},
+			info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+				return agentruntime.Info{
+					HandleID:  "openclaw-box-new",
+					State:     agentruntime.StateRunning,
+					CreatedAt: time.Date(2026, 6, 26, 9, 0, 0, 0, time.UTC),
+				}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	currentProfile := AgentProfile{
+		Name:            "alice",
+		Provider:        ProviderAPI,
+		BaseURL:         "https://api.example/v1",
+		APIKey:          "api-key",
+		ModelID:         "qwen3.7-max",
+		ProfileComplete: true,
+	}
+	svc.agents["u-alice"] = Agent{
+		ID:          "u-alice",
+		Name:        "alice",
+		RuntimeID:   "rt-u-alice",
+		RuntimeKind: RuntimeKindOpenClawSandbox,
+		Image:       "openclaw-image:test",
+		BoxID:       "openclaw-box-old",
+		Role:        RoleWorker,
+		Status:      string(agentruntime.StateRunning),
+		RuntimeOptions: map[string]any{
+			"local_workspace_dir": "/tmp/keep",
+		},
+		AgentProfile:    currentProfile,
+		ProfileComplete: true,
+		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	nextRuntimeOptions := map[string]any{
+		"local_workspace_dir": "/tmp/keep",
+		"mcp": map[string]any{
+			"mcpServers": map[string]any{
+				"context7": map[string]any{
+					"command": "uvx",
+					"args":    []any{"context7-mcp"},
+				},
+			},
+		},
+	}
+	updated, err := svc.Update(context.Background(), "u-alice", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if reconcileCalls != 1 {
+		t.Fatalf("ReconcileConfig() calls = %d, want 1", reconcileCalls)
+	}
+	if len(provisionCalls) != 1 {
+		t.Fatalf("Provision() calls = %d, want 1", len(provisionCalls))
+	}
+	if got, want := provisionCalls[0].RuntimeOptions["local_workspace_dir"], "/tmp/keep"; got != want {
+		t.Fatalf("Provision().RuntimeOptions local_workspace_dir = %#v, want %q", got, want)
+	}
+	mcpRoot, ok := provisionCalls[0].RuntimeOptions["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("Provision().RuntimeOptions[mcp] = %#v, want object", provisionCalls[0].RuntimeOptions["mcp"])
+	}
+	servers := mcpRoot["mcpServers"].(map[string]any)
+	if _, ok := servers["context7"]; !ok {
+		t.Fatalf("Provision().RuntimeOptions mcpServers = %#v, want context7", servers)
+	}
+	if updated.AgentProfile.EnvRestartRequired {
+		t.Fatal("Update().AgentProfile.EnvRestartRequired = true, want false after successful recreate")
+	}
+	if got, want := updated.BoxID, "openclaw-box-new"; got != want {
+		t.Fatalf("Update().BoxID = %q, want %q", got, want)
+	}
+}
+
+func TestUpdateOpenClawMCPRuntimeOptionsRecreateFailureKeepsRestartRequired(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{
+			ListenAddr:       "127.0.0.1:18080",
+			AdvertiseBaseURL: "http://127.0.0.1:18080",
+			AccessToken:      "shared-token",
+		},
+		"openclaw-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindOpenClawSandbox,
+			restart: func(change agentruntime.RuntimeConfigChange) (bool, error) {
+				return !reflect.DeepEqual(change.Previous.Options["mcp"], change.Current.Options["mcp"]), nil
+			},
+			provision: func(context.Context, agentruntime.ProvisionRequest) error {
+				return fmt.Errorf("provision failed")
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	currentProfile := AgentProfile{
+		Name:            "alice",
+		Provider:        ProviderAPI,
+		BaseURL:         "https://api.example/v1",
+		APIKey:          "api-key",
+		ModelID:         "qwen3.7-max",
+		ProfileComplete: true,
+	}
+	svc.agents["u-alice"] = Agent{
+		ID:              "u-alice",
+		Name:            "alice",
+		RuntimeID:       "rt-u-alice",
+		RuntimeKind:     RuntimeKindOpenClawSandbox,
+		Image:           "openclaw-image:test",
+		BoxID:           "openclaw-box-old",
+		Role:            RoleWorker,
+		Status:          string(agentruntime.StateRunning),
+		AgentProfile:    currentProfile,
+		ProfileComplete: true,
+		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	nextRuntimeOptions := map[string]any{
+		"mcp": map[string]any{
+			"mcpServers": map[string]any{
+				"context7": map[string]any{"command": "uvx"},
+			},
+		},
+	}
+	_, err = svc.Update(context.Background(), "u-alice", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
+	if err == nil || !strings.Contains(err.Error(), "provision failed") {
+		t.Fatalf("Update() error = %v, want provision failed", err)
+	}
+	got, ok := svc.Agent("u-alice")
+	if !ok {
+		t.Fatal("Agent() ok = false, want true")
+	}
+	if !got.AgentProfile.EnvRestartRequired {
+		t.Fatal("Agent().AgentProfile.EnvRestartRequired = false, want true after failed recreate")
+	}
+	if _, ok := got.RuntimeOptions["mcp"].(map[string]any); !ok {
+		t.Fatalf("Agent().RuntimeOptions = %#v, want saved mcp config", got.RuntimeOptions)
+	}
+	if got.BoxID != "openclaw-box-old" {
+		t.Fatalf("Agent().BoxID = %q, want old box id after failed recreate", got.BoxID)
+	}
+}
+
+func TestUpdateMCPRuntimeOptionsRejectsNonOpenClawRuntime(t *testing.T) {
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindPicoClawSandbox}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-dev"] = Agent{
+		ID:              "u-dev",
+		Name:            "dev",
+		RuntimeID:       "rt-u-dev",
+		RuntimeKind:     RuntimeKindPicoClawSandbox,
+		Image:           "picoclaw-image:test",
+		Role:            RoleWorker,
+		Status:          "profile_incomplete",
+		AgentProfile:    AgentProfile{Name: "dev"},
+		ProfileComplete: false,
+		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	nextRuntimeOptions := map[string]any{
+		"mcp": map[string]any{"mcpServers": map[string]any{}},
+	}
+	_, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
+	if err == nil || !strings.Contains(err.Error(), `runtime_options.mcp is only supported`) {
+		t.Fatalf("Update() error = %v, want unsupported mcp runtime", err)
+	}
+}
+
+func TestCreateMCPRuntimeOptionsRejectsNonOpenClawRuntime(t *testing.T) {
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindPicoClawSandbox}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	_, err = svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
+		Name:        "dev",
+		Role:        RoleWorker,
+		RuntimeKind: RuntimeKindPicoClawSandbox,
+		Image:       "picoclaw-image:test",
+		RuntimeOptions: map[string]any{
+			"mcp": map[string]any{"mcpServers": map[string]any{}},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `runtime_options.mcp is only supported`) {
+		t.Fatalf("Create() error = %v, want unsupported mcp runtime", err)
+	}
+}
+
+func TestReplaceRejectsInheritedMCPBeforeDeletingExistingAgent(t *testing.T) {
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindOpenClawSandbox}),
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindPicoClawSandbox}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-dev"] = Agent{
+		ID:          "u-dev",
+		Name:        "dev",
+		RuntimeID:   "rt-u-dev",
+		RuntimeKind: RuntimeKindOpenClawSandbox,
+		Image:       "openclaw-image:test",
+		Role:        RoleWorker,
+		Status:      string(agentruntime.StateStopped),
+		RuntimeOptions: map[string]any{
+			"mcp": map[string]any{"mcpServers": map[string]any{"context7": map[string]any{"command": "uvx"}}},
+		},
+		AgentProfile: AgentProfile{
+			Name:            "dev",
+			Provider:        ProviderAPI,
+			BaseURL:         "https://api.example/v1",
+			APIKey:          "api-key",
+			ModelID:         "qwen3.7-max",
+			ProfileComplete: true,
+		},
+		ProfileComplete: true,
+		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	_, err = svc.Create(context.Background(), CreateRequest{
+		Replace:   true,
+		FieldMask: []string{"runtime_kind", "image"},
+		Spec: CreateAgentSpec{
+			ID:          "u-dev",
+			RuntimeKind: RuntimeKindPicoClawSandbox,
+			Image:       "picoclaw-image:test",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `runtime_options.mcp is only supported`) {
+		t.Fatalf("Create(replace) error = %v, want unsupported mcp runtime", err)
+	}
+	got, ok := svc.Agent("u-dev")
+	if !ok {
+		t.Fatal("Agent(u-dev) ok = false, want existing agent preserved after failed replace")
+	}
+	if got.RuntimeKind != RuntimeKindOpenClawSandbox {
+		t.Fatalf("Agent().RuntimeKind = %q, want original %q", got.RuntimeKind, RuntimeKindOpenClawSandbox)
+	}
+	if _, ok := got.RuntimeOptions["mcp"].(map[string]any); !ok {
+		t.Fatalf("Agent().RuntimeOptions = %#v, want original mcp preserved", got.RuntimeOptions)
+	}
+}
+
+func TestReplaceRejectsInvalidOpenClawMCPBeforeDeletingExistingAgent(t *testing.T) {
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(openclawsandbox.New(openclawsandbox.Dependencies{})),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-dev"] = Agent{
+		ID:          "u-dev",
+		Name:        "dev",
+		RuntimeID:   "rt-u-dev",
+		RuntimeKind: RuntimeKindOpenClawSandbox,
+		Image:       "openclaw-image:test",
+		Role:        RoleWorker,
+		Status:      string(agentruntime.StateStopped),
+		AgentProfile: AgentProfile{
+			Name:            "dev",
+			Provider:        ProviderAPI,
+			BaseURL:         "https://api.example/v1",
+			APIKey:          "api-key",
+			ModelID:         "qwen3.7-max",
+			ProfileComplete: true,
+		},
+		ProfileComplete: true,
+		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	_, err = svc.Create(context.Background(), CreateRequest{
+		Replace:   true,
+		FieldMask: []string{"runtime_options"},
+		Spec: CreateAgentSpec{
+			ID: "u-dev",
+			RuntimeOptions: map[string]any{
+				"mcp": map[string]any{
+					"servers": map[string]any{
+						"context7": map[string]any{"command": "uvx"},
+					},
+				},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `runtime_options.mcp contains unsupported field`) {
+		t.Fatalf("Create(replace) error = %v, want unsupported mcp field", err)
+	}
+	svc.mu.RLock()
+	_, ok := svc.agents["u-dev"]
+	svc.mu.RUnlock()
+	if !ok {
+		t.Fatal("Agent(u-dev) ok = false, want existing agent preserved after failed replace")
 	}
 }
 

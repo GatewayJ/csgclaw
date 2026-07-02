@@ -30,6 +30,7 @@ type ProvisionRequest struct {
 	AgentName        string
 	Instructions     string
 	Profile          Profile
+	RuntimeOptions   map[string]any
 	WorkspaceOverlay string
 	Gateway          *GatewayProvision
 }

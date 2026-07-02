@@ -25,6 +25,20 @@ export type BotType = typeof BOT_TYPE_NORMAL | typeof BOT_TYPE_NOTIFICATION | st
 export type ProviderName = "csghub_lite" | "csghub" | "codex" | "claude_code" | "api" | string;
 export type JSONRecord = Record<string, unknown>;
 
+export const MCP_RUNTIME_OPTION_KEY = "mcp";
+export const MCP_RUNTIME_OPTIONS_EXAMPLE: JSONRecord = {
+  mcpServers: {
+    context7: {
+      command: "npx",
+      args: ["-y", "context7-mcp"],
+    },
+  },
+};
+
+export type MCPRuntimeOptionsParseResult =
+  | { ok: true; value: JSONRecord | null }
+  | { ok: false; error: "invalid_json" | "object_required" };
+
 export type RuntimeOptionSchema = {
   key?: string | null;
   path?: string | null;
@@ -527,6 +541,52 @@ function normalizeRuntimeOptionsRecord(value: unknown): JSONRecord {
     return {};
   }
   return { ...(value as JSONRecord) };
+}
+
+function isJSONRecord(value: unknown): value is JSONRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+export function supportsMCPRuntimeOptions(runtimeKind: unknown): boolean {
+  return normalizeRuntimeKind(runtimeKind) === "openclaw_sandbox";
+}
+
+export function mcpRuntimeOptionsText(runtimeOptions: JSONRecord | null | undefined): string {
+  const value = normalizeRuntimeOptionsRecord(runtimeOptions)[MCP_RUNTIME_OPTION_KEY];
+  if (value == null) {
+    return "";
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+export function parseMCPRuntimeOptionsText(text: string): MCPRuntimeOptionsParseResult {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { ok: true, value: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed) as unknown;
+  } catch {
+    return { ok: false, error: "invalid_json" };
+  }
+  if (!isJSONRecord(parsed)) {
+    return { ok: false, error: "object_required" };
+  }
+  return { ok: true, value: parsed };
+}
+
+export function setMCPRuntimeOptions(
+  runtimeOptions: JSONRecord | null | undefined,
+  value: JSONRecord | null,
+): JSONRecord {
+  const next = normalizeRuntimeOptionsRecord(runtimeOptions);
+  if (value == null) {
+    delete next[MCP_RUNTIME_OPTION_KEY];
+    return next;
+  }
+  next[MCP_RUNTIME_OPTION_KEY] = value;
+  return next;
 }
 
 export function isManagerAgent(item: AgentLike | null | undefined): boolean {

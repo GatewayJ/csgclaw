@@ -9,12 +9,12 @@ import (
 
 var _ agentruntime.RuntimeConfigController = (*Runtime)(nil)
 
-func (r *Runtime) ValidateConfig(_ context.Context, _ agentruntime.RuntimeConfigSnapshot) error {
-	return nil
+func (r *Runtime) ValidateConfig(_ context.Context, current agentruntime.RuntimeConfigSnapshot) error {
+	return validateOpenClawMCPRuntimeOptions(current.Options)
 }
 
-func (r *Runtime) RestartRequired(agentruntime.RuntimeConfigChange) (bool, error) {
-	return false, nil
+func (r *Runtime) RestartRequired(change agentruntime.RuntimeConfigChange) (bool, error) {
+	return openClawMCPRestartRequired(change.Previous.Options, change.Current.Options)
 }
 
 func (r *Runtime) ReconcileConfig(_ context.Context, h agentruntime.Handle, _ agentruntime.RuntimeConfigChange) error {
