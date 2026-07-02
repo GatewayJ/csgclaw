@@ -17,6 +17,7 @@ import (
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/config"
 	agentruntime "csgclaw/internal/runtime"
+	"csgclaw/internal/runtime/codexsandbox"
 	"csgclaw/internal/runtime/openclawsandbox"
 	"csgclaw/internal/runtime/picoclawsandbox"
 	"csgclaw/internal/runtime/sandboxgateway"
@@ -7674,6 +7675,29 @@ func TestGatewayProvisionRequestBuildsOpenClawWorkerAssets(t *testing.T) {
 	}
 }
 
+func TestGatewayProvisionRequestRejectsCodexSandboxManager(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
+		"manager-image:test",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	_, err = svc.gatewayProvisionRequest(RuntimeKindCodexSandbox, ManagerName, ManagerUserID)
+	if err == nil {
+		t.Fatal("gatewayProvisionRequest() error = nil, want codex_sandbox manager rejection")
+	}
+	if !strings.Contains(err.Error(), "supports worker templates only") {
+		t.Fatalf("gatewayProvisionRequest() error = %v, want worker-only message", err)
+	}
+}
+
 func TestGatewayProvisionRequestUsesDockerHostAliasForImplicitAdvertiseURL(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -7798,6 +7822,13 @@ func testBuiltinLayout(agentName, runtimeKind string) (agentruntime.Layout, erro
 			WorkspaceRoot: workspace,
 			SkillsRoot:    filepath.Join(workspace, "skills"),
 			HostLogPaths:  []string{openclawsandbox.HostGatewayLogPath(agentHome)},
+		}, nil
+	case RuntimeKindCodexSandbox:
+		workspace := filepath.Join(codexsandbox.Root(agentHome), codexsandbox.HostWorkspaceDir)
+		return agentruntime.Layout{
+			WorkspaceRoot: workspace,
+			SkillsRoot:    filepath.Join(workspace, "skills"),
+			HostLogPaths:  []string{codexsandbox.HostGatewayLogPath(agentHome)},
 		}, nil
 	case RuntimeKindCodex:
 		return agentruntime.Layout{
@@ -8336,6 +8367,32 @@ func TestGatewayProfileRuntimeRestartNotRequiredForCodex(t *testing.T) {
 	}, "alice", "")
 	if gatewayProfileRuntimeRestartRequired(current, next) {
 		t.Fatal("gatewayProfileRuntimeRestartRequired() = true, want false for codex runtime")
+	}
+}
+
+func TestGatewayProfileRuntimeRestartNotRequiredForCodexSandbox(t *testing.T) {
+	current := Agent{
+		RuntimeKind: RuntimeKindCodexSandbox,
+		Name:        "alice",
+		AgentProfile: AgentProfile{
+			Name:            "alice",
+			Provider:        ProviderAPI,
+			BaseURL:         "https://api.example/v1",
+			APIKey:          "api-key",
+			ModelID:         "gpt-5.4",
+			ProfileComplete: true,
+		},
+	}
+	next := normalizeProfile(AgentProfile{
+		Name:            "alice",
+		Provider:        ProviderAPI,
+		BaseURL:         "https://api.example/v1",
+		APIKey:          "api-key",
+		ModelID:         "gpt-5.5",
+		ProfileComplete: true,
+	}, "alice", "")
+	if gatewayProfileRuntimeRestartRequired(current, next) {
+		t.Fatal("gatewayProfileRuntimeRestartRequired() = true, want false so codex_sandbox uses recreate instead of host config sync")
 	}
 }
 

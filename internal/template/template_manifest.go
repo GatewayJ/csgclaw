@@ -137,7 +137,7 @@ func validateManifest(manifest templateManifest) error {
 	}
 	manifest.RuntimeKind = normalizeTemplateRuntimeKind(manifest.RuntimeKind)
 	switch manifest.RuntimeKind {
-	case runtime.NamePicoClaw, runtime.NameOpenClaw, runtime.KindCodex:
+	case runtime.NamePicoClaw, runtime.NameOpenClaw, runtime.KindCodexSandbox, runtime.KindCodex:
 	default:
 		return fmt.Errorf("%w: %s", ErrRuntimeKindRequired, manifest.RuntimeKind)
 	}

@@ -28,6 +28,7 @@ import (
 	"csgclaw/internal/participant"
 	agentruntime "csgclaw/internal/runtime"
 	codexruntime "csgclaw/internal/runtime/codex"
+	"csgclaw/internal/runtime/codexsandbox"
 	"csgclaw/internal/runtime/openclawsandbox"
 	"csgclaw/internal/runtime/picoclawsandbox"
 	"csgclaw/internal/sandbox"
@@ -51,7 +52,10 @@ func init() {
 		if err := runtimewiring.WithPicoClawSandboxRuntime(nil)(s); err != nil {
 			return err
 		}
-		return runtimewiring.WithOpenClawSandboxRuntime(nil)(s)
+		if err := runtimewiring.WithOpenClawSandboxRuntime(nil)(s); err != nil {
+			return err
+		}
+		return runtimewiring.WithCodexSandboxRuntime(nil)(s)
 	})
 	_ = codexruntime.TestOnlySetResponsesAPIProbe(func(context.Context, string, string, string, map[string]string) error {
 		return nil
@@ -91,6 +95,13 @@ func (f fakeCompatRuntime) Layout(agentHome string) agentruntime.Layout {
 			WorkspaceRoot: workspace,
 			SkillsRoot:    filepath.Join(workspace, "skills"),
 			HostLogPaths:  []string{openclawsandbox.HostGatewayLogPath(agentHome)},
+		}
+	case agent.RuntimeKindCodexSandbox:
+		workspace := filepath.Join(codexsandbox.Root(agentHome), codexsandbox.HostWorkspaceDir)
+		return agentruntime.Layout{
+			WorkspaceRoot: workspace,
+			SkillsRoot:    filepath.Join(workspace, "skills"),
+			HostLogPaths:  []string{codexsandbox.HostGatewayLogPath(agentHome)},
 		}
 	case agent.RuntimeKindCodex:
 		return agentruntime.Layout{
@@ -379,6 +390,13 @@ func TestBootstrapConfigIncludesBuiltinOpenClawRuntimeDefaultImage(t *testing.T)
 	}
 	if !strings.Contains(openclawImage, "/opencsghq/openclaw:") {
 		t.Fatalf("RuntimeDefaultImages[%q] = %q, want builtin OpenClaw image", agent.RuntimeNameOpenClaw, openclawImage)
+	}
+	codexSandboxImage := got.RuntimeDefaultImages[agent.RuntimeKindCodexSandbox]
+	if codexSandboxImage == "" {
+		t.Fatalf("RuntimeDefaultImages[%q] = empty; defaults=%#v", agent.RuntimeKindCodexSandbox, got.RuntimeDefaultImages)
+	}
+	if !strings.Contains(codexSandboxImage, "/opencsghq/csgclaw-codex-sandbox:") {
+		t.Fatalf("RuntimeDefaultImages[%q] = %q, want builtin Codex Sandbox image", agent.RuntimeKindCodexSandbox, codexSandboxImage)
 	}
 }
 
