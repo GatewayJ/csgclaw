@@ -910,8 +910,8 @@ func TestStartServerWithConfigPathLoadsPersistedUpgradeFailure(t *testing.T) {
 		if !strings.Contains(status.LastError, "restart daemon: boom") {
 			return fmt.Errorf("LastError = %q, want persisted failure", status.LastError)
 		}
-		if !strings.Contains(status.LastError, artifacts.LogPath) {
-			return fmt.Errorf("LastError = %q, want log path", status.LastError)
+		if status.LastErrorLogPath != artifacts.LogPath {
+			return fmt.Errorf("LastErrorLogPath = %q, want %q", status.LastErrorLogPath, artifacts.LogPath)
 		}
 		return nil
 	}

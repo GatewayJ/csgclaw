@@ -585,7 +585,7 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 	if outcome, err := upgrade.ConsumeApplyStatus(configPath); err != nil {
 		slog.Warn("load upgrade helper failure", "error", err)
 	} else if outcome.Status == upgrade.ApplyStatusFailed && outcome.Message != "" {
-		upgradeManager.MarkUpgradeFailed(errors.New(outcome.Message))
+		upgradeManager.MarkUpgradeFailedWithDetails(errors.New(outcome.Message), outcome.ErrorKind, outcome.LogPath)
 	}
 	hubSvc, err := newAgentTemplateHubService(cfg.Hub)
 	if err != nil {

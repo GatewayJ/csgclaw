@@ -2061,6 +2061,8 @@
   padding: 10px 12px;
   background: color-mix(in oklab, var(--danger) 12%, var(--surface));
   color: color-mix(in oklab, var(--danger) 86%, var(--text));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .entity-pane {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyUpgradeRequest } from "@/api/upgrade";
-import { normalizeUpgradeStatus } from "@/models/upgradeStatus";
+import { normalizeUpgradeStatus, upgradeErrorMessage } from "@/models/upgradeStatus";
 import type { UpgradePhase } from "@/models/upgradeStatus";
 import type { UpgradeController, UseUpgradeControllerArgs } from "./types";
 
@@ -84,6 +84,8 @@ export function useUpgradeController({
               manual_restart_required: false,
               upgrading: false,
               last_error: "",
+              last_error_kind: "",
+              last_error_log_path: "",
             }));
             return;
           }
@@ -95,12 +97,13 @@ export function useUpgradeController({
             setShowUpgradeModal(true);
             return;
           }
-          if (latest?.last_error) {
+          const statusMessage = upgradeErrorMessage(latest, t);
+          if (statusMessage) {
             stopUpgradePoll();
             setUpgradeBusy(false);
             setUpgradePhase("error");
             setShowUpgradeModal(true);
-            setUpgradeError(`${t("upgradeApplyFailed")} ${latest.last_error}`.trim());
+            setUpgradeError(statusMessage);
             return;
           }
         } catch (_) {
@@ -112,8 +115,7 @@ export function useUpgradeController({
           setUpgradePhase("error");
           setShowUpgradeModal(true);
           const latest = await refreshUpgradeStatus();
-          const detail = latest?.last_error ? ` ${latest.last_error}` : "";
-          setUpgradeError(`${t("upgradeApplyFailed")}${detail}`);
+          setUpgradeError(upgradeErrorMessage(latest, t) || t("upgradeApplyFailed"));
         }
       };
       poll();
@@ -153,16 +155,32 @@ export function useUpgradeController({
         manual_restart_required: false,
         upgrading: true,
         last_error: "",
+        last_error_kind: "",
+        last_error_log_path: "",
       }));
       startUpgradeReconnectPoll(upgradeStatus?.latest_version);
       setShowUpgradeModal(false);
     } catch (err: unknown) {
       setUpgradeBusy(false);
       setUpgradePhase("error");
+      const latest = await refreshUpgradeStatus().catch(() => null);
+      const statusMessage = upgradeErrorMessage(latest, t);
+      if (statusMessage) {
+        setUpgradeError(statusMessage);
+        return;
+      }
       const detail = upgradeErrorDetail(err);
       setUpgradeError(`${t("upgradeApplyFailed")}${detail}`);
     }
-  }, [appVersion, setUpgradeStatusData, startUpgradeReconnectPoll, t, upgradeBusy, upgradeStatus]);
+  }, [
+    appVersion,
+    refreshUpgradeStatus,
+    setUpgradeStatusData,
+    startUpgradeReconnectPoll,
+    t,
+    upgradeBusy,
+    upgradeStatus,
+  ]);
 
   const openUpgradeModal = useCallback(() => {
     if (upgradePhase !== "error") {

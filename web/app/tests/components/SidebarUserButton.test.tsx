@@ -11,6 +11,9 @@ const labels: Record<string, string> = {
   themeLight: "Light",
   themeSwitcher: "Theme",
   upgradeAction: "Update & Restart",
+  upgradeErrorDetails: "Details: {detail}",
+  upgradeErrorLogPath: "Log: {path}",
+  upgradeErrorPermission: "Permission issue.",
   upgradeLocalBuild: "Local build",
   versionInfo: "Version",
   versionSettings: "Version and updates",
@@ -28,8 +31,8 @@ const labels: Record<string, string> = {
   csghubSignOut: "Sign out",
 };
 
-function t(key: string): string {
-  return labels[key] ?? key;
+function t(key: string, params: Record<string, string | number> = {}): string {
+  return (labels[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => `${params[name] ?? ""}`);
 }
 
 const updateAvailableStatus: UpgradeStatus = {
@@ -39,6 +42,8 @@ const updateAvailableStatus: UpgradeStatus = {
   current_version: "v0.3.0",
   last_checked_at: "",
   last_error: "",
+  last_error_kind: "",
+  last_error_log_path: "",
   latest_version: "v0.3.1",
   manual_restart_required: false,
   update_available: true,

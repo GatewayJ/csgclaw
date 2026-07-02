@@ -735,6 +735,14 @@ export const messages = {
     upgradeAction: "更新并重启",
     upgradeActionBusy: "更新中...",
     upgradeApplyFailed: "启动升级失败，请重试。",
+    upgradeErrorArchiveInvalid: "下载的升级包无效或已损坏，请重试；如果持续失败，请反馈该版本安装包问题。",
+    upgradeErrorDetails: "详情：{detail}",
+    upgradeErrorDiskSpace: "磁盘空间不足，无法完成升级。请清理临时目录或安装目录所在磁盘后重试。",
+    upgradeErrorLocalInstall: "本地安装目录或升级状态异常，请确认安装是否完整后重试。",
+    upgradeErrorLogPath: "日志：{path}",
+    upgradeErrorNetworkOrService: "网络或服务访问失败，请检查网络、代理或稍后重试。",
+    upgradeErrorPermission: "本地权限不足，无法准备或安装升级。请检查安装目录、配置/日志目录和系统临时目录的写入权限。",
+    upgradeErrorUnknown: "升级失败。请查看详情并重试。",
     upgradeTitle: "发现新版本",
     upgradeSubtitle: "可以直接在界面中完成升级，升级过程会短暂重启本地服务。",
     upgradeManualUpgradeSubtitle: "当前安装方式不支持界面内自动升级，需要手动完成升级。",
@@ -1534,6 +1542,18 @@ export const messages = {
     upgradeAction: "Update & Restart",
     upgradeActionBusy: "Updating...",
     upgradeApplyFailed: "Failed to start the upgrade. Please retry.",
+    upgradeErrorArchiveInvalid:
+      "The downloaded upgrade package is invalid or corrupted. Retry the upgrade; if it keeps failing, report the release package.",
+    upgradeErrorDetails: "Details: {detail}",
+    upgradeErrorDiskSpace:
+      "There is not enough disk space to complete the upgrade. Free space on the temp or install volume, then retry.",
+    upgradeErrorLocalInstall:
+      "The local installation directory or upgrade state looks abnormal. Check that the installation is complete, then retry.",
+    upgradeErrorLogPath: "Log: {path}",
+    upgradeErrorNetworkOrService: "Network or service access failed. Check your network or proxy, or retry later.",
+    upgradeErrorPermission:
+      "A local permission issue prevented the upgrade. Check write access to the install directory, config/log directory, and system temp directory.",
+    upgradeErrorUnknown: "The upgrade failed. Review the details and retry.",
     upgradeTitle: "New version available",
     upgradeSubtitle: "Upgrade directly from the app. The local service will restart briefly.",
     upgradeManualUpgradeSubtitle: "This installation does not support in-app upgrade and must be upgraded manually.",

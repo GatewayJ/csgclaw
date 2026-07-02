@@ -7,7 +7,12 @@ import type { AuthStatus } from "@/models/auth";
 import type { LocaleCode, TranslateFn } from "@/models/conversations";
 import { githubFeedbackIssueURL } from "@/models/feedback";
 import type { UpgradePhase, UpgradeStatus } from "@/models/upgradeStatus";
-import { formatSidebarVersionLabel, hasUpgradeAttention, isLocalBuildUpgradeStatus } from "@/models/upgradeStatus";
+import {
+  formatSidebarVersionLabel,
+  hasUpgradeAttention,
+  isLocalBuildUpgradeStatus,
+  upgradeErrorMessage,
+} from "@/models/upgradeStatus";
 import { classNames } from "@/shared/lib/classNames";
 import type { ThemeMode } from "@/shared/theme/theme";
 
@@ -65,8 +70,8 @@ export function SidebarUserButton({
     showUpgradeControls && !localBuild && upgradeStatus?.auto_upgrade_supported !== false;
   const upgradeAttention = upgradeControlsAvailable && hasUpgradeAttention(upgradeStatus, upgradePhase, upgradeBusy);
   const upgradeRunning = upgradeControlsAvailable ? upgradeBusy || Boolean(upgradeStatus?.upgrading) : false;
-  const upgradeIssue =
-    upgradeControlsAvailable && !suppressUpgradeIssue ? upgradeError || upgradeStatus?.last_error || "" : "";
+  const statusIssue = upgradeErrorMessage(upgradeStatus, t);
+  const upgradeIssue = upgradeControlsAvailable && !suppressUpgradeIssue ? upgradeError || statusIssue : "";
   const upgradeView = upgradeControlsAvailable
     ? {
         actionLabel: upgradeMenuActionText({

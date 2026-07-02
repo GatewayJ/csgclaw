@@ -133,6 +133,29 @@ func TestManagerRefreshPreservesUpgradeFailure(t *testing.T) {
 	}
 }
 
+func TestManagerPreservesUpgradeFailureMetadata(t *testing.T) {
+	manager := NewManager(fakeChecker{
+		check: func(_ context.Context, _ string) (CheckResult, error) {
+			return CheckResult{LatestVersion: "v0.2.7"}, nil
+		},
+	}, "v0.2.5", ManagerOptions{})
+
+	manager.MarkUpgradeFailedWithDetails(
+		errors.New("write /tmp/csgclaw-upgrade/archive.tar.gz: stream error: stream ID 3"),
+		UpgradeErrorNetworkDownload,
+		"/tmp/upgrade-helper.log",
+	)
+	manager.Refresh(context.Background())
+
+	status := manager.Status()
+	if got, want := status.LastErrorKind, UpgradeErrorNetworkDownload; got != want {
+		t.Fatalf("LastErrorKind = %q, want %q", got, want)
+	}
+	if got, want := status.LastErrorLogPath, "/tmp/upgrade-helper.log"; got != want {
+		t.Fatalf("LastErrorLogPath = %q, want %q", got, want)
+	}
+}
+
 func TestManagerRefreshSkipsLocalDevVersionWithoutError(t *testing.T) {
 	now := time.Date(2026, 5, 6, 16, 0, 0, 0, time.UTC)
 	manager := NewManager(fakeChecker{

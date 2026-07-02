@@ -2,6 +2,7 @@ package upgrade
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,6 +103,8 @@ func (m *Manager) Refresh(ctx context.Context) {
 			m.status.LastError = m.stickyError
 		} else {
 			m.status.LastError = err.Error()
+			m.status.LastErrorKind = ""
+			m.status.LastErrorLogPath = ""
 		}
 		updated := copyStatus(m.status)
 		notify := shouldNotifyStatusChange(previous, updated)
@@ -116,6 +119,10 @@ func (m *Manager) Refresh(ctx context.Context) {
 	m.status.LatestVersion = result.LatestVersion
 	m.status.UpdateAvailable = result.UpdateAvailable
 	m.status.LastError = m.stickyError
+	if m.stickyError == "" {
+		m.status.LastErrorKind = ""
+		m.status.LastErrorLogPath = ""
+	}
 	updated := copyStatus(m.status)
 	notify := shouldNotifyStatusChange(previous, updated)
 	callback := m.onStatusChange
@@ -152,6 +159,8 @@ func (m *Manager) MarkUpgrading() apitypes.UpgradeStatus {
 	m.status.ManualRestartRequired = false
 	m.stickyError = ""
 	m.status.LastError = ""
+	m.status.LastErrorKind = ""
+	m.status.LastErrorLogPath = ""
 	updated := copyStatus(m.status)
 	notify := shouldNotifyStatusChange(previous, updated)
 	callback := m.onStatusChange
@@ -163,6 +172,10 @@ func (m *Manager) MarkUpgrading() apitypes.UpgradeStatus {
 }
 
 func (m *Manager) MarkUpgradeFailed(err error) apitypes.UpgradeStatus {
+	return m.MarkUpgradeFailedWithDetails(err, "", "")
+}
+
+func (m *Manager) MarkUpgradeFailedWithDetails(err error, kind, logPath string) apitypes.UpgradeStatus {
 	if m == nil {
 		return apitypes.UpgradeStatus{}
 	}
@@ -173,8 +186,13 @@ func (m *Manager) MarkUpgradeFailed(err error) apitypes.UpgradeStatus {
 	m.status.ManualRestartRequired = false
 	m.stickyError = ""
 	if err != nil {
+		if strings.TrimSpace(kind) == "" {
+			kind = ClassifyFailure(err)
+		}
 		m.stickyError = err.Error()
 		m.status.LastError = m.stickyError
+		m.status.LastErrorKind = strings.TrimSpace(kind)
+		m.status.LastErrorLogPath = strings.TrimSpace(logPath)
 	}
 	updated := copyStatus(m.status)
 	notify := shouldNotifyStatusChange(previous, updated)
@@ -197,6 +215,8 @@ func (m *Manager) MarkManualRestartRequired() apitypes.UpgradeStatus {
 	m.status.ManualRestartRequired = true
 	m.stickyError = ""
 	m.status.LastError = ""
+	m.status.LastErrorKind = ""
+	m.status.LastErrorLogPath = ""
 	updated := copyStatus(m.status)
 	notify := shouldNotifyStatusChange(previous, updated)
 	callback := m.onStatusChange
@@ -222,6 +242,8 @@ func shouldNotifyStatusChange(previous, current apitypes.UpgradeStatus) bool {
 		previous.Upgrading != current.Upgrading ||
 		previous.ManualRestartRequired != current.ManualRestartRequired ||
 		previous.LastError != current.LastError ||
+		previous.LastErrorKind != current.LastErrorKind ||
+		previous.LastErrorLogPath != current.LastErrorLogPath ||
 		previous.AutoUpgradeSupported != current.AutoUpgradeSupported ||
 		previous.AutoUpgradeUnsupportedReason != current.AutoUpgradeUnsupportedReason
 }

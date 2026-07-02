@@ -96,6 +96,42 @@ func TestHandleUpgradeStatusConsumesManualRestartRequired(t *testing.T) {
 	}
 }
 
+func TestHandleUpgradeStatusConsumesFailureMetadata(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.toml"
+	artifacts, err := upgrade.ResolveApplyArtifacts(configPath)
+	if err != nil {
+		t.Fatalf("ResolveApplyArtifacts() error = %v", err)
+	}
+	if err := artifacts.RecordFailure(errors.New("write /tmp/csgclaw-upgrade/archive.tar.gz: stream error: stream ID 3")); err != nil {
+		t.Fatalf("RecordFailure() error = %v", err)
+	}
+
+	manager := upgrade.NewManager(stubUpgradeChecker{err: errors.New("unused")}, "v0.2.5", upgrade.ManagerOptions{})
+	srv := &Handler{}
+	srv.SetUpgradeManager(manager)
+	srv.SetUpgradeConfigPath(configPath)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/upgrade/status", nil)
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var got apitypes.UpgradeStatus
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.LastErrorKind != upgrade.UpgradeErrorNetworkDownload {
+		t.Fatalf("LastErrorKind = %q, want %q", got.LastErrorKind, upgrade.UpgradeErrorNetworkDownload)
+	}
+	if got.LastErrorLogPath != artifacts.LogPath {
+		t.Fatalf("LastErrorLogPath = %q, want %q", got.LastErrorLogPath, artifacts.LogPath)
+	}
+}
+
 func TestHandleUpgradeStatusServiceUnavailable(t *testing.T) {
 	srv := &Handler{}
 

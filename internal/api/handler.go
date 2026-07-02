@@ -691,7 +691,7 @@ func (h *Handler) handleUpgradeStatus(w http.ResponseWriter, r *http.Request) {
 		switch outcome.Status {
 		case upgrade.ApplyStatusFailed:
 			if outcome.Message != "" {
-				h.upgradeManager.MarkUpgradeFailed(errors.New(outcome.Message))
+				h.upgradeManager.MarkUpgradeFailedWithDetails(errors.New(outcome.Message), outcome.ErrorKind, outcome.LogPath)
 			}
 		case upgrade.ApplyStatusManualRestartRequired:
 			h.upgradeManager.MarkManualRestartRequired()

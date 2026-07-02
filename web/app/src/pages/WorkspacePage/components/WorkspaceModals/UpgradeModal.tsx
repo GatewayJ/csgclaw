@@ -1,5 +1,10 @@
 import { Button } from "@/components/ui";
-import { formatSidebarVersionLabel, isLocalBuildVersion, upgradeStatusLabel } from "@/models/upgradeStatus";
+import {
+  formatSidebarVersionLabel,
+  isLocalBuildVersion,
+  upgradeErrorMessage,
+  upgradeStatusLabel,
+} from "@/models/upgradeStatus";
 import type { UpgradePhase, UpgradeStatus } from "@/models/upgradeStatus";
 import type { TranslateFn } from "@/models/conversations";
 import { ModalCloseButton } from "./ModalCloseButton";
@@ -35,6 +40,8 @@ export function UpgradeModal({
       ? t("upgradeStatusManualUpgrade")
       : upgradeStatusLabel(upgradePhase, t);
   const subtitle = manualUpgradeRequired ? t("upgradeManualUpgradeSubtitle") : t("upgradeSubtitle");
+  const statusError = upgradeErrorMessage(upgradeStatus, t);
+  const visibleError = upgradeError || statusError;
   return (
     <div className="modal-backdrop">
       <div className="modal-card upgrade-modal" onClick={(event) => event.stopPropagation()}>
@@ -80,9 +87,7 @@ export function UpgradeModal({
                     : t("upgradeConfirmBody")}
           </p>
         </div>
-        {upgradeError || upgradeStatus?.last_error ? (
-          <div className="form-error">{upgradeError || upgradeStatus?.last_error}</div>
-        ) : null}
+        {visibleError ? <div className="form-error">{visibleError}</div> : null}
         <div className="modal-actions">
           {upgradePhase === "done" ? (
             <Button variant="primary" size="md" onClick={() => window.location.reload()}>

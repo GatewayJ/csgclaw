@@ -4,6 +4,7 @@ import {
   isLocalBuildUpgradeStatus,
   isLocalBuildVersion,
   normalizeUpgradeStatus,
+  upgradeErrorMessage,
   upgradeStatusLabel,
 } from "@/models/upgradeStatus";
 import type { UpgradeStatus } from "@/models/upgradeStatus";
@@ -44,6 +45,8 @@ describe("upgrade status helpers", () => {
         current_version: "v0.2.0",
         last_checked_at: 123,
         last_error: 404,
+        last_error_kind: "network_download",
+        last_error_log_path: "/tmp/upgrade.log",
         latest_version: "v0.2.1",
         manual_restart_required: "yes",
         auto_upgrade_supported: false,
@@ -58,6 +61,8 @@ describe("upgrade status helpers", () => {
       current_version: "v0.2.0",
       last_checked_at: 123,
       last_error: "",
+      last_error_kind: "network_download",
+      last_error_log_path: "/tmp/upgrade.log",
       latest_version: "v0.2.1",
       manual_restart_required: true,
       update_available: true,
@@ -80,6 +85,65 @@ describe("upgrade status helpers", () => {
     expect(upgradeStatusLabel("idle", t)).toBe("label:upgradeStatusReady");
   });
 
+  it("formats classified upgrade errors through translations", () => {
+    const t = (key: string, params: Record<string, string | number> = {}) => {
+      const labels: Record<string, string> = {
+        upgradeErrorDetails: "Details: {detail}",
+        upgradeErrorLocalInstall: "Local install is abnormal.",
+        upgradeErrorLogPath: "Log: {path}",
+        upgradeErrorNetworkOrService: "Network or service failed.",
+      };
+      return (labels[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => `${params[name] ?? ""}`);
+    };
+
+    expect(
+      upgradeErrorMessage(
+        {
+          ...baseUpgradeStatus,
+          last_error: "write archive: stream error",
+          last_error_kind: "network_download",
+          last_error_log_path: "/tmp/upgrade-helper.log",
+        },
+        t,
+      ),
+    ).toBe("Network or service failed.\nDetails: write archive: stream error\nLog: /tmp/upgrade-helper.log");
+    expect(
+      upgradeErrorMessage(
+        {
+          ...baseUpgradeStatus,
+          last_error: "fetch latest release metadata: unexpected status 503",
+          last_error_kind: "http_metadata",
+        },
+        t,
+      ),
+    ).toBe("Network or service failed.\nDetails: fetch latest release metadata: unexpected status 503");
+    expect(
+      upgradeErrorMessage(
+        {
+          ...baseUpgradeStatus,
+          last_error_kind: "missing_path",
+        },
+        t,
+      ),
+    ).toBe("Local install is abnormal.");
+  });
+
+  it("keeps log paths visible for unclassified upgrade errors", () => {
+    const t = (key: string, params: Record<string, string | number> = {}) =>
+      key === "upgradeErrorLogPath" ? `Log: ${params.path}` : key;
+
+    expect(
+      upgradeErrorMessage(
+        {
+          ...baseUpgradeStatus,
+          last_error: "restart daemon: boom",
+          last_error_log_path: "/tmp/upgrade-helper.log",
+        },
+        t,
+      ),
+    ).toBe("restart daemon: boom\nLog: /tmp/upgrade-helper.log");
+  });
+
   it("detects upgrade states that need settings attention", () => {
     expect(hasUpgradeAttention(null, "idle")).toBe(false);
     expect(hasUpgradeAttention({ ...baseUpgradeStatus, update_available: true }, "idle")).toBe(true);
@@ -100,6 +164,8 @@ const baseUpgradeStatus: UpgradeStatus = {
   current_version: "v0.2.0",
   last_checked_at: "",
   last_error: "",
+  last_error_kind: "",
+  last_error_log_path: "",
   latest_version: "v0.2.0",
   manual_restart_required: false,
   update_available: false,

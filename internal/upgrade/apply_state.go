@@ -33,13 +33,16 @@ type ApplyArtifacts struct {
 type applyFailureRecord struct {
 	Status    string    `json:"status,omitempty"`
 	Message   string    `json:"message"`
+	ErrorKind string    `json:"error_kind,omitempty"`
 	LogPath   string    `json:"log_path,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type ApplyStatusRecord struct {
-	Status  string
-	Message string
+	Status    string
+	Message   string
+	ErrorKind string
+	LogPath   string
 }
 
 func ResolveApplyArtifacts(configPath string) (ApplyArtifacts, error) {
@@ -109,6 +112,7 @@ func (a ApplyArtifacts) RecordFailure(err error) error {
 	record := applyFailureRecord{
 		Status:    ApplyStatusFailed,
 		Message:   err.Error(),
+		ErrorKind: ClassifyFailure(err),
 		LogPath:   strings.TrimSpace(a.LogPath),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -170,20 +174,17 @@ func ConsumeApplyStatus(configPath string) (ApplyStatusRecord, error) {
 	if status == "" {
 		status = ApplyStatusFailed
 	}
-	if status == ApplyStatusFailed {
-		if message == "" {
-			return ApplyStatusRecord{}, nil
-		}
-		if logPath := strings.TrimSpace(record.LogPath); logPath != "" {
-			message = fmt.Sprintf("%s\nLog: %s", message, logPath)
-		}
+	if status == ApplyStatusFailed && message == "" {
+		return ApplyStatusRecord{}, nil
 	}
 	if message == "" && status != ApplyStatusManualRestartRequired {
 		return ApplyStatusRecord{}, nil
 	}
 	return ApplyStatusRecord{
-		Status:  status,
-		Message: message,
+		Status:    status,
+		Message:   message,
+		ErrorKind: strings.TrimSpace(record.ErrorKind),
+		LogPath:   strings.TrimSpace(record.LogPath),
 	}, nil
 }
 

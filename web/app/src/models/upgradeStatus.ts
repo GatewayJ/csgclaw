@@ -8,6 +8,8 @@ export type UpgradeStatus = {
   current_version: string;
   last_checked_at: unknown;
   last_error: string;
+  last_error_kind: string;
+  last_error_log_path: string;
   latest_version: string;
   manual_restart_required: boolean;
   update_available: boolean;
@@ -57,8 +59,51 @@ export function normalizeUpgradeStatus(status: unknown): UpgradeStatus | null {
     upgrading: Boolean(source.upgrading),
     last_checked_at: source.last_checked_at || "",
     last_error: typeof source.last_error === "string" ? source.last_error : "",
+    last_error_kind: typeof source.last_error_kind === "string" ? source.last_error_kind : "",
+    last_error_log_path: typeof source.last_error_log_path === "string" ? source.last_error_log_path : "",
     manual_restart_required: Boolean(source.manual_restart_required),
   };
+}
+
+export function upgradeErrorMessage(status: UpgradeStatus | null | undefined, t: TranslateFn): string {
+  if (!status?.last_error && !status?.last_error_kind && !status?.last_error_log_path) {
+    return "";
+  }
+  const detail = status.last_error.trim();
+  const logPath = status.last_error_log_path.trim();
+  const kind = status.last_error_kind.trim();
+  if (!kind) {
+    return [detail, logPath ? t("upgradeErrorLogPath", { path: logPath }) : ""].filter(Boolean).join("\n");
+  }
+
+  const parts = [upgradeErrorSummary(kind, t)];
+  if (detail) {
+    parts.push(t("upgradeErrorDetails", { detail }));
+  }
+  if (logPath) {
+    parts.push(t("upgradeErrorLogPath", { path: logPath }));
+  }
+  return parts.filter(Boolean).join("\n");
+}
+
+function upgradeErrorSummary(kind: string, t: TranslateFn): string {
+  switch (kind) {
+    case "archive_invalid":
+      return t("upgradeErrorArchiveInvalid");
+    case "disk_space":
+      return t("upgradeErrorDiskSpace");
+    case "http_asset":
+    case "http_metadata":
+    case "network_download":
+    case "network_check":
+      return t("upgradeErrorNetworkOrService");
+    case "missing_path":
+      return t("upgradeErrorLocalInstall");
+    case "permission":
+      return t("upgradeErrorPermission");
+    default:
+      return t("upgradeErrorUnknown");
+  }
 }
 
 export function upgradeStatusLabel(phase: UpgradePhase, t: TranslateFn): string {

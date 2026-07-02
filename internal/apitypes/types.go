@@ -179,6 +179,8 @@ type UpgradeStatus struct {
 	AutoUpgradeUnsupportedReason string     `json:"auto_upgrade_unsupported_reason,omitempty"`
 	LastCheckedAt                *time.Time `json:"last_checked_at,omitempty"`
 	LastError                    string     `json:"last_error,omitempty"`
+	LastErrorKind                string     `json:"last_error_kind,omitempty"`
+	LastErrorLogPath             string     `json:"last_error_log_path,omitempty"`
 }
 
 type UpgradeActionResponse struct {
