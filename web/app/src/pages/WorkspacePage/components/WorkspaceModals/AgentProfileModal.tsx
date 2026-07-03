@@ -22,6 +22,7 @@ import {
   composeLegacyRuntimeKind,
   formatRuntimeKindLabel,
   isNotificationBotDraftContext,
+  MCP_RUNTIME_OPTION_KEY,
   normalizeRuntimeKind,
   normalizeRuntimeName,
   normalizeTemplateSelection,
@@ -29,6 +30,7 @@ import {
   pickDefaultAgentTemplate,
   defaultWorkerImageForRuntime,
   runtimeOptionSchemasForAgent,
+  setMCPRuntimeOptions,
   supportsMCPRuntimeOptions,
   templateMatchesRuntime,
   workerSelectableTemplates,
@@ -183,12 +185,30 @@ export function AgentProfileModal({
       : selectedRuntimeChoice?.message || t("runtimeCodexNotInstalled")
     : "";
 
+  function runtimeOptionsForRuntimeKind(
+    runtimeOptions: AgentDraft["runtime_options"],
+    runtimeKind: string,
+  ): AgentDraft["runtime_options"] {
+    if (supportsMCPRuntimeOptions(runtimeKind) || !runtimeOptions || !(MCP_RUNTIME_OPTION_KEY in runtimeOptions)) {
+      return runtimeOptions;
+    }
+    const next = setMCPRuntimeOptions(runtimeOptions, null);
+    return Object.keys(next).length > 0 ? next : undefined;
+  }
+
+  function draftWithRuntimeOptionsForRuntimeKind(draft: AgentDraft): AgentDraft {
+    return {
+      ...draft,
+      runtime_options: runtimeOptionsForRuntimeKind(draft.runtime_options, draft.runtime_kind),
+    };
+  }
+
   function defaultCustomWorkerDraft(baseDraft: AgentDraft): AgentDraft {
     const codexAvailable = codexChoice?.installed !== false;
     const runtimeName = codexAvailable ? "codex" : defaultSandboxRuntimeName;
     const nextSandboxEnabled = !codexAvailable;
     const runtimeKind = composeLegacyRuntimeKind(runtimeName, nextSandboxEnabled) || DEFAULT_RUNTIME_KIND;
-    return {
+    return draftWithRuntimeOptionsForRuntimeKind({
       ...baseDraft,
       bot_type: BOT_TYPE_NORMAL,
       description: "",
@@ -207,7 +227,7 @@ export function AgentProfileModal({
         : "",
       from_template: "",
       template_name: "",
-    };
+    });
   }
 
   useEffect(() => {
@@ -226,34 +246,38 @@ export function AgentProfileModal({
     if (nextSandboxEnabled) {
       const runtimeName = defaultSandboxRuntimeName;
       const runtimeKind = composeLegacyRuntimeKind(runtimeName, true) || DEFAULT_RUNTIME_KIND;
-      onAgentDraftChange({
-        ...agentDraft,
-        bot_type: BOT_TYPE_NORMAL,
-        sandbox_enabled: true,
-        runtime_name: runtimeName,
-        runtime_kind: runtimeKind,
-        image: defaultWorkerImageForRuntime(
-          hubTemplates,
-          runtimeKind,
-          bootstrapConfig,
-          agentDraft.default_image || managerAgent?.image || "",
-        ),
-        from_template: "",
-        template_name: "",
-      });
+      onAgentDraftChange(
+        draftWithRuntimeOptionsForRuntimeKind({
+          ...agentDraft,
+          bot_type: BOT_TYPE_NORMAL,
+          sandbox_enabled: true,
+          runtime_name: runtimeName,
+          runtime_kind: runtimeKind,
+          image: defaultWorkerImageForRuntime(
+            hubTemplates,
+            runtimeKind,
+            bootstrapConfig,
+            agentDraft.default_image || managerAgent?.image || "",
+          ),
+          from_template: "",
+          template_name: "",
+        }),
+      );
       onAgentModelsReset();
       return;
     }
-    onAgentDraftChange({
-      ...agentDraft,
-      bot_type: BOT_TYPE_NORMAL,
-      sandbox_enabled: false,
-      runtime_name: "codex",
-      runtime_kind: "codex",
-      image: "",
-      from_template: "",
-      template_name: "",
-    });
+    onAgentDraftChange(
+      draftWithRuntimeOptionsForRuntimeKind({
+        ...agentDraft,
+        bot_type: BOT_TYPE_NORMAL,
+        sandbox_enabled: false,
+        runtime_name: "codex",
+        runtime_kind: "codex",
+        image: "",
+        from_template: "",
+        template_name: "",
+      }),
+    );
     onAgentModelsReset();
   }
 
@@ -295,9 +319,12 @@ export function AgentProfileModal({
           pickDefaultAgentTemplate(workerTemplates, defaultSandboxRuntimeKind, bootstrapConfig) ||
           null,
       );
-      onAgentDraftChange((current) =>
-        current ? applyTemplateToDraft(current, nextTemplate, bootstrapConfig, managerAgent?.image || "") : current,
-      );
+      onAgentDraftChange((current) => {
+        const next = current
+          ? applyTemplateToDraft(current, nextTemplate, bootstrapConfig, managerAgent?.image || "")
+          : current;
+        return next ? draftWithRuntimeOptionsForRuntimeKind(next) : next;
+      });
       return;
     }
     onAgentDraftChange((current) => (current ? defaultCustomWorkerDraft(current) : current));
@@ -516,16 +543,18 @@ export function AgentProfileModal({
                           <Select
                             value="codex"
                             onValueChange={(value) => {
-                              onAgentDraftChange({
-                                ...agentDraft,
-                                bot_type: BOT_TYPE_NORMAL,
-                                sandbox_enabled: false,
-                                runtime_name: normalizeRuntimeName(value) || "codex",
-                                runtime_kind: "codex",
-                                image: "",
-                                from_template: "",
-                                template_name: "",
-                              });
+                              onAgentDraftChange(
+                                draftWithRuntimeOptionsForRuntimeKind({
+                                  ...agentDraft,
+                                  bot_type: BOT_TYPE_NORMAL,
+                                  sandbox_enabled: false,
+                                  runtime_name: normalizeRuntimeName(value) || "codex",
+                                  runtime_kind: "codex",
+                                  image: "",
+                                  from_template: "",
+                                  template_name: "",
+                                }),
+                              );
                             }}
                             triggerProps={{ "aria-label": t("profileRuntimeKind") }}
                             options={[
@@ -580,6 +609,7 @@ export function AgentProfileModal({
                                 bootstrapConfig,
                                 managerAgent?.image || "",
                               );
+                              nextDraft = draftWithRuntimeOptionsForRuntimeKind(nextDraft);
                               onAgentDraftChange(nextDraft);
                               onAgentModelsReset();
                             }}
