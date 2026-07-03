@@ -287,6 +287,32 @@ Participant 是 channel-scoped identity，用于房间、消息、mention、通�
 - `field_mask` 用于替换时只覆盖指定字段
 - `agent_profile.api_key` 只在写入时使用，读取时会被脱敏
 
+OpenClaw agent 可通过 `runtime_options.mcp` 配置 MCP server。CSGClaw API 接收 `mcpServers` 输入，并在 OpenClaw runtime 配置中渲染为 `mcp.servers`：
+
+```json
+{
+  "name": "alice",
+  "runtime_kind": "openclaw_sandbox",
+  "runtime_options": {
+    "mcp": {
+      "mcpServers": {
+        "workspace-filesystem": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "/home/node/.openclaw/workspace"
+          ]
+        }
+      }
+    }
+  },
+  "profile": "api.gpt-5.4"
+}
+```
+
+注意：MCP command 在 OpenClaw sandbox 内执行，filesystem server 的目录参数也必须是容器内可见路径。非 OpenClaw runtime 提交 `runtime_options.mcp` 会返回错误。
+
 ### `GET /api/v1/agents/{id}`
 
 获取单个 agent。
@@ -319,6 +345,9 @@ Participant 是 channel-scoped identity，用于房间、消息、mention、通�
 说明：
 
 - 省略的字段不会修改
+- `runtime_options` 一旦提交就是整体替换；修改 MCP 时请提交合并后的完整 `runtime_options`
+- `runtime_options.mcp: null` 或提交不含 `mcp` 的 `runtime_options` 可清除 MCP 配置
+- OpenClaw agent 的 MCP 配置变更会触发该 agent runtime recreate，使新的 `openclaw.json` 生效
 - `agent_profile.api_key` 如果传空，服务端会保留原有密钥
 - 如果 `agent_profile.env` 发生变化，响应中的 `env_restart_required` 可能为 `true`
 
