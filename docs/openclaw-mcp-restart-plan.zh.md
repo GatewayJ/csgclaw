@@ -1,12 +1,12 @@
-# OpenClaw Runtime MCP 配置接入方案
+# OpenClaw Runtime MCP 配置实现说明
 
-本文档约束 CSGClaw 为 OpenClaw agent 增加 MCP 能力的阶段一实现方案。阶段一只支持 `openclaw_sandbox`：MCP 配置先存入 agent 的 `runtime_options.mcp`，再由 OpenClaw runtime adapter 在 provision/recreate 阶段渲染为 OpenClaw 原生配置。非 OpenClaw runtime 暂不接收 `runtime_options.mcp`，后续 runtime 如需支持再单独接入。
+本文档记录 CSGClaw 为 OpenClaw agent 增加 MCP 能力的当前实现。当前阶段只支持 `openclaw_sandbox`：MCP 配置先存入 agent 的 `runtime_options.mcp`，再由 OpenClaw runtime adapter 在 provision/recreate 阶段渲染为 OpenClaw 原生配置。非 OpenClaw runtime 暂不接收 `runtime_options.mcp`，后续 runtime 如需支持再单独接入。
 
-阶段一沿用现有 gateway runtime 配置变更路径：MCP 配置保存后进入 CSGClaw 持久化状态，并立即触发现有 agent recreate 流程；recreate 成功后，新 runtime 进程加载最新 MCP 配置，`env_restart_required` 被清除。recreate 失败时，已保存的 MCP 配置保留在 agent state 中，`env_restart_required` 继续为 true，用户可通过现有“重建”动作重试。阶段一不依赖 runtime hot reload。
+当前实现沿用现有 gateway runtime 配置变更路径：MCP 配置保存后进入 CSGClaw 持久化状态，并立即触发现有 agent recreate 流程；recreate 成功后，新 runtime 进程加载最新 MCP 配置，`env_restart_required` 被清除。recreate 失败时，已保存的 MCP 配置保留在 agent state 中，`env_restart_required` 继续为 true，用户可通过现有“重建”动作重试。当前实现不依赖 runtime hot reload。
 
 ## 1. 目标与边界
 
-目标：
+已实现目标：
 
 - OpenClaw agent 使用现有 API 形态：`runtime_options.mcp`。
 - MCP 配置由 CSGClaw 管理，随 OpenClaw agent create/update 持久化。
@@ -15,17 +15,17 @@
 - OpenClaw adapter 负责把 `runtime_options.mcp` 转成 `openclaw.json` 中的 `mcp.servers`。
 - 非 OpenClaw runtime 收到 `runtime_options.mcp` 时返回明确错误，不静默忽略。
 
-非目标：
+当前未覆盖：
 
-- 阶段一不做 MCP marketplace、自动安装、连接测试或动态发现。
-- 阶段一不依赖任一 runtime 的 MCP hot reload 保证。
-- 阶段一不新增 CLI MCP 参数或 `agent update` 子命令。
-- 阶段一不抽象通用 MCP runtime policy，也不接入 PicoClaw/Codex。
+- 当前不做 MCP marketplace、自动安装、连接测试或动态发现。
+- 当前不依赖任一 runtime 的 MCP hot reload 保证。
+- 当前不新增 CLI MCP 参数或 `agent update` 子命令。
+- 当前不抽象通用 MCP runtime policy，也不接入 PicoClaw/Codex。
 - 暂不处理 MCP secret 脱敏体验；API 和前端沿用 `runtime_options` 的现有回显语义。
 
 ## 2. 当前 OpenClaw 配置注入路径
 
-OpenClaw 是第一条需要落地的 runtime adapter。CSGClaw 当前已经通过配置文件注入 OpenClaw 运行参数，路径如下：
+OpenClaw 是当前已接入 MCP 的 runtime adapter。CSGClaw 通过配置文件注入 OpenClaw 运行参数，路径如下：
 
 ```text
 Agent create/recreate provisioning
@@ -33,26 +33,26 @@ Agent create/recreate provisioning
   -> openclawsandbox.Runtime.Provision(...)
   -> openclawsandbox.EnsureConfig(...)
   -> renderConfig(defaults/openclaw-gateway.json + CSGClaw runtime inputs)
-  -> ~/.csgclaw/agents/<agent-name>/.openclaw/openclaw.json
+  -> ~/.csgclaw/agents/<agent-id>/.openclaw/openclaw.json
 ```
 
 `EnsureConfig` 会创建宿主机目录：
 
 ```text
-~/.csgclaw/agents/<agent-name>/.openclaw/
+~/.csgclaw/agents/<agent-id>/.openclaw/
 ```
 
 并写入：
 
 ```text
-~/.csgclaw/agents/<agent-name>/.openclaw/openclaw.json
-~/.csgclaw/agents/<agent-name>/.openclaw/exec-approvals.json
+~/.csgclaw/agents/<agent-id>/.openclaw/openclaw.json
+~/.csgclaw/agents/<agent-id>/.openclaw/exec-approvals.json
 ```
 
 OpenClaw sandbox 创建时，CSGClaw 会把该目录挂载进容器：
 
 ```text
-宿主机: ~/.csgclaw/agents/<agent-name>/.openclaw
+宿主机: ~/.csgclaw/agents/<agent-id>/.openclaw
 容器内: /home/node/.openclaw
 ```
 
@@ -74,7 +74,7 @@ node /app/openclaw.mjs gateway --allow-unconfigured --bind lan --port 18789
 /home/node/.openclaw/openclaw.json
 ```
 
-结论：OpenClaw MCP adapter 不需要写 workspace 文件，也不需要通过 task wrapper 或 `OPENCLAW_CONFIG_PATH` 指向临时文件；它应该继续维护每个 agent 的长期 OpenClaw 配置根目录，并在 provision/recreate 时把 `runtime_options.mcp` 渲染进 `openclaw.json`。
+结论：OpenClaw MCP adapter 不需要写 workspace 文件，也不需要通过 task wrapper 或 `OPENCLAW_CONFIG_PATH` 指向临时文件；它维护每个 agent 的长期 OpenClaw 配置根目录，并在 provision/recreate 时把 `runtime_options.mcp` 渲染进 `openclaw.json`。
 
 ## 3. MCP 配置形态
 
@@ -142,12 +142,13 @@ OpenClaw 约束：
 - `runtime_options.mcp.mcpServers` 渲染为 OpenClaw `mcp.servers`。
 - 不支持直接提交完整 OpenClaw `mcp` 对象，避免用户把 OpenClaw 其它 `mcp.*` 设置和 server 列表混在一起造成合并语义不清。
 - MCP command 在 OpenClaw sandbox 内执行，不在宿主机执行；需要的二进制必须在镜像内存在，或通过 workspace/projects 等已有挂载路径可访问。
+- filesystem MCP server 的目录参数也是容器内可见路径，例如 `/home/node/.openclaw/workspace`；直接填写宿主机路径不会自动挂载进容器。
 
 ## 4. 后端设计
 
 ### 4.1 数据模型
 
-不要新增 top-level `Agent.MCPConfig`。阶段一把 MCP 配置放在 `Agent.RuntimeOptions["mcp"]`，保持和已有 runtime option 架构一致。
+不要新增 top-level `Agent.MCPConfig`。当前实现把 MCP 配置放在 `Agent.RuntimeOptions["mcp"]`，保持和已有 runtime option 架构一致。
 
 需要同步处理：
 
@@ -202,7 +203,7 @@ runtime_options.mcp
   -> openclawsandbox.EnsureConfig(...)
   -> renderConfig(...)
   -> updateOpenClawMCP(...)
-  -> ~/.csgclaw/agents/<agent-name>/.openclaw/openclaw.json
+  -> ~/.csgclaw/agents/<agent-id>/.openclaw/openclaw.json
 ```
 
 `openclawsandbox.EnsureConfig` 新增 runtime options 参数后，`renderConfig` 在现有步骤之后追加：
@@ -217,7 +218,7 @@ updateOpenClawMCP
 
 ### 4.3 OpenClaw adapter 策略
 
-阶段一复用现有 `RuntimeConfigController` 扩展点，不新增 MCP 专用跨 runtime 抽象。OpenClaw runtime controller 负责：
+当前实现复用现有 `RuntimeConfigController` 扩展点，不新增 MCP 专用跨 runtime 抽象。OpenClaw runtime controller 负责：
 
 - 校验 `runtime_options.mcp`。
 - 判断 `runtime_options.mcp` 变更是否需要 recreate。
@@ -231,7 +232,7 @@ OpenClaw adapter：
 
 非 OpenClaw runtime：
 
-- 阶段一不支持 `runtime_options.mcp`。
+- 当前不支持 `runtime_options.mcp`。
 - create/update/start 等需要校验 runtime config 的路径遇到 `runtime_options.mcp` 时返回明确错误。
 
 ### 4.4 保存与自动重建
@@ -417,9 +418,9 @@ MCP 修改保存后，后端负责自动重建 runtime；前端不再提供专�
 
 如果 agent 正在运行，保存 MCP 配置会触发 runtime recreate。当前路径会重建该 agent 的 runtime 进程，不依赖 hot reload。
 
-## 7. 验证计划
+## 7. 验证与测试
 
-后端测试：
+后端覆盖：
 
 - `runtime_options.mcp` 的缺失、`null`、空对象、空 `mcpServers`、非空 `mcpServers` 语义正确。
 - 非 object server entry 报错。
@@ -434,7 +435,7 @@ MCP 修改保存后，后端负责自动重建 runtime；前端不再提供专�
 - 非 OpenClaw runtime 收到 `runtime_options.mcp` 时返回明确错误。
 - `syncGatewayHostConfig` 重写 OpenClaw host config 时不会丢失 MCP 配置。
 
-前端测试：
+前端覆盖：
 
 - `AgentProfileModal` 能编辑 `runtime_options.mcp`。
 - `AgentDetailPane` 能显示和编辑 `runtime_options.mcp`。
@@ -444,17 +445,24 @@ MCP 修改保存后，后端负责自动重建 runtime；前端不再提供专�
 - 保存已有 agent 的 MCP 配置时只调用 update；recreate 由后端自动完成。
 - update 失败后刷新 agent，并能展示现有 recreate required 状态。
 
-手工验证：
+可手工验证：
 
 1. 创建 agent，带一个 stdio MCP server。
-2. 对 OpenClaw agent，检查宿主机 `~/.csgclaw/agents/<agent>/.openclaw/openclaw.json` 包含 `mcp.servers`。
+2. 对 OpenClaw agent，检查宿主机 `~/.csgclaw/agents/<agent-id>/.openclaw/openclaw.json` 包含 `mcp.servers`。
 3. 启动 agent 后确认 runtime 能看到 MCP tool。
 4. 修改 MCP 配置并保存，确认后端自动重建 runtime。
 5. 自动重建成功后确认新配置生效，`env_restart_required` 清除。
 6. 模拟 recreate 失败，确认已保存 MCP 配置保留，`env_restart_required` 为 true，现有重建 action 可恢复。
-7. MCP 配置生效后修改 profile，确认 host config sync 不会丢失 `mcp.servers`，并能看到诊断日志。
+7. MCP 配置生效后修改 profile，确认 host config sync 不会丢失 `mcp.servers`。
 
-## 8. 实施顺序
+本 PR 使用过的定向验证命令：
+
+```bash
+go test ./internal/runtime/openclawsandbox ./internal/agent -run 'Test(RenderAgentOpenClawConfig.*MCP|UpdateOpenClawMCP|UpdateMCPRuntimeOptions|CreateMCPRuntimeOptions|Replace.*MCP|UpdateFieldMaskClearsRuntimeOptions)'
+pnpm exec vitest run tests/models/agents.test.ts tests/components/AgentProfileModal.test.tsx tests/components/AgentActions.test.tsx
+```
+
+## 8. 已完成改动
 
 1. 增加 `runtime_options.mcp` parser/validator 和共享 helper。
 2. 扩展 provision request，把 `Agent.RuntimeOptions` 传到 runtime provision 边界。
@@ -463,4 +471,4 @@ MCP 修改保存后，后端负责自动重建 runtime；前端不再提供专�
 5. 让 `syncGatewayHostConfig` 重写 OpenClaw host config 时也传入并渲染当前 `Agent.RuntimeOptions`，避免 profile 热同步丢失 MCP。
 6. 拒绝非 OpenClaw runtime 的 `runtime_options.mcp`。
 7. 接入前端 Agent 创建/详情页 MCP runtime options UI。
-8. 补充 `docs/api.zh.md` 和相关英文 API 文档。
+8. 补充 `docs/api.zh.md` 和 `docs/api.md` 的 MCP runtime options 示例。

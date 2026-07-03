@@ -290,6 +290,36 @@ Additional notes:
 - `field_mask` limits which fields are overwritten during replacement
 - `agent_profile.api_key` is write-only and will be redacted in reads
 
+OpenClaw agents can configure MCP servers through `runtime_options.mcp`. The
+CSGClaw API accepts `mcpServers` input and renders it into OpenClaw's native
+`mcp.servers` config:
+
+```json
+{
+  "name": "alice",
+  "runtime_kind": "openclaw_sandbox",
+  "runtime_options": {
+    "mcp": {
+      "mcpServers": {
+        "workspace-filesystem": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "/home/node/.openclaw/workspace"
+          ]
+        }
+      }
+    }
+  },
+  "profile": "api.gpt-5.4"
+}
+```
+
+MCP commands run inside the OpenClaw sandbox, so filesystem server directory
+arguments must be paths visible inside the container. Non-OpenClaw runtimes
+reject `runtime_options.mcp`.
+
 ### `GET /api/v1/agents/{id}`
 
 Gets a single agent.
@@ -322,6 +352,9 @@ Example request body:
 Notes:
 
 - Omitted fields are left unchanged
+- `runtime_options` uses whole-object replacement when submitted; include the full merged `runtime_options` when editing MCP
+- `runtime_options.mcp: null` or a submitted `runtime_options` object without `mcp` clears MCP config
+- Updating MCP config on an OpenClaw agent recreates that agent runtime so the new `openclaw.json` takes effect
 - If `agent_profile.api_key` is sent empty, the server keeps the existing key
 - If `agent_profile.env` changes, `env_restart_required` may become `true` in the response
 
