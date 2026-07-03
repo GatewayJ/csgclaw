@@ -1194,6 +1194,85 @@ describe("AgentProfileModal", () => {
     expect(screen.queryByLabelText("MCP Servers")).not.toBeInTheDocument();
   });
 
+  it("drops MCP runtime options when OpenClaw drafts switch to unsupported runtimes", async () => {
+    const user = userEvent.setup();
+    const onAgentDraftChange = vi.fn();
+    const openclawDraft: AgentDraft = {
+      ...agentToDraft({ ...worker, runtime_kind: "openclaw_sandbox" }),
+      from_template: "",
+      model_provider_id: "api",
+      runtime_name: "openclaw",
+      runtime_kind: "openclaw_sandbox",
+      sandbox_enabled: true,
+      runtime_options: {
+        local_workspace_dir: "/tmp/project",
+        mcp: {
+          mcpServers: {
+            context7: {
+              command: "npx",
+            },
+          },
+        },
+      },
+    };
+
+    function TestModal() {
+      const [draft, setDraft] = useState<AgentDraft>(openclawDraft);
+      return (
+        <AgentProfileModal
+          t={t}
+          agentModalMode="create"
+          editingAgent={null}
+          agentDraft={draft}
+          locale="en"
+          onAgentDraftChange={(update) => {
+            onAgentDraftChange(update);
+            setDraft((current) => {
+              const next = typeof update === "function" ? update(current) : update;
+              return next ?? current;
+            });
+          }}
+          onAgentModelsReset={vi.fn()}
+          hubTemplates={[]}
+          bootstrapConfig={{
+            worker_runtime_choices: [
+              { name: "codex", sandbox_enabled: false, installed: true, label: "Codex CLI" },
+              { name: "openclaw", sandbox_enabled: true, installed: true, label: "OpenClaw" },
+              { name: "picoclaw", sandbox_enabled: true, installed: true, label: "PicoClaw" },
+            ],
+          }}
+          managerAgent={null}
+          agentModels={[]}
+          agentModelBusy={false}
+          authStatuses={{}}
+          authBusyProvider=""
+          agentCreateBotKind="worker"
+          agentCreateMode="custom"
+          onAgentCreateBotKindChange={vi.fn()}
+          notifierWebhookPublicOrigin="http://127.0.0.1:18080"
+          onProviderLogin={vi.fn()}
+          agentError=""
+          agentProgress={null}
+          agentBusy={false}
+          onClose={vi.fn()}
+          onSave={vi.fn()}
+        />
+      );
+    }
+
+    render(<TestModal />);
+
+    expect(screen.getByLabelText("MCP Servers")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "Runtime" }));
+    await user.click(screen.getByRole("option", { name: "PicoClaw" }));
+
+    const nextDraft = onAgentDraftChange.mock.calls.at(-1)?.[0] as AgentDraft;
+    expect(nextDraft.runtime_kind).toBe("picoclaw_sandbox");
+    expect(nextDraft.runtime_options).toEqual({ local_workspace_dir: "/tmp/project" });
+    expect(screen.queryByLabelText("MCP Servers")).not.toBeInTheDocument();
+  });
+
   it("shows provider logos only in the provider field, not in the model field", () => {
     const { container } = render(
       <AgentProfileModal
