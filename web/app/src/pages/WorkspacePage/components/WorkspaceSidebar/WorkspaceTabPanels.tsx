@@ -6,7 +6,6 @@ import { isDirectConversation, resolveConversationUser } from "@/models/conversa
 import { modelProviderAvatarPath, providerStatusTone, type ModelProvider } from "@/models/modelProviders";
 import { WorkspacePaneTypes, WorkspaceTabs } from "@/models/routing";
 import { displayTeam } from "@/models/tasks";
-import { skillSourceBadgeName } from "@/models/skillhub";
 import { localizeTemplateSourceTag } from "@/shared/i18n";
 import { WORKSPACE_SECTION_ORDER_STORAGE_KEY } from "@/shared/storage/keys";
 import { SkillUploadDialog } from "./SkillUploadDialog";
@@ -729,36 +728,25 @@ export function WorkspaceTabPanels({
             addIcon={<Plus size={15} strokeWidth={2.2} aria-hidden="true" />}
           >
             {resourcesSkills.length ? (
-              resourcesSkills.map((item) => {
-                const sourceBadgeName = skillSourceBadgeName(item);
-                return (
-                  <button
-                    key={item.name}
-                    className={`workspace-row hub-template-row hub-skill-row ${
-                      resourcesPaneActive &&
-                      selectedHubSkillName === item.name &&
-                      selectedHubResourceType === "skill"
-                        ? "active"
-                        : ""
-                    }`}
-                    onClick={() => onSelectHubSkill(item)}
-                  >
-                    <span className="workspace-row-icon">
-                      <FileCode2 size={16} strokeWidth={2} aria-hidden="true" />
-                    </span>
-                    <span className="workspace-row-main">
-                      <span className="workspace-row-title truncate">{item.name}</span>
-                      <span className="workspace-row-meta truncate">{item.description || item.name}</span>
-                    </span>
-                    {sourceBadgeName ? (
-                      <span className="mini-badge template-source-badge">
-                        <span className="template-source-badge-dot" aria-hidden="true"></span>
-                        {localizeTemplateSourceTag(sourceBadgeName, locale)}
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })
+              resourcesSkills.map((item) => (
+                <button
+                  key={item.name}
+                  className={`workspace-row hub-template-row hub-skill-row ${
+                    resourcesPaneActive && selectedHubSkillName === item.name && selectedHubResourceType === "skill"
+                      ? "active"
+                      : ""
+                  }`}
+                  onClick={() => onSelectHubSkill(item)}
+                >
+                  <span className="workspace-row-icon">
+                    <FileCode2 size={16} strokeWidth={2} aria-hidden="true" />
+                  </span>
+                  <span className="workspace-row-main">
+                    <span className="workspace-row-title truncate">{item.name}</span>
+                    <span className="workspace-row-meta truncate">{item.description || item.name}</span>
+                  </span>
+                </button>
+              ))
             ) : resourcesSkillsError ? (
               <div className="workspace-empty">{resourcesSkillsError}</div>
             ) : resourcesLoaded && resourcesTemplates.length === 0 ? (
@@ -772,7 +760,7 @@ export function WorkspaceTabPanels({
             onSubmit={(file) => hub?.uploadSkill?.(file)}
             busy={resourcesUploadBusy}
             error={resourcesUploadError}
-            locale={locale}
+            installedSkills={resourcesSkills}
             onInstallRemoteSkill={hub?.installRemoteSkill}
             onLoadMoreRemoteSkills={hub?.loadMoreRemoteSkills}
             remoteInstallBusy={hub?.remoteInstallBusy || ""}

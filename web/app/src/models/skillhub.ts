@@ -12,6 +12,7 @@ export type SkillSummary = {
   readonly?: boolean;
   remoteRef?: string;
   remotePath?: string;
+  remoteURL?: string;
   source?: string;
 };
 
@@ -61,6 +62,11 @@ export function hasSkillName(
   return (skills || []).some((item) => normalizeSkillName(item?.name) === value);
 }
 
+export function remoteSkillInstallName(skill: SkillSummary | null | undefined): string {
+  const remotePathName = skillNameFromPath(skill?.remotePath);
+  return remotePathName || normalizeSkillName(skill?.name);
+}
+
 function normalizeSkillName(value: unknown): string {
   return String(value || "").trim();
 }
@@ -69,4 +75,18 @@ function normalizeSkillSource(value: unknown): string {
   return String(value || "")
     .trim()
     .toLowerCase();
+}
+
+function skillNameFromPath(value: unknown): string {
+  const path = String(value || "").trim();
+  if (!path) {
+    return "";
+  }
+  return (
+    path
+      .split("/")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .at(-1) || ""
+  );
 }

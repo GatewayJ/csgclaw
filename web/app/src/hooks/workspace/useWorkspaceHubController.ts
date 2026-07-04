@@ -14,6 +14,9 @@ import type { UseWorkspaceHubControllerArgs } from "./types";
 type WorkspaceHubSelection = ReturnType<typeof useWorkspaceHubSelection>;
 type DeleteHubTemplate = (template: HubTemplate | null | undefined) => Promise<boolean>;
 type DeleteSkill = (skill: SkillSummary | null | undefined) => Promise<boolean>;
+export type InstallRemoteSkillOptions = {
+  replace?: boolean;
+};
 
 export type WorkspaceHubController = {
   hub: Omit<WorkspaceHubSelection, "detailPaneProps"> & {
@@ -23,7 +26,10 @@ export type WorkspaceHubController = {
     skillDeleteBusy: boolean;
     remoteInstallBusy: string;
     remoteInstallError: string;
-    installRemoteSkill: (skill: SkillSummary | null | undefined) => Promise<SkillSummary | null>;
+    installRemoteSkill: (
+      skill: SkillSummary | null | undefined,
+      options?: InstallRemoteSkillOptions,
+    ) => Promise<SkillSummary | null>;
     uploadBusy: boolean;
     uploadError: string;
     uploadSkill: (file: File) => Promise<SkillSummary | null>;
@@ -165,7 +171,10 @@ export function useWorkspaceHubController({
   );
 
   const installRemoteSkill = useCallback(
-    async (skill: SkillSummary | null | undefined): Promise<SkillSummary | null> => {
+    async (
+      skill: SkillSummary | null | undefined,
+      options: InstallRemoteSkillOptions = {},
+    ): Promise<SkillSummary | null> => {
       const remotePath = String(skill?.remotePath || "").trim();
       if (!remotePath) {
         setResourcesRemoteInstallError(t("resourcesSkillRemoteInstallFailed"));
@@ -174,7 +183,7 @@ export function useWorkspaceHubController({
       setResourcesRemoteInstallBusy(remotePath);
       setResourcesRemoteInstallError("");
       try {
-        const installed = await installRemoteSkillRequest(remotePath, skill?.remoteRef);
+        const installed = await installRemoteSkillRequest(remotePath, skill?.remoteRef, Boolean(options.replace));
         queryClient.setQueryData<SkillSummary[]>(workspaceQueryKeys.skills(), (current) => {
           return upsertSkillSummary(current, installed);
         });

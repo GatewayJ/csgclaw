@@ -155,7 +155,7 @@
 
 .hub-skill-remote-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   min-height: 54px;
@@ -163,6 +163,27 @@
   border: 1px solid var(--gray-200);
   border-radius: 8px;
   background: var(--white);
+}
+
+.hub-skill-remote-link {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.hub-skill-remote-link:hover .hub-skill-remote-title,
+.hub-skill-remote-link:focus-visible .hub-skill-remote-title {
+  color: var(--brand-600);
+}
+
+.hub-skill-remote-link:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid color-mix(in srgb, var(--brand-600) 40%, transparent);
+  outline-offset: 2px;
 }
 
 :root[data-theme="dark"] .hub-skill-remote-row {
@@ -210,6 +231,13 @@
   line-height: 18px;
 }
 
+.hub-skill-remote-row:hover .hub-skill-remote-meta,
+.hub-skill-remote-row:focus-within .hub-skill-remote-meta {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 :root[data-theme="dark"] .hub-skill-remote-title,
 :root[data-theme="dark"] .hub-skill-remote-meta {
   color: var(--white);
@@ -231,11 +259,7 @@
 
 @media (max-width: 560px) {
   .hub-skill-remote-row {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .hub-skill-remote-row .mini-badge {
-    display: none;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

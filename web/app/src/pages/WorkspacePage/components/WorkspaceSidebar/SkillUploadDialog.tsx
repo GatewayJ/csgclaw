@@ -11,15 +11,19 @@ import {
   DialogTitle,
   TextInput,
 } from "@/components/ui";
-import type { LocaleCode, TranslateFn } from "@/models/conversations";
+import type { TranslateFn } from "@/models/conversations";
+import { hasSkillName, remoteSkillInstallName } from "@/models/skillhub";
 import type { SkillSummary } from "@/models/skillhub";
-import { localizeTemplateSourceTag } from "@/shared/i18n";
+
+type RemoteSkillInstallOptions = {
+  replace?: boolean;
+};
 
 export type SkillUploadDialogProps = {
   busy: boolean;
   error: string;
-  locale: LocaleCode;
-  onInstallRemoteSkill?: (skill: SkillSummary) => Promise<unknown>;
+  installedSkills: readonly SkillSummary[];
+  onInstallRemoteSkill?: (skill: SkillSummary, options?: RemoteSkillInstallOptions) => Promise<unknown>;
   onLoadMoreRemoteSkills?: () => Promise<unknown>;
   onOpenChange: (open: boolean) => void;
   onRefreshRemoteSkills?: () => Promise<unknown>;
@@ -51,7 +55,7 @@ export function SkillUploadDialog({
   onSubmit,
   busy,
   error,
-  locale,
+  installedSkills,
   remoteInstallBusy,
   remoteInstallError,
   remoteSkillsHasMore,
@@ -130,11 +134,11 @@ export function SkillUploadDialog({
   }, [onOpenChange, onSubmit, selectedFile, t]);
 
   const handleRemoteInstall = useCallback(
-    async (skill: SkillSummary) => {
+    async (skill: SkillSummary, options: RemoteSkillInstallOptions = {}) => {
       if (!onInstallRemoteSkill) {
         return;
       }
-      const result = await onInstallRemoteSkill(skill);
+      const result = await onInstallRemoteSkill(skill, options);
       if (result) {
         onOpenChange(false);
       }
@@ -255,32 +259,51 @@ export function SkillUploadDialog({
               ) : remoteSkills.length ? (
                 <>
                   <div className="hub-skill-remote-list" onScroll={handleRemoteListScroll}>
-                    {remoteSkills.map((item) => (
-                      <div className="hub-skill-remote-row" key={item.remotePath || item.name}>
-                        <span className="hub-skill-remote-icon" aria-hidden="true">
-                          <FileCode2 size={16} strokeWidth={2} />
-                        </span>
-                        <span className="hub-skill-remote-main">
-                          <span className="hub-skill-remote-title truncate">{item.name}</span>
-                          <span className="hub-skill-remote-meta truncate">{item.description || item.remotePath}</span>
-                        </span>
-                        <span className="mini-badge template-source-badge">
-                          <span className="template-source-badge-dot" aria-hidden="true"></span>
-                          {localizeTemplateSourceTag("official", locale)}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          loading={remoteInstallBusy === (item.remotePath || item.name)}
-                          disabled={!onInstallRemoteSkill || Boolean(remoteInstallBusy)}
-                          onClick={() => void handleRemoteInstall(item)}
-                        >
-                          {remoteInstallBusy === (item.remotePath || item.name)
-                            ? t("resourcesSkillRemoteInstalling")
-                            : t("resourcesSkillRemoteInstallAction")}
-                        </Button>
-                      </div>
-                    ))}
+                    {remoteSkills.map((item) => {
+                      const installKey = item.remotePath || item.name;
+                      const installed = hasSkillName(installedSkills, remoteSkillInstallName(item));
+                      const description = item.description || item.remotePath || item.name;
+                      const rowContent = (
+                        <>
+                          <span className="hub-skill-remote-icon" aria-hidden="true">
+                            <FileCode2 size={16} strokeWidth={2} />
+                          </span>
+                          <span className="hub-skill-remote-main">
+                            <span className="hub-skill-remote-title truncate">{item.name}</span>
+                            <span className="hub-skill-remote-meta truncate">{description}</span>
+                          </span>
+                        </>
+                      );
+                      return (
+                        <div className="hub-skill-remote-row" key={installKey} title={description}>
+                          {item.remoteURL ? (
+                            <a
+                              className="hub-skill-remote-link"
+                              href={item.remoteURL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {rowContent}
+                            </a>
+                          ) : (
+                            <span className="hub-skill-remote-link">{rowContent}</span>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            loading={remoteInstallBusy === installKey}
+                            disabled={!onInstallRemoteSkill || Boolean(remoteInstallBusy)}
+                            onClick={() => void handleRemoteInstall(item, { replace: installed })}
+                          >
+                            {remoteInstallBusy === installKey
+                              ? t("resourcesSkillRemoteInstalling")
+                              : installed
+                                ? t("resourcesSkillRemoteReplaceAction")
+                                : t("resourcesSkillRemoteInstallAction")}
+                          </Button>
+                        </div>
+                      );
+                    })}
                     {remoteSkillsLoadingMore ? (
                       <div className="hub-skill-remote-list-state">{t("resourcesSkillRemoteSkillsLoading")}</div>
                     ) : null}

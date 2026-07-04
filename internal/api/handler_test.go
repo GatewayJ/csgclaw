@@ -3088,8 +3088,27 @@ enabled = true
 	if !strings.Contains(string(script), "echo ready") {
 		t.Fatalf("script = %q, want remote script content", script)
 	}
-	if rootTreePages != 2 {
-		t.Fatalf("root tree pages = %d, want 2", rootTreePages)
+	staleFile := filepath.Join(skillRoot, "stale.txt")
+	if err := os.WriteFile(staleFile, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("WriteFile(stale) error = %v", err)
+	}
+
+	replaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/skills:install", strings.NewReader(`{
+		"remote_path": "AIWizards/agent-builder",
+		"ref": "dev",
+		"replace": true
+	}`))
+	replaceRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(replaceRec, replaceReq)
+
+	if replaceRec.Code != http.StatusCreated {
+		t.Fatalf("replace install status = %d, want %d; body=%s", replaceRec.Code, http.StatusCreated, replaceRec.Body.String())
+	}
+	if _, err := os.Stat(staleFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale file still exists after replace, err=%v", err)
+	}
+	if rootTreePages != 4 {
+		t.Fatalf("root tree pages = %d, want 4", rootTreePages)
 	}
 }
 

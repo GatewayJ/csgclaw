@@ -23,7 +23,15 @@ var (
 	ErrSKILLMDMissing      = errors.New("skill archive must contain SKILL.md")
 )
 
+type InstallArchiveOptions struct {
+	Replace bool
+}
+
 func InstallArchive(root, filename string, archive []byte) (SkillSummary, error) {
+	return InstallArchiveWithOptions(root, filename, archive, InstallArchiveOptions{})
+}
+
+func InstallArchiveWithOptions(root, filename string, archive []byte, options InstallArchiveOptions) (SkillSummary, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return SkillSummary{}, fmt.Errorf("skills root is required")
@@ -66,7 +74,13 @@ func InstallArchive(root, filename string, archive []byte) (SkillSummary, error)
 		return SkillSummary{}, err
 	}
 	if _, err := os.Stat(destDir); err == nil {
-		return SkillSummary{}, fmt.Errorf("%w: %s", ErrSkillAlreadyExists, summary.Name)
+		if !options.Replace {
+			return SkillSummary{}, fmt.Errorf("%w: %s", ErrSkillAlreadyExists, summary.Name)
+		}
+		if err := replaceDir(skillDir, destDir, root); err != nil {
+			return SkillSummary{}, err
+		}
+		return summary, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return SkillSummary{}, fmt.Errorf("stat skill destination %q: %w", destDir, err)
 	}
@@ -76,6 +90,41 @@ func InstallArchive(root, filename string, archive []byte) (SkillSummary, error)
 		return SkillSummary{}, err
 	}
 	return summary, nil
+}
+
+func replaceDir(srcDir, dstDir, root string) error {
+	tempRoot := filepath.Dir(root)
+	tempDest, err := os.MkdirTemp(tempRoot, ".csgclaw-skill-replace-*")
+	if err != nil {
+		return fmt.Errorf("create replacement temp dir: %w", err)
+	}
+	if err := copyDir(srcDir, tempDest); err != nil {
+		_ = os.RemoveAll(tempDest)
+		return err
+	}
+
+	backupDir, err := os.MkdirTemp(tempRoot, ".csgclaw-skill-backup-*")
+	if err != nil {
+		_ = os.RemoveAll(tempDest)
+		return fmt.Errorf("create replacement backup dir: %w", err)
+	}
+	if err := os.Remove(backupDir); err != nil {
+		_ = os.RemoveAll(tempDest)
+		return fmt.Errorf("prepare replacement backup dir %q: %w", backupDir, err)
+	}
+	if err := os.Rename(dstDir, backupDir); err != nil {
+		_ = os.RemoveAll(tempDest)
+		return fmt.Errorf("backup existing skill destination %q: %w", dstDir, err)
+	}
+	if err := os.Rename(tempDest, dstDir); err != nil {
+		_ = os.Rename(backupDir, dstDir)
+		_ = os.RemoveAll(tempDest)
+		return fmt.Errorf("replace skill destination %q: %w", dstDir, err)
+	}
+	if err := os.RemoveAll(backupDir); err != nil {
+		return fmt.Errorf("remove replaced skill backup %q: %w", backupDir, err)
+	}
+	return nil
 }
 
 func extractArchive(archive []byte, dstDir string) error {

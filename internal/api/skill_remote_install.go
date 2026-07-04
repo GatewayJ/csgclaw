@@ -15,6 +15,7 @@ import (
 type skillInstallRequest struct {
 	RemotePath string `json:"remote_path"`
 	Ref        string `json:"ref,omitempty"`
+	Replace    bool   `json:"replace,omitempty"`
 }
 
 func (h *Handler) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +57,12 @@ func (h *Handler) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	item, err := skilllocal.InstallArchive(root, skillremote.AgenticHubSkillArchiveName(remotePath), archive)
+	item, err := skilllocal.InstallArchiveWithOptions(
+		root,
+		skillremote.AgenticHubSkillArchiveName(remotePath),
+		archive,
+		skilllocal.InstallArchiveOptions{Replace: req.Replace},
+	)
 	if err != nil {
 		writeSkillInstallError(w, err)
 		return

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isReadonlySkill, skillSourceBadgeName } from "@/models/skillhub";
+import { isReadonlySkill, remoteSkillInstallName, skillSourceBadgeName } from "@/models/skillhub";
 
 describe("skill hub helpers", () => {
   it("treats official and system skills as readonly", () => {
@@ -18,5 +18,13 @@ describe("skill hub helpers", () => {
     expect(skillSourceBadgeName({ name: "readonly", readonly: true })).toBe("builtin");
     expect(skillSourceBadgeName({ name: "local" })).toBe("local");
     expect(skillSourceBadgeName(null)).toBe("");
+  });
+
+  it("uses the remote path basename as the installed remote skill name", () => {
+    expect(remoteSkillInstallName({ name: "Display Name", remotePath: "AIWizards/agent-builder" })).toBe(
+      "agent-builder",
+    );
+    expect(remoteSkillInstallName({ name: "local-name" })).toBe("local-name");
+    expect(remoteSkillInstallName(null)).toBe("");
   });
 });

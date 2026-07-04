@@ -16,11 +16,12 @@ const labels: Record<string, string> = {
   resourcesSkillsLabel: "Skills",
   resourcesSkillRemoteInstallFailed: "Install failed",
   resourcesSkillRemoteInstallAction: "Install",
-  resourcesSkillRemoteInstallTab: "Remote install",
+  resourcesSkillRemoteInstallTab: "Community install",
   resourcesSkillRemoteInstalling: "Installing",
-  resourcesSkillRemoteSearchPlaceholder: "Search remote skills",
-  resourcesSkillRemoteSkillsEmpty: "No remote skills",
-  resourcesSkillRemoteSkillsLoading: "Loading remote skills",
+  resourcesSkillRemoteReplaceAction: "Replace",
+  resourcesSkillRemoteSearchPlaceholder: "Search community skills",
+  resourcesSkillRemoteSkillsEmpty: "No community skills",
+  resourcesSkillRemoteSkillsLoading: "Loading community skills",
   resourcesSkillUpload: "Upload skill",
   resourcesSkillUploadDropHint: "Only zip",
   resourcesSkillUploadDropTitle: "Choose zip",
@@ -328,6 +329,15 @@ describe("WorkspaceTabPanels", () => {
       remoteSkillsHasMore: true,
       remoteSkillsLoadingMore: false,
       remoteSkillsSearch: "",
+      remoteSkills: [
+        {
+          name: "agent-builder",
+          description: "Build agents",
+          remotePath: "AIWizards/agent-builder",
+          remoteURL: "https://opencsg-stg.example.test/skills/AIWizards/agent-builder",
+        },
+      ],
+      skills: [{ name: "agent-builder", description: "Installed skill" }],
       setRemoteSkillsEnabled,
       setRemoteSkillsSearch,
     } as unknown as WorkspaceSidebarProps["hub"];
@@ -378,12 +388,17 @@ describe("WorkspaceTabPanels", () => {
     expect(screen.getByRole("tab", { name: /Upload zip/ })).toHaveAttribute("aria-selected", "true");
     expect(setRemoteSkillsEnabled).not.toHaveBeenCalledWith(true);
 
-    fireEvent.click(screen.getByRole("tab", { name: /Remote install/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Community install/ }));
 
     expect(setRemoteSkillsEnabled).toHaveBeenCalledWith(true);
-    expect(screen.getByText("agent-builder")).toBeInTheDocument();
+    expect(screen.getAllByText("agent-builder").length).toBeGreaterThan(0);
     expect(screen.getByText("Build agents")).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search remote skills" }), {
+    expect(screen.queryByText("official")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /agent-builder/ })).toHaveAttribute(
+      "href",
+      "https://opencsg-stg.example.test/skills/AIWizards/agent-builder",
+    );
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search community skills" }), {
       target: { value: "sa" },
     });
     expect(setRemoteSkillsSearch).toHaveBeenCalledWith("sa");
@@ -398,7 +413,10 @@ describe("WorkspaceTabPanels", () => {
     fireEvent.scroll(remoteList);
     expect(loadMoreRemoteSkills).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Install" }));
-    expect(installRemoteSkill).toHaveBeenCalledWith(expect.objectContaining({ remotePath: "AIWizards/agent-builder" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    expect(installRemoteSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ remotePath: "AIWizards/agent-builder" }),
+      { replace: true },
+    );
   });
 });

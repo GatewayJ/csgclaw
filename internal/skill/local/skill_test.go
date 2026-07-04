@@ -114,6 +114,29 @@ func TestInstallArchiveRejectsDuplicate(t *testing.T) {
 	}
 }
 
+func TestInstallArchiveWithOptionsReplacesDuplicate(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "alpha", "SKILL.md"), "# Alpha\n")
+	mustWriteFile(t, filepath.Join(root, "alpha", "old.txt"), "old")
+
+	got, err := InstallArchiveWithOptions(root, "alpha.zip", mustZip(t, map[string]string{
+		"alpha/SKILL.md": "---\ndescription: Replacement skill\n---\n# Alpha v2\n",
+		"alpha/new.txt":  "new",
+	}), InstallArchiveOptions{Replace: true})
+	if err != nil {
+		t.Fatalf("InstallArchiveWithOptions() error = %v", err)
+	}
+	if got.Name != "alpha" || got.Description != "Replacement skill" {
+		t.Fatalf("InstallArchiveWithOptions() = %+v, want replacement summary", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "alpha", "old.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old file still exists, err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "alpha", "new.txt")); err != nil {
+		t.Fatalf("replacement file missing: %v", err)
+	}
+}
+
 func TestInstallArchiveRejectsSystemSkillName(t *testing.T) {
 	root := t.TempDir()
 

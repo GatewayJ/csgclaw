@@ -64,6 +64,7 @@ describe("skills API", () => {
         readonly: true,
         remoteRef: "dev",
         remotePath: "AIWizards/agent-builder",
+        remoteURL: "https://opencsg-stg.example.test/skills/AIWizards/agent-builder",
         source: "official",
       },
     ]);
@@ -107,6 +108,7 @@ describe("skills API", () => {
         {
           name: "page-two-skill",
           remotePath: "AIWizards/page-two-skill",
+          remoteURL: "https://opencsg-stg.example.test/skills/AIWizards/page-two-skill",
           source: "official",
         },
       ],
@@ -160,6 +162,22 @@ describe("skills API", () => {
       "api/v1/skills:install",
       expect.objectContaining({
         body: JSON.stringify({ remote_path: "AIWizards/agent-builder", ref: "dev" }),
+        method: "POST",
+      }),
+    );
+  });
+
+  it("sends replace when installing over an existing remote skill", async () => {
+    const fetchMock = mockFetch(async () => new Response(JSON.stringify({ name: "agent-builder" }), { status: 201 }));
+
+    await expect(installRemoteSkillRequest("AIWizards/agent-builder", "dev", true)).resolves.toEqual({
+      name: "agent-builder",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "api/v1/skills:install",
+      expect.objectContaining({
+        body: JSON.stringify({ remote_path: "AIWizards/agent-builder", ref: "dev", replace: true }),
         method: "POST",
       }),
     );
