@@ -1,14 +1,19 @@
 ARG GO_IMAGE=golang:1.26.2-alpine
 ARG RUNTIME_IMAGE=node:22.13.0-alpine
+ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
 
 FROM ${GO_IMAGE} AS gateway-build
 
 WORKDIR /src
 
 ARG GOPROXY=https://goproxy.cn,direct
+ARG ALPINE_MIRROR
 ENV GOPROXY=${GOPROXY}
 
-RUN apk add --no-cache ca-certificates
+RUN if [ -n "${ALPINE_MIRROR}" ]; then \
+      sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories; \
+    fi && \
+    apk add --no-cache ca-certificates
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -25,14 +30,20 @@ FROM ${RUNTIME_IMAGE}
 
 ARG LARK_CODING_AGENT_BRIDGE_PACKAGE=lark-channel-bridge@0.4.1
 ARG CODEX_PACKAGE=@openai/codex@0.142.5
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG ALPINE_MIRROR
 
-RUN apk add --no-cache \
+RUN if [ -n "${ALPINE_MIRROR}" ]; then \
+      sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories; \
+    fi && \
+    apk add --no-cache \
       bash \
       ca-certificates \
       git \
       openssh-client \
       tini \
       wget && \
+    npm config set registry ${NPM_REGISTRY} && \
     npm install -g ${LARK_CODING_AGENT_BRIDGE_PACKAGE} ${CODEX_PACKAGE} && \
     npm cache clean --force && \
     command -v lark-channel-bridge && \
