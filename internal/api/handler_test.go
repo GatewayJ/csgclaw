@@ -2142,6 +2142,28 @@ func TestAgentCreateRequestFromAPIIncludesFromTemplate(t *testing.T) {
 	}
 }
 
+func TestAgentCreateRequestFromJSONIncludesProfile(t *testing.T) {
+	var req apitypes.CreateAgentRequest
+	if err := json.Unmarshal([]byte(`{"name":"alice","runtime_kind":"codex_sandbox","from_template":"local.codex","profile":"codex.gpt-5.5"}`), &req); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	got := agentCreateRequestFromAPI(req)
+
+	if got.Spec.Name != "alice" {
+		t.Fatalf("Spec.Name = %q, want %q", got.Spec.Name, "alice")
+	}
+	if got.Spec.RuntimeKind != agent.RuntimeKindCodexSandbox {
+		t.Fatalf("Spec.RuntimeKind = %q, want %q", got.Spec.RuntimeKind, agent.RuntimeKindCodexSandbox)
+	}
+	if got.Spec.FromTemplate != "local.codex" {
+		t.Fatalf("Spec.FromTemplate = %q, want %q", got.Spec.FromTemplate, "local.codex")
+	}
+	if got.Spec.Profile != "codex.gpt-5.5" {
+		t.Fatalf("Spec.Profile = %q, want %q", got.Spec.Profile, "codex.gpt-5.5")
+	}
+}
+
 func TestHandleHubTemplatesListsAggregatedTemplates(t *testing.T) {
 	hubSvc := mustNewLocalTemplateHubService(t, "review-bot", hub.Template{
 		ID:          "review-bot",

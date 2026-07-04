@@ -55,3 +55,37 @@ func TestCreateAgentRequestUnmarshalJSONSupportsBareSandboxRuntimeKind(t *testin
 		t.Fatal("SandboxEnabled = false, want true")
 	}
 }
+
+func TestCreateAgentRequestUnmarshalProfileSelector(t *testing.T) {
+	var got CreateAgentRequest
+	if err := json.Unmarshal([]byte(`{"name":"alice","profile":" codex.gpt-5.5 "}`), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if got.Profile != "codex.gpt-5.5" {
+		t.Fatalf("Profile = %q, want %q", got.Profile, "codex.gpt-5.5")
+	}
+	if got.ProfileConfig != nil {
+		t.Fatalf("ProfileConfig = %+v, want nil for selector profile", got.ProfileConfig)
+	}
+}
+
+func TestCreateAgentRequestUnmarshalProfileObject(t *testing.T) {
+	var got CreateAgentRequest
+	if err := json.Unmarshal([]byte(`{"name":"alice","profile":{"model_provider_id":"codex","model_id":"gpt-5.5","env":{"OPENAI_API_KEY":"from-env"}}}`), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if got.Profile != "" {
+		t.Fatalf("Profile = %q, want empty selector for object profile", got.Profile)
+	}
+	if got.ProfileConfig == nil {
+		t.Fatalf("ProfileConfig = nil, want decoded object profile")
+	}
+	if got.ProfileConfig.ModelProviderID != "codex" || got.ProfileConfig.ModelID != "gpt-5.5" {
+		t.Fatalf("ProfileConfig = %+v, want codex/gpt-5.5", got.ProfileConfig)
+	}
+	if got.ProfileConfig.Env["OPENAI_API_KEY"] != "from-env" {
+		t.Fatalf("ProfileConfig.Env = %+v, want OPENAI_API_KEY", got.ProfileConfig.Env)
+	}
+}
