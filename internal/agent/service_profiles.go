@@ -168,6 +168,17 @@ func (s *Service) syncGatewayAfterProfileChange(ctx context.Context, id string, 
 		_, err := s.EnsureManager(ctx, false)
 		return err
 	}
+	if strings.TrimSpace(got.RuntimeKind) == RuntimeKindCodexSandbox && restartRequired {
+		runtimeRunning := isRuntimeRunning(got)
+		if err := s.syncGatewayHostConfigWithRestartFlag(got, runtimeNormalized, !runtimeRunning); err != nil {
+			return err
+		}
+		if runtimeRunning {
+			_, err := s.Recreate(ctx, id)
+			return err
+		}
+		return nil
+	}
 	if gatewayProfileRuntimeRestartRequired(previous, normalized) {
 		return s.syncGatewayHostConfig(got, runtimeNormalized)
 	}
@@ -179,6 +190,10 @@ func (s *Service) syncGatewayAfterProfileChange(ctx context.Context, id string, 
 }
 
 func (s *Service) syncGatewayHostConfig(got Agent, profile AgentProfile) error {
+	return s.syncGatewayHostConfigWithRestartFlag(got, profile, true)
+}
+
+func (s *Service) syncGatewayHostConfigWithRestartFlag(got Agent, profile AgentProfile, clearEnvRestartRequired bool) error {
 	if s == nil {
 		return nil
 	}
@@ -209,6 +224,10 @@ func (s *Service) syncGatewayHostConfig(got Agent, profile AgentProfile) error {
 			return fmt.Errorf("sync gateway codex sandbox config: %w", err)
 		}
 	default:
+		return nil
+	}
+
+	if !clearEnvRestartRequired {
 		return nil
 	}
 

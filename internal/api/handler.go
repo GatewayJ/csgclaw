@@ -511,6 +511,12 @@ func workerRuntimeChoices() []workerRuntimeChoiceResponse {
 			Installed:      true,
 		},
 		{
+			Name:           agent.RuntimeNameCodex,
+			Label:          "Codex Sandbox",
+			SandboxEnabled: true,
+			Installed:      true,
+		},
+		{
 			Name:           agent.RuntimeNamePicoClaw,
 			Label:          "PicoClaw",
 			SandboxEnabled: true,
@@ -1232,6 +1238,10 @@ func agentCreateRequestFromAPI(req apitypes.CreateAgentRequest) agent.CreateRequ
 		profileReq = req.AgentProfile
 	}
 	prof := agentProfileFromAPI(profileReq)
+	runtimeKind := strings.TrimSpace(req.Runtime.Kind)
+	if runtimeKind == "" {
+		runtimeKind = strings.TrimSpace(req.RuntimeKind)
+	}
 	runtimeName := strings.TrimSpace(req.Runtime.Name)
 	sandboxEnabled := req.Runtime.SandboxEnabled
 	if runtimeName == "" {
@@ -1249,6 +1259,7 @@ func agentCreateRequestFromAPI(req apitypes.CreateAgentRequest) agent.CreateRequ
 			Description:    req.Description,
 			Instructions:   req.Instructions,
 			Image:          req.Image,
+			RuntimeKind:    runtimeKind,
 			RuntimeName:    runtimeName,
 			SandboxEnabled: sandboxEnabled,
 			FromTemplate:   req.FromTemplate,

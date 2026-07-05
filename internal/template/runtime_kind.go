@@ -12,7 +12,7 @@ func normalizeTemplateRuntimeKind(kind string) string {
 		return runtime.NamePicoClaw
 	case runtime.NameOpenClaw, runtime.KindOpenClawSandbox:
 		return runtime.NameOpenClaw
-	case runtime.KindCodexSandbox:
+	case "codex-sandbox", runtime.KindCodexSandbox:
 		return runtime.KindCodexSandbox
 	case runtime.KindCodex:
 		return runtime.KindCodex

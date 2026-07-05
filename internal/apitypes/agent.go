@@ -292,7 +292,6 @@ func (r CreateAgentRequest) MarshalJSON() ([]byte, error) {
 		Description:    r.Description,
 		Instructions:   r.Instructions,
 		Image:          r.Image,
-		RuntimeKind:    runtime.Kind,
 		RuntimeName:    runtime.Name,
 		SandboxEnabled: runtime.SandboxEnabled,
 		FromTemplate:   r.FromTemplate,

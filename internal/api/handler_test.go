@@ -400,6 +400,20 @@ func TestBootstrapConfigIncludesBuiltinOpenClawRuntimeDefaultImage(t *testing.T)
 	}
 }
 
+func TestBootstrapConfigIncludesCodexSandboxWorkerChoice(t *testing.T) {
+	got := bootstrapConfigView(context.Background(), config.Config{}, nil, nil)
+
+	for _, choice := range got.WorkerRuntimeChoices {
+		if choice.Name == agent.RuntimeNameCodex && choice.SandboxEnabled {
+			if choice.Label != "Codex Sandbox" || !choice.Installed {
+				t.Fatalf("codex sandbox choice = %#v, want installed Codex Sandbox", choice)
+			}
+			return
+		}
+	}
+	t.Fatalf("WorkerRuntimeChoices = %#v, want codex sandbox choice", got.WorkerRuntimeChoices)
+}
+
 func TestHandleAgentIncludesRuntimeOptionSchemas(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "agents.json")
 	if err := writeSeededAgents(statePath, []agent.Agent{

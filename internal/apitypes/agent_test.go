@@ -56,6 +56,37 @@ func TestCreateAgentRequestUnmarshalJSONSupportsBareSandboxRuntimeKind(t *testin
 	}
 }
 
+func TestCreateAgentRequestMarshalUsesSplitRuntimeFields(t *testing.T) {
+	data, err := json.Marshal(CreateAgentRequest{
+		Name:        "alice",
+		RuntimeKind: "codex_sandbox",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode marshaled request: %v", err)
+	}
+	if _, ok := got["runtime_kind"]; ok {
+		t.Fatalf("runtime_kind = %#v, want omitted", got["runtime_kind"])
+	}
+	if got["runtime_name"] != "codex" {
+		t.Fatalf("runtime_name = %#v, want %q", got["runtime_name"], "codex")
+	}
+	if got["sandbox_enabled"] != true {
+		t.Fatalf("sandbox_enabled = %#v, want true", got["sandbox_enabled"])
+	}
+	runtime, ok := got["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime = %#v, want object", got["runtime"])
+	}
+	if runtime["name"] != "codex" || runtime["sandbox_enabled"] != true {
+		t.Fatalf("runtime = %#v, want codex sandbox selection", runtime)
+	}
+}
+
 func TestCreateAgentRequestUnmarshalProfileSelector(t *testing.T) {
 	var got CreateAgentRequest
 	if err := json.Unmarshal([]byte(`{"name":"alice","profile":" codex.gpt-5.5 "}`), &got); err != nil {
