@@ -70,11 +70,11 @@
   background: var(--danger);
 }
 
-.mcp-runtime-options-panel {
+.mcp-config-panel {
   min-width: 0;
 }
 
-.mcp-runtime-options-header {
+.mcp-config-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -82,7 +82,7 @@
   min-width: 0;
 }
 
-.mcp-runtime-options-header > label {
+.mcp-config-header > label {
   min-width: 0;
   color: var(--text);
   font-size: var(--text-sm-size);
@@ -90,14 +90,14 @@
   line-height: var(--text-sm-line-height);
 }
 
-.mcp-runtime-options-actions {
+.mcp-config-actions {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
 }
 
-.mcp-runtime-options-textarea {
+.mcp-config-textarea {
   min-height: 168px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
@@ -106,16 +106,16 @@
 }
 
 @media (max-width: 680px) {
-  .mcp-runtime-options-header {
+  .mcp-config-header {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .mcp-runtime-options-actions {
+  .mcp-config-actions {
     width: 100%;
   }
 
-  .mcp-runtime-options-actions .btn {
+  .mcp-config-actions .btn {
     flex: 1 1 0;
     min-width: 0;
   }

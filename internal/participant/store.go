@@ -721,6 +721,9 @@ func isLegacyCSGClawManagerBot(b apitypes.LegacyBot, typ, channel, agentID strin
 
 func legacyBotMetadata(b apitypes.LegacyBot) map[string]any {
 	metadata := cloneAnyMap(b.RuntimeOptions)
+	if len(b.MCPConfig) > 0 {
+		metadata["mcp_config"] = cloneAnyMap(b.MCPConfig)
+	}
 	putMetadataString(metadata, "description", b.Description)
 	putMetadataString(metadata, "legacy_bot_type", b.Type)
 	putMetadataString(metadata, "legacy_role", b.Role)

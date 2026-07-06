@@ -169,6 +169,7 @@ type agentResponse struct {
 	Profile              string                             `json:"-"`
 	ProfileConfig        apitypes.AgentProfile              `json:"model_config,omitempty"`
 	RuntimeOptions       map[string]any                     `json:"-"`
+	MCPConfig            map[string]any                     `json:"mcp_config,omitempty"`
 	RuntimeOptionSchemas []agentruntime.RuntimeOptionSchema `json:"-"`
 	AgentProfile         agent.AgentProfileView             `json:"-"`
 	ProfileComplete      bool                               `json:"-"`
@@ -203,6 +204,7 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 		Profile:          apiAgent.Profile,
 		ProfileConfig:    apiAgent.ProfileConfig,
 		RuntimeOptions:   apiAgent.Runtime.Options,
+		MCPConfig:        utils.CloneAnyMap(apiAgent.MCPConfig),
 		AgentProfile:     agentProfileViewFromAPI(apiAgent.ProfileConfig),
 		UserID:           apiAgent.UserID,
 		UserName:         apiAgent.UserName,
@@ -228,6 +230,7 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 		BoxID                string                             `json:"box_id"`
 		Status               string                             `json:"status"`
 		RuntimeOptions       map[string]any                     `json:"runtime_options"`
+		MCPConfig            map[string]any                     `json:"mcp_config"`
 		RuntimeOptionSchemas []agentruntime.RuntimeOptionSchema `json:"runtime_option_schemas"`
 		AgentProfile         agent.AgentProfileView             `json:"agent_profile"`
 		ProfileComplete      bool                               `json:"profile_complete"`
@@ -259,6 +262,9 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 	}
 	if len(legacy.RuntimeOptions) > 0 {
 		r.RuntimeOptions = legacy.RuntimeOptions
+	}
+	if len(legacy.MCPConfig) > 0 {
+		r.MCPConfig = legacy.MCPConfig
 	}
 	if len(legacy.RuntimeOptionSchemas) > 0 {
 		r.RuntimeOptionSchemas = legacy.RuntimeOptionSchemas
@@ -1342,6 +1348,7 @@ func agentCreateRequestFromAPI(req apitypes.CreateAgentRequest) agent.CreateRequ
 			UpdatedAt:      req.CreatedAt,
 			Profile:        req.Profile,
 			RuntimeOptions: runtimeOptions,
+			MCPConfig:      utils.CloneAnyMapShallowNestedStringMaps(req.MCPConfig),
 			AgentProfile:   prof,
 		},
 		Replace:   req.Replace,
@@ -2791,6 +2798,7 @@ func presentAgent(item agent.Agent) agentResponse {
 		UpdatedAt:        item.UpdatedAt,
 		Profile:          item.Profile,
 		RuntimeOptions:   runtimeOptions,
+		MCPConfig:        utils.CloneAnyMap(item.MCPConfig),
 		ProfileConfig:    profile,
 		AgentProfile:     av,
 		ProfileComplete:  item.ProfileComplete,

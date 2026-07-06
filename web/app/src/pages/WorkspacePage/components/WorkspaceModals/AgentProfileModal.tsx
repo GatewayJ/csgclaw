@@ -6,7 +6,7 @@ import {
   EnvKeyValueEditor,
   FieldHelpTooltip,
   isBlank,
-  MCPRuntimeOptionsPanel,
+  MCPConfigPanel,
   ModelOptionLabel,
   NotifierControls,
   requiredFieldLabel,
@@ -30,8 +30,8 @@ import {
   pickDefaultAgentTemplate,
   defaultWorkerImageForRuntime,
   runtimeOptionSchemasForAgent,
-  setMCPRuntimeOptions,
-  supportsMCPRuntimeOptions,
+  stripLegacyMCPRuntimeOption,
+  supportsMCPConfig,
   templateMatchesRuntime,
   workerSelectableTemplates,
 } from "@/models/agents";
@@ -110,7 +110,7 @@ export function AgentProfileModal({
   onSave,
 }: AgentProfileModalProps) {
   const [isEditorScrolling, setIsEditorScrolling] = useState(false);
-  const [mcpRuntimeOptionsInvalid, setMcpRuntimeOptionsInvalid] = useState(false);
+  const [mcpConfigInvalid, setMcpConfigInvalid] = useState(false);
   const editorScrollTimerRef = useRef<number | null>(null);
   const lastTemplateIDRef = useRef("");
   const createBotKind = agentModalMode === "create" ? agentCreateBotKind : undefined;
@@ -120,7 +120,7 @@ export function AgentProfileModal({
   const missingRequiredEnv = isTemplateCreate && agentDraftMissingRequiredEnv(agentDraft);
   const isCustomCreate = isWorkerCreate && agentCreateMode === "custom";
   const templateLocked = agentCreateTemplateLocked(agentDraft, agentModalMode);
-  const showMCPRuntimeOptions = !isNotificationContext && supportsMCPRuntimeOptions(agentDraft.runtime_kind);
+  const showMCPConfig = !isNotificationContext && supportsMCPConfig(agentDraft.runtime_kind);
   const runtimeOptionSchemas = isNotificationContext
     ? []
     : runtimeOptionSchemasForAgent(
@@ -193,10 +193,10 @@ export function AgentProfileModal({
     runtimeOptions: AgentDraft["runtime_options"],
     runtimeKind: string,
   ): AgentDraft["runtime_options"] {
-    if (supportsMCPRuntimeOptions(runtimeKind) || !runtimeOptions || !(MCP_RUNTIME_OPTION_KEY in runtimeOptions)) {
+    if (supportsMCPConfig(runtimeKind) || !runtimeOptions || !(MCP_RUNTIME_OPTION_KEY in runtimeOptions)) {
       return runtimeOptions;
     }
-    const next = setMCPRuntimeOptions(runtimeOptions, null);
+    const next = stripLegacyMCPRuntimeOption(runtimeOptions);
     return Object.keys(next).length > 0 ? next : undefined;
   }
 
@@ -295,10 +295,10 @@ export function AgentProfileModal({
   );
 
   useEffect(() => {
-    if (!showMCPRuntimeOptions) {
-      setMcpRuntimeOptionsInvalid(false);
+    if (!showMCPConfig) {
+      setMcpConfigInvalid(false);
     }
-  }, [showMCPRuntimeOptions]);
+  }, [showMCPConfig]);
 
   function onEditorShellScroll() {
     setIsEditorScrolling(true);
@@ -642,12 +642,12 @@ export function AgentProfileModal({
                       embedded
                     />
                   ) : null}
-                  {showMCPRuntimeOptions ? (
-                    <MCPRuntimeOptionsPanel
+                  {showMCPConfig ? (
+                    <MCPConfigPanel
                       draft={agentDraft}
                       t={t}
                       onDraftChange={onAgentDraftChange}
-                      onInvalidChange={setMcpRuntimeOptionsInvalid}
+                      onInvalidChange={setMcpConfigInvalid}
                     />
                   ) : null}
                 </div>
@@ -820,7 +820,7 @@ export function AgentProfileModal({
             size="md"
             disabled={
               agentBusy ||
-              mcpRuntimeOptionsInvalid ||
+              mcpConfigInvalid ||
               isBlank(agentDraft.name) ||
               (isNotificationContext
                 ? !notifierFormIsComplete(agentDraft, editingAgent)

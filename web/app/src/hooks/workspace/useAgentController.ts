@@ -59,6 +59,7 @@ import {
   composeLegacyRuntimeKind,
   defaultManagerRebuildImageForRuntime,
   defaultWorkerImageForRuntime,
+  draftMCPConfigForSave,
   draftRuntimeOptionsForSave,
   draftToProfileComparePayload,
   draftToProfile,
@@ -1312,6 +1313,14 @@ export function useAgentController({
     return JSON.stringify(runtimeOptions || {});
   }
 
+  function mcpConfigPayloadForCompare(draft: AgentDraft | null | undefined): string {
+    const normalized = normalizeDraftForCompare(draft);
+    if (!normalized) {
+      return "";
+    }
+    return JSON.stringify(draftMCPConfigForSave(normalized));
+  }
+
   function hasObjectValues(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 0);
   }
@@ -1347,8 +1356,11 @@ export function useAgentController({
     saved: AgentLike | null | undefined,
     profileChanged: boolean,
     runtimeOptionsChanged: boolean,
+    mcpConfigChanged: boolean,
   ): boolean {
-    return Boolean(saved?.id && saved.id !== MANAGER_AGENT_ID && profileChanged && !runtimeOptionsChanged);
+    return Boolean(
+      saved?.id && saved.id !== MANAGER_AGENT_ID && profileChanged && !runtimeOptionsChanged && !mcpConfigChanged,
+    );
   }
 
   async function saveAgentPage(): Promise<void> {
@@ -1391,10 +1403,14 @@ export function useAgentController({
       const runtimeOptions = draftRuntimeOptionsForSave(draft, {
         mergeNotifier: false,
       });
+      const mcpConfig = draftMCPConfigForSave(draft);
       const profileChanged = profilePayloadForCompare(draftToSave) !== profilePayloadForCompare(agentPageSavedDraft);
       const runtimeOptionsChanged =
         runtimeOptionsPayloadForCompare(draftToSave) !== runtimeOptionsPayloadForCompare(agentPageSavedDraft);
-      const hasProfileOrRuntimeChange = profileChanged || (runtimeOptionsChanged && hasObjectValues(runtimeOptions));
+      const mcpConfigChanged =
+        mcpConfigPayloadForCompare(draftToSave) !== mcpConfigPayloadForCompare(agentPageSavedDraft);
+      const hasProfileOrRuntimeChange =
+        profileChanged || (runtimeOptionsChanged && hasObjectValues(runtimeOptions)) || mcpConfigChanged;
 
       const payload = agentPageBaseUpdatePayload(draftToSave);
       if (profileChanged) {
@@ -1403,6 +1419,9 @@ export function useAgentController({
       }
       if (runtimeOptionsChanged) {
         payload.runtime_options = runtimeOptions || {};
+      }
+      if (mcpConfigChanged) {
+        payload.mcp_config = mcpConfig;
       }
       if (!hasProfileOrRuntimeChange) {
         debugAgentPageSavePayload("meta-only", payload);
@@ -1429,7 +1448,7 @@ export function useAgentController({
       const profileIncompleteBeforeSave = !isAgentProfileMarkedComplete(agentPageSavedDraft);
       const saved = await updateAgentRequest(selectedAgentForPage.id, payload);
       await saveLinkedAgentUserAvatar(selectedAgentForPage, draft.avatar);
-      if (canApplyAgentPageProfileSaveImmediately(saved, profileChanged, runtimeOptionsChanged)) {
+      if (canApplyAgentPageProfileSaveImmediately(saved, profileChanged, runtimeOptionsChanged, mcpConfigChanged)) {
         const savedWithAvatar = { ...saved, avatar: draft.avatar };
         applyAgentListUpdate(savedWithAvatar);
         const savedDraft = agentToDraft(savedWithAvatar);
@@ -1557,6 +1576,7 @@ export function useAgentController({
       const runtimeOptions = draftRuntimeOptionsForSave(draft, {
         mergeNotifier: false,
       });
+      const mcpConfig = draftMCPConfigForSave(draft);
       const payload: AgentUpdatePayload = {
         name: agentDraft.name,
         role: WORKER_AGENT_ROLE,
@@ -1574,12 +1594,21 @@ export function useAgentController({
       const runtimeOptionsChanged = !isCreate
         ? runtimeOptionsPayloadForCompare(agentDraft) !== runtimeOptionsPayloadForCompare(editingDraftBaseline)
         : Boolean(runtimeOptions);
+      const mcpConfigChanged = !isCreate
+        ? mcpConfigPayloadForCompare(agentDraft) !== mcpConfigPayloadForCompare(editingDraftBaseline)
+        : Boolean(mcpConfig);
       if (isCreate) {
         if (runtimeOptions) {
           payload.runtime_options = runtimeOptions;
         }
+        if (mcpConfig) {
+          payload.mcp_config = mcpConfig;
+        }
       } else if (runtimeOptionsChanged) {
         payload.runtime_options = runtimeOptions || {};
+      }
+      if (!isCreate && mcpConfigChanged) {
+        payload.mcp_config = mcpConfig;
       }
       const saved = isCreate
         ? await (async () => {
@@ -1609,6 +1638,7 @@ export function useAgentController({
             agent_profile: payload.agent_profile,
             profile: payload.profile,
             ...(payload.runtime_options !== undefined ? { runtime_options: payload.runtime_options } : {}),
+            ...(payload.mcp_config !== undefined ? { mcp_config: payload.mcp_config } : {}),
           });
       await saveLinkedAgentUserAvatar(saved?.participants?.length ? saved : editingAgent || saved, agentDraft.avatar);
       if (isCreate) {

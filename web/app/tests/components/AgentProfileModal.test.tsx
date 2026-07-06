@@ -1077,7 +1077,7 @@ describe("AgentProfileModal", () => {
     );
   });
 
-  it("edits MCP runtime options only for OpenClaw agent drafts", async () => {
+  it("edits MCP config for supported agent drafts", async () => {
     const user = userEvent.setup();
     const onAgentDraftChange = vi.fn();
     const openclawDraft = {
@@ -1086,11 +1086,11 @@ describe("AgentProfileModal", () => {
       runtime_kind: "openclaw_sandbox",
       runtime_options: {
         local_workspace_dir: "/tmp/project",
-        mcp: {
-          mcpServers: {
-            existing: {
-              command: "node",
-            },
+      },
+      mcp_config: {
+        mcpServers: {
+          existing: {
+            command: "node",
           },
         },
       },
@@ -1138,11 +1138,11 @@ describe("AgentProfileModal", () => {
       expect.objectContaining({
         runtime_options: {
           local_workspace_dir: "/tmp/project",
-          mcp: {
-            mcpServers: {
-              context7: {
-                command: "npx",
-              },
+        },
+        mcp_config: {
+          mcpServers: {
+            context7: {
+              command: "npx",
             },
           },
         },
@@ -1156,6 +1156,7 @@ describe("AgentProfileModal", () => {
         runtime_options: {
           local_workspace_dir: "/tmp/project",
         },
+        mcp_config: undefined,
       }),
     );
 
@@ -1191,10 +1192,10 @@ describe("AgentProfileModal", () => {
       />,
     );
 
-    expect(screen.queryByLabelText("MCP Servers")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("MCP Servers")).toBeInTheDocument();
   });
 
-  it("drops MCP runtime options when OpenClaw drafts switch to unsupported runtimes", async () => {
+  it("preserves MCP config when switching between MCP-capable runtimes", async () => {
     const user = userEvent.setup();
     const onAgentDraftChange = vi.fn();
     const openclawDraft: AgentDraft = {
@@ -1206,11 +1207,11 @@ describe("AgentProfileModal", () => {
       sandbox_enabled: true,
       runtime_options: {
         local_workspace_dir: "/tmp/project",
-        mcp: {
-          mcpServers: {
-            context7: {
-              command: "npx",
-            },
+      },
+      mcp_config: {
+        mcpServers: {
+          context7: {
+            command: "npx",
           },
         },
       },
@@ -1270,7 +1271,14 @@ describe("AgentProfileModal", () => {
     const nextDraft = onAgentDraftChange.mock.calls.at(-1)?.[0] as AgentDraft;
     expect(nextDraft.runtime_kind).toBe("picoclaw_sandbox");
     expect(nextDraft.runtime_options).toEqual({ local_workspace_dir: "/tmp/project" });
-    expect(screen.queryByLabelText("MCP Servers")).not.toBeInTheDocument();
+    expect(nextDraft.mcp_config).toEqual({
+      mcpServers: {
+        context7: {
+          command: "npx",
+        },
+      },
+    });
+    expect(screen.getByLabelText("MCP Servers")).toBeInTheDocument();
   });
 
   it("shows provider logos only in the provider field, not in the model field", () => {

@@ -2,6 +2,7 @@ package picoclawsandbox
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"csgclaw/internal/channel/feishu"
@@ -37,6 +38,95 @@ func TestRenderConfigDisablesUnconfiguredFeishuChannel(t *testing.T) {
 	if got, want := feishu["app_secret"], ""; got != want {
 		t.Fatalf("channels.feishu.app_secret = %q, want empty in:\n%s", got, data)
 	}
+}
+
+func TestRenderConfigWithMCPConfigWritesPicoClawToolsMCP(t *testing.T) {
+	baseServer := config.ServerConfig{AccessToken: "shared-token"}
+	baseModel := config.ModelConfig{ModelID: "gpt-5.5"}
+	resolver := fixedBaseURL("http://127.0.0.1:18080")
+
+	t.Run("absent disables mcp", func(t *testing.T) {
+		data, err := RenderConfigWithMCPConfig("manager", "u-manager", baseServer, baseModel, nil, resolver)
+		if err != nil {
+			t.Fatalf("RenderConfigWithMCPConfig() error = %v", err)
+		}
+		mcpRoot := renderedToolsMCP(t, data)
+		if got, want := mcpRoot["enabled"], false; got != want {
+			t.Fatalf("tools.mcp.enabled = %v, want %v in:\n%s", got, want, data)
+		}
+		if _, ok := mcpRoot["servers"]; ok {
+			t.Fatalf("tools.mcp.servers should be absent for unmanaged config: %#v", mcpRoot["servers"])
+		}
+	})
+
+	t.Run("empty managed config enables empty servers", func(t *testing.T) {
+		data, err := RenderConfigWithMCPConfig("manager", "u-manager", baseServer, baseModel, map[string]any{}, resolver)
+		if err != nil {
+			t.Fatalf("RenderConfigWithMCPConfig() error = %v", err)
+		}
+		mcpRoot := renderedToolsMCP(t, data)
+		if got, want := mcpRoot["enabled"], true; got != want {
+			t.Fatalf("tools.mcp.enabled = %v, want %v in:\n%s", got, want, data)
+		}
+		servers, ok := mcpRoot["servers"].(map[string]any)
+		if !ok {
+			t.Fatalf("tools.mcp.servers = %#v, want object", mcpRoot["servers"])
+		}
+		if len(servers) != 0 {
+			t.Fatalf("tools.mcp.servers = %#v, want empty", servers)
+		}
+	})
+
+	t.Run("server config is preserved", func(t *testing.T) {
+		data, err := RenderConfigWithMCPConfig("manager", "u-manager", baseServer, baseModel, map[string]any{
+			"mcpServers": map[string]any{
+				"context7": map[string]any{
+					"command": "uvx",
+					"args":    []any{"context7-mcp"},
+				},
+			},
+		}, resolver)
+		if err != nil {
+			t.Fatalf("RenderConfigWithMCPConfig() error = %v", err)
+		}
+		mcpRoot := renderedToolsMCP(t, data)
+		if got, want := mcpRoot["enabled"], true; got != want {
+			t.Fatalf("tools.mcp.enabled = %v, want %v in:\n%s", got, want, data)
+		}
+		servers := mcpRoot["servers"].(map[string]any)
+		context7 := servers["context7"].(map[string]any)
+		if got, want := context7["command"], "uvx"; got != want {
+			t.Fatalf("context7.command = %#v, want %q", got, want)
+		}
+		args := context7["args"].([]any)
+		if got, want := args[0], "context7-mcp"; got != want {
+			t.Fatalf("context7.args[0] = %#v, want %q", got, want)
+		}
+	})
+}
+
+func TestRenderConfigWithMCPConfigRejectsInvalidPicoClawMCP(t *testing.T) {
+	_, err := RenderConfigWithMCPConfig("manager", "u-manager", config.ServerConfig{}, config.ModelConfig{ModelID: "gpt-5.5"}, map[string]any{
+		"mcpServers": []any{},
+	}, fixedBaseURL("http://127.0.0.1:18080"))
+	if err == nil || !strings.Contains(err.Error(), "mcp_config.mcpServers must be an object") {
+		t.Fatalf("RenderConfigWithMCPConfig() error = %v, want mcpServers object error", err)
+	}
+}
+
+func renderedToolsMCP(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+	var rendered struct {
+		Tools map[string]any `json:"tools"`
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("RenderConfigWithMCPConfig() produced invalid JSON: %v", err)
+	}
+	mcpRoot, ok := rendered.Tools["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("RenderConfigWithMCPConfig() missing tools.mcp in:\n%s", data)
+	}
+	return mcpRoot
 }
 
 func TestRenderConfigEnablesFeishuChannelWhenParticipantConfigured(t *testing.T) {

@@ -290,25 +290,24 @@ Additional notes:
 - `field_mask` limits which fields are overwritten during replacement
 - `agent_profile.api_key` is write-only and will be redacted in reads
 
-OpenClaw agents can configure MCP servers through `runtime_options.mcp`. The
-CSGClaw API accepts `mcpServers` input and renders it into OpenClaw's native
-`mcp.servers` config:
+OpenClaw, PicoClaw, and Codex CLI agents can configure MCP servers through the
+top-level `mcp_config` field. The API accepts the same `mcpServers` object for
+all supported runtimes and each runtime adapter renders it into its native
+configuration format:
 
 ```json
 {
   "name": "alice",
   "runtime_kind": "openclaw_sandbox",
-  "runtime_options": {
-    "mcp": {
-      "mcpServers": {
-        "workspace-filesystem": {
-          "command": "npx",
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-filesystem",
-            "/home/node/.openclaw/workspace"
-          ]
-        }
+  "mcp_config": {
+    "mcpServers": {
+      "workspace-filesystem": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/home/node/.openclaw/workspace"
+        ]
       }
     }
   },
@@ -316,9 +315,16 @@ CSGClaw API accepts `mcpServers` input and renders it into OpenClaw's native
 }
 ```
 
-MCP commands run inside the OpenClaw sandbox, so filesystem server directory
-arguments must be paths visible inside the container. Non-OpenClaw runtimes
-reject `runtime_options.mcp`.
+Runtime adapters map this shared input as follows:
+
+- OpenClaw: `mcp_config.mcpServers` -> `openclaw.json` `mcp.servers`
+- PicoClaw: `mcp_config.mcpServers` -> PicoClaw config `tools.mcp.servers`
+- Codex CLI: `mcp_config.mcpServers` -> managed `[mcp_servers."<name>"]` blocks in the isolated Codex home `config.toml`
+
+MCP commands run inside the target runtime environment, so filesystem server
+directory arguments must be paths visible to that runtime. Existing clients
+that still send legacy `runtime_options.mcp` are normalized into `mcp_config`;
+new clients should use `mcp_config`.
 
 ### `GET /api/v1/agents/{id}`
 
@@ -336,6 +342,7 @@ Supported fields:
 - `description`
 - `image`
 - `runtime_options`
+- `mcp_config`
 - `agent_profile`
 
 Example request body:
@@ -352,9 +359,9 @@ Example request body:
 Notes:
 
 - Omitted fields are left unchanged
-- `runtime_options` uses whole-object replacement when submitted; include the full merged `runtime_options` when editing MCP
-- `runtime_options.mcp: null` or a submitted `runtime_options` object without `mcp` clears MCP config
-- Updating MCP config on an OpenClaw agent recreates that agent runtime so the new `openclaw.json` takes effect
+- `runtime_options` uses whole-object replacement when submitted
+- `mcp_config` uses whole-object replacement when submitted; send `null` to clear CSGClaw-managed MCP config
+- Updating MCP config on OpenClaw, PicoClaw, or Codex CLI agents may recreate that agent runtime so the native config takes effect
 - If `agent_profile.api_key` is sent empty, the server keeps the existing key
 - If `agent_profile.env` changes, `env_restart_required` may become `true` in the response
 

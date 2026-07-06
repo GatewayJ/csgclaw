@@ -62,6 +62,26 @@ func (r *Runtime) ReconcileConfig(ctx context.Context, h agentruntime.Handle, ch
 	return r.RefreshCodexHomeAgentsFile(ctx, h)
 }
 
+func (r *Runtime) ValidateMCPConfig(_ context.Context, current agentruntime.MCPConfigSnapshot) error {
+	return agentruntime.ValidateMCPConfig(current.Config)
+}
+
+func (r *Runtime) MCPConfigRestartRequired(change agentruntime.MCPConfigChange) (bool, error) {
+	return agentruntime.MCPConfigNeedsRestart(change.Previous.Config, change.Current.Config)
+}
+
+func (r *Runtime) ReconcileMCPConfig(_ context.Context, h agentruntime.Handle, _ agentruntime.MCPConfigChange) error {
+	agentRef, err := r.resolveAgent(h)
+	if err != nil {
+		return err
+	}
+	codexHomeDir, err := r.resolveCodexHomeDir(agentRef.ID)
+	if err != nil {
+		return err
+	}
+	return r.seedCodexHomeConfig(codexHomeDir, agentRef.Profile.Normalized(), agentRef.MCPConfig)
+}
+
 type responsesProbeTargetConfig struct {
 	provider string
 	baseURL  string

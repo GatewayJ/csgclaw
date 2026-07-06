@@ -77,6 +77,7 @@ type persistedAgent struct {
 	BoxID            string                   `json:"box_id,omitempty"`
 	Runtime          *RuntimeRecord           `json:"runtime,omitempty"`
 	RuntimeOptions   map[string]any           `json:"-"`
+	MCPConfig        map[string]any           `json:"-"`
 	Role             string                   `json:"role"`
 	Status           string                   `json:"status,omitempty"`
 	CreatedAt        time.Time                `json:"created_at"`
@@ -132,6 +133,9 @@ func (a persistedAgent) MarshalJSON() ([]byte, error) {
 	if !profileEmpty(profile) {
 		out["model_config"] = profile
 	}
+	if len(a.MCPConfig) > 0 {
+		out["mcp_config"] = a.MCPConfig
+	}
 	if len(a.DetectionResults) > 0 {
 		out["detection_results"] = a.DetectionResults
 	}
@@ -145,6 +149,7 @@ func (a *persistedAgent) UnmarshalJSON(data []byte) error {
 		ModelConfig    json.RawMessage `json:"model_config"`
 		Profile        json.RawMessage `json:"profile"`
 		RuntimeOptions map[string]any  `json:"runtime_options"`
+		MCPConfig      map[string]any  `json:"mcp_config"`
 	}
 	var decoded persistedAgentJSON
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -152,6 +157,7 @@ func (a *persistedAgent) UnmarshalJSON(data []byte) error {
 	}
 	*a = persistedAgent(decoded.persistedAgentAlias)
 	a.RuntimeOptions = utils.CloneAnyMap(decoded.RuntimeOptions)
+	a.MCPConfig = utils.CloneAnyMap(decoded.MCPConfig)
 	profilePayload := decoded.ModelConfig
 	if len(profilePayload) == 0 || string(profilePayload) == "null" {
 		profilePayload = decoded.Profile
@@ -172,6 +178,7 @@ func (a *persistedAgent) UnmarshalJSON(data []byte) error {
 	if a.Runtime != nil && len(a.Runtime.Options) > 0 && len(a.RuntimeOptions) == 0 {
 		a.RuntimeOptions = utils.CloneAnyMap(a.Runtime.Options)
 	}
+	a.RuntimeOptions, a.MCPConfig = splitLegacyRuntimeOptionsMCP(a.RuntimeOptions, a.MCPConfig)
 	return nil
 }
 
@@ -198,6 +205,7 @@ func newPersistedAgent(a Agent) persistedAgent {
 	if len(a.RuntimeOptions) > 0 {
 		topRX = utils.CloneAnyMap(a.RuntimeOptions)
 	}
+	topRX, mcpConfig := splitLegacyRuntimeOptionsMCP(topRX, a.MCPConfig)
 	ap.BaseURL, ap.ModelID = pol.StripProfileLLMFields(a.RuntimeKind, ap.BaseURL, ap.ModelID)
 	ap = compactPersistedProfile(ap)
 	updatedAt := a.UpdatedAt.UTC()
@@ -212,6 +220,7 @@ func newPersistedAgent(a Agent) persistedAgent {
 		Image:            a.Image,
 		Runtime:          compactPersistedRuntime(runtimeRecordForAgent(a), topRX),
 		RuntimeOptions:   topRX,
+		MCPConfig:        mcpConfig,
 		Role:             a.Role,
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        updatedAt,
@@ -226,6 +235,7 @@ func (a persistedAgent) toAgent() Agent {
 		ap = cloneProfile(a.AgentProfile)
 	}
 	rx := utils.CloneAnyMap(a.RuntimeOptions)
+	mcpConfig := utils.CloneAnyMap(a.MCPConfig)
 	if strings.TrimSpace(ap.Name) == "" {
 		ap.Name = a.Name
 	}
@@ -269,6 +279,7 @@ func (a persistedAgent) toAgent() Agent {
 			rx = utils.CloneAnyMap(rt.Options)
 		}
 	}
+	rx, mcpConfig = splitLegacyRuntimeOptionsMCP(rx, mcpConfig)
 	runtimeCfg := agentruntime.RuntimeConfigForKind(runtimeKind)
 	ag := Agent{
 		ID:               a.ID,
@@ -283,6 +294,7 @@ func (a persistedAgent) toAgent() Agent {
 		Avatar:           a.Avatar,
 		BoxID:            boxID,
 		RuntimeOptions:   rx,
+		MCPConfig:        mcpConfig,
 		Role:             a.Role,
 		Status:           status,
 		CreatedAt:        a.CreatedAt,

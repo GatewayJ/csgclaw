@@ -72,29 +72,30 @@ type ProfileDetectionResult struct {
 }
 
 type Agent struct {
-	ID               string        `json:"id"`
-	Name             string        `json:"name"`
-	Description      string        `json:"description,omitempty"`
-	Instructions     string        `json:"instructions,omitempty"`
-	Runtime          AgentRuntime  `json:"runtime,omitempty"`
-	RuntimeID        string        `json:"-"`
-	RuntimeKind      string        `json:"-"`
-	RuntimeName      string        `json:"runtime_name,omitempty"`
-	SandboxEnabled   bool          `json:"sandbox_enabled,omitempty"`
-	Image            string        `json:"image,omitempty"`
-	Avatar           string        `json:"-"`
-	BoxID            string        `json:"-"`
-	Role             string        `json:"role"`
-	Status           string        `json:"-"`
-	CreatedAt        time.Time     `json:"created_at"`
-	UpdatedAt        time.Time     `json:"updated_at,omitempty"`
-	Profile          string        `json:"-"`
-	ProfileConfig    AgentProfile  `json:"model_config,omitempty"`
-	UserID           string        `json:"user_id,omitempty"`
-	UserName         string        `json:"user_name,omitempty"`
-	ParticipantIDs   []string      `json:"participant_ids,omitempty"`
-	ParticipantNames []string      `json:"participant_names,omitempty"`
-	Participants     []Participant `json:"participants,omitempty"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	Description      string         `json:"description,omitempty"`
+	Instructions     string         `json:"instructions,omitempty"`
+	Runtime          AgentRuntime   `json:"runtime,omitempty"`
+	RuntimeID        string         `json:"-"`
+	RuntimeKind      string         `json:"-"`
+	RuntimeName      string         `json:"runtime_name,omitempty"`
+	SandboxEnabled   bool           `json:"sandbox_enabled,omitempty"`
+	MCPConfig        map[string]any `json:"mcp_config,omitempty"`
+	Image            string         `json:"image,omitempty"`
+	Avatar           string         `json:"-"`
+	BoxID            string         `json:"-"`
+	Role             string         `json:"role"`
+	Status           string         `json:"-"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at,omitempty"`
+	Profile          string         `json:"-"`
+	ProfileConfig    AgentProfile   `json:"model_config,omitempty"`
+	UserID           string         `json:"user_id,omitempty"`
+	UserName         string         `json:"user_name,omitempty"`
+	ParticipantIDs   []string       `json:"participant_ids,omitempty"`
+	ParticipantNames []string       `json:"participant_names,omitempty"`
+	Participants     []Participant  `json:"participants,omitempty"`
 }
 
 func (a *Agent) UnmarshalJSON(data []byte) error {
@@ -139,6 +140,7 @@ func (a *Agent) UnmarshalJSON(data []byte) error {
 		Status         string         `json:"status"`
 		BoxID          string         `json:"box_id"`
 		RuntimeOptions map[string]any `json:"runtime_options"`
+		MCPConfig      map[string]any `json:"mcp_config"`
 	}
 	if err := json.Unmarshal(data, &legacy); err != nil {
 		return err
@@ -172,6 +174,9 @@ func (a *Agent) UnmarshalJSON(data []byte) error {
 	}
 	if len(a.Runtime.Options) == 0 && len(legacy.RuntimeOptions) > 0 {
 		a.Runtime.Options = legacy.RuntimeOptions
+	}
+	if len(a.MCPConfig) == 0 && len(legacy.MCPConfig) > 0 {
+		a.MCPConfig = legacy.MCPConfig
 	}
 	if strings.TrimSpace(a.RuntimeName) == "" {
 		a.RuntimeName = strings.TrimSpace(a.Runtime.Name)
@@ -229,6 +234,7 @@ type CreateAgentRequest struct {
 	CreatedAt      time.Time           `json:"created_at,omitempty"`
 	Runtime        AgentRuntime        `json:"runtime,omitempty"`
 	RuntimeOptions map[string]any      `json:"runtime_options,omitempty"`
+	MCPConfig      map[string]any      `json:"mcp_config,omitempty"`
 	Profile        string              `json:"-"`
 	ProfileConfig  *CreateAgentProfile `json:"model_config,omitempty"`
 	AgentProfile   *CreateAgentProfile `json:"agent_profile,omitempty"`
@@ -251,6 +257,7 @@ func (r CreateAgentRequest) MarshalJSON() ([]byte, error) {
 		CreatedAt      time.Time           `json:"created_at,omitempty"`
 		Runtime        AgentRuntime        `json:"runtime,omitempty"`
 		RuntimeOptions map[string]any      `json:"runtime_options,omitempty"`
+		MCPConfig      map[string]any      `json:"mcp_config,omitempty"`
 		ModelConfig    *CreateAgentProfile `json:"model_config,omitempty"`
 		Profile        string              `json:"profile,omitempty"`
 		AgentProfile   *CreateAgentProfile `json:"agent_profile,omitempty"`
@@ -288,6 +295,7 @@ func (r CreateAgentRequest) MarshalJSON() ([]byte, error) {
 		CreatedAt:      r.CreatedAt,
 		Runtime:        runtime,
 		RuntimeOptions: r.RuntimeOptions,
+		MCPConfig:      r.MCPConfig,
 		ModelConfig:    r.ProfileConfig,
 		Profile:        profile,
 		AgentProfile:   r.AgentProfile,
@@ -303,6 +311,7 @@ func (r *CreateAgentRequest) UnmarshalJSON(data []byte) error {
 		RuntimeName    string              `json:"runtime_name,omitempty"`
 		SandboxEnabled *bool               `json:"sandbox_enabled,omitempty"`
 		RuntimeOptions map[string]any      `json:"runtime_options,omitempty"`
+		MCPConfig      map[string]any      `json:"mcp_config,omitempty"`
 		ModelConfig    *CreateAgentProfile `json:"model_config,omitempty"`
 		AgentProfile   *CreateAgentProfile `json:"agent_profile,omitempty"`
 		Runtime        struct {
@@ -321,6 +330,7 @@ func (r *CreateAgentRequest) UnmarshalJSON(data []byte) error {
 	r.RuntimeKind = strings.TrimSpace(decoded.RuntimeKind)
 	r.RuntimeName = strings.TrimSpace(decoded.RuntimeName)
 	r.RuntimeOptions = decoded.RuntimeOptions
+	r.MCPConfig = decoded.MCPConfig
 	r.ProfileConfig = decoded.ModelConfig
 	r.AgentProfile = decoded.AgentProfile
 	r.Runtime.Kind = strings.TrimSpace(decoded.Runtime.Kind)

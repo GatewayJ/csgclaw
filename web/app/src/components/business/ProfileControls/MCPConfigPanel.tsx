@@ -1,16 +1,16 @@
 import { useEffect, useId, useState } from "react";
 import {
-  MCP_RUNTIME_OPTIONS_EXAMPLE,
-  mcpRuntimeOptionsText,
-  parseMCPRuntimeOptionsText,
-  setMCPRuntimeOptions,
+  MCP_CONFIG_EXAMPLE,
+  mcpConfigText,
+  parseMCPConfigText,
+  setMCPConfig,
   type AgentDraft,
   type JSONRecord,
 } from "@/models/agents";
 import type { TranslateFn } from "@/models/conversations";
 import { Button } from "@/components/ui/Button/Button";
 
-export type MCPRuntimeOptionsPanelProps = {
+export type MCPConfigPanelProps = {
   draft: AgentDraft;
   onDraftChange: (draft: AgentDraft) => void;
   onInvalidChange?: (invalid: boolean) => void;
@@ -18,16 +18,16 @@ export type MCPRuntimeOptionsPanelProps = {
 };
 
 function cloneMCPExample(): JSONRecord {
-  return JSON.parse(JSON.stringify(MCP_RUNTIME_OPTIONS_EXAMPLE)) as JSONRecord;
+  return JSON.parse(JSON.stringify(MCP_CONFIG_EXAMPLE)) as JSONRecord;
 }
 
 function errorMessageForKey(key: "invalid_json" | "object_required", t: TranslateFn): string {
   return key === "invalid_json" ? t("profileMCPServersInvalidJSON") : t("profileMCPServersObjectRequired");
 }
 
-export function MCPRuntimeOptionsPanel({ draft, onDraftChange, onInvalidChange, t }: MCPRuntimeOptionsPanelProps) {
+export function MCPConfigPanel({ draft, onDraftChange, onInvalidChange, t }: MCPConfigPanelProps) {
   const textareaId = useId();
-  const draftText = mcpRuntimeOptionsText(draft.runtime_options);
+  const draftText = mcpConfigText(draft.mcp_config);
   const [text, setText] = useState(draftText);
   const [error, setError] = useState("");
 
@@ -39,7 +39,7 @@ export function MCPRuntimeOptionsPanel({ draft, onDraftChange, onInvalidChange, 
 
   function commitText(nextText: string) {
     setText(nextText);
-    const parsed = parseMCPRuntimeOptionsText(nextText);
+    const parsed = parseMCPConfigText(nextText);
     if (!parsed.ok) {
       setError(errorMessageForKey(parsed.error, t));
       onInvalidChange?.(true);
@@ -49,7 +49,7 @@ export function MCPRuntimeOptionsPanel({ draft, onDraftChange, onInvalidChange, 
     onInvalidChange?.(false);
     onDraftChange({
       ...draft,
-      runtime_options: setMCPRuntimeOptions(draft.runtime_options, parsed.value),
+      mcp_config: setMCPConfig(parsed.value),
     });
   }
 
@@ -60,7 +60,7 @@ export function MCPRuntimeOptionsPanel({ draft, onDraftChange, onInvalidChange, 
     setText(JSON.stringify(example, null, 2));
     onDraftChange({
       ...draft,
-      runtime_options: setMCPRuntimeOptions(draft.runtime_options, example),
+      mcp_config: setMCPConfig(example),
     });
   }
 
@@ -70,15 +70,15 @@ export function MCPRuntimeOptionsPanel({ draft, onDraftChange, onInvalidChange, 
     setText("");
     onDraftChange({
       ...draft,
-      runtime_options: setMCPRuntimeOptions(draft.runtime_options, null),
+      mcp_config: setMCPConfig(null),
     });
   }
 
   return (
-    <div className="field span-2 mcp-runtime-options-panel">
-      <div className="mcp-runtime-options-header">
+    <div className="field span-2 mcp-config-panel">
+      <div className="mcp-config-header">
         <label htmlFor={textareaId}>{t("profileMCPServers")}</label>
-        <div className="mcp-runtime-options-actions">
+        <div className="mcp-config-actions">
           <Button variant="secondaryGray" size="sm" onClick={fillExample}>
             {t("profileMCPServersUseExample")}
           </Button>
@@ -89,7 +89,7 @@ export function MCPRuntimeOptionsPanel({ draft, onDraftChange, onInvalidChange, 
       </div>
       <textarea
         id={textareaId}
-        className="compact-textarea mcp-runtime-options-textarea"
+        className="compact-textarea mcp-config-textarea"
         value={text}
         aria-invalid={error ? "true" : undefined}
         aria-describedby={`${textareaId}-hint`}

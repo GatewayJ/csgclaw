@@ -46,6 +46,7 @@ export type AgentUpdatePayload = {
   instructions?: string;
   image?: string;
   model_config?: JSONRecord;
+  mcp_config?: JSONRecord | null;
   name?: string;
   profile?: JSONRecord | string;
   runtime?: { name?: RuntimeName; sandbox_enabled?: boolean; options?: JSONRecord };
@@ -287,6 +288,7 @@ export async function createBotRequest(payload: CreateBotPayload): Promise<Agent
         },
         runtime_name: runtimeSelection.runtime_name,
         sandbox_enabled: runtimeSelection.sandbox_enabled,
+        mcp_config: payload.mcp_config,
         from_template: payload.from_template,
         model_config: payload.agent_profile,
       },

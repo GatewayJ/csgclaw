@@ -26,7 +26,7 @@ export type ProviderName = "csghub_lite" | "csghub" | "codex" | "claude_code" | 
 export type JSONRecord = Record<string, unknown>;
 
 export const MCP_RUNTIME_OPTION_KEY = "mcp";
-export const MCP_RUNTIME_OPTIONS_EXAMPLE: JSONRecord = {
+export const MCP_CONFIG_EXAMPLE: JSONRecord = {
   mcpServers: {
     context7: {
       command: "npx",
@@ -35,7 +35,7 @@ export const MCP_RUNTIME_OPTIONS_EXAMPLE: JSONRecord = {
   },
 };
 
-export type MCPRuntimeOptionsParseResult =
+export type MCPConfigParseResult =
   | { ok: true; value: JSONRecord | null }
   | { ok: false; error: "invalid_json" | "object_required" };
 
@@ -89,6 +89,7 @@ export type AgentProfileLike = {
   reasoning_effort?: string | null;
   request_options?: JSONRecord | null;
   runtime_options?: JSONRecord | null;
+  mcp_config?: JSONRecord | null;
   runtime_kind?: string | null;
   runtime_name?: RuntimeName | null;
   sandbox_enabled?: boolean | null;
@@ -127,6 +128,7 @@ export type AgentLike = AgentProfileLike & {
   sandbox_enabled?: boolean | null;
   runtime_option_schemas?: RuntimeOptionSchema[] | null;
   runtime_options?: JSONRecord | null;
+  mcp_config?: JSONRecord | null;
   status?: string | null;
   template_name?: string | null;
   user_id?: string | null;
@@ -314,6 +316,18 @@ export function agentRuntimeOptions(item: AgentLike | AgentProfileLike | null | 
   return {};
 }
 
+export function agentMCPConfig(item: AgentLike | AgentProfileLike | null | undefined): JSONRecord {
+  const agent = item as AgentLike | null | undefined;
+  if (agent?.mcp_config && typeof agent.mcp_config === "object" && !Array.isArray(agent.mcp_config)) {
+    return { ...(agent.mcp_config as JSONRecord) };
+  }
+  const legacyMCP = agentRuntimeOptions(item)[MCP_RUNTIME_OPTION_KEY];
+  if (legacyMCP && typeof legacyMCP === "object" && !Array.isArray(legacyMCP)) {
+    return { ...(legacyMCP as JSONRecord) };
+  }
+  return {};
+}
+
 export function agentProfileConfig(item: AgentLike | null | undefined): AgentProfileLike | null {
   if (item?.model_config && typeof item.model_config === "object" && !Array.isArray(item.model_config)) {
     return item.model_config;
@@ -363,6 +377,7 @@ export type AgentDraft = {
   role?: string;
   bot_type?: BotType;
   runtime_options?: JSONRecord;
+  mcp_config?: JSONRecord;
   runtime_name?: RuntimeName;
   sandbox_enabled?: boolean;
   runtime_kind: RuntimeKind;
@@ -547,19 +562,20 @@ function isJSONRecord(value: unknown): value is JSONRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-export function supportsMCPRuntimeOptions(runtimeKind: unknown): boolean {
-  return normalizeRuntimeKind(runtimeKind) === "openclaw_sandbox";
+export function supportsMCPConfig(runtimeKind: unknown): boolean {
+  const normalized = normalizeRuntimeKind(runtimeKind);
+  return normalized === "openclaw_sandbox" || normalized === "picoclaw_sandbox" || normalized === "codex";
 }
 
-export function mcpRuntimeOptionsText(runtimeOptions: JSONRecord | null | undefined): string {
-  const value = normalizeRuntimeOptionsRecord(runtimeOptions)[MCP_RUNTIME_OPTION_KEY];
-  if (value == null) {
+export function mcpConfigText(mcpConfig: JSONRecord | null | undefined): string {
+  const value = normalizeRuntimeOptionsRecord(mcpConfig);
+  if (Object.keys(value).length === 0) {
     return "";
   }
   return JSON.stringify(value, null, 2);
 }
 
-export function parseMCPRuntimeOptionsText(text: string): MCPRuntimeOptionsParseResult {
+export function parseMCPConfigText(text: string): MCPConfigParseResult {
   const trimmed = text.trim();
   if (!trimmed) {
     return { ok: true, value: null };
@@ -576,16 +592,16 @@ export function parseMCPRuntimeOptionsText(text: string): MCPRuntimeOptionsParse
   return { ok: true, value: parsed };
 }
 
-export function setMCPRuntimeOptions(
-  runtimeOptions: JSONRecord | null | undefined,
-  value: JSONRecord | null,
-): JSONRecord {
-  const next = normalizeRuntimeOptionsRecord(runtimeOptions);
+export function setMCPConfig(value: JSONRecord | null): JSONRecord | undefined {
   if (value == null) {
-    delete next[MCP_RUNTIME_OPTION_KEY];
-    return next;
+    return undefined;
   }
-  next[MCP_RUNTIME_OPTION_KEY] = value;
+  return normalizeRuntimeOptionsRecord(value);
+}
+
+export function stripLegacyMCPRuntimeOption(runtimeOptions: JSONRecord | null | undefined): JSONRecord {
+  const next = normalizeRuntimeOptionsRecord(runtimeOptions);
+  delete next[MCP_RUNTIME_OPTION_KEY];
   return next;
 }
 
@@ -875,6 +891,8 @@ export function agentDraftWithRuntimeFieldsFromAgent(
   if (Object.keys(updatedRuntimeOptions).length > 0) {
     next.runtime_options = normalizeRuntimeOptionsRecord(updatedRuntimeOptions);
   }
+  const updatedMCPConfig = agentMCPConfig(updated);
+  next.mcp_config = normalizeRuntimeOptionsRecord(updatedMCPConfig);
   return next;
 }
 
@@ -1281,6 +1299,7 @@ export function agentToDraft(agent: AgentDraftSource | null | undefined): AgentD
     from_template: agent?.from_template || "",
     template_name: agent?.template_name || "",
     runtime_options: normalizeRuntimeOptionsRecord(agentRuntimeOptions(agent as AgentLike | null | undefined)),
+    mcp_config: normalizeRuntimeOptionsRecord(agentMCPConfig(agent as AgentLike | null | undefined)),
     ...base,
     notifier_delivery_mode: normalizeNotifierDeliveryMode(agent?.notifier_delivery_mode || base.notifier_delivery_mode),
     runtime_name: agentRuntimeName(agent as AgentLike | null | undefined),
@@ -1550,6 +1569,11 @@ export function draftRuntimeOptionsForSave(
     return null;
   }
   return { ...(base || {}), ...(notifier || {}) };
+}
+
+export function draftMCPConfigForSave(draft: Partial<AgentDraft> | null | undefined): JSONRecord | null {
+  const config = normalizeRuntimeOptionsRecord(draft?.mcp_config);
+  return Object.keys(config).length > 0 ? config : null;
 }
 
 export function notifierRemoteTokenPlaceholderText(
