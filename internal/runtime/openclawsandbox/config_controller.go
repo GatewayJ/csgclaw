@@ -8,13 +8,14 @@ import (
 )
 
 var _ agentruntime.RuntimeConfigController = (*Runtime)(nil)
+var _ agentruntime.MCPConfigController = (*Runtime)(nil)
 
 func (r *Runtime) ValidateConfig(_ context.Context, current agentruntime.RuntimeConfigSnapshot) error {
-	return validateOpenClawMCPRuntimeOptions(current.Options)
+	return nil
 }
 
 func (r *Runtime) RestartRequired(change agentruntime.RuntimeConfigChange) (bool, error) {
-	return openClawMCPRestartRequired(change.Previous.Options, change.Current.Options)
+	return false, nil
 }
 
 func (r *Runtime) ReconcileConfig(_ context.Context, h agentruntime.Handle, _ agentruntime.RuntimeConfigChange) error {
@@ -27,4 +28,16 @@ func (r *Runtime) ReconcileConfig(_ context.Context, h agentruntime.Handle, _ ag
 		return err
 	}
 	return refreshWorkspaceAgentsFile(filepath.Join(r.Layout(agentHome).WorkspaceRoot, "AGENTS.md"), agentRef.Instructions)
+}
+
+func (r *Runtime) ValidateMCPConfig(_ context.Context, current agentruntime.MCPConfigSnapshot) error {
+	return validateOpenClawMCPConfig(current.Config)
+}
+
+func (r *Runtime) MCPConfigRestartRequired(change agentruntime.MCPConfigChange) (bool, error) {
+	return openClawMCPRestartRequired(change.Previous.Config, change.Current.Config)
+}
+
+func (r *Runtime) ReconcileMCPConfig(context.Context, agentruntime.Handle, agentruntime.MCPConfigChange) error {
+	return nil
 }

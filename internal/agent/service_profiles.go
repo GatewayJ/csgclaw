@@ -11,6 +11,7 @@ import (
 	"csgclaw/internal/identity"
 	agentruntime "csgclaw/internal/runtime"
 	"csgclaw/internal/runtime/openclawsandbox"
+	"csgclaw/internal/runtime/picoclawsandbox"
 	"csgclaw/internal/sandbox"
 	"csgclaw/internal/utils"
 )
@@ -183,7 +184,11 @@ func (s *Service) syncGatewayHostConfig(got Agent, profile AgentProfile) error {
 	switch strings.TrimSpace(got.RuntimeKind) {
 	case RuntimeKindPicoClawSandbox:
 		feishuProvider := s.currentFeishuProviderForRuntime(RuntimeKindPicoClawSandbox)
-		if _, err := s.ensureAgentPicoClawConfigForParticipantWithResolver(got.Name, participantID, got.ID, s.server, modelCfg, resolveManagerBaseURL, feishuProvider); err != nil {
+		agentHome, err := s.agentHomeDir(got.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := picoclawsandbox.EnsureConfigWithMCPConfig(agentHome, participantID, got.ID, s.server, modelCfg, got.MCPConfig, resolveManagerBaseURL, feishuProvider); err != nil {
 			return fmt.Errorf("sync gateway picoclaw config: %w", err)
 		}
 	case RuntimeKindOpenClawSandbox:
@@ -192,7 +197,7 @@ func (s *Service) syncGatewayHostConfig(got Agent, profile AgentProfile) error {
 			return err
 		}
 		feishuProvider := s.currentFeishuProviderForRuntime(RuntimeKindOpenClawSandbox)
-		if _, err := openclawsandbox.EnsureConfigWithRuntimeOptions(agentHome, participantID, got.ID, s.server, modelCfg, got.RuntimeOptions, resolveManagerBaseURL, feishuProvider); err != nil {
+		if _, err := openclawsandbox.EnsureConfigWithMCPConfig(agentHome, participantID, got.ID, s.server, modelCfg, got.MCPConfig, resolveManagerBaseURL, feishuProvider); err != nil {
 			return fmt.Errorf("sync gateway openclaw config: %w", err)
 		}
 	default:
@@ -264,6 +269,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 	}
 	instructionsUpdated := updateRequested("instructions", req.Instructions != nil)
 	runtimeOptionsUpdated := updateRequested("runtime_options", req.RuntimeOptions != nil)
+	mcpConfigUpdated := updateRequested("mcp_config", req.MCPConfigSet)
+	if mcpConfigUpdated && !req.MCPConfigSet {
+		s.mu.Unlock()
+		return Agent{}, fmt.Errorf("field_mask includes mcp_config but request is missing mcp_config")
+	}
 	if updateRequested("name", req.Name != nil) {
 		if req.Name == nil {
 			s.mu.Unlock()
@@ -326,7 +336,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 		current.Profile = strings.TrimSpace(*req.Profile)
 	}
 	agentProfileUpdated := updateRequested("agent_profile", req.AgentProfile != nil)
-	if !agentProfileUpdated && strings.TrimSpace(current.Profile) != "" {
+	if !hasFieldMask && !agentProfileUpdated && strings.TrimSpace(current.Profile) != "" {
 		if selected, ok := CatalogProviderModelConfig(s.llm, current.Profile); ok {
 			selected.Name = current.AgentProfile.Name
 			selected.Description = current.AgentProfile.Description
@@ -338,7 +348,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 			agentProfileUpdated = true
 		}
 	}
-	if agentProfileUpdated || runtimeOptionsUpdated {
+	if agentProfileUpdated || runtimeOptionsUpdated || mcpConfigUpdated {
 		profileUpdated = true
 		profile := current.AgentProfile
 		if agentProfileUpdated {
@@ -359,9 +369,19 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 				req.RuntimeOptions = &empty
 			}
 			patch = *req.RuntimeOptions
-			if err := validateMCPRuntimeOptionSupport(runtimeKind, patch); err != nil {
+			var legacyMCPConfig map[string]any
+			var legacyMCPSet bool
+			var err error
+			patch, legacyMCPConfig, legacyMCPSet, err = splitLegacyRuntimeOptionsMCPStrictWithPresence(patch, nil, false)
+			if err != nil {
 				s.mu.Unlock()
 				return Agent{}, err
+			}
+			if !mcpConfigUpdated && legacyMCPSet {
+				if legacyMCPConfig != nil {
+					req.MCPConfig = &legacyMCPConfig
+				}
+				mcpConfigUpdated = true
 			}
 		}
 		mergedFlat := runtimeOptionsAfterPatch(current.RuntimeKind, current.RuntimeOptions, nil)
@@ -371,17 +391,41 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 		} else {
 			current.RuntimeOptions = nextAgentRuntimeOptions(current.RuntimeKind, current.RuntimeOptions, mergedFlat)
 		}
+		if mcpConfigUpdated {
+			if req.MCPConfig == nil {
+				current.MCPConfig = nil
+			} else {
+				normalizedMCPConfig, err := agentruntime.NormalizeMCPConfig(*req.MCPConfig)
+				if err != nil {
+					s.mu.Unlock()
+					return Agent{}, err
+				}
+				current.MCPConfig = normalizedMCPConfig
+			}
+		}
 		normalized := normalizeProfileForAgentRuntime(profile, current.RuntimeOptions, current.Name, current.Description, current.RuntimeKind, mergedFlat)
 		runtimePrevious := s.hydrateProfileFromCatalogLocked(previous.AgentProfile)
 		runtimeNormalized := s.hydrateProfileFromCatalogLocked(normalized)
 		change := runtimeConfigChangeForAgent(runtimePrevious, runtimeNormalized, previous.RuntimeOptions, current.RuntimeOptions)
+		mcpChange := mcpConfigChangeForAgent(previous.MCPConfig, current.MCPConfig)
+		runtimeConfigUpdated := agentProfileUpdated || runtimeOptionsUpdated
 		restartRequired = profileRestartRequired(previous, normalized)
-		controllerRestartRequired, err := s.runtimeConfigRestartRequired(runtimeKind, change)
-		if err != nil {
-			s.mu.Unlock()
-			return Agent{}, err
+		if runtimeConfigUpdated {
+			controllerRestartRequired, err := s.runtimeConfigRestartRequired(runtimeKind, change)
+			if err != nil {
+				s.mu.Unlock()
+				return Agent{}, err
+			}
+			restartRequired = restartRequired || controllerRestartRequired
 		}
-		restartRequired = restartRequired || controllerRestartRequired
+		if mcpConfigUpdated {
+			controllerMCPRestartRequired, err := s.mcpConfigRestartRequired(runtimeKind, mcpChange)
+			if err != nil {
+				s.mu.Unlock()
+				return Agent{}, err
+			}
+			restartRequired = restartRequired || controllerMCPRestartRequired
+		}
 		normalized.EnvRestartRequired = restartRequired
 		current.AgentProfile = normalized
 		current.ProfileComplete = normalized.ProfileComplete
@@ -390,10 +434,17 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 		if current.ProfileComplete && strings.EqualFold(strings.TrimSpace(current.Status), "profile_incomplete") {
 			current.Status = string(sandbox.StateStopped)
 		}
-		if runtimeNormalized.ProfileComplete {
+		if (runtimeConfigUpdated && runtimeNormalized.ProfileComplete) || mcpConfigUpdated {
 			s.mu.Unlock()
-			if err := s.validateRuntimeConfig(ctx, runtimeKind, change.Current); err != nil {
-				return Agent{}, err
+			if runtimeConfigUpdated && runtimeNormalized.ProfileComplete {
+				if err := s.validateRuntimeConfig(ctx, runtimeKind, change.Current); err != nil {
+					return Agent{}, err
+				}
+			}
+			if mcpConfigUpdated {
+				if err := s.validateMCPConfig(ctx, runtimeKind, mcpChange.Current); err != nil {
+					return Agent{}, err
+				}
 			}
 			s.mu.Lock()
 			if _, key, ok = s.agentByIDLocked(id); !ok {
@@ -416,6 +467,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 	s.mu.Unlock()
 	if instructionsUpdated || runtimeOptionsUpdated {
 		if err := s.reconcileRuntimeConfig(ctx, previous, current); err != nil {
+			return Agent{}, err
+		}
+	}
+	if mcpConfigUpdated {
+		if err := s.reconcileMCPConfig(ctx, previous, current); err != nil {
 			return Agent{}, err
 		}
 	}
@@ -506,15 +562,15 @@ func runtimeConfigSnapshotForAgent(profile AgentProfile, options map[string]any)
 	}
 }
 
-func validateMCPRuntimeOptionSupport(runtimeKind string, options map[string]any) error {
-	_, ok := options[agentruntime.RuntimeOptionMCPKey]
-	if !ok {
-		return nil
+func mcpConfigChangeForAgent(previousConfig, currentConfig map[string]any) agentruntime.MCPConfigChange {
+	return agentruntime.MCPConfigChange{
+		Previous: mcpConfigSnapshotForAgent(previousConfig),
+		Current:  mcpConfigSnapshotForAgent(currentConfig),
 	}
-	if strings.TrimSpace(runtimeKind) == RuntimeKindOpenClawSandbox {
-		return nil
-	}
-	return fmt.Errorf("runtime_options.%s is only supported for runtime_kind %q", agentruntime.RuntimeOptionMCPKey, RuntimeKindOpenClawSandbox)
+}
+
+func mcpConfigSnapshotForAgent(config map[string]any) agentruntime.MCPConfigSnapshot {
+	return agentruntime.MCPConfigSnapshot{Config: utils.CloneAnyMap(config)}
 }
 
 func (s *Service) hydrateProfileFromCatalog(profile AgentProfile) AgentProfile {
@@ -589,9 +645,6 @@ func (s *Service) validateRuntimeConfig(ctx context.Context, runtimeKind string,
 	if runtimeKind == "" {
 		return nil
 	}
-	if err := validateMCPRuntimeOptionSupport(runtimeKind, current.Options); err != nil {
-		return err
-	}
 	rt, err := s.runtimeForKind(runtimeKind)
 	if err != nil {
 		return err
@@ -632,6 +685,50 @@ func (s *Service) runtimeConfigRestartRequired(runtimeKind string, change agentr
 	return controller.RestartRequired(change)
 }
 
+func (s *Service) validateMCPConfig(ctx context.Context, runtimeKind string, current agentruntime.MCPConfigSnapshot) error {
+	if s == nil {
+		return fmt.Errorf("agent service is required")
+	}
+	if current.Config == nil {
+		return nil
+	}
+	runtimeKind = strings.TrimSpace(runtimeKind)
+	if runtimeKind == "" {
+		return nil
+	}
+	rt, err := s.runtimeForKind(runtimeKind)
+	if err != nil {
+		return err
+	}
+	controller, ok := rt.(agentruntime.MCPConfigController)
+	if !ok {
+		return fmt.Errorf("mcp_config is not supported for runtime_kind %q", runtimeKind)
+	}
+	return controller.ValidateMCPConfig(ctx, current)
+}
+
+func (s *Service) mcpConfigRestartRequired(runtimeKind string, change agentruntime.MCPConfigChange) (bool, error) {
+	if s == nil {
+		return false, fmt.Errorf("agent service is required")
+	}
+	if change.Previous.Config == nil && change.Current.Config == nil {
+		return false, nil
+	}
+	runtimeKind = strings.TrimSpace(runtimeKind)
+	if runtimeKind == "" {
+		return false, nil
+	}
+	rt, err := s.runtimeForKind(runtimeKind)
+	if err != nil {
+		return false, err
+	}
+	controller, ok := rt.(agentruntime.MCPConfigController)
+	if !ok {
+		return false, fmt.Errorf("mcp_config is not supported for runtime_kind %q", runtimeKind)
+	}
+	return controller.MCPConfigRestartRequired(change)
+}
+
 func (s *Service) reconcileRuntimeConfig(ctx context.Context, previous, current Agent) error {
 	if s == nil {
 		return fmt.Errorf("agent service is required")
@@ -651,6 +748,35 @@ func (s *Service) reconcileRuntimeConfig(ctx context.Context, previous, current 
 	previous.AgentProfile = s.hydrateProfileFromCatalog(previous.AgentProfile)
 	current.AgentProfile = s.hydrateProfileFromCatalog(current.AgentProfile)
 	return controller.ReconcileConfig(ctx, runtimeHandleForAgent(current), runtimeConfigChangeForAgent(previous.AgentProfile, current.AgentProfile, previous.RuntimeOptions, current.RuntimeOptions))
+}
+
+func (s *Service) reconcileMCPConfig(ctx context.Context, previous, current Agent) error {
+	if s == nil {
+		return fmt.Errorf("agent service is required")
+	}
+	runtimeKind := strings.TrimSpace(current.RuntimeKind)
+	if runtimeKind == "" {
+		return nil
+	}
+	rt, err := s.runtimeForKind(runtimeKind)
+	if err != nil {
+		return err
+	}
+	controller, ok := rt.(agentruntime.MCPConfigController)
+	if !ok {
+		if current.MCPConfig == nil {
+			return nil
+		}
+		return fmt.Errorf("mcp_config is not supported for runtime_kind %q", runtimeKind)
+	}
+	return controller.ReconcileMCPConfig(ctx, runtimeHandleForAgent(current), mcpConfigChangeForAgent(previous.MCPConfig, current.MCPConfig))
+}
+
+func normalizeMCPConfig(config map[string]any) (map[string]any, error) {
+	if config == nil {
+		return nil, nil
+	}
+	return agentruntime.NormalizeMCPConfig(config)
 }
 
 func (s *Service) storedAPIKeyForModelRequest(req ProfileModelRequest, profile AgentProfile) string {
@@ -742,6 +868,9 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 	if err := s.validateRuntimeConfig(ctx, strings.TrimSpace(got.RuntimeKind), runtimeConfigSnapshotForAgent(profile, got.RuntimeOptions)); err != nil {
 		return Agent{}, err
 	}
+	if err := s.validateMCPConfig(ctx, strings.TrimSpace(got.RuntimeKind), mcpConfigSnapshotForAgent(got.MCPConfig)); err != nil {
+		return Agent{}, err
+	}
 
 	runtimeImpl, err := s.runtimeForKind(strings.TrimSpace(got.RuntimeKind))
 	if err != nil {
@@ -822,6 +951,7 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 		Instructions:   strings.TrimSpace(got.Instructions),
 		Profile:        runtimeProfile,
 		RuntimeOptions: utils.CloneAnyMap(got.RuntimeOptions),
+		MCPConfig:      utils.CloneAnyMap(got.MCPConfig),
 	}); err != nil {
 		return Agent{}, fmt.Errorf("provision agent runtime: %w", err)
 	}

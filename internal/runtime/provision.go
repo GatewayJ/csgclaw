@@ -31,6 +31,7 @@ type ProvisionRequest struct {
 	Instructions     string
 	Profile          Profile
 	RuntimeOptions   map[string]any
+	MCPConfig        map[string]any
 	WorkspaceOverlay string
 	Gateway          *GatewayProvision
 }

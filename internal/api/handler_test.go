@@ -177,6 +177,45 @@ func (f fakeConversationRuntime) NewConversation(ctx context.Context, handle age
 	}, nil
 }
 
+type apiFakeCodexBinaryProvider struct{}
+
+func (apiFakeCodexBinaryProvider) Ensure(context.Context) (string, error) {
+	return "/tmp/codex", nil
+}
+
+type apiFakeCodexManager struct{}
+
+func (apiFakeCodexManager) Start(_ context.Context, spec codexruntime.SessionSpec) (*codexruntime.Session, error) {
+	now := time.Now().UTC()
+	return &codexruntime.Session{
+		RuntimeID:    spec.RuntimeID,
+		AgentID:      spec.AgentID,
+		AgentName:    spec.AgentName,
+		SessionID:    "session-" + spec.AgentID,
+		BinaryPath:   spec.BinaryPath,
+		RuntimeDir:   spec.RuntimeDir,
+		WorkspaceDir: spec.WorkspaceDir,
+		HomeDir:      spec.HomeDir,
+		CodexHomeDir: spec.CodexHomeDir,
+		StderrPath:   spec.StderrPath,
+		ProcessID:    os.Getpid(),
+		CreatedAt:    now,
+		StartedAt:    now,
+	}, nil
+}
+
+func (apiFakeCodexManager) Stop(context.Context, codexruntime.SessionHandle) error {
+	return nil
+}
+
+func (apiFakeCodexManager) Session(codexruntime.SessionHandle) (*codexruntime.Session, error) {
+	return nil, os.ErrNotExist
+}
+
+func (apiFakeCodexManager) Prompt(context.Context, codexruntime.SessionHandle, codexruntime.PromptRequest) (codexruntime.PromptResponse, error) {
+	return codexruntime.PromptResponse{}, os.ErrNotExist
+}
+
 type fakeCodexBridgeController struct {
 	ensureCalls []agent.Agent
 	stopCalls   []string
@@ -2077,6 +2116,420 @@ func TestHandleAgentsCreateCodexWorkerEnsuresCodexBridge(t *testing.T) {
 	}
 	if !strings.HasPrefix(bridge.ensureCalls[0].ID, "agent-") || bridge.ensureCalls[0].RuntimeKind != agent.RuntimeKindCodex {
 		t.Fatalf("EnsureAgent() got %+v, want codex worker typed agent ID", bridge.ensureCalls[0])
+	}
+}
+
+func TestHandleAgentsMCPConfigClosedLoopForSupportedRuntimes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
+
+	codexRoot := t.TempDir()
+	codexHomes := map[string]string{}
+	statePath := filepath.Join(t.TempDir(), "agents.json")
+	codexRT := codexruntime.New(codexruntime.Dependencies{
+		BinaryProvider: apiFakeCodexBinaryProvider{},
+		AgentHome: func(agentID string) (string, error) {
+			home := filepath.Join(codexRoot, agentID)
+			codexHomes[agentID] = home
+			return home, nil
+		},
+		ResolveAgent: func(h agentruntime.Handle) (codexruntime.AgentRef, error) {
+			return codexAgentRefFromStateFile(statePath, h.RuntimeID, agentruntime.Profile{
+				Provider: agent.ProviderAPI,
+				BaseURL:  "https://llm.example/v1",
+				APIKey:   "sk-test",
+				ModelID:  "model-1",
+			})
+		},
+		Manager: apiFakeCodexManager{},
+	})
+
+	svc, err := agent.NewService(
+		config.ModelConfig{
+			Provider: config.ProviderLLMAPI,
+			BaseURL:  "https://llm.example/v1",
+			APIKey:   "sk-default",
+			ModelID:  "model-default",
+		},
+		config.ServerConfig{
+			ListenAddr:       "127.0.0.1:18080",
+			AdvertiseBaseURL: "http://127.0.0.1:18080",
+			AccessToken:      "shared-token",
+		},
+		"manager-image:test",
+		statePath,
+		agent.WithRuntime(codexRT),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	srv := &Handler{svc: svc, im: im.NewService()}
+
+	mcpConfig := map[string]any{
+		"mcpServers": map[string]any{
+			"context7": map[string]any{
+				"command": "uvx",
+				"args":    []any{"context7-mcp"},
+				"env": map[string]any{
+					"CONTEXT7_API_KEY": "secret",
+				},
+			},
+			"remote": map[string]any{
+				"url":                  "https://mcp.example.com/mcp",
+				"bearer_token_env_var": "MCP_TOKEN",
+			},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		id          string
+		agentName   string
+		runtimeKind string
+		image       string
+		assertFile  func(t *testing.T, created agentResponse)
+	}{
+		{
+			name:        "openclaw",
+			id:          "u-openclawmcp",
+			agentName:   "openclawmcp",
+			runtimeKind: agent.RuntimeKindOpenClawSandbox,
+			image:       "openclaw-image:test",
+			assertFile: func(t *testing.T, created agentResponse) {
+				t.Helper()
+				home := testAgentHomeFromStatePath(statePath, created.ID)
+				cfg := readJSONMap(t, filepath.Join(openclawsandbox.Root(home), openclawsandbox.HostConfig))
+				mcpRoot, ok := cfg["mcp"].(map[string]any)
+				if !ok {
+					t.Fatalf("openclaw config missing mcp object: %+v", cfg["mcp"])
+				}
+				assertMCPServers(t, mcpRoot["servers"])
+			},
+		},
+		{
+			name:        "picoclaw",
+			id:          "u-picoclawmcp",
+			agentName:   "picoclawmcp",
+			runtimeKind: agent.RuntimeKindPicoClawSandbox,
+			image:       "picoclaw-image:test",
+			assertFile: func(t *testing.T, created agentResponse) {
+				t.Helper()
+				home := testAgentHomeFromStatePath(statePath, created.ID)
+				cfg := readJSONMap(t, filepath.Join(picoclawsandbox.Root(home), picoclawsandbox.HostConfig))
+				tools, ok := cfg["tools"].(map[string]any)
+				if !ok {
+					t.Fatalf("picoclaw config missing tools object: %+v", cfg["tools"])
+				}
+				mcpRoot, ok := tools["mcp"].(map[string]any)
+				if !ok {
+					t.Fatalf("picoclaw config missing tools.mcp object: %+v", tools["mcp"])
+				}
+				if enabled, _ := mcpRoot["enabled"].(bool); !enabled {
+					t.Fatalf("picoclaw tools.mcp.enabled = %v, want true", mcpRoot["enabled"])
+				}
+				assertMCPServers(t, mcpRoot["servers"])
+			},
+		},
+		{
+			name:        "codex",
+			id:          "u-codexmcp",
+			agentName:   "codexmcp",
+			runtimeKind: agent.RuntimeKindCodex,
+			assertFile: func(t *testing.T, created agentResponse) {
+				t.Helper()
+				home := codexHomes[agent.CanonicalID(created.ID)]
+				if strings.TrimSpace(home) == "" {
+					t.Fatalf("codex agent home for %s was not resolved", created.ID)
+				}
+				configPath := filepath.Join(home, ".codex", "home", "config.toml")
+				raw, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatalf("read codex config %s: %v", configPath, err)
+				}
+				configText := string(raw)
+				for _, want := range []string{
+					`# BEGIN csgclaw-managed mcp`,
+					`[mcp_servers."context7"]`,
+					`command = "uvx"`,
+					`args = ["context7-mcp"]`,
+					`env = { "CONTEXT7_API_KEY" = "secret" }`,
+					`[mcp_servers."remote"]`,
+					`url = "https://mcp.example.com/mcp"`,
+					`bearer_token_env_var = "MCP_TOKEN"`,
+					`# END csgclaw-managed mcp`,
+				} {
+					if !strings.Contains(configText, want) {
+						t.Fatalf("codex config missing %q:\n%s", want, configText)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			createBody := map[string]any{
+				"id":           tt.id,
+				"name":         tt.agentName,
+				"role":         agent.RoleWorker,
+				"runtime_kind": tt.runtimeKind,
+				"agent_profile": map[string]any{
+					"model_provider_id": "e2e-api",
+					"base_url":          "https://llm.example/v1",
+					"api_key":           "sk-test",
+					"model_id":          "model-1",
+				},
+			}
+			if tt.image != "" {
+				createBody["image"] = tt.image
+			}
+			created := doAgentJSON(t, srv, http.MethodPost, "/api/v1/agents", createBody, http.StatusCreated)
+			wantRuntime := agentruntime.RuntimeConfigForKind(tt.runtimeKind)
+			if created.RuntimeName != wantRuntime.Name || created.SandboxEnabled != wantRuntime.Sandboxed {
+				t.Fatalf("created runtime = %q/%t, want %q/%t", created.RuntimeName, created.SandboxEnabled, wantRuntime.Name, wantRuntime.Sandboxed)
+			}
+
+			updated := doAgentJSON(t, srv, http.MethodPatch, "/api/v1/agents/"+created.ID, map[string]any{
+				"field_mask": []string{"mcp_config"},
+				"mcp_config": mcpConfig,
+			}, http.StatusOK)
+			assertMCPConfigResponse(t, updated.MCPConfig)
+			if _, ok := updated.RuntimeOptions[agentruntime.RuntimeOptionMCPKey]; ok {
+				t.Fatalf("runtime_options contains legacy %q after mcp_config patch: %+v", agentruntime.RuntimeOptionMCPKey, updated.RuntimeOptions)
+			}
+			tt.assertFile(t, updated)
+		})
+	}
+}
+
+func doAgentJSON(t *testing.T, srv *Handler, method, path string, body any, wantStatus int) agentResponse {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	req := httptest.NewRequest(method, path, bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != wantStatus {
+		t.Fatalf("%s %s status = %d, want %d; body=%s", method, path, rec.Code, wantStatus, rec.Body.String())
+	}
+	var got agentResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+	}
+	return got
+}
+
+func testAgentHomeFromStatePath(statePath, agentID string) string {
+	return filepath.Join(filepath.Dir(statePath), "agents", agent.CanonicalID(agentID))
+}
+
+func codexAgentRefFromStateFile(path, runtimeID string, fallback agentruntime.Profile) (codexruntime.AgentRef, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return codexruntime.AgentRef{}, err
+	}
+	var state struct {
+		Agents []struct {
+			ID             string               `json:"id"`
+			Name           string               `json:"name"`
+			Instructions   string               `json:"instructions,omitempty"`
+			RuntimeID      string               `json:"runtime_id,omitempty"`
+			RuntimeKind    string               `json:"runtime_kind,omitempty"`
+			BoxID          string               `json:"box_id,omitempty"`
+			Runtime        *agent.RuntimeRecord `json:"runtime,omitempty"`
+			RuntimeOptions map[string]any       `json:"runtime_options,omitempty"`
+			MCPConfig      map[string]any       `json:"mcp_config,omitempty"`
+			ModelConfig    agent.AgentProfile   `json:"model_config,omitempty"`
+			AgentProfile   agent.AgentProfile   `json:"agent_profile,omitempty"`
+		} `json:"agents"`
+		Items []struct {
+			ID             string               `json:"id"`
+			Name           string               `json:"name"`
+			Instructions   string               `json:"instructions,omitempty"`
+			RuntimeID      string               `json:"runtime_id,omitempty"`
+			RuntimeKind    string               `json:"runtime_kind,omitempty"`
+			BoxID          string               `json:"box_id,omitempty"`
+			Runtime        *agent.RuntimeRecord `json:"runtime,omitempty"`
+			RuntimeOptions map[string]any       `json:"runtime_options,omitempty"`
+			MCPConfig      map[string]any       `json:"mcp_config,omitempty"`
+			ModelConfig    agent.AgentProfile   `json:"model_config,omitempty"`
+			AgentProfile   agent.AgentProfile   `json:"agent_profile,omitempty"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return codexruntime.AgentRef{}, err
+	}
+	type stateAgent struct {
+		ID             string
+		Name           string
+		Instructions   string
+		RuntimeID      string
+		RuntimeKind    string
+		BoxID          string
+		Runtime        *agent.RuntimeRecord
+		RuntimeOptions map[string]any
+		MCPConfig      map[string]any
+		ModelConfig    agent.AgentProfile
+		AgentProfile   agent.AgentProfile
+	}
+	items := make([]stateAgent, 0, len(state.Agents)+len(state.Items))
+	for _, item := range state.Agents {
+		items = append(items, stateAgent{
+			ID:             item.ID,
+			Name:           item.Name,
+			Instructions:   item.Instructions,
+			RuntimeID:      item.RuntimeID,
+			RuntimeKind:    item.RuntimeKind,
+			BoxID:          item.BoxID,
+			Runtime:        item.Runtime,
+			RuntimeOptions: item.RuntimeOptions,
+			MCPConfig:      item.MCPConfig,
+			ModelConfig:    item.ModelConfig,
+			AgentProfile:   item.AgentProfile,
+		})
+	}
+	for _, item := range state.Items {
+		items = append(items, stateAgent{
+			ID:             item.ID,
+			Name:           item.Name,
+			Instructions:   item.Instructions,
+			RuntimeID:      item.RuntimeID,
+			RuntimeKind:    item.RuntimeKind,
+			BoxID:          item.BoxID,
+			Runtime:        item.Runtime,
+			RuntimeOptions: item.RuntimeOptions,
+			MCPConfig:      item.MCPConfig,
+			ModelConfig:    item.ModelConfig,
+			AgentProfile:   item.AgentProfile,
+		})
+	}
+	for _, item := range items {
+		rtID := strings.TrimSpace(item.RuntimeID)
+		options := item.RuntimeOptions
+		boxID := strings.TrimSpace(item.BoxID)
+		if item.Runtime != nil {
+			if strings.TrimSpace(item.Runtime.ID) != "" {
+				rtID = strings.TrimSpace(item.Runtime.ID)
+			}
+			if len(options) == 0 && len(item.Runtime.Options) > 0 {
+				options = item.Runtime.Options
+			}
+			if boxID == "" {
+				boxID = strings.TrimSpace(item.Runtime.SandboxID)
+			}
+		}
+		if rtID == "" && strings.TrimSpace(item.ID) != "" {
+			rtID = "rt-" + strings.TrimSpace(item.ID)
+		}
+		if rtID != strings.TrimSpace(runtimeID) {
+			continue
+		}
+		profile := fallback.Normalized()
+		rawProfile := item.ModelConfig
+		if profileEmptyForTest(rawProfile) {
+			rawProfile = item.AgentProfile
+		}
+		if providerID := strings.TrimSpace(rawProfile.ModelProviderID); providerID != "" {
+			profile.Provider = agent.ProfileProviderForModelProviderID(providerID)
+		}
+		if provider := strings.TrimSpace(rawProfile.Provider); provider != "" {
+			profile.Provider = provider
+		}
+		if baseURL := strings.TrimRight(strings.TrimSpace(rawProfile.BaseURL), "/"); baseURL != "" {
+			profile.BaseURL = baseURL
+		}
+		if apiKey := strings.TrimSpace(rawProfile.APIKey); apiKey != "" {
+			profile.APIKey = apiKey
+		}
+		if modelID := strings.TrimSpace(rawProfile.ModelID); modelID != "" {
+			profile.ModelID = modelID
+		}
+		if reasoning := strings.TrimSpace(rawProfile.ReasoningEffort); reasoning != "" {
+			profile.ReasoningEffort = reasoning
+		}
+		if len(rawProfile.Env) > 0 {
+			profile.Env = rawProfile.Env
+		}
+		return codexruntime.AgentRef{
+			ID:             item.ID,
+			Name:           item.Name,
+			RuntimeID:      rtID,
+			HandleID:       boxID,
+			Instructions:   item.Instructions,
+			RuntimeOptions: options,
+			MCPConfig:      item.MCPConfig,
+			Profile:        profile,
+		}, nil
+	}
+	return codexruntime.AgentRef{}, os.ErrNotExist
+}
+
+func profileEmptyForTest(profile agent.AgentProfile) bool {
+	return strings.TrimSpace(profile.Provider) == "" &&
+		strings.TrimSpace(profile.ModelProviderID) == "" &&
+		strings.TrimSpace(profile.BaseURL) == "" &&
+		strings.TrimSpace(profile.APIKey) == "" &&
+		strings.TrimSpace(profile.ModelID) == "" &&
+		strings.TrimSpace(profile.ReasoningEffort) == "" &&
+		len(profile.Env) == 0
+}
+
+func readJSONMap(t *testing.T, path string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode %s: %v\n%s", path, err, string(raw))
+	}
+	return got
+}
+
+func assertMCPConfigResponse(t *testing.T, cfg map[string]any) {
+	t.Helper()
+	if len(cfg) == 0 {
+		t.Fatal("response missing mcp_config")
+	}
+	assertMCPServers(t, cfg[agentruntime.MCPConfigServersKey])
+}
+
+func assertMCPServers(t *testing.T, raw any) {
+	t.Helper()
+	servers, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("MCP servers = %#v, want object", raw)
+	}
+	context7, ok := servers["context7"].(map[string]any)
+	if !ok {
+		t.Fatalf("MCP servers missing context7: %+v", servers)
+	}
+	if command, _ := context7["command"].(string); command != "uvx" {
+		t.Fatalf("context7.command = %q, want uvx", command)
+	}
+	args, ok := context7["args"].([]any)
+	if !ok || len(args) != 1 || args[0] != "context7-mcp" {
+		t.Fatalf("context7.args = %#v, want [context7-mcp]", context7["args"])
+	}
+	env, ok := context7["env"].(map[string]any)
+	if !ok || env["CONTEXT7_API_KEY"] != "secret" {
+		t.Fatalf("context7.env = %#v, want CONTEXT7_API_KEY", context7["env"])
+	}
+	remote, ok := servers["remote"].(map[string]any)
+	if !ok {
+		t.Fatalf("MCP servers missing remote: %+v", servers)
+	}
+	if url, _ := remote["url"].(string); url != "https://mcp.example.com/mcp" {
+		t.Fatalf("remote.url = %q, want https://mcp.example.com/mcp", url)
+	}
+	if envVar, _ := remote["bearer_token_env_var"].(string); envVar != "MCP_TOKEN" {
+		t.Fatalf("remote.bearer_token_env_var = %q, want MCP_TOKEN", envVar)
 	}
 }
 

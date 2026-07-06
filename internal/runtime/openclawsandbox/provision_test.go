@@ -30,11 +30,9 @@ func TestProvisionPreparesGatewayAssets(t *testing.T) {
 		AgentID:   "u-alice",
 		AgentName: "alice",
 		Profile:   agentruntime.Profile{},
-		RuntimeOptions: map[string]any{
-			"mcp": map[string]any{
-				"mcpServers": map[string]any{
-					"context7": map[string]any{"command": "uvx", "args": []any{"context7-mcp"}},
-				},
+		MCPConfig: map[string]any{
+			"mcpServers": map[string]any{
+				"context7": map[string]any{"command": "uvx", "args": []any{"context7-mcp"}},
 			},
 		},
 		WorkspaceOverlay: overlayRoot,

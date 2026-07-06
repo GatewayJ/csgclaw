@@ -24,6 +24,7 @@ const labels: Record<string, string> = {
   agentProfileSectionNavLabel: "Profile sections",
   agentProfileTab: "Profile",
   agentProfileSkillsTab: "skills",
+  agentProfileMCPTab: "MCP",
   agentSaved: "Saved",
   agentSaveChanges: "Save changes",
   agentUpdateSave: "Save",
@@ -806,7 +807,7 @@ describe("agent action visibility", () => {
     expect(screen.queryByLabelText("Image")).not.toBeInTheDocument();
   });
 
-  it("edits MCP runtime options in the detail runtime section for OpenClaw agents", async () => {
+  it("edits MCP config in the detail MCP tab for supported agents", async () => {
     const user = userEvent.setup();
     const onDraftChange = vi.fn();
     const item = {
@@ -814,11 +815,11 @@ describe("agent action visibility", () => {
       runtime_kind: "openclaw_sandbox",
       runtime_options: {
         local_workspace_dir: "/tmp/project",
-        mcp: {
-          mcpServers: {
-            existing: {
-              command: "node",
-            },
+      },
+      mcp_config: {
+        mcpServers: {
+          existing: {
+            command: "node",
           },
         },
       },
@@ -839,6 +840,7 @@ describe("agent action visibility", () => {
         saveError=""
         authStatuses={{}}
         authBusyProvider=""
+        workspaceSupported
         notifierWebhookPublicOrigin="http://127.0.0.1:18080"
         onDraftChange={onDraftChange}
         onSave={vi.fn()}
@@ -853,7 +855,18 @@ describe("agent action visibility", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Runtime environment" }));
+    expect(screen.queryByLabelText("MCP Servers")).not.toBeInTheDocument();
+    const navigation = screen.getByRole("navigation", { name: "Profile sections" });
+    expect(within(navigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Profile",
+      "Activity",
+      "Channels",
+      "Instructions",
+      "skills",
+      "MCP",
+    ]);
+
+    await user.click(within(navigation).getByRole("button", { name: "MCP" }));
 
     const editor = screen.getByLabelText("MCP Servers");
     expect((editor as HTMLTextAreaElement).value).toContain('"existing"');
@@ -868,16 +881,78 @@ describe("agent action visibility", () => {
       expect.objectContaining({
         runtime_options: {
           local_workspace_dir: "/tmp/project",
-          mcp: {
-            mcpServers: {
-              context7: {
-                command: "npx",
-              },
+        },
+        mcp_config: {
+          mcpServers: {
+            context7: {
+              command: "npx",
             },
           },
         },
       }),
     );
+  });
+
+  it("keeps invalid MCP config blocking save after switching tabs", async () => {
+    const user = userEvent.setup();
+    const item = {
+      ...worker,
+      runtime_kind: "openclaw_sandbox",
+      runtime_options: {},
+      mcp_config: {
+        mcpServers: {
+          existing: {
+            command: "node",
+          },
+        },
+      },
+    };
+
+    render(
+      <AgentDetailPane
+        item={item}
+        t={t}
+        activeRoom={null}
+        busyKey=""
+        error=""
+        draft={agentToDraft(item)}
+        models={[]}
+        modelBusy={false}
+        saving={false}
+        publishBusy={false}
+        saveError=""
+        authStatuses={{}}
+        authBusyProvider=""
+        workspaceSupported
+        notifierWebhookPublicOrigin="http://127.0.0.1:18080"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onPublish={vi.fn()}
+        onProviderLogin={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        onRecreate={vi.fn()}
+        onDelete={vi.fn()}
+        onInvite={vi.fn()}
+        onOpenDM={vi.fn()}
+      />,
+    );
+
+    const navigation = screen.getByRole("navigation", { name: "Profile sections" });
+    await user.click(within(navigation).getByRole("button", { name: "MCP" }));
+
+    const editor = screen.getByLabelText("MCP Servers");
+    fireEvent.input(editor, { target: { value: "{" } });
+
+    expect(screen.getByText("Enter a valid JSON object.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    await user.click(within(navigation).getByRole("button", { name: "Profile" }));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    await user.click(within(navigation).getByRole("button", { name: "MCP" }));
+    expect(screen.getByLabelText("MCP Servers")).toHaveValue("{");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
 
   it("shows a saved status instead of a save button when the draft is unchanged", () => {
@@ -1226,7 +1301,14 @@ describe("agent action visibility", () => {
 
     const navigation = screen.getByRole("navigation", { name: "Profile sections" });
     const tabs = within(navigation).getAllByRole("button");
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["Profile", "Activity", "Channels", "Instructions", "skills"]);
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      "Profile",
+      "Activity",
+      "Channels",
+      "Instructions",
+      "skills",
+      "MCP",
+    ]);
     expect(tabs[0]).toHaveAttribute("aria-current", "location");
     expect(screen.getByText("Request options")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Channels" })).not.toBeInTheDocument();

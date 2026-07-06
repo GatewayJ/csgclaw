@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ type Agent struct {
 	Avatar           string                   `json:"avatar,omitempty"`
 	BoxID            string                   `json:"box_id,omitempty"`
 	RuntimeOptions   map[string]any           `json:"runtime_options,omitempty"`
+	MCPConfig        map[string]any           `json:"mcp_config,omitempty"`
 	Role             string                   `json:"role"`
 	Status           string                   `json:"status"`
 	CreatedAt        time.Time                `json:"created_at"`
@@ -83,6 +85,7 @@ func (a *Agent) UnmarshalJSON(data []byte) error {
 		Avatar           string                   `json:"avatar,omitempty"`
 		BoxID            string                   `json:"box_id,omitempty"`
 		RuntimeOptions   map[string]any           `json:"runtime_options,omitempty"`
+		MCPConfig        map[string]any           `json:"mcp_config,omitempty"`
 		Role             string                   `json:"role"`
 		Status           string                   `json:"status"`
 		CreatedAt        time.Time                `json:"created_at"`
@@ -109,6 +112,7 @@ func (a *Agent) UnmarshalJSON(data []byte) error {
 		Avatar:           decoded.Avatar,
 		BoxID:            decoded.BoxID,
 		RuntimeOptions:   utils.CloneAnyMap(decoded.RuntimeOptions),
+		MCPConfig:        utils.CloneAnyMap(decoded.MCPConfig),
 		Role:             decoded.Role,
 		Status:           decoded.Status,
 		CreatedAt:        decoded.CreatedAt,
@@ -150,6 +154,7 @@ func (a *Agent) UnmarshalJSON(data []byte) error {
 			out.SandboxEnabled = *decoded.Runtime.SandboxEnabled
 		}
 	}
+	out.RuntimeOptions, out.MCPConfig = splitLegacyRuntimeOptionsMCP(out.RuntimeOptions, out.MCPConfig)
 	out.SetRuntimeConfig(out.RuntimeConfig())
 	profilePayload := decoded.ModelConfig
 	if len(profilePayload) == 0 || string(profilePayload) == "null" {
@@ -189,6 +194,7 @@ type CreateAgentSpec struct {
 	UpdatedAt      time.Time      `json:"updated_at,omitempty"`
 	Profile        string         `json:"profile,omitempty"`
 	RuntimeOptions map[string]any `json:"runtime_options,omitempty"`
+	MCPConfig      map[string]any `json:"mcp_config,omitempty"`
 	AgentProfile   AgentProfile   `json:"agent_profile,omitempty"`
 }
 
@@ -230,6 +236,7 @@ func (s CreateAgentSpec) MarshalJSON() ([]byte, error) {
 		UpdatedAt      time.Time      `json:"updated_at,omitempty"`
 		Profile        string         `json:"profile,omitempty"`
 		RuntimeOptions map[string]any `json:"runtime_options,omitempty"`
+		MCPConfig      map[string]any `json:"mcp_config,omitempty"`
 		AgentProfile   AgentProfile   `json:"agent_profile,omitempty"`
 	}
 	runtimeName := strings.TrimSpace(s.RuntimeName)
@@ -272,6 +279,7 @@ func (s CreateAgentSpec) MarshalJSON() ([]byte, error) {
 		UpdatedAt:      s.UpdatedAt,
 		Profile:        s.Profile,
 		RuntimeOptions: utils.CloneAnyMap(s.RuntimeOptions),
+		MCPConfig:      utils.CloneAnyMap(s.MCPConfig),
 		AgentProfile:   cloneProfile(s.AgentProfile),
 	})
 }
@@ -295,6 +303,7 @@ func (s *CreateAgentSpec) UnmarshalJSON(data []byte) error {
 		ModelConfig    json.RawMessage `json:"model_config,omitempty"`
 		Profile        json.RawMessage `json:"profile,omitempty"`
 		RuntimeOptions map[string]any  `json:"runtime_options,omitempty"`
+		MCPConfig      map[string]any  `json:"mcp_config,omitempty"`
 		AgentProfile   AgentProfile    `json:"agent_profile,omitempty"`
 	}
 	var decoded createAgentSpecJSON
@@ -314,6 +323,7 @@ func (s *CreateAgentSpec) UnmarshalJSON(data []byte) error {
 		CreatedAt:      decoded.CreatedAt,
 		UpdatedAt:      decoded.UpdatedAt,
 		RuntimeOptions: utils.CloneAnyMap(decoded.RuntimeOptions),
+		MCPConfig:      utils.CloneAnyMap(decoded.MCPConfig),
 		AgentProfile:   cloneProfile(decoded.AgentProfile),
 	}
 	if decoded.SandboxEnabled != nil {
@@ -342,6 +352,7 @@ func (s *CreateAgentSpec) UnmarshalJSON(data []byte) error {
 			out.SandboxEnabled = *decoded.Runtime.SandboxEnabled
 		}
 	}
+	out.RuntimeOptions, out.MCPConfig = splitLegacyRuntimeOptionsMCP(out.RuntimeOptions, out.MCPConfig)
 	out.SetRuntimeConfig(out.RuntimeConfig())
 	profilePayload := decoded.ModelConfig
 	if len(profilePayload) == 0 || string(profilePayload) == "null" {
@@ -376,6 +387,8 @@ type UpdateRequest struct {
 	SandboxEnabled            *bool           `json:"-"`
 	RuntimeSelectionRequested bool            `json:"-"`
 	RuntimeOptions            *map[string]any `json:"runtime_options,omitempty"`
+	MCPConfig                 *map[string]any `json:"mcp_config,omitempty"`
+	MCPConfigSet              bool            `json:"-"`
 	AgentProfile              *AgentProfile   `json:"agent_profile,omitempty"`
 	FieldMask                 []string        `json:"field_mask,omitempty"`
 }
@@ -400,6 +413,7 @@ func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
 		Profile        json.RawMessage    `json:"profile,omitempty"`
 		Runtime        *runtimeUpdateJSON `json:"runtime,omitempty"`
 		RuntimeOptions *map[string]any    `json:"runtime_options,omitempty"`
+		MCPConfig      *map[string]any    `json:"mcp_config,omitempty"`
 		AgentProfile   *AgentProfile      `json:"agent_profile,omitempty"`
 		FieldMask      []string           `json:"field_mask,omitempty"`
 	}
@@ -416,8 +430,22 @@ func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
 		RuntimeName:    strings.TrimSpace(decoded.RuntimeName),
 		SandboxEnabled: decoded.SandboxEnabled,
 		RuntimeOptions: decoded.RuntimeOptions,
+		MCPConfig:      decoded.MCPConfig,
 		AgentProfile:   decoded.AgentProfile,
 		FieldMask:      append([]string(nil), decoded.FieldMask...),
+	}
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawFields); err == nil {
+		if raw, ok := rawFields["mcp_config"]; ok {
+			out.MCPConfigSet = true
+			if string(raw) != "null" {
+				var cfg map[string]any
+				if err := json.Unmarshal(raw, &cfg); err != nil {
+					return err
+				}
+				out.MCPConfig = &cfg
+			}
+		}
 	}
 	profileField := ""
 	profilePayload := decoded.ModelConfig
@@ -458,6 +486,23 @@ func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
 		strings.TrimSpace(out.RuntimeName) != "" ||
 		out.SandboxEnabled != nil
 	out.RuntimeSelectionRequested = rawRuntimeSelectionRequested && updateFieldMaskRequestsRuntimeSelection(out.FieldMask)
+	if out.RuntimeOptions != nil {
+		var existingMCPConfig map[string]any
+		if out.MCPConfig != nil {
+			existingMCPConfig = *out.MCPConfig
+		}
+		options, mcpConfig, legacyMCPSet, err := splitLegacyRuntimeOptionsMCPStrictWithPresence(*out.RuntimeOptions, existingMCPConfig, out.MCPConfigSet)
+		if err != nil {
+			return err
+		}
+		out.RuntimeOptions = &options
+		if !out.MCPConfigSet && legacyMCPSet {
+			if mcpConfig != nil {
+				out.MCPConfig = &mcpConfig
+			}
+			out.MCPConfigSet = true
+		}
+	}
 	if len(out.FieldMask) > 0 {
 		out.FieldMask = normalizeCompactUpdateFieldMask(out.FieldMask, profileField, decoded.Runtime != nil)
 	}
@@ -583,5 +628,77 @@ func cloneAgent(src *Agent) *Agent {
 	dst.AgentProfile = cloneProfile(src.AgentProfile)
 	dst.DetectionResults = append([]ProfileDetectionResult(nil), src.DetectionResults...)
 	dst.RuntimeOptions = utils.CloneAnyMap(src.RuntimeOptions)
+	dst.MCPConfig = utils.CloneAnyMap(src.MCPConfig)
 	return &dst
+}
+
+func splitLegacyRuntimeOptionsMCP(runtimeOptions map[string]any, mcpConfig map[string]any) (map[string]any, map[string]any) {
+	options, currentMCP, _, _ := splitLegacyRuntimeOptionsMCPValue(runtimeOptions, mcpConfig, mcpConfig != nil, false)
+	return options, currentMCP
+}
+
+func splitLegacyRuntimeOptionsMCPStrict(runtimeOptions map[string]any, mcpConfig map[string]any, mcpConfigProvided bool) (map[string]any, map[string]any, error) {
+	options, currentMCP, _, err := splitLegacyRuntimeOptionsMCPValue(runtimeOptions, mcpConfig, mcpConfigProvided, true)
+	return options, currentMCP, err
+}
+
+func splitLegacyRuntimeOptionsMCPStrictWithPresence(runtimeOptions map[string]any, mcpConfig map[string]any, mcpConfigProvided bool) (map[string]any, map[string]any, bool, error) {
+	return splitLegacyRuntimeOptionsMCPValue(runtimeOptions, mcpConfig, mcpConfigProvided, true)
+}
+
+func splitLegacyRuntimeOptionsMCPValue(runtimeOptions map[string]any, mcpConfig map[string]any, mcpConfigProvided, strict bool) (map[string]any, map[string]any, bool, error) {
+	options := utils.CloneAnyMap(runtimeOptions)
+	currentMCP := cloneAnyMapPreserveEmpty(mcpConfig)
+	if options == nil {
+		return nil, currentMCP, false, nil
+	}
+	raw, ok := options[agentruntime.RuntimeOptionMCPKey]
+	if !ok {
+		if len(options) == 0 {
+			return nil, currentMCP, false, nil
+		}
+		return options, currentMCP, false, nil
+	}
+	delete(options, agentruntime.RuntimeOptionMCPKey)
+	if !mcpConfigProvided {
+		if raw == nil {
+			currentMCP = nil
+		} else {
+			rawMap, ok := raw.(map[string]any)
+			if !ok {
+				if strict {
+					return nil, nil, true, fmt.Errorf("runtime_options.%s must be an object or null", agentruntime.RuntimeOptionMCPKey)
+				}
+			} else if normalized, err := agentruntime.NormalizeMCPConfig(rawMap); err == nil {
+				currentMCP = normalized
+			} else if strict {
+				return nil, nil, true, legacyRuntimeOptionsMCPErrorPath(err)
+			} else {
+				currentMCP = cloneAnyMapPreserveEmpty(rawMap)
+			}
+		}
+	}
+	if len(options) == 0 {
+		options = nil
+	}
+	return options, currentMCP, true, nil
+}
+
+func legacyRuntimeOptionsMCPErrorPath(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := strings.ReplaceAll(err.Error(), "mcp_config", "runtime_options."+agentruntime.RuntimeOptionMCPKey)
+	return fmt.Errorf("%s", message)
+}
+
+func cloneAnyMapPreserveEmpty(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	out := make(map[string]any, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
 }

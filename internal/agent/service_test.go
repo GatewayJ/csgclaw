@@ -128,21 +128,24 @@ func (f *fakeInstance) Close() error {
 }
 
 type fakeAgentRuntime struct {
-	kind       string
-	workspace  func(string) string
-	skills     func(string) string
-	hostLogs   func(string) []string
-	validate   func(context.Context, agentruntime.RuntimeConfigSnapshot) error
-	restart    func(agentruntime.RuntimeConfigChange) (bool, error)
-	reconcile  func(context.Context, agentruntime.Handle, agentruntime.RuntimeConfigChange) error
-	provision  func(context.Context, agentruntime.ProvisionRequest) error
-	new        func(context.Context, agentruntime.Spec) (agentruntime.Handle, error)
-	start      func(context.Context, agentruntime.Handle) (agentruntime.State, error)
-	stop       func(context.Context, agentruntime.Handle) (agentruntime.State, error)
-	del        func(context.Context, agentruntime.Handle) error
-	state      func(context.Context, agentruntime.Handle) (agentruntime.State, error)
-	info       func(context.Context, agentruntime.Handle) (agentruntime.Info, error)
-	streamLogs func(context.Context, agentruntime.Handle, agentruntime.LogOptions) error
+	kind         string
+	workspace    func(string) string
+	skills       func(string) string
+	hostLogs     func(string) []string
+	validate     func(context.Context, agentruntime.RuntimeConfigSnapshot) error
+	restart      func(agentruntime.RuntimeConfigChange) (bool, error)
+	reconcile    func(context.Context, agentruntime.Handle, agentruntime.RuntimeConfigChange) error
+	mcpValidate  func(context.Context, agentruntime.MCPConfigSnapshot) error
+	mcpRestart   func(agentruntime.MCPConfigChange) (bool, error)
+	mcpReconcile func(context.Context, agentruntime.Handle, agentruntime.MCPConfigChange) error
+	provision    func(context.Context, agentruntime.ProvisionRequest) error
+	new          func(context.Context, agentruntime.Spec) (agentruntime.Handle, error)
+	start        func(context.Context, agentruntime.Handle) (agentruntime.State, error)
+	stop         func(context.Context, agentruntime.Handle) (agentruntime.State, error)
+	del          func(context.Context, agentruntime.Handle) error
+	state        func(context.Context, agentruntime.Handle) (agentruntime.State, error)
+	info         func(context.Context, agentruntime.Handle) (agentruntime.Info, error)
+	streamLogs   func(context.Context, agentruntime.Handle, agentruntime.LogOptions) error
 }
 
 type fakeBareAgentRuntime struct {
@@ -257,6 +260,27 @@ func (f fakeAgentRuntime) RestartRequired(change agentruntime.RuntimeConfigChang
 func (f fakeAgentRuntime) ReconcileConfig(ctx context.Context, h agentruntime.Handle, change agentruntime.RuntimeConfigChange) error {
 	if f.reconcile != nil {
 		return f.reconcile(ctx, h, change)
+	}
+	return nil
+}
+
+func (f fakeAgentRuntime) ValidateMCPConfig(ctx context.Context, current agentruntime.MCPConfigSnapshot) error {
+	if f.mcpValidate != nil {
+		return f.mcpValidate(ctx, current)
+	}
+	return agentruntime.ValidateMCPConfig(current.Config)
+}
+
+func (f fakeAgentRuntime) MCPConfigRestartRequired(change agentruntime.MCPConfigChange) (bool, error) {
+	if f.mcpRestart != nil {
+		return f.mcpRestart(change)
+	}
+	return agentruntime.MCPConfigNeedsRestart(change.Previous.Config, change.Current.Config)
+}
+
+func (f fakeAgentRuntime) ReconcileMCPConfig(ctx context.Context, h agentruntime.Handle, change agentruntime.MCPConfigChange) error {
+	if f.mcpReconcile != nil {
+		return f.mcpReconcile(ctx, h, change)
 	}
 	return nil
 }
@@ -1615,11 +1639,11 @@ func TestUpdateCodexLocalWorkspaceDirMarksRunningRuntimeForRestart(t *testing.T)
 	}
 }
 
-func TestUpdateOpenClawMCPRuntimeOptionsRecreatesAndProvisionsLatestOptions(t *testing.T) {
+func TestUpdateMCPConfigRecreatesOpenClawAndProvisionsLatestConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	var provisionCalls []agentruntime.ProvisionRequest
-	reconcileCalls := 0
+	mcpReconcileCalls := 0
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{
@@ -1631,11 +1655,11 @@ func TestUpdateOpenClawMCPRuntimeOptionsRecreatesAndProvisionsLatestOptions(t *t
 		"",
 		WithRuntime(fakeAgentRuntime{
 			kind: RuntimeKindOpenClawSandbox,
-			restart: func(change agentruntime.RuntimeConfigChange) (bool, error) {
-				return !reflect.DeepEqual(change.Previous.Options["mcp"], change.Current.Options["mcp"]), nil
+			mcpRestart: func(change agentruntime.MCPConfigChange) (bool, error) {
+				return !reflect.DeepEqual(change.Previous.Config, change.Current.Config), nil
 			},
-			reconcile: func(context.Context, agentruntime.Handle, agentruntime.RuntimeConfigChange) error {
-				reconcileCalls++
+			mcpReconcile: func(context.Context, agentruntime.Handle, agentruntime.MCPConfigChange) error {
+				mcpReconcileCalls++
 				return nil
 			},
 			provision: func(_ context.Context, req agentruntime.ProvisionRequest) error {
@@ -1682,23 +1706,20 @@ func TestUpdateOpenClawMCPRuntimeOptionsRecreatesAndProvisionsLatestOptions(t *t
 		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
 	}
 
-	nextRuntimeOptions := map[string]any{
-		"local_workspace_dir": "/tmp/keep",
-		"mcp": map[string]any{
-			"mcpServers": map[string]any{
-				"context7": map[string]any{
-					"command": "uvx",
-					"args":    []any{"context7-mcp"},
-				},
+	nextMCPConfig := map[string]any{
+		"mcpServers": map[string]any{
+			"context7": map[string]any{
+				"command": "uvx",
+				"args":    []any{"context7-mcp"},
 			},
 		},
 	}
-	updated, err := svc.Update(context.Background(), "u-alice", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
+	updated, err := svc.Update(context.Background(), "u-alice", UpdateRequest{MCPConfig: &nextMCPConfig, MCPConfigSet: true})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
-	if reconcileCalls != 1 {
-		t.Fatalf("ReconcileConfig() calls = %d, want 1", reconcileCalls)
+	if mcpReconcileCalls != 1 {
+		t.Fatalf("ReconcileMCPConfig() calls = %d, want 1", mcpReconcileCalls)
 	}
 	if len(provisionCalls) != 1 {
 		t.Fatalf("Provision() calls = %d, want 1", len(provisionCalls))
@@ -1706,13 +1727,13 @@ func TestUpdateOpenClawMCPRuntimeOptionsRecreatesAndProvisionsLatestOptions(t *t
 	if got, want := provisionCalls[0].RuntimeOptions["local_workspace_dir"], "/tmp/keep"; got != want {
 		t.Fatalf("Provision().RuntimeOptions local_workspace_dir = %#v, want %q", got, want)
 	}
-	mcpRoot, ok := provisionCalls[0].RuntimeOptions["mcp"].(map[string]any)
-	if !ok {
-		t.Fatalf("Provision().RuntimeOptions[mcp] = %#v, want object", provisionCalls[0].RuntimeOptions["mcp"])
+	mcpRoot := provisionCalls[0].MCPConfig
+	if mcpRoot == nil {
+		t.Fatalf("Provision().MCPConfig = %#v, want object", provisionCalls[0].MCPConfig)
 	}
 	servers := mcpRoot["mcpServers"].(map[string]any)
 	if _, ok := servers["context7"]; !ok {
-		t.Fatalf("Provision().RuntimeOptions mcpServers = %#v, want context7", servers)
+		t.Fatalf("Provision().MCPConfig mcpServers = %#v, want context7", servers)
 	}
 	if updated.AgentProfile.EnvRestartRequired {
 		t.Fatal("Update().AgentProfile.EnvRestartRequired = true, want false after successful recreate")
@@ -1722,7 +1743,7 @@ func TestUpdateOpenClawMCPRuntimeOptionsRecreatesAndProvisionsLatestOptions(t *t
 	}
 }
 
-func TestUpdateOpenClawMCPRuntimeOptionsRecreateFailureKeepsRestartRequired(t *testing.T) {
+func TestUpdateMCPConfigRecreateFailureKeepsRestartRequired(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	svc, err := NewService(
@@ -1736,8 +1757,8 @@ func TestUpdateOpenClawMCPRuntimeOptionsRecreateFailureKeepsRestartRequired(t *t
 		"",
 		WithRuntime(fakeAgentRuntime{
 			kind: RuntimeKindOpenClawSandbox,
-			restart: func(change agentruntime.RuntimeConfigChange) (bool, error) {
-				return !reflect.DeepEqual(change.Previous.Options["mcp"], change.Current.Options["mcp"]), nil
+			mcpRestart: func(change agentruntime.MCPConfigChange) (bool, error) {
+				return !reflect.DeepEqual(change.Previous.Config, change.Current.Config), nil
 			},
 			provision: func(context.Context, agentruntime.ProvisionRequest) error {
 				return fmt.Errorf("provision failed")
@@ -1769,14 +1790,12 @@ func TestUpdateOpenClawMCPRuntimeOptionsRecreateFailureKeepsRestartRequired(t *t
 		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
 	}
 
-	nextRuntimeOptions := map[string]any{
-		"mcp": map[string]any{
-			"mcpServers": map[string]any{
-				"context7": map[string]any{"command": "uvx"},
-			},
+	nextMCPConfig := map[string]any{
+		"mcpServers": map[string]any{
+			"context7": map[string]any{"command": "uvx"},
 		},
 	}
-	_, err = svc.Update(context.Background(), "u-alice", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
+	_, err = svc.Update(context.Background(), "u-alice", UpdateRequest{MCPConfig: &nextMCPConfig, MCPConfigSet: true})
 	if err == nil || !strings.Contains(err.Error(), "provision failed") {
 		t.Fatalf("Update() error = %v, want provision failed", err)
 	}
@@ -1787,15 +1806,15 @@ func TestUpdateOpenClawMCPRuntimeOptionsRecreateFailureKeepsRestartRequired(t *t
 	if !got.AgentProfile.EnvRestartRequired {
 		t.Fatal("Agent().AgentProfile.EnvRestartRequired = false, want true after failed recreate")
 	}
-	if _, ok := got.RuntimeOptions["mcp"].(map[string]any); !ok {
-		t.Fatalf("Agent().RuntimeOptions = %#v, want saved mcp config", got.RuntimeOptions)
+	if _, ok := got.MCPConfig["mcpServers"].(map[string]any); !ok {
+		t.Fatalf("Agent().MCPConfig = %#v, want saved mcp config", got.MCPConfig)
 	}
 	if got.BoxID != "openclaw-box-old" {
 		t.Fatalf("Agent().BoxID = %q, want old box id after failed recreate", got.BoxID)
 	}
 }
 
-func TestUpdateMCPRuntimeOptionsRejectsNonOpenClawRuntime(t *testing.T) {
+func TestUpdatePicoClawMCPConfigIsAccepted(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1822,13 +1841,114 @@ func TestUpdateMCPRuntimeOptionsRejectsNonOpenClawRuntime(t *testing.T) {
 	nextRuntimeOptions := map[string]any{
 		"mcp": map[string]any{"mcpServers": map[string]any{}},
 	}
-	_, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
-	if err == nil || !strings.Contains(err.Error(), `runtime_options.mcp is only supported`) {
-		t.Fatalf("Update() error = %v, want unsupported mcp runtime", err)
+	updated, err := svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if _, ok := updated.MCPConfig["mcpServers"].(map[string]any); !ok {
+		t.Fatalf("Update().MCPConfig = %#v, want managed empty config", updated.MCPConfig)
 	}
 }
 
-func TestCreateMCPRuntimeOptionsRejectsNonOpenClawRuntime(t *testing.T) {
+func TestUpdateRequestLegacyMCPRuntimeOptionsNullMarksMCPConfigClear(t *testing.T) {
+	var req UpdateRequest
+	if err := json.Unmarshal([]byte(`{"runtime_options":{"local_workspace_dir":"/tmp/project","mcp":null}}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal(UpdateRequest) error = %v", err)
+	}
+	if !req.MCPConfigSet {
+		t.Fatal("UpdateRequest.MCPConfigSet = false, want true for legacy runtime_options.mcp null")
+	}
+	if req.MCPConfig != nil {
+		t.Fatalf("UpdateRequest.MCPConfig = %#v, want nil clear", *req.MCPConfig)
+	}
+	if req.RuntimeOptions == nil {
+		t.Fatal("UpdateRequest.RuntimeOptions = nil, want legacy mcp stripped options")
+	}
+	if _, ok := (*req.RuntimeOptions)[agentruntime.RuntimeOptionMCPKey]; ok {
+		t.Fatalf("UpdateRequest.RuntimeOptions still contains legacy mcp: %#v", *req.RuntimeOptions)
+	}
+}
+
+func TestUpdateLegacyMCPRuntimeOptionsNullClearsMCPConfig(t *testing.T) {
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindPicoClawSandbox}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-dev"] = Agent{
+		ID:          "u-dev",
+		Name:        "dev",
+		RuntimeID:   "rt-u-dev",
+		RuntimeKind: RuntimeKindPicoClawSandbox,
+		Image:       "picoclaw-image:test",
+		Role:        RoleWorker,
+		Status:      "profile_incomplete",
+		RuntimeOptions: map[string]any{
+			"local_workspace_dir": "/tmp/project",
+		},
+		MCPConfig: map[string]any{
+			"mcpServers": map[string]any{
+				"context7": map[string]any{"command": "uvx"},
+			},
+		},
+		AgentProfile:    AgentProfile{Name: "dev"},
+		ProfileComplete: false,
+		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	nextRuntimeOptions := map[string]any{
+		"local_workspace_dir": "/tmp/project",
+		"mcp":                 nil,
+	}
+	updated, err := svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.MCPConfig != nil {
+		t.Fatalf("Update().MCPConfig = %#v, want nil after legacy mcp null", updated.MCPConfig)
+	}
+	if _, ok := updated.RuntimeOptions[agentruntime.RuntimeOptionMCPKey]; ok {
+		t.Fatalf("Update().RuntimeOptions still contains legacy mcp: %#v", updated.RuntimeOptions)
+	}
+}
+
+func TestUpdateLegacyMCPRuntimeOptionsRejectsInvalidRoot(t *testing.T) {
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindPicoClawSandbox}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-dev"] = Agent{
+		ID:              "u-dev",
+		Name:            "dev",
+		RuntimeID:       "rt-u-dev",
+		RuntimeKind:     RuntimeKindPicoClawSandbox,
+		Image:           "picoclaw-image:test",
+		Role:            RoleWorker,
+		Status:          "profile_incomplete",
+		AgentProfile:    AgentProfile{Name: "dev"},
+		ProfileComplete: false,
+		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	runtimeOptions := map[string]any{"mcp": "invalid"}
+	_, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &runtimeOptions})
+	if err == nil || !strings.Contains(err.Error(), "runtime_options.mcp must be an object or null") {
+		t.Fatalf("Update() error = %v, want legacy mcp object error", err)
+	}
+}
+
+func TestCreatePicoClawMCPConfigIsAccepted(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1840,7 +1960,7 @@ func TestCreateMCPRuntimeOptionsRejectsNonOpenClawRuntime(t *testing.T) {
 		t.Fatalf("NewService() error = %v", err)
 	}
 
-	_, err = svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
+	created, err := svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
 		Name:        "dev",
 		Role:        RoleWorker,
 		RuntimeKind: RuntimeKindPicoClawSandbox,
@@ -1849,12 +1969,15 @@ func TestCreateMCPRuntimeOptionsRejectsNonOpenClawRuntime(t *testing.T) {
 			"mcp": map[string]any{"mcpServers": map[string]any{}},
 		},
 	}})
-	if err == nil || !strings.Contains(err.Error(), `runtime_options.mcp is only supported`) {
-		t.Fatalf("Create() error = %v, want unsupported mcp runtime", err)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if _, ok := created.MCPConfig["mcpServers"].(map[string]any); !ok {
+		t.Fatalf("Create().MCPConfig = %#v, want managed empty config", created.MCPConfig)
 	}
 }
 
-func TestReplaceRejectsInheritedMCPBeforeDeletingExistingAgent(t *testing.T) {
+func TestReplacePreservesInheritedMCPBeforeDeletingExistingAgent(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1872,10 +1995,11 @@ func TestReplaceRejectsInheritedMCPBeforeDeletingExistingAgent(t *testing.T) {
 		RuntimeID:   "rt-u-dev",
 		RuntimeKind: RuntimeKindOpenClawSandbox,
 		Image:       "openclaw-image:test",
+		BoxID:       "openclaw-box-old",
 		Role:        RoleWorker,
 		Status:      string(agentruntime.StateStopped),
-		RuntimeOptions: map[string]any{
-			"mcp": map[string]any{"mcpServers": map[string]any{"context7": map[string]any{"command": "uvx"}}},
+		MCPConfig: map[string]any{
+			"mcpServers": map[string]any{"context7": map[string]any{"command": "uvx"}},
 		},
 		AgentProfile: AgentProfile{
 			Name:            "dev",
@@ -1889,7 +2013,7 @@ func TestReplaceRejectsInheritedMCPBeforeDeletingExistingAgent(t *testing.T) {
 		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
 	}
 
-	_, err = svc.Create(context.Background(), CreateRequest{
+	replaced, err := svc.Create(context.Background(), CreateRequest{
 		Replace:   true,
 		FieldMask: []string{"runtime_kind", "image"},
 		Spec: CreateAgentSpec{
@@ -1898,18 +2022,15 @@ func TestReplaceRejectsInheritedMCPBeforeDeletingExistingAgent(t *testing.T) {
 			Image:       "picoclaw-image:test",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), `runtime_options.mcp is only supported`) {
-		t.Fatalf("Create(replace) error = %v, want unsupported mcp runtime", err)
+	if err != nil {
+		t.Fatalf("Create(replace) error = %v", err)
 	}
-	got, ok := svc.Agent("u-dev")
-	if !ok {
-		t.Fatal("Agent(u-dev) ok = false, want existing agent preserved after failed replace")
+	if replaced.RuntimeKind != RuntimeKindPicoClawSandbox {
+		t.Fatalf("Create(replace).RuntimeKind = %q, want %q", replaced.RuntimeKind, RuntimeKindPicoClawSandbox)
 	}
-	if got.RuntimeKind != RuntimeKindOpenClawSandbox {
-		t.Fatalf("Agent().RuntimeKind = %q, want original %q", got.RuntimeKind, RuntimeKindOpenClawSandbox)
-	}
-	if _, ok := got.RuntimeOptions["mcp"].(map[string]any); !ok {
-		t.Fatalf("Agent().RuntimeOptions = %#v, want original mcp preserved", got.RuntimeOptions)
+	servers, _ := replaced.MCPConfig["mcpServers"].(map[string]any)
+	if _, ok := servers["context7"]; !ok {
+		t.Fatalf("Create(replace).MCPConfig = %#v, want inherited context7", replaced.MCPConfig)
 	}
 }
 
@@ -1946,19 +2067,17 @@ func TestReplaceRejectsInvalidOpenClawMCPBeforeDeletingExistingAgent(t *testing.
 
 	_, err = svc.Create(context.Background(), CreateRequest{
 		Replace:   true,
-		FieldMask: []string{"runtime_options"},
+		FieldMask: []string{"mcp_config"},
 		Spec: CreateAgentSpec{
 			ID: "u-dev",
-			RuntimeOptions: map[string]any{
-				"mcp": map[string]any{
-					"servers": map[string]any{
-						"context7": map[string]any{"command": "uvx"},
-					},
+			MCPConfig: map[string]any{
+				"servers": map[string]any{
+					"context7": map[string]any{"command": "uvx"},
 				},
 			},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), `runtime_options.mcp contains unsupported field`) {
+	if err == nil || !strings.Contains(err.Error(), `mcp_config contains unsupported field`) {
 		t.Fatalf("Create(replace) error = %v, want unsupported mcp field", err)
 	}
 	svc.mu.RLock()

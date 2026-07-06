@@ -1640,8 +1640,8 @@ func TestConfigureCodexHomeConfigReplacesManagedBlocksIdempotently(t *testing.T)
 		BaseURL: "https://runtime.example/v1",
 		APIKey:  "runtime-key",
 	}
-	first := configureCodexHomeConfig(initial, profile)
-	second := configureCodexHomeConfig(first, profile)
+	first := configureCodexHomeConfig(initial, profile, nil)
+	second := configureCodexHomeConfig(first, profile, nil)
 	if first != second {
 		t.Fatalf("configureCodexHomeConfig should be idempotent\nfirst:\n%s\nsecond:\n%s", first, second)
 	}
@@ -1679,7 +1679,7 @@ func TestConfigureCodexHomeConfigReplacesManagedBlocksIdempotently(t *testing.T)
 func TestConfigureCodexHomeConfigIncompleteProfileSkipsProvider(t *testing.T) {
 	config := configureCodexHomeConfig("approval_policy = \"manual\"\n", agentruntime.Profile{
 		BaseURL: "https://runtime.example/v1",
-	})
+	}, nil)
 	if strings.Contains(config, csgclawProviderBeginMarker) {
 		t.Fatalf("config should skip provider block for incomplete profile:\n%s", config)
 	}
@@ -1689,6 +1689,41 @@ func TestConfigureCodexHomeConfigIncompleteProfileSkipsProvider(t *testing.T) {
 		csgclawMultiAgentBeginMarker,
 		csgclawMemoryFeatureBeginMarker,
 		csgclawMemoryConfigBeginMarker,
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("config missing %q:\n%s", want, config)
+		}
+	}
+}
+
+func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
+	config := configureCodexHomeConfig("approval_policy = \"manual\"\n", agentruntime.Profile{}, map[string]any{
+		"mcpServers": map[string]any{
+			"context7": map[string]any{
+				"command": "uvx",
+				"args":    []any{"context7-mcp"},
+				"env": map[string]any{
+					"CONTEXT7_API_KEY": "secret",
+				},
+			},
+			"remote": map[string]any{
+				"url":                  "https://mcp.example.com/mcp",
+				"bearer_token_env_var": "MCP_TOKEN",
+			},
+		},
+	})
+
+	for _, want := range []string{
+		csgclawMCPBeginMarker,
+		`[mcp_servers."context7"]`,
+		`command = "uvx"`,
+		`args = ["context7-mcp"]`,
+		`env = { "CONTEXT7_API_KEY" = "secret" }`,
+		`[mcp_servers."remote"]`,
+		`url = "https://mcp.example.com/mcp"`,
+		`bearer_token_env_var = "MCP_TOKEN"`,
+		csgclawMCPEndMarker,
+		`approval_policy = "manual"`,
 	} {
 		if !strings.Contains(config, want) {
 			t.Fatalf("config missing %q:\n%s", want, config)

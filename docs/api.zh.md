@@ -287,23 +287,21 @@ Participant 是 channel-scoped identity，用于房间、消息、mention、通�
 - `field_mask` 用于替换时只覆盖指定字段
 - `agent_profile.api_key` 只在写入时使用，读取时会被脱敏
 
-OpenClaw agent 可通过 `runtime_options.mcp` 配置 MCP server。CSGClaw API 接收 `mcpServers` 输入，并在 OpenClaw runtime 配置中渲染为 `mcp.servers`：
+OpenClaw、PicoClaw 和 Codex CLI agent 可通过顶层 `mcp_config` 字段配置 MCP server。CSGClaw API 对所有已支持 runtime 接收一致的 `mcpServers` 输入，再由各 runtime adapter 渲染为对应的原生配置：
 
 ```json
 {
   "name": "alice",
   "runtime_kind": "openclaw_sandbox",
-  "runtime_options": {
-    "mcp": {
-      "mcpServers": {
-        "workspace-filesystem": {
-          "command": "npx",
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-filesystem",
-            "/home/node/.openclaw/workspace"
-          ]
-        }
+  "mcp_config": {
+    "mcpServers": {
+      "workspace-filesystem": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/home/node/.openclaw/workspace"
+        ]
       }
     }
   },
@@ -311,7 +309,13 @@ OpenClaw agent 可通过 `runtime_options.mcp` 配置 MCP server。CSGClaw API �
 }
 ```
 
-注意：MCP command 在 OpenClaw sandbox 内执行，filesystem server 的目录参数也必须是容器内可见路径。非 OpenClaw runtime 提交 `runtime_options.mcp` 会返回错误。
+各 runtime adapter 的映射关系：
+
+- OpenClaw：`mcp_config.mcpServers` -> `openclaw.json` 的 `mcp.servers`
+- PicoClaw：`mcp_config.mcpServers` -> PicoClaw 配置的 `tools.mcp.servers`
+- Codex CLI：`mcp_config.mcpServers` -> 隔离 Codex home `config.toml` 中由 CSGClaw 管理的 `[mcp_servers."<name>"]` 块
+
+注意：MCP command 在目标 runtime 环境内执行，filesystem server 的目录参数也必须是该 runtime 可见路径。旧客户端继续提交 `runtime_options.mcp` 时会被服务端迁移为 `mcp_config`；新客户端应直接使用 `mcp_config`。
 
 ### `GET /api/v1/agents/{id}`
 
@@ -329,6 +333,7 @@ OpenClaw agent 可通过 `runtime_options.mcp` 配置 MCP server。CSGClaw API �
 - `description`
 - `image`
 - `runtime_options`
+- `mcp_config`
 - `agent_profile`
 
 请求体示例：
@@ -345,9 +350,9 @@ OpenClaw agent 可通过 `runtime_options.mcp` 配置 MCP server。CSGClaw API �
 说明：
 
 - 省略的字段不会修改
-- `runtime_options` 一旦提交就是整体替换；修改 MCP 时请提交合并后的完整 `runtime_options`
-- `runtime_options.mcp: null` 或提交不含 `mcp` 的 `runtime_options` 可清除 MCP 配置
-- OpenClaw agent 的 MCP 配置变更会触发该 agent runtime recreate，使新的 `openclaw.json` 生效
+- `runtime_options` 一旦提交就是整体替换
+- `mcp_config` 一旦提交就是整体替换；传 `null` 可清除 CSGClaw 托管的 MCP 配置
+- OpenClaw、PicoClaw 或 Codex CLI agent 的 MCP 配置变更可能触发该 agent runtime recreate，使原生配置生效
 - `agent_profile.api_key` 如果传空，服务端会保留原有密钥
 - 如果 `agent_profile.env` 发生变化，响应中的 `env_restart_required` 可能为 `true`
 
