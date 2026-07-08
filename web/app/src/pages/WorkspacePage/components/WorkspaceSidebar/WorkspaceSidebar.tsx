@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftOpen, Plus, Search } from "lucide-react";
+import { PanelLeftOpen, Plus, Search, Server } from "lucide-react";
 import {
   SidebarAlertTriangleIcon,
   SidebarBoxIcon,
@@ -82,6 +82,7 @@ export function WorkspaceSidebar({
   onOpenCreateTask,
   onOpenCreateScheduledTask,
   hub,
+  onSelectHubMCP,
   onSelectHubSkill,
   onSelectHubTemplate,
   onSelectHub,
@@ -127,6 +128,7 @@ export function WorkspaceSidebar({
   const firstNotificationAgent = notificationAgentItems[0] ?? null;
   const firstTeam = teams[0] ?? null;
   const firstHubTemplate = hub?.templates[0] ?? null;
+  const firstHubMCP = hub?.mcps[0] ?? null;
   const firstHubSkill = hub?.skills[0] ?? null;
   const firstModelProvider = modelProviders?.providers[0] ?? null;
   const notificationAgentIds = useMemo(
@@ -284,6 +286,21 @@ export function WorkspaceSidebar({
             },
           },
           {
+            active: activeContextSectionId === WorkspaceContextSectionIds.hubMCPs,
+            badge: badgeCount(hub?.mcps.length),
+            groupId: WorkspaceContextSectionIds.hubMCPs,
+            icon: navigationIcon(Server),
+            id: "mcps",
+            label: t("resourcesMCPLabel"),
+            onSelect: () => {
+              if (firstHubMCP && onSelectHubMCP) {
+                onSelectHubMCP(firstHubMCP);
+                return;
+              }
+              onSelectHub();
+            },
+          },
+          {
             active: activeContextSectionId === WorkspaceContextSectionIds.hubSkills,
             badge: badgeCount(hub?.skills.length),
             groupId: WorkspaceContextSectionIds.hubSkills,
@@ -321,18 +338,21 @@ export function WorkspaceSidebar({
       activePane.type,
       activeTaskBoardView,
       currentUser,
+      firstHubMCP,
       firstHubSkill,
       firstHubTemplate,
       firstModelProvider,
       firstNotificationAgent,
       firstTeam,
       firstWorkerAgent,
+      hub?.mcps.length,
       hub?.templates.length,
       hub?.skills.length,
       modelProviders?.providers.length,
       onSelectAgent,
       onSelectComputer,
       onSelectHub,
+      onSelectHubMCP,
       onSelectHubSkill,
       onSelectHubTemplate,
       onSelectHuman,
@@ -366,6 +386,7 @@ export function WorkspaceSidebar({
     onOpenCreateTeam,
     onOpenCreateTask,
     onOpenCreateScheduledTask,
+    hub,
     setSkillUploadOpen,
     t,
     activeTaskBoardView,
@@ -516,6 +537,7 @@ export function WorkspaceSidebar({
               onOpenCreateTask={onOpenCreateTask}
               onOpenCreateScheduledTask={onOpenCreateScheduledTask}
               hub={hub}
+              onSelectHubMCP={onSelectHubMCP}
               onSelectHubSkill={onSelectHubSkill}
               onSelectHubTemplate={onSelectHubTemplate}
               onSelectTask={onSelectTask}
@@ -575,6 +597,9 @@ function contextSectionIdForPane({
   if (activePane.type === WorkspacePaneTypes.hub) {
     if (activePane.resourceType === "skill") {
       return WorkspaceContextSectionIds.hubSkills;
+    }
+    if (activePane.resourceType === "mcp") {
+      return WorkspaceContextSectionIds.hubMCPs;
     }
     if (activePane.resourceType === "template") {
       return WorkspaceContextSectionIds.hubTemplates;
@@ -639,6 +664,9 @@ function contextTitleForSection(sectionId: WorkspaceContextSectionId, fallback: 
   if (sectionId === WorkspaceContextSectionIds.hubTemplates) {
     return t("resourcesTemplatesSection");
   }
+  if (sectionId === WorkspaceContextSectionIds.hubMCPs) {
+    return t("resourcesMCPLabel");
+  }
   if (sectionId === WorkspaceContextSectionIds.hubSkills) {
     return t("resourcesSkillsLabel");
   }
@@ -690,6 +718,9 @@ function contextBadgeCountForSection({
   if (activeContextSectionId === WorkspaceContextSectionIds.hubTemplates) {
     return hub?.templates.length ?? 0;
   }
+  if (activeContextSectionId === WorkspaceContextSectionIds.hubMCPs) {
+    return hub?.mcps.length ?? 0;
+  }
   if (activeContextSectionId === WorkspaceContextSectionIds.hubSkills) {
     return hub?.skills.length ?? 0;
   }
@@ -705,6 +736,7 @@ function contextBadgeCountForSection({
 function contextCreateActionForSection({
   activeTaskBoardView,
   activeContextSectionId,
+  hub,
   onCreateAgent,
   onCreateNotificationParticipant,
   onCreateRoom,
@@ -727,6 +759,7 @@ function contextCreateActionForSection({
 > & {
   activeTaskBoardView?: "tasks" | "scheduled";
   activeContextSectionId: WorkspaceContextSectionId;
+  hub: WorkspaceSidebarProps["hub"];
   setSkillUploadOpen: (open: boolean) => void;
 }) {
   if (activeContextSectionId === WorkspaceContextSectionIds.messages) {
@@ -769,6 +802,12 @@ function contextCreateActionForSection({
     return {
       label: t("resourcesSkillUpload"),
       onClick: () => setSkillUploadOpen(true),
+    };
+  }
+  if (activeContextSectionId === WorkspaceContextSectionIds.hubMCPs && hub?.openCreateMCPDialog) {
+    return {
+      label: t("resourcesMCPAdd"),
+      onClick: hub.openCreateMCPDialog,
     };
   }
   if (activeContextSectionId === WorkspaceContextSectionIds.models && onCreateModelProvider) {

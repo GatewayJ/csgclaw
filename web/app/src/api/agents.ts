@@ -39,6 +39,13 @@ export type DeleteBotOptions = {
   deleteAgent?: boolean;
 };
 
+export type AgentMCPConfigView = {
+  actual?: JSONRecord | null;
+  agent_id?: string | null;
+  desired?: JSONRecord | null;
+  runtime_kind?: string | null;
+};
+
 export type AgentUpdatePayload = {
   agent_profile?: JSONRecord;
   description?: string;
@@ -172,6 +179,17 @@ export function fetchAgentSkills(agentID: string, skillsPath = ""): Promise<Work
 export function fetchAgentSkillsFile(agentID: string, skillsPath: string): Promise<WorkspaceFile> {
   const params = new URLSearchParams({ path: skillsPath });
   return get(`api/v1/agents/${encodeURIComponent(agentID)}/skills/file?${params.toString()}`);
+}
+
+export function fetchAgentMCPConfig(agentID: string): Promise<AgentMCPConfigView> {
+  return get(`api/v1/agents/${encodeURIComponent(agentID)}/mcp`);
+}
+
+export function updateAgentMCPConfigRequest(
+  agentID: string,
+  mcpConfig: JSONRecord | null,
+): Promise<AgentMCPConfigView> {
+  return put(`api/v1/agents/${encodeURIComponent(agentID)}/mcp`, { mcp_config: mcpConfig });
 }
 
 export function batchAddAgentSkillsRequest(agentID: string, skillNames: string[]): Promise<void> {

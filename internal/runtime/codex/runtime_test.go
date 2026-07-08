@@ -1774,6 +1774,10 @@ func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
 			"remote": map[string]any{
 				"url":                  "https://mcp.example.com/mcp",
 				"bearer_token_env_var": "MCP_TOKEN",
+				"headers": map[string]any{
+					"X-MCP-Trace": "trace-id",
+				},
+				"transport": "streamable-http",
 			},
 		},
 	})
@@ -1787,12 +1791,144 @@ func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
 		`[mcp_servers."remote"]`,
 		`url = "https://mcp.example.com/mcp"`,
 		`bearer_token_env_var = "MCP_TOKEN"`,
+		`http_headers = { "X-MCP-Trace" = "trace-id" }`,
 		csgclawMCPEndMarker,
 		`approval_policy = "manual"`,
 	} {
 		if !strings.Contains(config, want) {
 			t.Fatalf("config missing %q:\n%s", want, config)
 		}
+	}
+
+	parsed, err := parseCodexMCPConfig(config)
+	if err != nil {
+		t.Fatalf("parseCodexMCPConfig() error = %v", err)
+	}
+	servers := parsed["mcpServers"].(map[string]any)
+	remote := servers["remote"].(map[string]any)
+	headers := remote["headers"].(map[string]any)
+	if got, want := headers["X-MCP-Trace"], "trace-id"; got != want {
+		t.Fatalf("remote headers X-MCP-Trace = %#v, want %q", got, want)
+	}
+	if _, ok := remote["http_headers"]; ok {
+		t.Fatalf("remote retained codex-specific http_headers = %#v, want generic headers", remote)
+	}
+	if got, want := remote["transport"], "streamable-http"; got != want {
+		t.Fatalf("remote transport = %#v, want %q", got, want)
+	}
+	if _, ok := remote["approval_policy"]; ok {
+		t.Fatalf("remote captured root config fields = %#v", remote)
+	}
+}
+
+func TestConfigureCodexHomeConfigReplacesExistingMCPServerTablesWhenManaged(t *testing.T) {
+	existing := strings.Join([]string{
+		`approval_policy = "manual"`,
+		``,
+		`[mcp_servers."manual"]`,
+		`command = "uvx"`,
+		`args = ["manual-mcp"]`,
+		``,
+		`[tools]`,
+		`enabled = true`,
+		``,
+	}, "\n")
+
+	config := configureCodexHomeConfig(existing, agentruntime.Profile{}, map[string]any{
+		"mcpServers": map[string]any{
+			"context7": map[string]any{
+				"command": "npx",
+				"args":    []any{"context7-mcp"},
+			},
+		},
+	})
+
+	for _, unwanted := range []string{
+		`[mcp_servers."manual"]`,
+		`manual-mcp`,
+	} {
+		if strings.Contains(config, unwanted) {
+			t.Fatalf("config should remove stale MCP server %q:\n%s", unwanted, config)
+		}
+	}
+	for _, want := range []string{
+		`[mcp_servers."context7"]`,
+		`command = "npx"`,
+		`args = ["context7-mcp"]`,
+		`[tools]`,
+		`enabled = true`,
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("config missing %q:\n%s", want, config)
+		}
+	}
+}
+
+func TestConfigureCodexHomeConfigClearsExistingMCPServerTablesWhenManagedEmpty(t *testing.T) {
+	existing := strings.Join([]string{
+		`approval_policy = "manual"`,
+		``,
+		`[mcp_servers."manual"]`,
+		`command = "uvx"`,
+		`args = ["manual-mcp"]`,
+		``,
+		`[tools]`,
+		`enabled = true`,
+		``,
+	}, "\n")
+
+	config := configureCodexHomeConfig(existing, agentruntime.Profile{}, map[string]any{})
+
+	for _, unwanted := range []string{
+		`[mcp_servers."manual"]`,
+		`manual-mcp`,
+	} {
+		if strings.Contains(config, unwanted) {
+			t.Fatalf("config should remove stale MCP server %q:\n%s", unwanted, config)
+		}
+	}
+	for _, want := range []string{
+		csgclawMCPBeginMarker,
+		csgclawMCPEndMarker,
+		`[tools]`,
+		`enabled = true`,
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("config missing %q:\n%s", want, config)
+		}
+	}
+	if strings.Contains(config, `[mcp_servers.`) {
+		t.Fatalf("empty managed MCP config should not render MCP server tables:\n%s", config)
+	}
+}
+
+func TestConfigureCodexHomeConfigKeepsUserMCPServerTablesWhenUnmanaged(t *testing.T) {
+	existing := strings.Join([]string{
+		`approval_policy = "manual"`,
+		``,
+		`[mcp_servers."manual"]`,
+		`command = "uvx"`,
+		`args = ["manual-mcp"]`,
+		``,
+		`[tools]`,
+		`enabled = true`,
+		``,
+	}, "\n")
+
+	config := configureCodexHomeConfig(existing, agentruntime.Profile{}, nil)
+
+	for _, want := range []string{
+		`[mcp_servers."manual"]`,
+		`manual-mcp`,
+		`[tools]`,
+		`enabled = true`,
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("config missing %q:\n%s", want, config)
+		}
+	}
+	if strings.Contains(config, csgclawMCPBeginMarker) {
+		t.Fatalf("unmanaged MCP config should not add a managed MCP block:\n%s", config)
 	}
 }
 

@@ -37,6 +37,8 @@ func (h *Handler) registerCoreRoutes(router chi.Router) {
 				r.Post("/skills:batchAdd", h.handleAgentSkillsBatchAdd)
 				r.Get("/skills/file", h.handleAgentSkillsFile)
 				r.Delete("/skills/{name}", h.handleAgentSkillDelete)
+				r.Get("/mcp", h.handleAgentMCPByID)
+				r.Put("/mcp", h.handleAgentMCPByID)
 				r.Route("/profile", func(r chi.Router) {
 					r.Get("/", h.getAgentProfile)
 					r.Put("/", h.updateAgentProfile)
@@ -56,6 +58,11 @@ func (h *Handler) registerCoreRoutes(router chi.Router) {
 				r.Post("/upgrade", h.upgradeAgent)
 			})
 		})
+		r.Get("/hub/state", h.handleHubState)
+		r.Get("/mcp-servers", h.handleHubMCPServers)
+		r.Post("/mcp-servers", h.handleHubMCPServers)
+		r.Put("/mcp-servers/{name}", h.handleHubMCPServerByName)
+		r.Delete("/mcp-servers/{name}", h.handleHubMCPServerByName)
 		r.Route("/hub/templates", func(r chi.Router) {
 			r.Get("/", h.listHubTemplates)
 			r.Post("/", h.createHubTemplate)

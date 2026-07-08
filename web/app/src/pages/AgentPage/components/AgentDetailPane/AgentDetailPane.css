@@ -1193,6 +1193,11 @@
 }
 
 .agent-skill-name {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   color: var(--gray-700);
   font-size: var(--text-sm-size);
@@ -1200,6 +1205,17 @@
   line-height: 22px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agent-skill-name svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.agent-skill-name span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agent-skill-description {
@@ -1211,6 +1227,11 @@
   line-height: 22px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agent-mcp-card .agent-skill-description {
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .agent-skills-empty {

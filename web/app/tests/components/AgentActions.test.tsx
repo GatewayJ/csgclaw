@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { AgentDetailPane, AgentRow, AgentView, NotificationParticipantDetailPane } from "@/pages/AgentPage/components";
@@ -35,6 +35,12 @@ const labels: Record<string, string> = {
   agentSkillAddEmpty: "No skills are available to add.",
   agentDeleteSkill: "Delete",
   agentDeleteSkillConfirmMessage: 'Delete skill "alpha" from this agent?',
+  agentMCPAdd: "Add MCP",
+  agentMCPAddSubtitle: "Candidates come from Hub.",
+  agentMCPAddEmpty: "No MCP servers are available to add.",
+  agentMCPEmpty: "No MCP servers installed yet.",
+  agentDeleteMCP: "Delete",
+  agentDeleteMCPConfirmMessage: 'Delete MCP server "{name}" from this agent?',
   feishuChannelName: "Feishu",
   feishuConnect: "Connect Feishu",
   feishuReconnect: "Reconnect Feishu",
@@ -62,6 +68,7 @@ const labels: Record<string, string> = {
   close: "Close",
   profileMCPServers: "MCP Servers",
   profileMCPServersHint: 'Recommended shape: {"mcpServers":{...}}.',
+  profileMCPServersHubHint: "Install MCP servers from Hub.",
   profileMCPServersPlaceholder: '{\n  "mcpServers": {}\n}',
   profileMCPServersUseExample: "Use example",
   profileMCPServersClear: "Clear config",
@@ -843,9 +850,10 @@ describe("agent action visibility", () => {
     expect(screen.queryByLabelText("Image")).not.toBeInTheDocument();
   });
 
-  it("edits MCP config in the detail MCP tab for supported agents", async () => {
+  it("installs MCP servers from hub candidates in the detail MCP tab", async () => {
     const user = userEvent.setup();
-    const onDraftChange = vi.fn();
+    const onInstallMCPServers = vi.fn(() => true);
+    const onDeleteMCPServer = vi.fn(() => true);
     const item = {
       ...worker,
       runtime_kind: "openclaw_sandbox",
@@ -859,6 +867,20 @@ describe("agent action visibility", () => {
           },
         },
       },
+    };
+    const existingMCP = {
+      name: "existing",
+      config: {
+        command: "node",
+      },
+      description: "node",
+    };
+    const context7MCP = {
+      name: "context7",
+      config: {
+        command: "npx",
+      },
+      description: "npx",
     };
 
     render(
@@ -877,8 +899,10 @@ describe("agent action visibility", () => {
         authStatuses={{}}
         authBusyProvider=""
         workspaceSupported
+        mcpServers={[existingMCP]}
+        mcpCandidates={[context7MCP]}
         notifierWebhookPublicOrigin="http://127.0.0.1:18080"
-        onDraftChange={onDraftChange}
+        onDraftChange={vi.fn()}
         onSave={vi.fn()}
         onPublish={vi.fn()}
         onProviderLogin={vi.fn()}
@@ -888,48 +912,39 @@ describe("agent action visibility", () => {
         onDelete={vi.fn()}
         onInvite={vi.fn()}
         onOpenDM={vi.fn()}
+        onInstallMCPServers={onInstallMCPServers}
+        onDeleteMCPServer={onDeleteMCPServer}
       />,
     );
 
     expect(screen.queryByLabelText("MCP Servers")).not.toBeInTheDocument();
     const navigation = screen.getByRole("navigation", { name: "Profile sections" });
-    expect(within(navigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "Profile",
-      "Activity",
-      "Channels",
-      "Instructions",
-      "skills",
-      "MCP",
-    ]);
+    expect(
+      within(navigation)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Profile", "Activity", "Channels", "Instructions", "skills", "MCP"]);
 
     await user.click(within(navigation).getByRole("button", { name: "MCP" }));
 
-    const editor = screen.getByLabelText("MCP Servers");
-    expect((editor as HTMLTextAreaElement).value).toContain('"existing"');
+    expect(screen.getByText("existing")).toBeInTheDocument();
+    expect(screen.getByText("node")).toBeInTheDocument();
 
-    fireEvent.input(editor, {
-      target: {
-        value: '{"mcpServers":{"context7":{"command":"npx"}}}',
-      },
-    });
+    await user.click(screen.getByRole("button", { name: "Add MCP" }));
+    await user.click(screen.getByLabelText(/context7/));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Add MCP" }));
 
-    expect(onDraftChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        runtime_options: {
-          local_workspace_dir: "/tmp/project",
-        },
-        mcp_config: {
-          mcpServers: {
-            context7: {
-              command: "npx",
-            },
-          },
-        },
-      }),
-    );
+    expect(onInstallMCPServers).toHaveBeenCalledWith(["context7"]);
+
+    const existingCard = screen.getByText("existing").closest("article");
+    expect(existingCard).not.toBeNull();
+    await user.click(within(existingCard as HTMLElement).getByRole("button", { name: "Delete" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+
+    expect(onDeleteMCPServer).toHaveBeenCalledWith(existingMCP);
   });
 
-  it("keeps invalid MCP config blocking save after switching tabs", async () => {
+  it("keeps MCP config managed by hub instead of exposing the JSON editor", async () => {
     const user = userEvent.setup();
     const item = {
       ...worker,
@@ -943,6 +958,7 @@ describe("agent action visibility", () => {
         },
       },
     };
+    const draft = agentToDraft(item);
 
     render(
       <AgentDetailPane
@@ -951,7 +967,8 @@ describe("agent action visibility", () => {
         activeRoom={null}
         busyKey=""
         error=""
-        draft={agentToDraft(item)}
+        draft={draft}
+        savedDraft={draft}
         models={[]}
         modelBusy={false}
         saving={false}
@@ -977,18 +994,15 @@ describe("agent action visibility", () => {
     const navigation = screen.getByRole("navigation", { name: "Profile sections" });
     await user.click(within(navigation).getByRole("button", { name: "MCP" }));
 
-    const editor = screen.getByLabelText("MCP Servers");
-    fireEvent.input(editor, { target: { value: "{" } });
-
-    expect(screen.getByText("Enter a valid JSON object.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.queryByLabelText("MCP Servers")).not.toBeInTheDocument();
+    expect(screen.getByText("No MCP servers installed yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Enter a valid JSON object.")).not.toBeInTheDocument();
 
     await user.click(within(navigation).getByRole("button", { name: "Profile" }));
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByText("Saved")).toBeInTheDocument();
 
     await user.click(within(navigation).getByRole("button", { name: "MCP" }));
-    expect(screen.getByLabelText("MCP Servers")).toHaveValue("{");
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.queryByLabelText("MCP Servers")).not.toBeInTheDocument();
   });
 
   it("shows a saved status instead of a save button when the draft is unchanged", () => {

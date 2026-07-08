@@ -147,6 +147,7 @@ var (
 	_ agentruntime.RuntimeOptionSchemaProvider = (*Runtime)(nil)
 	_ agentruntime.RuntimeConfigController     = (*Runtime)(nil)
 	_ agentruntime.MCPConfigController         = (*Runtime)(nil)
+	_ agentruntime.MCPConfigListController     = (*Runtime)(nil)
 )
 
 func New(deps Dependencies) *Runtime {

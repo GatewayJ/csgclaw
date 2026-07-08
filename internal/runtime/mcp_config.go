@@ -25,6 +25,10 @@ type MCPConfigController interface {
 	ReconcileMCPConfig(ctx context.Context, h Handle, change MCPConfigChange) error
 }
 
+type MCPConfigListController interface {
+	ListMCPConfig(ctx context.Context, h Handle, current MCPConfigSnapshot) (MCPConfigSnapshot, error)
+}
+
 type MCPConfigMode int
 
 const (

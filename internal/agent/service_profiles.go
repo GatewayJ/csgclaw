@@ -257,7 +257,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 	runtimeKind := strings.TrimSpace(current.RuntimeKind)
 	runtimeRunning := isRuntimeRunning(current)
 	restartRequired := false
-	profileUpdated := false
+	runtimeAffectingUpdate := false
 	fieldMask := normalizeUpdateFieldMask(req.FieldMask)
 	hasFieldMask := len(fieldMask) > 0
 	updateRequested := func(field string, legacy bool) bool {
@@ -349,7 +349,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 		}
 	}
 	if agentProfileUpdated || runtimeOptionsUpdated || mcpConfigUpdated {
-		profileUpdated = true
+		runtimeAffectingUpdate = true
 		profile := current.AgentProfile
 		if agentProfileUpdated {
 			if req.AgentProfile == nil {
@@ -453,7 +453,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 			}
 		}
 	}
-	if profileUpdated && current.ProfileComplete {
+	if runtimeAffectingUpdate && current.ProfileComplete {
 		s.profileDefaults = cloneProfile(current.AgentProfile)
 		s.detectionResults = nil
 	}
@@ -483,7 +483,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 	if !ok {
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}
-	if profileUpdated {
+	if runtimeAffectingUpdate {
 		normalized := normalizeProfileForAgentRuntime(updated.AgentProfile, updated.RuntimeOptions, updated.Name, updated.Description, updated.RuntimeKind, nil)
 		if err := s.syncGatewayAfterProfileChange(ctx, id, previous, normalized, restartRequired); err != nil {
 			return Agent{}, err
