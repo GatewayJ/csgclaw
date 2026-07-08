@@ -1101,6 +1101,50 @@
   gap: var(--space-3);
 }
 
+.agent-skills-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-skills-title-copy {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--gray-800);
+  font-size: var(--text-sm-size);
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.agent-skills-title-copy > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-section-count-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+  border: 1px solid var(--gray-200);
+  border-radius: 999px;
+  background: var(--gray-50);
+  color: var(--gray-600);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
 .agent-detail-pane .agent-skills-section-heading {
   display: flex;
   align-items: flex-start;
@@ -1162,6 +1206,7 @@
   position: static;
   opacity: 1;
   pointer-events: auto;
+  border-radius: var(--radius-md);
 }
 
 .agent-skill-icon-button {
@@ -1768,6 +1813,16 @@
   border-color: var(--line);
   background: var(--panel);
   box-shadow: none;
+}
+
+:root[data-theme="dark"] .agent-skills-title-copy {
+  color: var(--gray-200);
+}
+
+:root[data-theme="dark"] .agent-section-count-badge {
+  border-color: rgba(208, 213, 221, 0.16);
+  background: rgba(208, 213, 221, 0.08);
+  color: var(--gray-300);
 }
 
 :root[data-theme="dark"] .agent-skill-card {
