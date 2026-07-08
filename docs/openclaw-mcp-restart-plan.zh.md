@@ -181,7 +181,7 @@ oauth_client_id = "client-id"
 oauth_resource = "resource"
 ```
 
-Codex adapter 会忽略统一输入中 Codex 不支持的共享字段，例如 `headers`、`transport`，但共享 validator 仍保证这些字段是可预测的 string/string-map 类型。
+Codex adapter 会将统一输入中的共享字段转换为 Codex TOML 语义，例如远程 server 的 `headers` 会写为 `http_headers`；`transport` 不作为 TOML 字段写入，Codex 通过 `url` 隐式使用 streamable HTTP。
 
 ## 5. API 与持久化
 

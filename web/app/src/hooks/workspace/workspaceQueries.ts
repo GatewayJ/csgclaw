@@ -4,7 +4,13 @@ import { fetchAgentProfileModels, fetchAgentWorkspace, fetchAgentWorkspaceFile, 
 import type { AgentProfileModelRequest } from "@/api/agents";
 import { fetchBootstrap, fetchBootstrapConfig, fetchRuntimeImages, fetchVersion } from "@/api/app";
 import type { FetchVersionOptions } from "@/api/app";
-import { fetchHubTemplate, fetchHubTemplates, fetchHubWorkspace, fetchHubWorkspaceFile } from "@/api/hub";
+import {
+  fetchHubMCPServers,
+  fetchHubTemplate,
+  fetchHubTemplates,
+  fetchHubWorkspace,
+  fetchHubWorkspaceFile,
+} from "@/api/hub";
 import { fetchModelProviders } from "@/api/modelProviders";
 import { fetchAgenticHubOfficialSkillsPage, fetchSkillFile, fetchSkills, fetchSkillTree } from "@/api/skills";
 import type { AgenticHubSkillsPage } from "@/api/skills";
@@ -17,7 +23,7 @@ import {
   normalizeRuntimeOptionSchemaMap,
   parseJSONMap,
 } from "@/models/agents";
-import type { AgentLike, AgentProfileLike, AgentProfileModelsResponse, RuntimeBootstrapConfig } from "@/models/agents";
+import type { AgentLike, AgentProfileLike, AgentProfileModelsResponse, JSONRecord, RuntimeBootstrapConfig } from "@/models/agents";
 import { normalizeIMData } from "@/models/conversations";
 import type { IMData } from "@/models/conversations";
 import type { HubTemplate, HubWorkspaceFile, HubWorkspaceListing } from "@/models/hubWorkspace";
@@ -38,6 +44,7 @@ export const workspaceQueryKeys = {
   modelProviders: () => [WORKSPACE_QUERY_SCOPE, "model-providers"] as const,
   runtimeImages: () => [WORKSPACE_QUERY_SCOPE, "runtime-images"] as const,
   hubTemplates: () => [WORKSPACE_QUERY_SCOPE, "hub-templates"] as const,
+  mcpServers: () => [WORKSPACE_QUERY_SCOPE, "mcp-servers"] as const,
   hubTemplate: (templateID: string | null | undefined) =>
     [WORKSPACE_QUERY_SCOPE, "hub-template", templateID || ""] as const,
   hubWorkspace: (templateID: string | null | undefined, workspacePath: string | null | undefined) =>
@@ -58,6 +65,8 @@ export const workspaceQueryKeys = {
   agentWorkspaceFile: (agentID: string | null | undefined, workspacePath: string | null | undefined) =>
     [WORKSPACE_QUERY_SCOPE, "agent-workspace-file", agentID || "", workspacePath || ""] as const,
   agentSkills: (agentID: string | null | undefined) => [WORKSPACE_QUERY_SCOPE, "agent-skills", agentID || ""] as const,
+  agentMCPConfig: (agentID: string | null | undefined) =>
+    [WORKSPACE_QUERY_SCOPE, "agent-mcp-config", agentID || ""] as const,
   agentProfileModels: (requestKey: string | null | undefined) =>
     [WORKSPACE_QUERY_SCOPE, "agent-profile-models", requestKey || ""] as const,
   cliProxyAuthStatus: (provider: string | null | undefined) =>
@@ -187,6 +196,13 @@ export function useWorkspaceHubTemplatesQuery(): UseQueryResult<HubTemplate[]> {
       const payload = await fetchHubTemplates();
       return Array.isArray(payload) ? payload : [];
     },
+  });
+}
+
+export function useWorkspaceHubMCPServersQuery(): UseQueryResult<JSONRecord> {
+  return useQuery<JSONRecord>({
+    queryKey: workspaceQueryKeys.mcpServers(),
+    queryFn: fetchHubMCPServers,
   });
 }
 

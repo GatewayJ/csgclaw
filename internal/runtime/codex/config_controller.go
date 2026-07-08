@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -80,6 +82,30 @@ func (r *Runtime) ReconcileMCPConfig(_ context.Context, h agentruntime.Handle, _
 		return err
 	}
 	return r.seedCodexHomeConfig(codexHomeDir, agentRef.Profile.Normalized(), agentRef.MCPConfig)
+}
+
+func (r *Runtime) ListMCPConfig(_ context.Context, h agentruntime.Handle, _ agentruntime.MCPConfigSnapshot) (agentruntime.MCPConfigSnapshot, error) {
+	agentRef, err := r.resolveAgent(h)
+	if err != nil {
+		return agentruntime.MCPConfigSnapshot{}, err
+	}
+	codexHomeDir, err := r.resolveCodexHomeDir(agentRef.ID)
+	if err != nil {
+		return agentruntime.MCPConfigSnapshot{}, err
+	}
+	configPath := filepath.Join(codexHomeDir, configFileName)
+	raw, err := r.readFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return agentruntime.MCPConfigSnapshot{}, nil
+		}
+		return agentruntime.MCPConfigSnapshot{}, fmt.Errorf("read runtime codex mcp config %s: %w", configPath, err)
+	}
+	config, err := parseCodexMCPConfig(string(raw))
+	if err != nil {
+		return agentruntime.MCPConfigSnapshot{}, err
+	}
+	return agentruntime.MCPConfigSnapshot{Config: config}, nil
 }
 
 type responsesProbeTargetConfig struct {

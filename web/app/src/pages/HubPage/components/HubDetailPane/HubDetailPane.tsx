@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileCode2 } from "lucide-react";
+import { FileCode2, Server, Trash2 } from "lucide-react";
 import { formatRuntimeKindLabel } from "@/models/agents";
 import { formatHubDateTime, isDeletableHubTemplate } from "@/models/hubWorkspace";
+import { formatMCPServerWrapper, mcpServerDescription, parseMCPServerWrapper } from "@/models/mcpHub";
+import type { HubMCPServerPayload } from "@/models/mcpHub";
 import { WorkspaceFilePreview, WorkspaceFileTree } from "@/components/business/WorkspaceFileTree";
 import { localizeTemplateSourceTag } from "@/shared/i18n";
 import { ModelsIcon } from "@/components/ui/Icons";
@@ -17,6 +19,7 @@ import {
 } from "@/components/ui";
 import type { LocaleCode, TranslateFn } from "@/models/conversations";
 import type { HubTemplate } from "@/models/hubWorkspace";
+import type { HubMCPServer } from "@/models/mcpHub";
 import { isReadonlySkill } from "@/models/skillhub";
 import type { SkillFile, SkillSummary, SkillTree } from "@/models/skillhub";
 import type { WorkspaceEntry, WorkspaceFile } from "@/models/workspace";
@@ -30,14 +33,27 @@ type HubDetailPaneHub = {
     error: string;
     loaded: boolean;
     onDeleteSkill?: (item: SkillSummary | null | undefined) => Promise<boolean> | boolean;
+    onCreateMCP?: (payload: HubMCPServerPayload) => Promise<boolean> | boolean;
+    onDeleteMCP?: (item: HubMCPServer | null | undefined) => Promise<boolean> | boolean;
     onDeleteTemplate?: (item: HubTemplate | null | undefined) => unknown;
+    onSelectMCP?: (name: string | null | undefined) => void;
+    onUpdateMCP?: (currentName: string, payload: HubMCPServerPayload) => Promise<boolean> | boolean;
     onRetry: () => void | Promise<void>;
     onSelectSkill?: (name: string | null | undefined) => void;
     onSelectSkillFile?: (path: string) => void;
     onSelectTemplate?: (item: HubTemplate | null | undefined) => void;
     onSelectWorkspaceFile: (workspacePath: string) => void;
     onToggleWorkspaceDir?: (workspacePath: string) => void | Promise<void>;
-    selectedResourceType?: "skill" | "template";
+    mcps?: readonly HubMCPServer[];
+    mcpStateError?: string;
+    mcpStateLoading?: boolean;
+    mcpMutationBusy?: boolean;
+    mcpMutationError?: string;
+    mcpCreateDialogOpen?: boolean;
+    onMCPCreateDialogOpenChange?: (open: boolean) => void;
+    selectedMCP?: HubMCPServer | null;
+    selectedMCPName?: string;
+    selectedResourceType?: "mcp" | "skill" | "template";
     selectedSkill: SkillSummary | null;
     selectedSkillPath: string;
     selectedTemplate: HubTemplate | null;
@@ -66,9 +82,20 @@ const EMPTY_HUB_DETAIL_PROPS: HubDetailPaneHub["detailPaneProps"] = {
   error: "",
   loaded: false,
   onRetry: () => {},
+  mcps: [],
+  mcpStateError: "",
+  mcpStateLoading: false,
+  mcpMutationBusy: false,
+  mcpMutationError: "",
+  mcpCreateDialogOpen: false,
+  selectedMCP: null,
+  selectedMCPName: "",
   onSelectSkillFile: () => {},
   onSelectWorkspaceFile: () => {},
   onToggleWorkspaceDir: () => {},
+  onCreateMCP: () => false,
+  onDeleteMCP: () => false,
+  onUpdateMCP: () => false,
   selectedResourceType: "template",
   selectedSkill: null,
   selectedSkillPath: "",
@@ -91,6 +118,9 @@ const EMPTY_HUB_DETAIL_PROPS: HubDetailPaneHub["detailPaneProps"] = {
   workspaceTreeLoading: false,
   loadingWorkspaceDirs: new Set(),
 };
+
+const DEFAULT_MCP_CONFIG_TEXT =
+  '{\n  "mcpServers": {\n    "filesystem": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/workspace"]\n    }\n  }\n}';
 
 function HubPreviewEmptyIcon() {
   return (
@@ -135,10 +165,12 @@ export function HubDetailPane({
   const {
     templates,
     skills,
+    mcps = [],
     selectedTemplate,
     selectedTemplateId,
     selectedSkill,
     selectedSkillPath,
+    selectedMCP,
     selectedResourceType = "template",
     loaded,
     error,
@@ -152,6 +184,11 @@ export function HubDetailPane({
     skillFile,
     skillFileLoading,
     skillFileError,
+    mcpStateError = "",
+    mcpStateLoading = false,
+    mcpMutationBusy = false,
+    mcpMutationError = "",
+    mcpCreateDialogOpen = false,
     onSelectWorkspaceFile,
     onToggleWorkspaceDir,
     workspaceEntries = EMPTY_WORKSPACE_ENTRIES,
@@ -159,7 +196,11 @@ export function HubDetailPane({
     loadingWorkspaceDirs,
     onSelectSkillFile,
     onDeleteSkill,
+    onCreateMCP,
+    onDeleteMCP,
     onDeleteTemplate,
+    onMCPCreateDialogOpenChange,
+    onUpdateMCP,
     deleteBusy = false,
     skillDeleteBusy = false,
   } = hub?.detailPaneProps ?? EMPTY_HUB_DETAIL_PROPS;
@@ -167,20 +208,46 @@ export function HubDetailPane({
   const canDeleteSkill = Boolean(selectedSkill && !isReadonlySkill(selectedSkill));
   const skillEntries = skillTree?.entries ?? EMPTY_WORKSPACE_ENTRIES;
   const activeResourceType = useMemo(() => {
+    if (selectedResourceType === "mcp" && mcps.length) {
+      return "mcp";
+    }
     if (selectedResourceType === "skill" && skills.length) {
       return "skill";
     }
     if (templates.length) {
       return "template";
     }
+    if (mcps.length) {
+      return "mcp";
+    }
     if (skills.length) {
       return "skill";
     }
     return "template";
-  }, [selectedResourceType, skills.length, templates.length]);
+  }, [mcps.length, selectedResourceType, skills.length, templates.length]);
   const [isInspectorScrolling, setIsInspectorScrolling] = useState(false);
   const [deleteSkillDialogOpen, setDeleteSkillDialogOpen] = useState(false);
+  const [mcpDeleteDialogOpen, setMCPDeleteDialogOpen] = useState(false);
+  const [mcpDraftConfig, setMCPDraftConfig] = useState(DEFAULT_MCP_CONFIG_TEXT);
+  const [mcpDetailConfig, setMCPDetailConfig] = useState("");
+  const [mcpDetailError, setMCPDetailError] = useState("");
+  const [mcpFormError, setMCPFormError] = useState("");
   const inspectorScrollTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (mcpCreateDialogOpen) {
+      setMCPDraftConfig(DEFAULT_MCP_CONFIG_TEXT);
+      setMCPFormError("");
+    }
+  }, [mcpCreateDialogOpen]);
+  useEffect(() => {
+    if (!selectedMCP) {
+      setMCPDetailConfig("");
+      setMCPDetailError("");
+      return;
+    }
+    setMCPDetailConfig(formatMCPServerWrapper(selectedMCP.name, selectedMCP.config));
+    setMCPDetailError("");
+  }, [selectedMCP]);
   useEffect(
     () => () => {
       if (inspectorScrollTimerRef.current) {
@@ -208,12 +275,51 @@ export function HubDetailPane({
     }
   }
 
+  async function handleSaveMCP() {
+    const payload = parseMCPServerWrapper(mcpDraftConfig);
+    if (!payload) {
+      setMCPFormError(t("resourcesMCPConfigWrappedInvalid"));
+      return;
+    }
+    const saved = await onCreateMCP?.(payload);
+    if (saved) {
+      closeMCPFormDialog();
+    }
+  }
+
+  async function handleSaveMCPDetail() {
+    if (!selectedMCP) {
+      return;
+    }
+    const payload = parseMCPServerWrapper(mcpDetailConfig);
+    if (!payload) {
+      setMCPDetailError(t("resourcesMCPConfigWrappedInvalid"));
+      return;
+    }
+    const saved = await onUpdateMCP?.(selectedMCP.name, payload);
+    if (saved) {
+      setMCPDetailError("");
+    }
+  }
+
+  async function handleDeleteMCPConfirm() {
+    const deleted = await onDeleteMCP?.(selectedMCP);
+    if (deleted) {
+      setMCPDeleteDialogOpen(false);
+    }
+  }
+
+  function closeMCPFormDialog() {
+    setMCPFormError("");
+    onMCPCreateDialogOpenChange?.(false);
+  }
+
   return (
     <section className="entity-pane hub-detail-pane">
       {error ? <div className="form-error">{error}</div> : null}
       {!loaded && !error ? (
         <div className="workspace-empty">{t("resourcesLoading")}</div>
-      ) : templates.length === 0 && skills.length === 0 ? (
+      ) : templates.length === 0 && skills.length === 0 && mcps.length === 0 ? (
         <div className="empty-state shell-empty-state hub-empty-state">
           <span className="rich-empty-mark" aria-hidden="true">
             *
@@ -281,9 +387,7 @@ export function HubDetailPane({
                 <div className="hub-inspector-field">
                   <span>{t("resourcesRuntimeLabel")}</span>
                   <strong>
-                    {selectedTemplate.runtime_kind
-                      ? formatRuntimeKindLabel(selectedTemplate.runtime_kind, t)
-                      : "-"}
+                    {selectedTemplate.runtime_kind ? formatRuntimeKindLabel(selectedTemplate.runtime_kind, t) : "-"}
                   </strong>
                 </div>
                 <div className="hub-inspector-field">
@@ -393,12 +497,64 @@ export function HubDetailPane({
                 </div>
               </div>
             </>
+          ) : activeResourceType === "mcp" && selectedMCP ? (
+            <>
+              <div className="hub-inspector-hero">
+                <div className="hub-inspector-hero-row">
+                  <div className="hub-inspector-brand">
+                    <div className="hub-inspector-copy">
+                      <div className="hub-inspector-title-row">
+                        <span className="hub-inspector-title-icon" aria-hidden="true">
+                          <Server size={18} strokeWidth={2} />
+                        </span>
+                        <h2>{selectedMCP.name}</h2>
+                      </div>
+                      <p>{selectedMCP.description || mcpServerDescription(selectedMCP.config) || selectedMCP.name}</p>
+                    </div>
+                  </div>
+                  <div className="hub-template-actions">
+                    <Button variant="primary" size="md" loading={mcpMutationBusy} onClick={handleSaveMCPDetail}>
+                      {mcpMutationBusy ? t("resourcesMCPSaving") : t("resourcesMCPSave")}
+                    </Button>
+                    <Button
+                      variant="outlineDanger"
+                      size="md"
+                      disabled={mcpMutationBusy}
+                      onClick={() => setMCPDeleteDialogOpen(true)}
+                    >
+                      <Trash2 size={16} strokeWidth={2} />
+                      <span>{t("resourcesMCPDelete")}</span>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {mcpStateError || mcpMutationError ? (
+                <div className="form-error">{mcpStateError || mcpMutationError}</div>
+              ) : null}
+              {mcpStateLoading ? <div className="workspace-empty">{t("resourcesMCPLoading")}</div> : null}
+
+              <div className="hub-workspace-block hub-mcp-config-block">
+                <div className="hub-mcp-config-heading">
+                  <span className="hub-section-label">{t("resourcesMCPConfigLabel")}</span>
+                </div>
+                <textarea
+                  className="hub-mcp-config-editor"
+                  value={mcpDetailConfig}
+                  onChange={(event) => setMCPDetailConfig(event.currentTarget.value)}
+                  spellCheck={false}
+                />
+                {mcpDetailError ? <div className="form-error">{mcpDetailError}</div> : null}
+              </div>
+            </>
           ) : (
             <div className="empty-state shell-empty-state hub-empty-state">
               <span className="rich-empty-mark" aria-hidden="true">
                 *
               </span>
-              <strong>{templates.length || skills.length ? t("resourcesLoading") : t("resourcesEmpty")}</strong>
+              <strong>
+                {templates.length || skills.length || mcps.length ? t("resourcesLoading") : t("resourcesEmpty")}
+              </strong>
             </div>
           )}
         </div>
@@ -424,6 +580,82 @@ export function HubDetailPane({
               {t("cancel")}
             </Button>
             <Button variant="danger" size="sm" loading={skillDeleteBusy} onClick={handleDeleteSkillConfirm}>
+              {t("resourcesDeleteSkillConfirmAction")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </DialogRoot>
+      <DialogRoot
+        open={mcpCreateDialogOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setMCPDraftConfig(DEFAULT_MCP_CONFIG_TEXT);
+            setMCPFormError("");
+            onMCPCreateDialogOpenChange?.(true);
+          } else {
+            closeMCPFormDialog();
+          }
+        }}
+      >
+        <DialogContent className="hub-mcp-dialog">
+          <DialogHeader className="hub-skill-delete-dialog-header">
+            <div className="hub-skill-delete-dialog-copy">
+              <DialogTitle>
+                {t("resourcesMCPCreateTitle")}
+              </DialogTitle>
+              <DialogDescription>{t("resourcesMCPFormDescription")}</DialogDescription>
+            </div>
+            <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
+          </DialogHeader>
+          <div className="hub-mcp-form">
+            <label className="hub-mcp-form-field">
+              <span>{t("resourcesMCPConfigJSONLabel")}</span>
+              <textarea
+                value={mcpDraftConfig}
+                onChange={(event) => setMCPDraftConfig(event.currentTarget.value)}
+                spellCheck={false}
+                rows={12}
+              />
+            </label>
+            {mcpFormError || mcpMutationError ? <div className="form-error">{mcpFormError || mcpMutationError}</div> : null}
+          </div>
+          <DialogFooter className="hub-skill-delete-dialog-actions">
+            <Button
+              variant="secondaryGray"
+              size="sm"
+              disabled={mcpMutationBusy}
+              onClick={closeMCPFormDialog}
+            >
+              {t("cancel")}
+            </Button>
+            <Button variant="primary" size="sm" loading={mcpMutationBusy} onClick={handleSaveMCP}>
+              {mcpMutationBusy ? t("resourcesMCPSaving") : t("resourcesMCPSave")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </DialogRoot>
+      <DialogRoot open={mcpDeleteDialogOpen} onOpenChange={setMCPDeleteDialogOpen}>
+        <DialogContent className="hub-skill-delete-dialog">
+          <DialogHeader className="hub-skill-delete-dialog-header">
+            <div className="hub-skill-delete-dialog-copy">
+              <DialogTitle>{t("resourcesMCPDelete")}</DialogTitle>
+              <DialogDescription>
+                {t("resourcesMCPDeleteConfirmMessage", { name: selectedMCP?.name || "" })}
+              </DialogDescription>
+            </div>
+            <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
+          </DialogHeader>
+          {mcpMutationError ? <div className="form-error">{mcpMutationError}</div> : null}
+          <DialogFooter className="hub-skill-delete-dialog-actions">
+            <Button
+              variant="secondaryGray"
+              size="sm"
+              disabled={mcpMutationBusy}
+              onClick={() => setMCPDeleteDialogOpen(false)}
+            >
+              {t("cancel")}
+            </Button>
+            <Button variant="danger" size="sm" loading={mcpMutationBusy} onClick={handleDeleteMCPConfirm}>
               {t("resourcesDeleteSkillConfirmAction")}
             </Button>
           </DialogFooter>

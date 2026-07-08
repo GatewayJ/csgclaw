@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	agentruntime "csgclaw/internal/runtime"
+
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 const (
@@ -30,6 +32,7 @@ const (
 var (
 	rootFeaturesTableHeaderRe = regexp.MustCompile(`^\s*\[\s*features\s*\]\s*(?:#.*)?$`)
 	rootMemoriesTableHeaderRe = regexp.MustCompile(`^\s*\[\s*memories\s*\]\s*(?:#.*)?$`)
+	mcpServersTableHeaderRe   = regexp.MustCompile(`^\s*\[\s*mcp_servers\s*(?:\.\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[A-Za-z0-9_-]+)\s*)*\]\s*(?:#.*)?$`)
 
 	rootDottedMultiAgentRe    = regexp.MustCompile(`^\s*features\s*\.\s*multi_agent\s*=`)
 	featuresTableMultiAgentRe = regexp.MustCompile(`^\s*multi_agent\s*=`)
@@ -159,10 +162,9 @@ func buildMCPConfigBlock(mcpConfig map[string]any) (string, error) {
 		fmt.Fprintf(&b, "[mcp_servers.%s]\n", tomlQuotedKey(name))
 		if url := mcpTrimmedString(entry["url"]); url != "" {
 			fmt.Fprintf(&b, "url = %s\n", strconv.Quote(url))
-			for _, key := range []string{"bearer_token_env_var", "oauth_client_id", "oauth_resource"} {
-				if value := mcpTrimmedString(entry[key]); value != "" {
-					fmt.Fprintf(&b, "%s = %s\n", key, strconv.Quote(value))
-				}
+			writeCodexMCPStringFields(&b, entry)
+			if headers := mcpStringMap(entry["headers"]); len(headers) > 0 {
+				fmt.Fprintf(&b, "http_headers = %s\n", tomlInlineStringMap(headers))
 			}
 			continue
 		}
@@ -183,6 +185,30 @@ func buildMCPConfigBlock(mcpConfig map[string]any) (string, error) {
 	return b.String(), nil
 }
 
+func parseCodexMCPConfig(content string) (map[string]any, error) {
+	if strings.TrimSpace(content) == "" {
+		return nil, nil
+	}
+	var cfg map[string]any
+	if err := toml.Unmarshal([]byte(content), &cfg); err != nil {
+		return nil, fmt.Errorf("decode codex mcp config: %w", err)
+	}
+	rawServers, ok := cfg["mcp_servers"]
+	if !ok || rawServers == nil {
+		return nil, nil
+	}
+	servers, ok := rawServers.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("codex mcp_servers must be an object")
+	}
+	servers = codexMCPServersToGeneric(servers)
+	normalized, err := agentruntime.NormalizeMCPConfig(map[string]any{agentruntime.MCPConfigServersKey: servers})
+	if err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
 func configureCodexHomeConfig(existing string, profile agentruntime.Profile, mcpConfig map[string]any) string {
 	content := sanitizeCopiedCodexConfigContent(existing)
 	content = strings.TrimLeft(content, "\n")
@@ -193,6 +219,9 @@ func configureCodexHomeConfig(existing string, profile agentruntime.Profile, mcp
 	content = stripManagedBlock(content, csgclawMemoryFeatureBeginMarker, csgclawMemoryFeatureEndMarker)
 	content = stripManagedBlock(content, csgclawMemoryConfigBeginMarker, csgclawMemoryConfigEndMarker)
 	content = stripManagedBlock(content, csgclawMCPBeginMarker, csgclawMCPEndMarker)
+	if mcpConfig != nil {
+		content = stripTableBlocks(content, mcpServersTableHeaderRe)
+	}
 
 	content = stripLegacySandboxDirectives(content)
 	content = stripUserMultiAgentDirectives(content)
@@ -224,7 +253,7 @@ func configureCodexHomeConfig(existing string, profile agentruntime.Profile, mcp
 		content = hoistManagedBlock(content, block)
 	}
 	if block, err := buildMCPConfigBlock(mcpConfig); err == nil && block != "" {
-		content = hoistManagedBlock(content, block)
+		content = appendManagedBlock(content, block)
 	}
 
 	content = strings.TrimLeft(content, "\n")
@@ -267,6 +296,42 @@ func mcpStringMap(value any) map[string]string {
 			return nil
 		}
 		out[key] = text
+	}
+	return out
+}
+
+func writeCodexMCPStringFields(b *strings.Builder, entry map[string]any) {
+	for _, key := range []string{"bearer_token_env_var", "oauth_client_id", "oauth_resource"} {
+		if value := mcpTrimmedString(entry[key]); value != "" {
+			fmt.Fprintf(b, "%s = %s\n", key, strconv.Quote(value))
+		}
+	}
+}
+
+func codexMCPServersToGeneric(servers map[string]any) map[string]any {
+	out := make(map[string]any, len(servers))
+	for name, rawEntry := range servers {
+		entry, ok := rawEntry.(map[string]any)
+		if !ok {
+			out[name] = rawEntry
+			continue
+		}
+		normalized := make(map[string]any, len(entry))
+		for key, value := range entry {
+			if key == "http_headers" {
+				if _, exists := entry["headers"]; !exists {
+					normalized["headers"] = value
+				}
+				continue
+			}
+			normalized[key] = value
+		}
+		if _, exists := normalized["transport"]; !exists {
+			if mcpTrimmedString(normalized["url"]) != "" {
+				normalized["transport"] = "streamable-http"
+			}
+		}
+		out[name] = normalized
 	}
 	return out
 }
@@ -332,6 +397,29 @@ func stripManagedBlock(content, beginMarker, endMarker string) string {
 	return re.ReplaceAllString(content, "")
 }
 
+func stripTableBlocks(content string, tableHeaderRe *regexp.Regexp) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	skipping := false
+	for _, line := range lines {
+		if isTOMLTableHeader(line) {
+			skipping = tableHeaderRe.MatchString(line)
+		}
+		if skipping {
+			continue
+		}
+		out = append(out, line)
+	}
+	stripped := strings.Join(out, "\n")
+	stripped = regexp.MustCompile(`\n{3,}`).ReplaceAllString(stripped, "\n\n")
+	return strings.TrimRight(stripped, "\n")
+}
+
+func isTOMLTableHeader(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "[")
+}
+
 func hoistManagedBlock(content, block string) string {
 	block = strings.TrimRight(block, "\n") + "\n"
 	content = strings.TrimLeft(content, "\n")
@@ -339,6 +427,15 @@ func hoistManagedBlock(content, block string) string {
 		return block
 	}
 	return block + "\n" + content
+}
+
+func appendManagedBlock(content, block string) string {
+	block = strings.TrimRight(block, "\n") + "\n"
+	content = strings.TrimRight(content, "\n")
+	if content == "" {
+		return block
+	}
+	return content + "\n\n" + block
 }
 
 func hasRootFeaturesTable(content string) bool {

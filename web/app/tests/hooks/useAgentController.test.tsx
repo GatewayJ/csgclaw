@@ -10,6 +10,7 @@ import {
   deleteAgentSkillRequest,
   deleteBotRequest,
   fetchAgent,
+  fetchAgentMCPConfig,
   fetchAgentProfile,
   fetchAgentProfileDefaults,
   fetchAgentProfileModels,
@@ -20,6 +21,7 @@ import {
   finalizeFeishuRegistrationRequest,
   runAgentActionRequest,
   startFeishuRegistrationRequest,
+  updateAgentMCPConfigRequest,
   updateAgentRequest,
 } from "@/api/agents";
 import { createUserRequest } from "@/api/im";
@@ -31,6 +33,7 @@ import { WorkspacePaneTypes } from "@/models/routing";
 import type { WorkspacePane } from "@/models/routing";
 import type { AgentLike, AgentProfileLike, RuntimeBootstrapConfig } from "@/models/agents";
 import type { IMConversation, IMData, TranslateFn } from "@/models/conversations";
+import type { HubMCPServer } from "@/models/mcpHub";
 import { normalizeModelProviderCatalog } from "@/models/modelProviders";
 import type { ModelProviderCatalog } from "@/models/modelProviders";
 import type { ApiError } from "@/api/client";
@@ -68,6 +71,7 @@ vi.mock("@/api/agents", async () => {
     deleteAgentSkillRequest: vi.fn(),
     deleteBotRequest: vi.fn(),
     fetchAgent: vi.fn(),
+    fetchAgentMCPConfig: vi.fn(),
     fetchAgentProfile: vi.fn(),
     fetchAgentProfileDefaults: vi.fn(),
     fetchAgentProfileModels: vi.fn(),
@@ -78,6 +82,7 @@ vi.mock("@/api/agents", async () => {
     finalizeFeishuRegistrationRequest: vi.fn(),
     runAgentActionRequest: vi.fn(),
     startFeishuRegistrationRequest: vi.fn(),
+    updateAgentMCPConfigRequest: vi.fn(),
     updateAgentRequest: vi.fn(),
   };
 });
@@ -178,6 +183,7 @@ function useAgentControllerHarness(
     activePane?: WorkspacePane;
     agents?: AgentLike[];
     data?: IMData | null;
+    hubMCPServers?: HubMCPServer[];
     managerProfile?: AgentProfileLike | null;
     modelProviders?: ModelProviderCatalog | null;
     modelProvidersLoaded?: boolean;
@@ -224,6 +230,7 @@ function useAgentControllerHarness(
     } as UseQueryResult<AgentLike[]>,
     bootstrapConfig: options.bootstrapConfig ?? null,
     data,
+    hubMCPServers: options.hubMCPServers ?? [],
     hubTemplates: [],
     locale: "en",
     managerProfile: options.managerProfile ?? null,
@@ -270,6 +277,7 @@ describe("useAgentController", () => {
     vi.mocked(deleteAgentRequest).mockReset();
     vi.mocked(deleteAgentSkillRequest).mockReset();
     vi.mocked(deleteBotRequest).mockReset();
+    vi.mocked(fetchAgentMCPConfig).mockReset();
     vi.mocked(fetchAgentWorkspace).mockReset();
     vi.mocked(createUserRequest).mockReset();
     vi.mocked(fetchAgentSkills).mockReset();
@@ -281,6 +289,7 @@ describe("useAgentController", () => {
     vi.mocked(fetchTeams).mockReset();
     vi.mocked(runAgentActionRequest).mockReset();
     vi.mocked(startFeishuRegistrationRequest).mockReset();
+    vi.mocked(updateAgentMCPConfigRequest).mockReset();
     vi.mocked(updateAgentRequest).mockReset();
     vi.mocked(patchCsgclawUserRequest).mockReset();
     window.localStorage.removeItem(feishuRegistrationStorageKey);
@@ -314,6 +323,12 @@ describe("useAgentController", () => {
     vi.mocked(deleteAgentRequest).mockResolvedValue(undefined);
     vi.mocked(deleteAgentSkillRequest).mockResolvedValue(undefined);
     vi.mocked(deleteBotRequest).mockResolvedValue(undefined);
+    vi.mocked(fetchAgentMCPConfig).mockResolvedValue({
+      actual: null,
+      agent_id: "u-manager",
+      desired: null,
+      runtime_kind: "picoclaw_sandbox",
+    });
     vi.mocked(fetchAgentWorkspace).mockResolvedValue({ entries: [] });
     vi.mocked(createUserRequest).mockResolvedValue({ id: "u-worker", name: "worker" });
     vi.mocked(fetchAgentSkills).mockResolvedValue({ entries: [] });
@@ -352,6 +367,12 @@ describe("useAgentController", () => {
       participant_id: "dev",
       status: "configured",
     });
+    vi.mocked(updateAgentMCPConfigRequest).mockImplementation(async (agentID, mcpConfig) => ({
+      actual: mcpConfig,
+      agent_id: agentID,
+      desired: mcpConfig,
+      runtime_kind: "picoclaw_sandbox",
+    }));
     vi.mocked(updateAgentRequest).mockResolvedValue(latestAgent);
     vi.mocked(patchCsgclawUserRequest).mockImplementation(async (userID, payload) => ({
       avatar: payload.avatar || "",
@@ -713,6 +734,67 @@ describe("useAgentController", () => {
     await waitFor(() => expect(fetchAgentSkills).toHaveBeenCalledTimes(2));
     expect(result.current.agentViewProps.skillDeleteError).toBe("");
     expect(result.current.agentViewProps.skills).toEqual([]);
+  });
+
+  it("deletes an MCP server from the actual agent MCP list", async () => {
+    vi.mocked(fetchAgentMCPConfig).mockResolvedValueOnce({
+      actual: {
+        mcpServers: {
+          hub: { command: "npx", args: ["hub-mcp"] },
+          manual: { command: "uvx", args: ["manual-mcp"] },
+        },
+      },
+      agent_id: "u-manager",
+      desired: {
+        mcpServers: {
+          hub: { command: "npx", args: ["hub-mcp"] },
+        },
+      },
+      runtime_kind: "codex",
+    });
+
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
+
+    await waitFor(() =>
+      expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual(["hub", "manual"]),
+    );
+
+    await act(async () => {
+      await result.current.agentViewProps.onDeleteMCPServer?.("manual");
+    });
+
+    expect(updateAgentMCPConfigRequest).toHaveBeenCalledWith("u-manager", {
+      mcpServers: {
+        hub: { command: "npx", args: ["hub-mcp"] },
+      },
+    });
+    expect(result.current.agentViewProps.mcpDeleteError).toBe("");
+  });
+
+  it("submits an empty MCP config when deleting the last actual MCP server", async () => {
+    vi.mocked(fetchAgentMCPConfig).mockResolvedValueOnce({
+      actual: {
+        mcpServers: {
+          manual: { command: "uvx", args: ["manual-mcp"] },
+        },
+      },
+      agent_id: "u-manager",
+      desired: null,
+      runtime_kind: "codex",
+    });
+
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
+
+    await waitFor(() =>
+      expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual(["manual"]),
+    );
+
+    await act(async () => {
+      await result.current.agentViewProps.onDeleteMCPServer?.({ name: "manual" });
+    });
+
+    expect(updateAgentMCPConfigRequest).toHaveBeenCalledWith("u-manager", {});
+    expect(result.current.agentViewProps.mcpDeleteError).toBe("");
   });
 
   it("routes incomplete manager profile setup to the manager agent page", async () => {

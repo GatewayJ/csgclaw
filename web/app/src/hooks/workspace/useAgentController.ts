@@ -15,12 +15,14 @@ import {
   fetchAgent,
   fetchAgentProfile,
   fetchAgentProfileDefaults,
+  fetchAgentMCPConfig,
   fetchAgentSkills,
   fetchAgentSkillsFile,
   finalizeFeishuRegistrationRequest,
   patchNotificationBotRequest,
   runAgentActionRequest,
   startFeishuRegistrationRequest,
+  updateAgentMCPConfigRequest,
   updateAgentRequest,
 } from "@/api/agents";
 import type { AgentUpdatePayload, FeishuRegistration, FetchAgentsOptions } from "@/api/agents";
@@ -98,6 +100,12 @@ import type {
   RuntimeKind,
 } from "@/models/agents";
 import { isDirectConversation, localIdentitiesMatch, upsertUserInData } from "@/models/conversations";
+import {
+  hubMCPServersFromConfig,
+  mcpConfigWithServers,
+  mcpServerRecordFromConfig,
+  runtimeMCPServerConfig,
+} from "@/models/mcpHub";
 import { displayTeam } from "@/models/tasks";
 import type { WorkspaceTeam } from "@/models/tasks";
 import {
@@ -112,6 +120,7 @@ import { useCLIProxyAuthStatuses } from "./useCLIProxyAuthStatuses";
 import { workspaceQueryKeys } from "./workspaceQueries";
 import type { MessageAction, MessageActionError, MessageLike } from "@/components/business/MessageContent/types";
 import type { IMConversation, IMUser } from "@/models/conversations";
+import type { HubMCPServer } from "@/models/mcpHub";
 import type { UseAgentControllerArgs } from "./types";
 
 type ManagerRebuildOptions = {
@@ -404,6 +413,7 @@ export function useAgentController({
   agentsQuery,
   bootstrapConfig,
   data,
+  hubMCPServers = [],
   hubTemplates,
   locale,
   managerProfile,
@@ -455,6 +465,10 @@ export function useAgentController({
   const [agentSkillAddError, setAgentSkillAddError] = useState("");
   const [agentSkillDeleteBusy, setAgentSkillDeleteBusy] = useState(false);
   const [agentSkillDeleteError, setAgentSkillDeleteError] = useState("");
+  const [agentMCPAddBusy, setAgentMCPAddBusy] = useState(false);
+  const [agentMCPAddError, setAgentMCPAddError] = useState("");
+  const [agentMCPDeleteBusy, setAgentMCPDeleteBusy] = useState(false);
+  const [agentMCPDeleteError, setAgentMCPDeleteError] = useState("");
   const [agentPageNotice, setAgentPageNotice] = useState("");
   const [agentPageNoticeTone, setAgentPageNoticeTone] = useState<AgentPageNoticeTone>("warning");
   const agentPageNoticeTimerRef = useRef<number | null>(null);
@@ -581,7 +595,7 @@ export function useAgentController({
     }
     return normalizeFeishuPendingRegistration(feishuPendingRegistrations[agentID], agentID);
   }, [feishuPendingRegistrations, selectedAgentForPage?.id]);
-  const skillsAgentID = selectedAgentForPage?.id || "";
+  const agentDetailAgentID = selectedAgentForPage?.id || "";
   const globalSkillsQuery = useQuery({
     queryKey: workspaceQueryKeys.skills(),
     queryFn: async () => {
@@ -590,14 +604,14 @@ export function useAgentController({
     },
   });
   const agentSkillsQuery = useQuery({
-    queryKey: workspaceQueryKeys.agentSkills(skillsAgentID),
+    queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID),
     queryFn: async () => {
-      const skillsListing = await fetchAgentSkills(skillsAgentID);
+      const skillsListing = await fetchAgentSkills(agentDetailAgentID);
       const skills = skillOptionsFromWorkspace(skillsListing.entries || []);
       return Promise.all(
         skills.map(async (skill) => {
           try {
-            const file = await fetchAgentSkillsFile(skillsAgentID, `${skill.name}/SKILL.md`);
+            const file = await fetchAgentSkillsFile(agentDetailAgentID, `${skill.name}/SKILL.md`);
             return {
               ...skill,
               description: skillDescriptionFromMarkdown(file.content || "") || skill.description,
@@ -608,7 +622,12 @@ export function useAgentController({
         }),
       );
     },
-    enabled: Boolean(skillsAgentID),
+    enabled: Boolean(agentDetailAgentID),
+  });
+  const agentMCPConfigQuery = useQuery({
+    queryKey: workspaceQueryKeys.agentMCPConfig(agentDetailAgentID),
+    queryFn: () => fetchAgentMCPConfig(agentDetailAgentID),
+    enabled: Boolean(agentDetailAgentID),
   });
   const agentSkillsError = agentSkillsQuery.error
     ? errorMessage(agentSkillsQuery.error, t("agentSkillsLoadFailed"))
@@ -623,6 +642,16 @@ export function useAgentController({
   const agentSkillCandidatesError = globalSkillsQuery.error
     ? errorMessage(globalSkillsQuery.error, t("agentSkillsLoadFailed"))
     : "";
+  const agentMCPServers = useMemo(() => {
+    if (agentMCPConfigQuery.data) {
+      return hubMCPServersFromConfig(agentMCPConfigQuery.data.actual ?? { mcpServers: {} });
+    }
+    return hubMCPServersFromConfig(agentPageDraft?.mcp_config);
+  }, [agentMCPConfigQuery.data, agentPageDraft?.mcp_config]);
+  const agentMCPCandidates = useMemo(() => {
+    const currentNames = new Set(agentMCPServers.map((server) => server.name));
+    return hubMCPServers.filter((server) => server.name && !currentNames.has(server.name));
+  }, [agentMCPServers, hubMCPServers]);
   const activeConversation = useMemo(
     () => data?.rooms.find((item) => item.id === activeConversationId) ?? null,
     [data, activeConversationId],
@@ -791,7 +820,7 @@ export function useAgentController({
   useEffect(() => {
     setAgentSkillAddError("");
     setAgentSkillDeleteError("");
-  }, [skillsAgentID]);
+  }, [agentDetailAgentID]);
 
   useEffect(() => {
     if (!selectedAgentForPage) {
@@ -1991,7 +2020,7 @@ export function useAgentController({
 
   const batchAddAgentSkills = useCallback(
     async (skillNames: string[]) => {
-      if (!skillsAgentID || agentSkillAddBusy) {
+      if (!agentDetailAgentID || agentSkillAddBusy) {
         return false;
       }
       const names = skillNames.map((name) => String(name || "").trim()).filter(Boolean);
@@ -2001,8 +2030,8 @@ export function useAgentController({
       setAgentSkillAddBusy(true);
       setAgentSkillAddError("");
       try {
-        await batchAddAgentSkillsRequest(skillsAgentID, names);
-        await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(skillsAgentID) });
+        await batchAddAgentSkillsRequest(agentDetailAgentID, names);
+        await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID) });
         return true;
       } catch (err) {
         setAgentSkillAddError(errorMessage(err, t("agentSkillAddFailed")));
@@ -2011,12 +2040,12 @@ export function useAgentController({
         setAgentSkillAddBusy(false);
       }
     },
-    [agentSkillAddBusy, queryClient, skillsAgentID, t],
+    [agentSkillAddBusy, queryClient, agentDetailAgentID, t],
   );
 
   const deleteAgentSkill = useCallback(
     async (skill: { name?: string | null } | string | null | undefined) => {
-      if (!skillsAgentID || agentSkillDeleteBusy) {
+      if (!agentDetailAgentID || agentSkillDeleteBusy) {
         return false;
       }
       const rawName = typeof skill === "string" ? skill : String(skill?.name || "");
@@ -2027,8 +2056,8 @@ export function useAgentController({
       setAgentSkillDeleteBusy(true);
       setAgentSkillDeleteError("");
       try {
-        await deleteAgentSkillRequest(skillsAgentID, name);
-        await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(skillsAgentID) });
+        await deleteAgentSkillRequest(agentDetailAgentID, name);
+        await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID) });
         return true;
       } catch (err) {
         setAgentSkillDeleteError(errorMessage(err, t("agentSkillDeleteFailed")));
@@ -2037,7 +2066,98 @@ export function useAgentController({
         setAgentSkillDeleteBusy(false);
       }
     },
-    [agentSkillDeleteBusy, queryClient, skillsAgentID, t],
+    [agentSkillDeleteBusy, queryClient, agentDetailAgentID, t],
+  );
+
+  const installAgentMCPServers = useCallback(
+    async (serverNames: string[]) => {
+      if (!agentDetailAgentID || agentMCPAddBusy) {
+        return false;
+      }
+      const names = serverNames.map((name) => String(name || "").trim()).filter(Boolean);
+      if (!names.length) {
+        return false;
+      }
+      const byName = new Map(hubMCPServers.map((server) => [server.name, server]));
+      const selectedServers = names
+        .map((name) => byName.get(name))
+        .filter((server): server is HubMCPServer => Boolean(server));
+      if (!selectedServers.length) {
+        return false;
+      }
+      const baseConfig = agentMCPConfigQuery.data?.actual ?? agentPageDraft?.mcp_config;
+      const servers = mcpServerRecordFromConfig(baseConfig);
+      selectedServers.forEach((server) => {
+        servers[server.name] = runtimeMCPServerConfig(server.config);
+      });
+      const nextMCPConfig = mcpConfigWithServers(baseConfig, servers);
+      setAgentMCPAddBusy(true);
+      setAgentMCPAddError("");
+      setAgentMCPDeleteError("");
+      try {
+        await updateAgentMCPConfigRequest(agentDetailAgentID, nextMCPConfig);
+        setAgentPageDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
+        setAgentPageSavedDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPConfig(agentDetailAgentID) }),
+          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agents() }),
+        ]);
+        return true;
+      } catch (err) {
+        setAgentMCPAddError(errorMessage(err, t("agentActionFailed")));
+        return false;
+      } finally {
+        setAgentMCPAddBusy(false);
+      }
+    },
+    [
+      agentMCPAddBusy,
+      agentMCPConfigQuery.data?.actual,
+      agentPageDraft?.mcp_config,
+      hubMCPServers,
+      queryClient,
+      agentDetailAgentID,
+      t,
+    ],
+  );
+
+  const deleteAgentMCPServer = useCallback(
+    async (server: { name?: string | null } | string | null | undefined) => {
+      if (!agentDetailAgentID || agentMCPDeleteBusy) {
+        return false;
+      }
+      const rawName = typeof server === "string" ? server : String(server?.name || "");
+      const name = rawName.trim();
+      if (!name) {
+        return false;
+      }
+      const baseConfig = agentMCPConfigQuery.data?.actual ?? agentPageDraft?.mcp_config;
+      const servers = mcpServerRecordFromConfig(baseConfig);
+      if (!Object.hasOwn(servers, name)) {
+        return false;
+      }
+      delete servers[name];
+      const nextMCPConfig = mcpConfigWithServers(baseConfig, servers);
+      setAgentMCPDeleteBusy(true);
+      setAgentMCPAddError("");
+      setAgentMCPDeleteError("");
+      try {
+        await updateAgentMCPConfigRequest(agentDetailAgentID, nextMCPConfig);
+        setAgentPageDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
+        setAgentPageSavedDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPConfig(agentDetailAgentID) }),
+          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agents() }),
+        ]);
+        return true;
+      } catch (err) {
+        setAgentMCPDeleteError(errorMessage(err, t("agentActionFailed")));
+        return false;
+      } finally {
+        setAgentMCPDeleteBusy(false);
+      }
+    },
+    [agentMCPConfigQuery.data?.actual, agentMCPDeleteBusy, agentPageDraft?.mcp_config, queryClient, agentDetailAgentID, t],
   );
 
   function directConversationForUser(
@@ -2156,6 +2276,12 @@ export function useAgentController({
       skillAddError: agentSkillAddError,
       skillDeleteBusy: agentSkillDeleteBusy,
       skillDeleteError: agentSkillDeleteError,
+      mcpCandidates: agentMCPCandidates,
+      mcpServers: agentMCPServers,
+      mcpAddBusy: agentMCPAddBusy,
+      mcpAddError: agentMCPAddError,
+      mcpDeleteBusy: agentMCPDeleteBusy,
+      mcpDeleteError: agentMCPDeleteError,
       skills: agentSkillsQuery.data ?? [],
       skillsLoading: agentSkillsQuery.isFetching,
       skillsError: agentSkillsError,
@@ -2176,6 +2302,8 @@ export function useAgentController({
       onDisconnectFeishu: disconnectFeishu,
       onAddSkills: batchAddAgentSkills,
       onDeleteSkill: deleteAgentSkill,
+      onInstallMCPServers: installAgentMCPServers,
+      onDeleteMCPServer: deleteAgentMCPServer,
       teamActionBusy,
       teamActionError,
       onCreateTeam: createAgentTeam,

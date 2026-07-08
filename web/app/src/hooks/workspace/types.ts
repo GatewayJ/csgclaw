@@ -8,6 +8,7 @@ import type { MessageAction, MessageActionError, MessageLike } from "@/component
 import type { AgentLike, AgentProfileLike, RuntimeBootstrapConfig } from "@/models/agents";
 import type { IMConversation, IMData, IMUser, LocaleCode, TranslateFn, UsersById } from "@/models/conversations";
 import type { HubTemplate } from "@/models/hubWorkspace";
+import type { HubMCPServer } from "@/models/mcpHub";
 import type { ModelProviderCatalog } from "@/models/modelProviders";
 import type { CollapsedWorkspaceGroups, WorkspacePane, WorkspaceTab } from "@/models/routing";
 import type { UpgradePhase, UpgradeStatus } from "@/models/upgradeStatus";
@@ -241,6 +242,7 @@ export type UseAgentControllerArgs = {
   agentsQuery: UseQueryResult<AgentLike[]>;
   bootstrapConfig: RuntimeBootstrapConfig | null;
   data: IMData | null;
+  hubMCPServers?: HubMCPServer[];
   hubTemplates: HubTemplate[];
   locale: LocaleCode;
   managerProfile: AgentProfileLike | null;
