@@ -1060,7 +1060,7 @@ function AgentMCPPanel({
           <div className="agent-skills-title">
             <div className="agent-skills-title-copy">
               <span>{t("profileMCPServers")}</span>
-              <small>{servers.length}</small>
+              <small className="agent-section-count-badge">{servers.length}</small>
             </div>
             <Button
               className="agent-skill-add-button"
@@ -1330,7 +1330,7 @@ function AgentSkillsPanel({
           <div className="agent-skills-title">
             <div className="agent-skills-title-copy">
               <span>{t("agentSkillsTitle")}</span>
-              <small>{skills.length}</small>
+              <small className="agent-section-count-badge">{skills.length}</small>
             </div>
             <Button
               className="agent-skill-add-button"

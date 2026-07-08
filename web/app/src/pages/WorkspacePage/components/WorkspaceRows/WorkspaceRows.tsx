@@ -199,7 +199,7 @@ export function WorkspaceGroup({
             </span>
             <span className={styles.groupTitle}>
               <span>{title}</span>
-              <small>{count}</small>
+              <small className={styles.countBadge}>{count}</small>
             </span>
           </button>
           <div className={styles.groupActions}>
