@@ -53,7 +53,6 @@ const labels: Record<string, string> = {
   statusDisabled: "Disabled",
   templateLabel: "Template",
   templateNone: "No template",
-  agentCreateSave: "Create",
   agentUpdateSave: "Save",
 };
 

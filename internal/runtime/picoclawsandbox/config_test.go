@@ -2,6 +2,7 @@ package picoclawsandbox
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -84,6 +85,16 @@ func TestRenderConfigWithMCPConfigWritesPicoClawToolsMCP(t *testing.T) {
 					"command": "uvx",
 					"args":    []any{"context7-mcp"},
 				},
+				"filesystem": map[string]any{
+					"command": "npx",
+					"args": []any{
+						"-y",
+						"@modelcontextprotocol/server-filesystem",
+						"/home/user/workspace",
+						"${workspace}",
+						"${workspace}/from-placeholder",
+					},
+				},
 			},
 		}, resolver)
 		if err != nil {
@@ -101,6 +112,16 @@ func TestRenderConfigWithMCPConfigWritesPicoClawToolsMCP(t *testing.T) {
 		args := context7["args"].([]any)
 		if got, want := args[0], "context7-mcp"; got != want {
 			t.Fatalf("context7.args[0] = %#v, want %q", got, want)
+		}
+		filesystem := servers["filesystem"].(map[string]any)
+		if got, want := filesystem["args"], []any{
+			"-y",
+			"@modelcontextprotocol/server-filesystem",
+			"/home/user/workspace",
+			BoxWorkspaceDir,
+			BoxWorkspaceDir + "/from-placeholder",
+		}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("filesystem.args = %#v, want %#v", got, want)
 		}
 	})
 }

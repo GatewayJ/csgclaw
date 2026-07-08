@@ -133,7 +133,7 @@ func buildMemoryConfigBlock(inMemoriesTable bool) string {
 	return b.String()
 }
 
-func buildMCPConfigBlock(mcpConfig map[string]any) (string, error) {
+func buildMCPConfigBlock(mcpConfig map[string]any, workspaceDir string) (string, error) {
 	servers, err := agentruntime.MCPConfigServers(mcpConfig)
 	if err != nil {
 		return "", err
@@ -174,6 +174,7 @@ func buildMCPConfigBlock(mcpConfig map[string]any) (string, error) {
 		}
 		fmt.Fprintf(&b, "command = %s\n", strconv.Quote(command))
 		if args := mcpStringSlice(entry["args"]); len(args) > 0 {
+			args = resolveCodexMCPWorkspaceArgs(args, workspaceDir)
 			fmt.Fprintf(&b, "args = %s\n", tomlStringArray(args))
 		}
 		if env := mcpStringMap(entry["env"]); len(env) > 0 {
@@ -183,6 +184,30 @@ func buildMCPConfigBlock(mcpConfig map[string]any) (string, error) {
 	b.WriteString(csgclawMCPEndMarker)
 	b.WriteString("\n")
 	return b.String(), nil
+}
+
+func resolveCodexMCPWorkspaceArgs(args []string, workspaceDir string) []string {
+	workspaceDir = strings.TrimSpace(workspaceDir)
+	if workspaceDir == "" {
+		return args
+	}
+	out := make([]string, len(args))
+	for idx, arg := range args {
+		out[idx] = resolveCodexMCPWorkspaceArg(arg, workspaceDir)
+	}
+	return out
+}
+
+func resolveCodexMCPWorkspaceArg(arg, workspaceDir string) string {
+	for _, placeholder := range []string{"${workspace}", "${workspaceDir}", "{workspace}", "{workspaceDir}"} {
+		if arg == placeholder {
+			return workspaceDir
+		}
+		if strings.HasPrefix(arg, placeholder+"/") {
+			return filepath.Join(workspaceDir, strings.TrimPrefix(arg, placeholder+"/"))
+		}
+	}
+	return arg
 }
 
 func parseCodexMCPConfig(content string) (map[string]any, error) {
@@ -210,6 +235,10 @@ func parseCodexMCPConfig(content string) (map[string]any, error) {
 }
 
 func configureCodexHomeConfig(existing string, profile agentruntime.Profile, mcpConfig map[string]any) string {
+	return configureCodexHomeConfigWithWorkspace(existing, profile, mcpConfig, "")
+}
+
+func configureCodexHomeConfigWithWorkspace(existing string, profile agentruntime.Profile, mcpConfig map[string]any, workspaceDir string) string {
 	content := sanitizeCopiedCodexConfigContent(existing)
 	content = strings.TrimLeft(content, "\n")
 
@@ -252,7 +281,7 @@ func configureCodexHomeConfig(existing string, profile agentruntime.Profile, mcp
 	if block := buildProviderConfigBlock(profile); block != "" {
 		content = hoistManagedBlock(content, block)
 	}
-	if block, err := buildMCPConfigBlock(mcpConfig); err == nil && block != "" {
+	if block, err := buildMCPConfigBlock(mcpConfig, workspaceDir); err == nil && block != "" {
 		content = appendManagedBlock(content, block)
 	}
 

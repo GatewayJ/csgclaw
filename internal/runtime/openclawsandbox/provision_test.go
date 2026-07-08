@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -225,7 +226,7 @@ func TestReconcileMCPConfigWritesProvisionedGatewayConfig(t *testing.T) {
 	if err := rt.ReconcileMCPConfig(context.Background(), agentruntime.Handle{RuntimeID: "rt-1", HandleID: "box-1"}, agentruntime.MCPConfigChange{
 		Current: agentruntime.MCPConfigSnapshot{Config: map[string]any{
 			"mcpServers": map[string]any{
-				"filesystem": map[string]any{"command": "npx", "args": []any{"-y", "@modelcontextprotocol/server-filesystem", "/home/user/workspace"}},
+				"filesystem": map[string]any{"command": "npx", "args": []any{"-y", "@modelcontextprotocol/server-filesystem", "${workspace}"}},
 			},
 		}},
 	}); err != nil {
@@ -246,6 +247,9 @@ func TestReconcileMCPConfigWritesProvisionedGatewayConfig(t *testing.T) {
 	filesystem := servers["filesystem"].(map[string]any)
 	if got, want := filesystem["command"], "npx"; got != want {
 		t.Fatalf("filesystem.command = %#v, want %q", got, want)
+	}
+	if got, want := filesystem["args"], []any{"-y", "@modelcontextprotocol/server-filesystem", workspaceGuestPathForGOOS(runtime.GOOS)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("filesystem.args = %#v, want %#v", got, want)
 	}
 }
 

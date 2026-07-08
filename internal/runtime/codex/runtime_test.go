@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1753,6 +1754,46 @@ func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
 	}
 	if _, ok := remote["approval_policy"]; ok {
 		t.Fatalf("remote captured root config fields = %#v", remote)
+	}
+}
+
+func TestConfigureCodexHomeConfigResolvesWorkspaceMCPArgs(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "project")
+	config := configureCodexHomeConfigWithWorkspace("approval_policy = \"manual\"\n", agentruntime.Profile{}, map[string]any{
+		"mcpServers": map[string]any{
+			"filesystem": map[string]any{
+				"command": "npx",
+				"args": []any{
+					"-y",
+					"@modelcontextprotocol/server-filesystem",
+					"/home/user/workspace",
+					"/home/user/workspace/nested",
+					"${workspace}",
+					"${workspace}/from-placeholder",
+					"--root=/home/user/workspace",
+				},
+			},
+		},
+	}, workspace)
+
+	parsed, err := parseCodexMCPConfig(config)
+	if err != nil {
+		t.Fatalf("parseCodexMCPConfig() error = %v", err)
+	}
+	servers := parsed["mcpServers"].(map[string]any)
+	filesystem := servers["filesystem"].(map[string]any)
+	got := filesystem["args"]
+	want := []any{
+		"-y",
+		"@modelcontextprotocol/server-filesystem",
+		"/home/user/workspace",
+		"/home/user/workspace/nested",
+		workspace,
+		filepath.Join(workspace, "from-placeholder"),
+		"--root=/home/user/workspace",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filesystem.args = %#v, want %#v\nconfig:\n%s", got, want, config)
 	}
 }
 
