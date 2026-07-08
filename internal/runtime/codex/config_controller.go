@@ -81,7 +81,11 @@ func (r *Runtime) ReconcileMCPConfig(_ context.Context, h agentruntime.Handle, _
 	if err != nil {
 		return err
 	}
-	return r.seedCodexHomeConfig(codexHomeDir, agentRef.Profile.Normalized(), agentRef.MCPConfig)
+	workspaceDir, err := r.resolveWorkspaceDir(agentRef.ID, agentRef.RuntimeOptions)
+	if err != nil {
+		return err
+	}
+	return r.seedCodexHomeConfig(codexHomeDir, workspaceDir, agentRef.Profile.Normalized(), agentRef.MCPConfig)
 }
 
 func (r *Runtime) ListMCPConfig(_ context.Context, h agentruntime.Handle, _ agentruntime.MCPConfigSnapshot) (agentruntime.MCPConfigSnapshot, error) {

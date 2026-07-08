@@ -196,6 +196,18 @@ func TestRenderAgentOpenClawConfigRendersMCPServers(t *testing.T) {
 						"CONTEXT7_API_KEY": "secret",
 					},
 				},
+				"filesystem": map[string]any{
+					"command": "npx",
+					"args": []any{
+						"-y",
+						"@modelcontextprotocol/server-filesystem",
+						"/home/user/workspace",
+						"/home/user/workspace/nested",
+						"${workspace}",
+						"${workspace}/from-placeholder",
+						"--root=/home/user/workspace",
+					},
+				},
 				"remote-search": map[string]any{
 					"command":   nil,
 					"url":       "https://mcp.example.com/mcp",
@@ -226,6 +238,19 @@ func TestRenderAgentOpenClawConfigRendersMCPServers(t *testing.T) {
 	env := context7["env"].(map[string]any)
 	if got, want := env["CONTEXT7_API_KEY"], "secret"; got != want {
 		t.Fatalf("context7 env key = %#v, want %q", got, want)
+	}
+	filesystem := servers["filesystem"].(map[string]any)
+	workspace := workspaceGuestPathForGOOS(runtime.GOOS)
+	if got, want := filesystem["args"], []any{
+		"-y",
+		"@modelcontextprotocol/server-filesystem",
+		"/home/user/workspace",
+		"/home/user/workspace/nested",
+		workspace,
+		strings.TrimRight(workspace, "/") + "/from-placeholder",
+		"--root=/home/user/workspace",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("filesystem args = %#v, want %#v", got, want)
 	}
 	remote := servers["remote-search"].(map[string]any)
 	if got, want := remote["url"], "https://mcp.example.com/mcp"; got != want {

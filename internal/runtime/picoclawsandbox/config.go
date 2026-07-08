@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -133,8 +134,57 @@ func updatePicoClawMCP(cfg map[string]any, mcpConfig map[string]any) error {
 		return nil
 	}
 	mcpRoot["enabled"] = true
-	mcpRoot["servers"] = servers
+	mcpRoot["servers"] = resolvePicoClawMCPWorkspaceServers(servers, BoxWorkspaceDir)
 	return nil
+}
+
+func resolvePicoClawMCPWorkspaceServers(servers map[string]any, workspaceGuestPath string) map[string]any {
+	workspaceGuestPath = strings.TrimSpace(workspaceGuestPath)
+	if workspaceGuestPath == "" {
+		return servers
+	}
+	out := make(map[string]any, len(servers))
+	for name, rawEntry := range servers {
+		entry, ok := rawEntry.(map[string]any)
+		if !ok {
+			out[name] = rawEntry
+			continue
+		}
+		next := make(map[string]any, len(entry))
+		for key, value := range entry {
+			next[key] = value
+		}
+		if args, ok := next["args"].([]any); ok {
+			next["args"] = resolvePicoClawMCPWorkspaceArgs(args, workspaceGuestPath)
+		}
+		out[name] = next
+	}
+	return out
+}
+
+func resolvePicoClawMCPWorkspaceArgs(args []any, workspaceGuestPath string) []any {
+	out := make([]any, len(args))
+	for idx, arg := range args {
+		text, ok := arg.(string)
+		if !ok {
+			out[idx] = arg
+			continue
+		}
+		out[idx] = resolvePicoClawMCPWorkspaceArg(text, workspaceGuestPath)
+	}
+	return out
+}
+
+func resolvePicoClawMCPWorkspaceArg(arg, workspaceGuestPath string) string {
+	for _, placeholder := range []string{"${workspace}", "${workspaceDir}", "{workspace}", "{workspaceDir}"} {
+		if arg == placeholder {
+			return workspaceGuestPath
+		}
+		if strings.HasPrefix(arg, placeholder+"/") {
+			return path.Join(workspaceGuestPath, strings.TrimPrefix(arg, placeholder+"/"))
+		}
+	}
+	return arg
 }
 
 func updateFeishuChannel(cfg map[string]any, agentID string, provider feishu.AgentCredentialProvider) error {

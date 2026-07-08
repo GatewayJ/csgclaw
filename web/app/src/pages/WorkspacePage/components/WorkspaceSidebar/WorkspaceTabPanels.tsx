@@ -904,7 +904,7 @@ export function WorkspaceTabPanels({
           <div className={styles.empty}>{resourcesMCPError}</div>
         ) : resourcesMCPs.length ? (
           <div className={styles.empty}>{t("workspaceSearchNoResults")}</div>
-        ) : flat || (resourcesLoaded && resourcesTemplates.length === 0 && resourcesSkills.length === 0) ? (
+        ) : flat || (resourcesLoaded && resourcesMCPs.length === 0) ? (
           <div className={styles.empty}>{t("resourcesMCPEmpty")}</div>
         ) : null}
       </WorkspaceGroup>
@@ -954,7 +954,7 @@ export function WorkspaceTabPanels({
           <div className={styles.empty}>{resourcesSkillsError}</div>
         ) : resourcesSkills.length ? (
           <div className={styles.empty}>{t("workspaceSearchNoResults")}</div>
-        ) : flat || (resourcesLoaded && resourcesTemplates.length === 0) ? (
+        ) : flat || (resourcesLoaded && resourcesSkills.length === 0) ? (
           <div className={styles.empty}>{t("resourcesSkillsEmpty")}</div>
         ) : null}
       </WorkspaceGroup>

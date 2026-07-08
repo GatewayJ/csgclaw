@@ -120,7 +120,7 @@ const EMPTY_HUB_DETAIL_PROPS: HubDetailPaneHub["detailPaneProps"] = {
 };
 
 const DEFAULT_MCP_CONFIG_TEXT =
-  '{\n  "mcpServers": {\n    "filesystem": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/workspace"]\n    }\n  }\n}';
+  '{\n  "mcpServers": {\n    "filesystem": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspace}"]\n    }\n  }\n}';
 
 function HubPreviewEmptyIcon() {
   return (
@@ -600,9 +600,7 @@ export function HubDetailPane({
         <DialogContent className="hub-mcp-dialog">
           <DialogHeader className="hub-skill-delete-dialog-header">
             <div className="hub-skill-delete-dialog-copy">
-              <DialogTitle>
-                {t("resourcesMCPCreateTitle")}
-              </DialogTitle>
+              <DialogTitle>{t("resourcesMCPCreateTitle")}</DialogTitle>
               <DialogDescription>{t("resourcesMCPFormDescription")}</DialogDescription>
             </div>
             <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
@@ -617,15 +615,12 @@ export function HubDetailPane({
                 rows={12}
               />
             </label>
-            {mcpFormError || mcpMutationError ? <div className="form-error">{mcpFormError || mcpMutationError}</div> : null}
+            {mcpFormError || mcpMutationError ? (
+              <div className="form-error">{mcpFormError || mcpMutationError}</div>
+            ) : null}
           </div>
           <DialogFooter className="hub-skill-delete-dialog-actions">
-            <Button
-              variant="secondaryGray"
-              size="sm"
-              disabled={mcpMutationBusy}
-              onClick={closeMCPFormDialog}
-            >
+            <Button variant="secondaryGray" size="sm" disabled={mcpMutationBusy} onClick={closeMCPFormDialog}>
               {t("cancel")}
             </Button>
             <Button variant="primary" size="sm" loading={mcpMutationBusy} onClick={handleSaveMCP}>
