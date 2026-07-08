@@ -761,6 +761,7 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 		AgentID:       createSpec.AgentID,
 		ParticipantID: participantIDForAgent(createSpec.AgentName, createSpec.AgentID),
 		AgentName:     createSpec.AgentName,
+		Instructions:  strings.TrimSpace(got.Instructions),
 		Profile:       runtimeProfile,
 	}); err != nil {
 		return Agent{}, fmt.Errorf("provision agent runtime: %w", err)

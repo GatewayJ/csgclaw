@@ -1859,6 +1859,7 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		AgentID:          id,
 		ParticipantID:    participantIDForAgent(name, id),
 		AgentName:        name,
+		Instructions:     instructions,
 		Profile:          runtimeProfile,
 		WorkspaceOverlay: strings.TrimSpace(spec.FromTemplate),
 	}); err != nil {
@@ -2079,6 +2080,7 @@ func (s *Service) provisionRuntimeForAgent(ctx context.Context, rt agentruntime.
 		AgentID:          strings.TrimSpace(got.ID),
 		ParticipantID:    participantIDForAgent(got.Name, got.ID),
 		AgentName:        strings.TrimSpace(got.Name),
+		Instructions:     strings.TrimSpace(got.Instructions),
 		Profile:          s.runtimeProfileForAgent(got),
 		WorkspaceOverlay: strings.TrimSpace(workspaceOverlay),
 	})
