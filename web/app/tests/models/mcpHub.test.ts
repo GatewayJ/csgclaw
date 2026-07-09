@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatMCPServerWrapper,
   hubMCPServersFromResponse,
+  mcpServerPayloadFromConfig,
   parseMCPServerWrapper,
   runtimeMCPServerConfig,
 } from "@/models/mcpHub";
@@ -43,6 +44,19 @@ describe("MCP hub helpers", () => {
     expect(parseMCPServerWrapper(formatted)).toEqual({
       name: "filesystem",
       config: { command: "npx", args: ["-y"], startup_timeout_sec: 60 },
+    });
+  });
+
+  it("builds a single MCP server payload from an already parsed config", () => {
+    expect(
+      mcpServerPayloadFromConfig({
+        mcpServers: {
+          filesystem: { command: "npx", args: ["-y"] },
+        },
+      }),
+    ).toEqual({
+      name: "filesystem",
+      config: { command: "npx", args: ["-y"] },
     });
   });
 

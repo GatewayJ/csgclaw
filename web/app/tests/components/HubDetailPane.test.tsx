@@ -14,6 +14,16 @@ function t(key: string, params: Record<string, string | number> = {}) {
     resourcesEmpty: "No templates",
     resourcesImageLabel: "Image",
     resourcesLoading: "Loading resources",
+    resourcesMCPConfigInvalid: "MCP config must be valid JSON.",
+    resourcesMCPConfigJSONLabel: "Config JSON",
+    resourcesMCPConfigLabel: "MCP config",
+    resourcesMCPConfigObjectRequired: "MCP config must be a JSON object.",
+    resourcesMCPConfigWrappedInvalid: "MCP config must be an mcpServers JSON object with exactly one server.",
+    resourcesMCPDelete: "Delete",
+    resourcesMCPDeleteConfirmMessage: 'Delete MCP server "{name}"?',
+    resourcesMCPLoading: "Loading MCP servers",
+    resourcesMCPSave: "Save",
+    resourcesMCPSaving: "Saving...",
     resourcesRefresh: "Refresh templates",
     resourcesSkillsEmpty: "No skills",
     resourcesSkillsLabel: "Skills",
@@ -159,6 +169,65 @@ function renderHubSkillDetailPane() {
   );
 }
 
+function renderHubMCPDetailPane() {
+  const onUpdateMCP = vi.fn().mockResolvedValue(true);
+  const mcp = {
+    name: "grafana",
+    description: "Grafana",
+    config: {
+      command: "grafana-mcp",
+      args: ["--transport", "stdio"],
+      startup_timeout_sec: 120,
+    },
+  };
+  const result = render(
+    <HubDetailPane
+      locale="en"
+      t={t}
+      onCreateFromTemplate={vi.fn()}
+      hub={{
+        detailPaneProps: {
+          detailLoading: false,
+          error: "",
+          loaded: true,
+          onRetry: vi.fn(),
+          onSelectSkill: vi.fn(),
+          onSelectSkillFile: vi.fn(),
+          onSelectTemplate: vi.fn(),
+          onSelectWorkspaceFile: vi.fn(),
+          selectedResourceType: "mcp",
+          selectedMCP: mcp,
+          selectedMCPName: mcp.name,
+          selectedSkill: null,
+          selectedSkillPath: "",
+          selectedTemplate: null,
+          selectedTemplateId: "",
+          selectedWorkspacePath: "",
+          skillFile: null,
+          skillFileError: "",
+          skillFileLoading: false,
+          skills: [],
+          skillTree: null,
+          skillTreeError: "",
+          skillTreeLoading: false,
+          templates: [],
+          mcps: [mcp],
+          mcpMutationBusy: false,
+          mcpMutationError: "",
+          mcpStateError: "",
+          mcpStateLoading: false,
+          onDeleteMCP: vi.fn(),
+          onUpdateMCP,
+          workspaceFile: null,
+          workspaceFileError: "",
+          workspaceFileLoading: false,
+        },
+      }}
+    />,
+  );
+  return { ...result, onUpdateMCP };
+}
+
 describe("HubDetailPane", () => {
   it("opens markdown files in a dialog with preview and code modes", async () => {
     const user = userEvent.setup();
@@ -199,5 +268,25 @@ describe("HubDetailPane", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText('Delete skill "demo-skill"? This action cannot be undone.')).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Delete" }).length).toBeGreaterThan(0);
+  });
+
+  it("highlights and validates MCP JSON configs before saving", async () => {
+    const user = userEvent.setup();
+    const { container, onUpdateMCP } = renderHubMCPDetailPane();
+
+    expect(container.querySelector(".cm-editor")).toBeInTheDocument();
+    expect(container.textContent).toContain("mcpServers");
+    expect(container.textContent).toContain("grafana-mcp");
+
+    const editor = screen.getByRole("textbox", { name: "MCP config" });
+    await user.click(editor);
+    await user.keyboard("{Control>}a{/Control}");
+    await user.keyboard("not json");
+
+    expect(screen.queryByText("MCP config must be valid JSON.")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onUpdateMCP).not.toHaveBeenCalled();
   });
 });

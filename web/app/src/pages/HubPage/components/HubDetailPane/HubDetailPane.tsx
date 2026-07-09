@@ -1,8 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { json } from "@codemirror/lang-json";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { linter } from "@codemirror/lint";
+import type { Diagnostic } from "@codemirror/lint";
+import { EditorState, type Extension } from "@codemirror/state";
+import { EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 import { FileCode2, Server, Trash2 } from "lucide-react";
 import { formatRuntimeKindLabel } from "@/models/agents";
 import { formatHubDateTime, isDeletableHubTemplate } from "@/models/hubWorkspace";
-import { formatMCPServerWrapper, mcpServerDescription, parseMCPServerWrapper } from "@/models/mcpHub";
+import { formatMCPServerWrapper, mcpServerDescription, mcpServerPayloadFromConfig } from "@/models/mcpHub";
 import type { HubMCPServerPayload } from "@/models/mcpHub";
 import { WorkspaceFilePreview, WorkspaceFileTree } from "@/components/business/WorkspaceFileTree";
 import { localizeTemplateSourceTag } from "@/shared/i18n";
@@ -121,6 +130,226 @@ const EMPTY_HUB_DETAIL_PROPS: HubDetailPaneHub["detailPaneProps"] = {
 
 const DEFAULT_MCP_CONFIG_TEXT =
   '{\n  "mcpServers": {\n    "filesystem": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspace}"],\n      "startup_timeout_sec": 60\n    }\n  }\n}';
+
+const jsonEditorTheme = EditorView.theme({
+  "&": {
+    backgroundColor: "transparent",
+    color: "var(--text)",
+    fontFamily: "var(--font-mono)",
+    fontSize: "12px",
+  },
+  "&.cm-focused": {
+    outline: "none",
+  },
+  ".cm-scroller": {
+    fontFamily: "var(--font-mono)",
+    lineHeight: "1.6",
+    minHeight: "var(--hub-json-editor-min-height, 220px)",
+  },
+  ".cm-content": {
+    caretColor: "var(--text)",
+    padding: "14px 0",
+  },
+  ".cm-line": {
+    padding: "0 14px",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    borderRight: "1px solid color-mix(in oklab, var(--line) 70%, transparent)",
+    color: "var(--gray-500)",
+    paddingLeft: "4px",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "color-mix(in oklab, var(--brand-600) 7%, transparent)",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "color-mix(in oklab, var(--brand-600) 7%, transparent)",
+    color: "var(--gray-700)",
+  },
+  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+    backgroundColor: "color-mix(in oklab, var(--brand-600) 24%, transparent)",
+  },
+  ".cm-lintRange-error": {
+    textDecoration: "underline wavy var(--error-600)",
+    textDecorationSkipInk: "none",
+  },
+  ".cm-tooltip": {
+    border: "1px solid var(--line)",
+    borderRadius: "var(--radius-md)",
+    backgroundColor: "var(--surface)",
+    color: "var(--text)",
+    boxShadow: "var(--shadow-lg)",
+    fontFamily: "var(--font-sans)",
+    fontSize: "12px",
+  },
+});
+
+const jsonHighlightStyle = HighlightStyle.define([
+  { tag: tags.propertyName, color: "var(--brand-700)" },
+  { tag: tags.string, color: "var(--success-700)" },
+  { tag: tags.number, color: "var(--warning-700)" },
+  { tag: tags.bool, color: "var(--error-600)" },
+  { tag: tags.null, color: "var(--error-600)" },
+  { tag: tags.punctuation, color: "var(--gray-500)" },
+]);
+
+function jsonSyntaxLinter(view: EditorView): Diagnostic[] {
+  const source = view.state.doc.toString();
+  try {
+    JSON.parse(source);
+    return [];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid JSON";
+    const positionMatch = /position\s+(\d+)/i.exec(message);
+    const parsedPosition = positionMatch ? Number(positionMatch[1]) : source.length;
+    if (source.length === 0) {
+      return [
+        {
+          from: 0,
+          message,
+          severity: "error",
+          to: 0,
+        },
+      ];
+    }
+    const position = Number.isFinite(parsedPosition) ? Math.max(0, Math.min(source.length, parsedPosition)) : 0;
+    const from = Math.max(0, Math.min(source.length, position || source.length) - 1);
+    const to = Math.min(source.length, Math.max(from + 1, position + 1));
+    return [
+      {
+        from,
+        message,
+        severity: "error",
+        to,
+      },
+    ];
+  }
+}
+
+const jsonEditorExtensions: Extension[] = [
+  lineNumbers(),
+  highlightActiveLineGutter(),
+  highlightActiveLine(),
+  history(),
+  json(),
+  syntaxHighlighting(jsonHighlightStyle),
+  linter(jsonSyntaxLinter, { delay: 250 }),
+  keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+  EditorState.tabSize.of(2),
+  EditorView.lineWrapping,
+  jsonEditorTheme,
+];
+
+type MCPConfigParseResult =
+  | {
+      kind: "valid";
+      payload: HubMCPServerPayload;
+    }
+  | {
+      kind: "structure" | "syntax";
+      message: string;
+    };
+
+function parseMCPConfigText(value: string, t: TranslateFn): MCPConfigParseResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return { kind: "syntax", message: t("resourcesMCPConfigInvalid") };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { kind: "structure", message: t("resourcesMCPConfigObjectRequired") };
+  }
+  const payload = mcpServerPayloadFromConfig(parsed);
+  if (!payload) {
+    return { kind: "structure", message: t("resourcesMCPConfigWrappedInvalid") };
+  }
+  return { kind: "valid", payload };
+}
+
+function JSONConfigEditor({
+  invalid = false,
+  label,
+  minRows = 12,
+  onChange,
+  value,
+}: {
+  invalid?: boolean;
+  label: string;
+  minRows?: number;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  const editorId = useId();
+  const editorParentRef = useRef<HTMLDivElement | null>(null);
+  const editorViewRef = useRef<EditorView | null>(null);
+  const initialValueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  const minHeight = `${Math.max(minRows, 6) * 19.2 + 28}px`;
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    if (!editorParentRef.current) {
+      return;
+    }
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: initialValueRef.current,
+        extensions: [
+          ...jsonEditorExtensions,
+          EditorView.contentAttributes.of({
+            "aria-label": label,
+            id: editorId,
+          }),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              onChangeRef.current(update.state.doc.toString());
+            }
+          }),
+        ],
+      }),
+      parent: editorParentRef.current,
+    });
+    editorViewRef.current = view;
+    return () => {
+      editorViewRef.current = null;
+      view.destroy();
+    };
+  }, [editorId, label]);
+
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view) {
+      return;
+    }
+    const current = view.state.doc.toString();
+    if (current === value) {
+      return;
+    }
+    view.dispatch({
+      changes: {
+        from: 0,
+        insert: value,
+        to: current.length,
+      },
+    });
+  }, [value]);
+
+  return (
+    <div
+      className={`hub-json-editor${invalid ? " is-invalid" : ""}`}
+      style={{ "--hub-json-editor-min-height": minHeight } as CSSProperties}
+    >
+      <label className="hub-json-editor-label" htmlFor={editorId}>
+        {label}
+      </label>
+      <div className="hub-json-editor-shell" ref={editorParentRef} aria-invalid={invalid || undefined} />
+    </div>
+  );
+}
 
 function HubPreviewEmptyIcon() {
   return (
@@ -276,12 +505,12 @@ export function HubDetailPane({
   }
 
   async function handleSaveMCP() {
-    const payload = parseMCPServerWrapper(mcpDraftConfig);
-    if (!payload) {
-      setMCPFormError(t("resourcesMCPConfigWrappedInvalid"));
+    const result = parseMCPConfigText(mcpDraftConfig, t);
+    if (result.kind !== "valid") {
+      setMCPFormError(result.kind === "structure" ? result.message : "");
       return;
     }
-    const saved = await onCreateMCP?.(payload);
+    const saved = await onCreateMCP?.(result.payload);
     if (saved) {
       closeMCPFormDialog();
     }
@@ -291,12 +520,12 @@ export function HubDetailPane({
     if (!selectedMCP) {
       return;
     }
-    const payload = parseMCPServerWrapper(mcpDetailConfig);
-    if (!payload) {
-      setMCPDetailError(t("resourcesMCPConfigWrappedInvalid"));
+    const result = parseMCPConfigText(mcpDetailConfig, t);
+    if (result.kind !== "valid") {
+      setMCPDetailError(result.kind === "structure" ? result.message : "");
       return;
     }
-    const saved = await onUpdateMCP?.(selectedMCP.name, payload);
+    const saved = await onUpdateMCP?.(selectedMCP.name, result.payload);
     if (saved) {
       setMCPDetailError("");
     }
@@ -307,6 +536,18 @@ export function HubDetailPane({
     if (deleted) {
       setMCPDeleteDialogOpen(false);
     }
+  }
+
+  function handleMCPDraftConfigChange(value: string) {
+    setMCPDraftConfig(value);
+    const result = parseMCPConfigText(value, t);
+    setMCPFormError(result.kind === "structure" ? result.message : "");
+  }
+
+  function handleMCPDetailConfigChange(value: string) {
+    setMCPDetailConfig(value);
+    const result = parseMCPConfigText(value, t);
+    setMCPDetailError(result.kind === "structure" ? result.message : "");
   }
 
   function closeMCPFormDialog() {
@@ -535,16 +776,14 @@ export function HubDetailPane({
               {mcpStateLoading ? <div className="workspace-empty">{t("resourcesMCPLoading")}</div> : null}
 
               <div className="hub-workspace-block hub-mcp-config-block">
-                <div className="hub-mcp-config-heading">
-                  <span className="hub-section-label">{t("resourcesMCPConfigLabel")}</span>
-                </div>
-                <textarea
-                  className="hub-mcp-config-editor"
+                <JSONConfigEditor
+                  label={t("resourcesMCPConfigLabel")}
                   value={mcpDetailConfig}
-                  onChange={(event) => setMCPDetailConfig(event.currentTarget.value)}
-                  spellCheck={false}
+                  onChange={handleMCPDetailConfigChange}
+                  invalid={Boolean(mcpDetailError)}
+                  minRows={12}
                 />
-                {mcpDetailError ? <div className="form-error">{mcpDetailError}</div> : null}
+                {mcpDetailError ? <div className="form-error hub-json-editor-error">{mcpDetailError}</div> : null}
               </div>
             </>
           ) : (
@@ -606,17 +845,15 @@ export function HubDetailPane({
             <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
           </DialogHeader>
           <div className="hub-mcp-form">
-            <label className="hub-mcp-form-field">
-              <span>{t("resourcesMCPConfigJSONLabel")}</span>
-              <textarea
-                value={mcpDraftConfig}
-                onChange={(event) => setMCPDraftConfig(event.currentTarget.value)}
-                spellCheck={false}
-                rows={12}
-              />
-            </label>
+            <JSONConfigEditor
+              label={t("resourcesMCPConfigJSONLabel")}
+              value={mcpDraftConfig}
+              onChange={handleMCPDraftConfigChange}
+              invalid={Boolean(mcpFormError)}
+              minRows={12}
+            />
             {mcpFormError || mcpMutationError ? (
-              <div className="form-error">{mcpFormError || mcpMutationError}</div>
+              <div className="form-error hub-json-editor-error">{mcpFormError || mcpMutationError}</div>
             ) : null}
           </div>
           <DialogFooter className="hub-skill-delete-dialog-actions">

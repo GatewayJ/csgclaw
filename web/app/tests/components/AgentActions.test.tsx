@@ -23,7 +23,7 @@ const labels: Record<string, string> = {
   agentMoreActions: "More",
   agentProfileSectionNavLabel: "Profile sections",
   agentProfileTab: "Profile",
-  agentProfileSkillsTab: "skills",
+  agentProfileSkillsTab: "Skills",
   agentProfileMCPTab: "MCP",
   agentSaved: "Saved",
   agentSaveChanges: "Save changes",
@@ -887,7 +887,7 @@ describe("agent action visibility", () => {
       within(navigation)
         .getAllByRole("button")
         .map((button) => button.textContent),
-    ).toEqual(["Profile", "Activity", "Channels", "Instructions", "skills", "MCP"]);
+    ).toEqual(["Profile", "Activity", "Channels", "Instructions", "Skills", "MCP"]);
 
     await user.click(within(navigation).getByRole("button", { name: "MCP" }));
 
@@ -1046,7 +1046,7 @@ describe("agent action visibility", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "skills" }));
+    await user.click(screen.getByRole("button", { name: "Skills" }));
     await user.click(screen.getByRole("button", { name: "Add skill" }));
     expect(screen.getByText("Candidates come from global skills.")).toBeInTheDocument();
     expect(screen.getByText("Beta candidate")).toBeInTheDocument();
@@ -1098,7 +1098,7 @@ describe("agent action visibility", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "skills" }));
+    await user.click(screen.getByRole("button", { name: "Skills" }));
     await user.click(screen.getAllByRole("button", { name: "Delete" })[0]);
     expect(screen.getByText('Delete skill "alpha" from this agent?')).toBeInTheDocument();
 
@@ -1320,7 +1320,7 @@ describe("agent action visibility", () => {
       "Activity",
       "Channels",
       "Instructions",
-      "skills",
+      "Skills",
       "MCP",
     ]);
     expect(tabs[0]).toHaveAttribute("aria-current", "location");
