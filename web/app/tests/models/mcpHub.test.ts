@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatMCPServerWrapper, hubMCPServersFromResponse, parseMCPServerWrapper } from "@/models/mcpHub";
+import {
+  formatMCPServerWrapper,
+  hubMCPServersFromResponse,
+  parseMCPServerWrapper,
+  runtimeMCPServerConfig,
+} from "@/models/mcpHub";
 
 describe("MCP hub helpers", () => {
   it("splits state mcpServers into individual sorted server entries", () => {
@@ -7,13 +12,17 @@ describe("MCP hub helpers", () => {
       hubMCPServersFromResponse({
         mcpServers: {
           github: { url: "https://github.example/mcp" },
-          filesystem: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem"] },
+          filesystem: {
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem"],
+            startup_timeout_sec: 60,
+          },
         },
       }),
     ).toEqual([
       {
         name: "filesystem",
-        config: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem"] },
+        config: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem"], startup_timeout_sec: 60 },
         description: "npx -y @modelcontextprotocol/server-filesystem",
       },
       {
@@ -25,11 +34,28 @@ describe("MCP hub helpers", () => {
   });
 
   it("parses and formats a single wrapped MCP server", () => {
-    const formatted = formatMCPServerWrapper("filesystem", { command: "npx", args: ["-y"] });
+    const formatted = formatMCPServerWrapper("filesystem", {
+      command: "npx",
+      args: ["-y"],
+      startup_timeout_sec: 60,
+    });
 
     expect(parseMCPServerWrapper(formatted)).toEqual({
       name: "filesystem",
-      config: { command: "npx", args: ["-y"] },
+      config: { command: "npx", args: ["-y"], startup_timeout_sec: 60 },
+    });
+  });
+
+  it("keeps runtime MCP fields while removing hub display metadata", () => {
+    expect(
+      runtimeMCPServerConfig({
+        command: "uvx",
+        description: "Grafana",
+        startup_timeout_sec: 120,
+      }),
+    ).toEqual({
+      command: "uvx",
+      startup_timeout_sec: 120,
     });
   });
 });

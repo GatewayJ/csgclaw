@@ -31,6 +31,7 @@ export const MCP_CONFIG_EXAMPLE: JSONRecord = {
     context7: {
       command: "npx",
       args: ["-y", "context7-mcp"],
+      startup_timeout_sec: 60,
     },
   },
 };

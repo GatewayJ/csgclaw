@@ -120,7 +120,7 @@ const EMPTY_HUB_DETAIL_PROPS: HubDetailPaneHub["detailPaneProps"] = {
 };
 
 const DEFAULT_MCP_CONFIG_TEXT =
-  '{\n  "mcpServers": {\n    "filesystem": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspace}"]\n    }\n  }\n}';
+  '{\n  "mcpServers": {\n    "filesystem": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspace}"],\n      "startup_timeout_sec": 60\n    }\n  }\n}';
 
 function HubPreviewEmptyIcon() {
   return (
