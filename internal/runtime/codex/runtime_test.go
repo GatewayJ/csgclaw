@@ -1766,8 +1766,14 @@ func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
 	config := configureCodexHomeConfig("approval_policy = \"manual\"\n", agentruntime.Profile{}, map[string]any{
 		"mcpServers": map[string]any{
 			"context7": map[string]any{
-				"command": "uvx",
-				"args":    []any{"context7-mcp"},
+				"command":             "uvx",
+				"args":                []any{"context7-mcp"},
+				"startup_timeout_sec": float64(90),
+				"tool_timeout_sec":    120,
+				"enabled":             true,
+				"required":            false,
+				"enabled_tools":       []any{"search"},
+				"disabled_tools":      []any{"delete"},
 				"env": map[string]any{
 					"CONTEXT7_API_KEY": "secret",
 				},
@@ -1789,6 +1795,12 @@ func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
 		`command = "uvx"`,
 		`args = ["context7-mcp"]`,
 		`env = { "CONTEXT7_API_KEY" = "secret" }`,
+		`startup_timeout_sec = 90`,
+		`tool_timeout_sec = 120`,
+		`enabled = true`,
+		`required = false`,
+		`enabled_tools = ["search"]`,
+		`disabled_tools = ["delete"]`,
 		`[mcp_servers."remote"]`,
 		`url = "https://mcp.example.com/mcp"`,
 		`bearer_token_env_var = "MCP_TOKEN"`,
@@ -1806,6 +1818,10 @@ func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
 		t.Fatalf("parseCodexMCPConfig() error = %v", err)
 	}
 	servers := parsed["mcpServers"].(map[string]any)
+	context7 := servers["context7"].(map[string]any)
+	if got, want := context7["startup_timeout_sec"], int64(90); got != want {
+		t.Fatalf("context7 startup_timeout_sec = %#v, want %#v", got, want)
+	}
 	remote := servers["remote"].(map[string]any)
 	headers := remote["headers"].(map[string]any)
 	if got, want := headers["X-MCP-Trace"], "trace-id"; got != want {

@@ -190,8 +190,10 @@ func TestRenderAgentOpenClawConfigRendersMCPServers(t *testing.T) {
 		"mcp": map[string]any{
 			"mcpServers": map[string]any{
 				"context7": map[string]any{
-					"command": "uvx",
-					"args":    []any{"context7-mcp"},
+					"command":             "uvx",
+					"args":                []any{"context7-mcp"},
+					"startup_timeout_sec": float64(90),
+					"tool_timeout_sec":    120,
 					"env": map[string]any{
 						"CONTEXT7_API_KEY": "secret",
 					},
@@ -234,6 +236,12 @@ func TestRenderAgentOpenClawConfigRendersMCPServers(t *testing.T) {
 	}
 	if got, want := context7["args"], []any{"context7-mcp"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("context7 args = %#v, want %#v", got, want)
+	}
+	if got, want := context7["startup_timeout_sec"], float64(90); got != want {
+		t.Fatalf("context7 startup_timeout_sec = %#v, want %#v", got, want)
+	}
+	if got, want := context7["tool_timeout_sec"], float64(120); got != want {
+		t.Fatalf("context7 tool_timeout_sec = %#v, want %#v", got, want)
 	}
 	env := context7["env"].(map[string]any)
 	if got, want := env["CONTEXT7_API_KEY"], "secret"; got != want {

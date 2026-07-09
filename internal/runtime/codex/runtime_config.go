@@ -2,6 +2,7 @@ package codex
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -166,6 +167,7 @@ func buildMCPConfigBlock(mcpConfig map[string]any, workspaceDir string) (string,
 			if headers := mcpStringMap(entry["headers"]); len(headers) > 0 {
 				fmt.Fprintf(&b, "http_headers = %s\n", tomlInlineStringMap(headers))
 			}
+			writeCodexMCPCommonFields(&b, entry)
 			continue
 		}
 		command := mcpTrimmedString(entry["command"])
@@ -180,6 +182,7 @@ func buildMCPConfigBlock(mcpConfig map[string]any, workspaceDir string) (string,
 		if env := mcpStringMap(entry["env"]); len(env) > 0 {
 			fmt.Fprintf(&b, "env = %s\n", tomlInlineStringMap(env))
 		}
+		writeCodexMCPCommonFields(&b, entry)
 	}
 	b.WriteString(csgclawMCPEndMarker)
 	b.WriteString("\n")
@@ -298,35 +301,45 @@ func mcpTrimmedString(value any) string {
 }
 
 func mcpStringSlice(value any) []string {
-	raw, ok := value.([]any)
-	if !ok {
+	switch raw := value.(type) {
+	case []any:
+		out := make([]string, 0, len(raw))
+		for _, item := range raw {
+			text, ok := item.(string)
+			if !ok {
+				return nil
+			}
+			out = append(out, text)
+		}
+		return out
+	case []string:
+		return append([]string(nil), raw...)
+	default:
 		return nil
 	}
-	out := make([]string, 0, len(raw))
-	for _, item := range raw {
-		text, ok := item.(string)
-		if !ok {
-			return nil
-		}
-		out = append(out, text)
-	}
-	return out
 }
 
 func mcpStringMap(value any) map[string]string {
-	raw, ok := value.(map[string]any)
-	if !ok {
+	switch raw := value.(type) {
+	case map[string]any:
+		out := make(map[string]string, len(raw))
+		for key, item := range raw {
+			text, ok := item.(string)
+			if !ok {
+				return nil
+			}
+			out[key] = text
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]string, len(raw))
+		for key, item := range raw {
+			out[key] = item
+		}
+		return out
+	default:
 		return nil
 	}
-	out := make(map[string]string, len(raw))
-	for key, item := range raw {
-		text, ok := item.(string)
-		if !ok {
-			return nil
-		}
-		out[key] = text
-	}
-	return out
 }
 
 func writeCodexMCPStringFields(b *strings.Builder, entry map[string]any) {
@@ -335,6 +348,104 @@ func writeCodexMCPStringFields(b *strings.Builder, entry map[string]any) {
 			fmt.Fprintf(b, "%s = %s\n", key, strconv.Quote(value))
 		}
 	}
+}
+
+func writeCodexMCPCommonFields(b *strings.Builder, entry map[string]any) {
+	for _, key := range []string{"cwd", "default_tools_approval_mode", "experimental_environment"} {
+		if value := mcpTrimmedString(entry[key]); value != "" {
+			fmt.Fprintf(b, "%s = %s\n", key, strconv.Quote(value))
+		}
+	}
+	for _, key := range []string{"startup_timeout_sec", "tool_timeout_sec"} {
+		if value, ok := mcpInteger(entry[key]); ok {
+			fmt.Fprintf(b, "%s = %d\n", key, value)
+		}
+	}
+	for _, key := range []string{"enabled", "required"} {
+		if value, ok := entry[key].(bool); ok {
+			fmt.Fprintf(b, "%s = %t\n", key, value)
+		}
+	}
+	for _, key := range []string{"enabled_tools", "disabled_tools", "env_vars"} {
+		if values := mcpStringSlice(entry[key]); len(values) > 0 {
+			fmt.Fprintf(b, "%s = %s\n", key, tomlStringArray(values))
+		}
+	}
+	if headers := mcpStringMap(entry["env_http_headers"]); len(headers) > 0 {
+		fmt.Fprintf(b, "env_http_headers = %s\n", tomlInlineStringMap(headers))
+	}
+}
+
+func mcpInteger(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		if typed <= 0 {
+			return 0, false
+		}
+		return int64(typed), true
+	case int8:
+		if typed <= 0 {
+			return 0, false
+		}
+		return int64(typed), true
+	case int16:
+		if typed <= 0 {
+			return 0, false
+		}
+		return int64(typed), true
+	case int32:
+		if typed <= 0 {
+			return 0, false
+		}
+		return int64(typed), true
+	case int64:
+		if typed <= 0 {
+			return 0, false
+		}
+		return typed, true
+	case uint:
+		if typed == 0 || uint64(typed) > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(typed), true
+	case uint8:
+		if typed == 0 {
+			return 0, false
+		}
+		return int64(typed), true
+	case uint16:
+		if typed == 0 {
+			return 0, false
+		}
+		return int64(typed), true
+	case uint32:
+		if typed == 0 {
+			return 0, false
+		}
+		return int64(typed), true
+	case uint64:
+		if typed == 0 || typed > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(typed), true
+	case float64:
+		if !validMCPIntegerFloat(typed) {
+			return 0, false
+		}
+		return int64(typed), true
+	default:
+		return 0, false
+	}
+}
+
+func validMCPIntegerFloat(value float64) bool {
+	// float64(math.MaxInt64) rounds up to 1<<63; values at that boundary cannot
+	// be safely converted back to int64 for Codex's integer TOML fields.
+	return !math.IsNaN(value) &&
+		!math.IsInf(value, 0) &&
+		math.Trunc(value) == value &&
+		value > 0 &&
+		value < float64(math.MaxInt64)
 }
 
 func codexMCPServersToGeneric(servers map[string]any) map[string]any {

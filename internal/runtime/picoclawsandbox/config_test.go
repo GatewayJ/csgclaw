@@ -82,8 +82,9 @@ func TestRenderConfigWithMCPConfigWritesPicoClawToolsMCP(t *testing.T) {
 		data, err := RenderConfigWithMCPConfig("manager", "u-manager", baseServer, baseModel, map[string]any{
 			"mcpServers": map[string]any{
 				"context7": map[string]any{
-					"command": "uvx",
-					"args":    []any{"context7-mcp"},
+					"command":             "uvx",
+					"args":                []any{"context7-mcp"},
+					"startup_timeout_sec": float64(90),
 				},
 				"filesystem": map[string]any{
 					"command": "npx",
@@ -112,6 +113,9 @@ func TestRenderConfigWithMCPConfigWritesPicoClawToolsMCP(t *testing.T) {
 		args := context7["args"].([]any)
 		if got, want := args[0], "context7-mcp"; got != want {
 			t.Fatalf("context7.args[0] = %#v, want %q", got, want)
+		}
+		if got, want := context7["startup_timeout_sec"], float64(90); got != want {
+			t.Fatalf("context7.startup_timeout_sec = %#v, want %#v", got, want)
 		}
 		filesystem := servers["filesystem"].(map[string]any)
 		if got, want := filesystem["args"], []any{

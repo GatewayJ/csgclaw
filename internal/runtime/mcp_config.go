@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 	"strings"
@@ -212,6 +213,12 @@ func normalizeMCPServerEntry(path, name string, entry map[string]any) (map[strin
 	if err := validateMCPStringMapField(normalized, "headers"); err != nil {
 		return nil, fmt.Errorf("%s.%s.%s.headers must be an object with string values", path, MCPConfigServersKey, name)
 	}
+	if err := validateMCPIntegerField(normalized, "startup_timeout_sec"); err != nil {
+		return nil, fmt.Errorf("%s.%s.%s.startup_timeout_sec %s", path, MCPConfigServersKey, name, err)
+	}
+	if err := validateMCPIntegerField(normalized, "tool_timeout_sec"); err != nil {
+		return nil, fmt.Errorf("%s.%s.%s.tool_timeout_sec %s", path, MCPConfigServersKey, name, err)
+	}
 	if err := validateMCPStringField(normalized, "transport"); err != nil {
 		return nil, fmt.Errorf("%s.%s.%s.transport must be a string", path, MCPConfigServersKey, name)
 	}
@@ -277,6 +284,70 @@ func validateMCPStringMapField(values map[string]any, key string) error {
 		}
 	}
 	return nil
+}
+
+func validateMCPIntegerField(values map[string]any, key string) error {
+	raw, ok := values[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch typed := raw.(type) {
+	case int:
+		if typed > 0 {
+			return nil
+		}
+	case int8:
+		if typed > 0 {
+			return nil
+		}
+	case int16:
+		if typed > 0 {
+			return nil
+		}
+	case int32:
+		if typed > 0 {
+			return nil
+		}
+	case int64:
+		if typed > 0 {
+			return nil
+		}
+	case uint:
+		if typed > 0 && uint64(typed) <= math.MaxInt64 {
+			return nil
+		}
+	case uint8:
+		if typed > 0 {
+			return nil
+		}
+	case uint16:
+		if typed > 0 {
+			return nil
+		}
+	case uint32:
+		if typed > 0 {
+			return nil
+		}
+	case uint64:
+		if typed > 0 && typed <= math.MaxInt64 {
+			return nil
+		}
+	case float64:
+		if validMCPIntegerFloat(typed) {
+			return nil
+		}
+	}
+	return fmt.Errorf("must be a positive integer")
+}
+
+func validMCPIntegerFloat(value float64) bool {
+	// float64(math.MaxInt64) rounds up to 1<<63, so a <= check would allow a
+	// value that overflows int64 when Codex renders TOML.
+	return !math.IsNaN(value) &&
+		!math.IsInf(value, 0) &&
+		math.Trunc(value) == value &&
+		value > 0 &&
+		value < float64(math.MaxInt64)
 }
 
 func cloneMCPJSONObject(value any) any {
