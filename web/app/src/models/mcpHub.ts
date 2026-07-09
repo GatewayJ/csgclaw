@@ -69,14 +69,18 @@ export function parseMCPServerWrapper(value: string): HubMCPServerPayload | null
   } catch {
     return null;
   }
-  const entries = Object.entries(cloneMCPServersRecord(mcpServerRecordFromRoot(parsed)));
+  return mcpServerPayloadFromConfig(parsed);
+}
+
+export function mcpServerPayloadFromConfig(config: unknown): HubMCPServerPayload | null {
+  const entries = Object.entries(cloneMCPServersRecord(mcpServerRecordFromRoot(config)));
   if (entries.length !== 1) {
     return null;
   }
-  const [name, config] = entries[0];
+  const [name, serverConfig] = entries[0];
   return {
     name,
-    config,
+    config: serverConfig,
   };
 }
 
