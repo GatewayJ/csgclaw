@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftOpen, Plus, Search, Server } from "lucide-react";
+import {
+  Bell,
+  Bot,
+  Boxes,
+  CalendarClock,
+  FileCode2,
+  ListCheck,
+  MessageSquareText,
+  Monitor,
+  PanelLeftOpen,
+  Plus,
+  Search,
+  Server,
+  UserRound,
+  UsersRound,
+  Wrench,
+} from "lucide-react";
 import { SidebarRailControlButton } from "./SidebarRailControlButton";
 import { SidebarUserButton } from "./SidebarUserButton";
 import { LogoMark, LogoWordmark } from "./WorkspaceSidebarBrand";
@@ -9,28 +25,24 @@ import { WorkspaceContextSectionIds } from "./types";
 import { WorkspacePaneTypes, WorkspaceTabs, workspaceHasContextSidebar } from "@/models/routing";
 import { classNames } from "@/shared/lib/classNames";
 import styles from "./WorkspaceSidebar.module.css";
-import type { CSSProperties, ComponentType } from "react";
-
 import type { PrimaryNavigationItem, PrimaryNavigationSection } from "./WorkspacePrimaryNavigation";
 import type { WorkspaceContextSectionId, WorkspaceSidebarProps } from "./types";
+import type { ComponentType } from "react";
 
-type SidebarNavigationIcon = string | ComponentType<{ size?: number | string }>;
-type NavigationIconStyle = CSSProperties & {
-  "--workspace-nav-icon-url": string;
-};
+type SidebarNavigationIcon = ComponentType<{ size?: number | string; "aria-hidden"?: boolean | "true" | "false" }>;
 
 const WORKSPACE_NAVIGATION_ICONS = {
-  agents: "icons/workspace-agents.svg",
-  computers: "icons/workspace-computers.svg",
-  humans: "icons/workspace-humans.svg",
-  messages: "icons/workspace-messages.svg",
-  models: "icons/workspace-models.svg",
-  notifications: "icons/workspace-notifications.svg",
-  scheduledTasks: "icons/workspace-scheduled-tasks.svg",
-  skills: "icons/workspace-skills.svg",
-  tasks: "icons/workspace-tasks.svg",
-  teams: "icons/workspace-teams.svg",
-  templates: "icons/workspace-templates.svg",
+  agents: Bot,
+  computers: Monitor,
+  humans: UserRound,
+  messages: MessageSquareText,
+  models: Boxes,
+  notifications: Bell,
+  scheduledTasks: CalendarClock,
+  skills: Wrench,
+  tasks: ListCheck,
+  teams: UsersRound,
+  templates: FileCode2,
 } as const;
 
 export function WorkspaceSidebar({
@@ -560,15 +572,6 @@ export function WorkspaceSidebar({
 }
 
 function navigationIcon(icon: SidebarNavigationIcon) {
-  if (typeof icon === "string") {
-    return (
-      <span
-        className={styles.primaryNavIconMask}
-        style={{ "--workspace-nav-icon-url": `url("${icon}")` } as NavigationIconStyle}
-        aria-hidden="true"
-      />
-    );
-  }
   const Icon = icon;
 
   return (
