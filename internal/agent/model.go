@@ -327,6 +327,9 @@ func (s *CreateAgentSpec) UnmarshalJSON(data []byte) error {
 		MCPConfig:      utils.CloneAnyMap(decoded.MCPConfig),
 		AgentProfile:   cloneProfile(decoded.AgentProfile),
 	}
+	if runtimeOptionsHasLegacyMCP(out.RuntimeOptions) {
+		return fmt.Errorf("runtime_options.%s is deprecated, use mcp_config instead", agentruntime.RuntimeOptionMCPKey)
+	}
 	var rawFields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &rawFields); err == nil {
 		if _, ok := rawFields["mcp_config"]; ok {

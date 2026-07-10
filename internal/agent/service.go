@@ -1902,6 +1902,9 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 			defer cleanup()
 		}
 	}
+	if runtimeOptionsHasLegacyMCP(spec.RuntimeOptions) {
+		return Agent{}, fmt.Errorf("runtime_options.%s is deprecated, use mcp_config instead", agentruntime.RuntimeOptionMCPKey)
+	}
 	id := strings.TrimSpace(spec.ID)
 	name := strings.TrimSpace(spec.Name)
 	description := strings.TrimSpace(spec.Description)

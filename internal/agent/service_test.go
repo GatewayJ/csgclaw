@@ -1943,7 +1943,7 @@ func TestUpdateLegacyMCPRuntimeOptionsRejectsInvalidRoot(t *testing.T) {
 	}
 }
 
-func TestCreatePicoClawMCPConfigIsAccepted(t *testing.T) {
+func TestCreatePicoClawLegacyRuntimeOptionsMCPIsRejected(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1955,7 +1955,7 @@ func TestCreatePicoClawMCPConfigIsAccepted(t *testing.T) {
 		t.Fatalf("NewService() error = %v", err)
 	}
 
-	created, err := svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
+	_, err = svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
 		Name:        "dev",
 		Role:        RoleWorker,
 		RuntimeKind: RuntimeKindPicoClawSandbox,
@@ -1963,6 +1963,20 @@ func TestCreatePicoClawMCPConfigIsAccepted(t *testing.T) {
 		RuntimeOptions: map[string]any{
 			"mcp": map[string]any{"mcpServers": map[string]any{}},
 		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
+		t.Fatalf("Create() error = %v, want legacy runtime_options.mcp rejection", err)
+	}
+
+	created, err := svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
+		Name:        "dev2",
+		Role:        RoleWorker,
+		RuntimeKind: RuntimeKindPicoClawSandbox,
+		Image:       "picoclaw-image:test",
+		MCPConfig: map[string]any{
+			"mcpServers": map[string]any{},
+		},
+		MCPConfigSet: true,
 	}})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
