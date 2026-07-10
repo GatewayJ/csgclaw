@@ -9,10 +9,12 @@ import { WorkspaceContextSectionIds } from "./types";
 import { WorkspacePaneTypes, WorkspaceTabs, workspaceHasContextSidebar } from "@/models/routing";
 import { classNames } from "@/shared/lib/classNames";
 import styles from "./WorkspaceSidebar.module.css";
+import type { CSSProperties, ComponentType } from "react";
+
 import type { PrimaryNavigationItem, PrimaryNavigationSection } from "./WorkspacePrimaryNavigation";
 import type { WorkspaceContextSectionId, WorkspaceSidebarProps } from "./types";
-import type { CSSProperties } from "react";
 
+type SidebarNavigationIcon = string | ComponentType<{ size?: number | string }>;
 type NavigationIconStyle = CSSProperties & {
   "--workspace-nav-icon-url": string;
 };
@@ -117,7 +119,7 @@ export function WorkspaceSidebar({
   const firstNotificationAgent = notificationAgentItems[0] ?? null;
   const firstTeam = teams[0] ?? null;
   const firstHubTemplate = hub?.templates[0] ?? null;
-  const firstHubMCP = hub?.mcps[0] ?? null;
+  const firstHubMCP = hub?.mcps?.[0] ?? null;
   const firstHubSkill = hub?.skills[0] ?? null;
   const firstModelProvider = modelProviders?.providers[0] ?? null;
   const notificationAgentIds = useMemo(
@@ -276,7 +278,7 @@ export function WorkspaceSidebar({
           },
           {
             active: activeContextSectionId === WorkspaceContextSectionIds.hubMCPs,
-            badge: badgeCount(hub?.mcps.length),
+            badge: badgeCount(hub?.mcps?.length),
             groupId: WorkspaceContextSectionIds.hubMCPs,
             icon: navigationIcon(Server),
             id: "mcps",
@@ -334,7 +336,7 @@ export function WorkspaceSidebar({
       firstNotificationAgent,
       firstTeam,
       firstWorkerAgent,
-      hub?.mcps.length,
+      hub?.mcps?.length,
       hub?.templates.length,
       hub?.skills.length,
       modelProviders?.providers.length,
@@ -557,13 +559,20 @@ export function WorkspaceSidebar({
   );
 }
 
-function navigationIcon(path: string) {
+function navigationIcon(icon: SidebarNavigationIcon) {
+  if (typeof icon === "string") {
+    return (
+      <span
+        className={styles.primaryNavIconMask}
+        style={{ "--workspace-nav-icon-url": `url("${icon}")` } as NavigationIconStyle}
+        aria-hidden="true"
+      />
+    );
+  }
+  const Icon = icon;
+
   return (
-    <span
-      className={styles.primaryNavIconMask}
-      style={{ "--workspace-nav-icon-url": `url("${path}")` } as NavigationIconStyle}
-      aria-hidden="true"
-    />
+    <Icon size={24} aria-hidden="true" />
   );
 }
 
@@ -714,7 +723,7 @@ function contextBadgeCountForSection({
     return hub?.templates.length ?? 0;
   }
   if (activeContextSectionId === WorkspaceContextSectionIds.hubMCPs) {
-    return hub?.mcps.length ?? 0;
+    return hub?.mcps?.length ?? 0;
   }
   if (activeContextSectionId === WorkspaceContextSectionIds.hubSkills) {
     return hub?.skills.length ?? 0;
