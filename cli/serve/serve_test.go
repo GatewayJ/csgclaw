@@ -791,6 +791,9 @@ func TestServeForegroundPassesContextToServer(t *testing.T) {
 		if opts.Upgrade == nil {
 			return fmt.Errorf("Upgrade = nil, want configured manager")
 		}
+		if opts.MCP == nil {
+			return fmt.Errorf("MCP = nil, want configured service")
+		}
 		if opts.OnReady == nil {
 			return fmt.Errorf("OnReady is nil")
 		}

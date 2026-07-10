@@ -41,6 +41,7 @@ import (
 	"csgclaw/internal/im"
 	"csgclaw/internal/llm"
 	"csgclaw/internal/localstore"
+	"csgclaw/internal/mcp"
 	"csgclaw/internal/modelprovider"
 	internalonboard "csgclaw/internal/onboard"
 	"csgclaw/internal/participant"
@@ -611,6 +612,7 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 	if err != nil {
 		return err
 	}
+	mcpSvc := mcp.NewService()
 	teamSvc, teamAdapters, err := NewTeamService(imSvc, feishuSvc, participantSvc)
 	if err != nil {
 		return err
@@ -637,6 +639,7 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 		ListenAddr:        cfg.Server.ListenAddr,
 		Service:           svc,
 		Hub:               hubSvc,
+		MCP:               mcpSvc,
 		Participant:       participantSvc,
 		IM:                imSvc,
 		IMBus:             imBus,

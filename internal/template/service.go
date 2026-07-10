@@ -43,7 +43,6 @@ type Service struct {
 	defaultPublishRegistry string
 	stores                 map[string]configuredStore
 	order                  []string
-	mcpStore               MCPStateStore
 }
 
 type configuredStore struct {
@@ -52,14 +51,6 @@ type configuredStore struct {
 }
 
 type ServiceOption func(*Service)
-
-func WithMCPStateStore(store MCPStateStore) ServiceOption {
-	return func(s *Service) {
-		if store != nil {
-			s.mcpStore = store
-		}
-	}
-}
 
 func NewService(cfg config.HubConfig, factory StoreFactory, options ...ServiceOption) (*Service, error) {
 	if factory == nil {
@@ -72,7 +63,6 @@ func NewService(cfg config.HubConfig, factory StoreFactory, options ...ServiceOp
 		defaultPublishRegistry: resolved.DefaultPublishRegistry,
 		stores:                 make(map[string]configuredStore, len(resolved.Registries)),
 		order:                  make([]string, 0, len(resolved.Registries)),
-		mcpStore:               defaultMCPStateStore(),
 	}
 	for _, option := range options {
 		if option != nil {

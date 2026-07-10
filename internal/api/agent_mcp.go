@@ -9,7 +9,7 @@ import (
 	"csgclaw/internal/agent"
 )
 
-type addAgentMCPServersRequest struct {
+type batchAddAgentMCPServersRequest struct {
 	Names []string `json:"names"`
 }
 
@@ -17,7 +17,7 @@ func (h *Handler) handleAgentMCPByID(w http.ResponseWriter, r *http.Request) {
 	h.handleAgentMCP(w, r, pathValue(r, "id"))
 }
 
-func (h *Handler) handleAgentMCPServersByID(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleBatchAddAgentMCPServers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -26,8 +26,8 @@ func (h *Handler) handleAgentMCPServersByID(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	if h.hub == nil {
-		http.Error(w, "hub service is not configured", http.StatusServiceUnavailable)
+	if h.mcp == nil {
+		http.Error(w, "mcp service is not configured", http.StatusServiceUnavailable)
 		return
 	}
 	id := strings.TrimSpace(pathValue(r, "id"))
@@ -35,7 +35,7 @@ func (h *Handler) handleAgentMCPServersByID(w http.ResponseWriter, r *http.Reque
 		http.NotFound(w, r)
 		return
 	}
-	var req addAgentMCPServersRequest
+	var req batchAddAgentMCPServersRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 		return
@@ -51,12 +51,12 @@ func (h *Handler) handleAgentMCPServersByID(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "names is required", http.StatusBadRequest)
 		return
 	}
-	hubServers, err := h.hub.ListMCPServers(r.Context())
+	servers, err := h.mcp.ListServers(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	updated, err := h.svc.AddMCPServers(r.Context(), id, req.Names, hubServers)
+	updated, err := h.svc.AddMCPServers(r.Context(), id, req.Names, servers)
 	if err != nil {
 		writeAgentMCPMutationError(w, err)
 		return

@@ -25,6 +25,7 @@ import (
 	"csgclaw/internal/config"
 	"csgclaw/internal/im"
 	"csgclaw/internal/llm"
+	"csgclaw/internal/mcp"
 	"csgclaw/internal/participant"
 	agentruntime "csgclaw/internal/runtime"
 	codexruntime "csgclaw/internal/runtime/codex"
@@ -3191,22 +3192,22 @@ func newAgentSkillManagementTestServer(t *testing.T) (*Handler, *agent.Service, 
 	return &Handler{svc: svc, hub: hubSvc}, svc, created
 }
 
-func TestHandleAgentMCPServersAddsHubServersByName(t *testing.T) {
+func TestHandleBatchAddAgentMCPServersAddsCatalogServersByName(t *testing.T) {
 	srv, svc, created := newAgentMCPManagementTestServer(t)
 
-	if _, err := srv.hub.CreateMCPServer(context.Background(), "context7", map[string]any{
+	if _, err := srv.mcp.CreateServer(context.Background(), "context7", map[string]any{
 		"command":     "uvx",
 		"args":        []any{"context7-mcp"},
 		"description": "Context7",
 	}); err != nil {
-		t.Fatalf("CreateMCPServer(context7) error = %v", err)
+		t.Fatalf("CreateServer(context7) error = %v", err)
 	}
-	if _, err := srv.hub.CreateMCPServer(context.Background(), "remote", map[string]any{
+	if _, err := srv.mcp.CreateServer(context.Background(), "remote", map[string]any{
 		"url":         "https://mcp.example.com/mcp",
 		"transport":   "streamable-http",
 		"description": "Remote",
 	}); err != nil {
-		t.Fatalf("CreateMCPServer(remote) error = %v", err)
+		t.Fatalf("CreateServer(remote) error = %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(`{"names":["context7","remote","context7"]}`))
@@ -3243,7 +3244,7 @@ func TestHandleAgentMCPServersAddsHubServersByName(t *testing.T) {
 	}
 }
 
-func TestHandleAgentMCPServersReturnsNotFoundWhenHubServerMissing(t *testing.T) {
+func TestHandleBatchAddAgentMCPServersReturnsNotFoundWhenCatalogServerMissing(t *testing.T) {
 	srv, _, created := newAgentMCPManagementTestServer(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(`{"names":["missing"]}`))
@@ -3264,6 +3265,7 @@ func newAgentMCPManagementTestServer(t *testing.T) (*Handler, *agent.Service, ag
 	if err != nil {
 		t.Fatalf("hub.NewService() error = %v", err)
 	}
+	mcpSvc := mcp.NewService()
 
 	svc, err := agent.NewService(config.ModelConfig{
 		Provider: config.ProviderLLMAPI,
@@ -3295,7 +3297,49 @@ func newAgentMCPManagementTestServer(t *testing.T) (*Handler, *agent.Service, ag
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	return &Handler{svc: svc, hub: hubSvc}, svc, created
+	return &Handler{svc: svc, mcp: mcpSvc}, svc, created
+}
+
+func TestHandleMCPServersUsesMCPService(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	srv := &Handler{mcp: mcp.NewService()}
+
+	post := httptest.NewRequest(http.MethodPost, "/api/v1/mcp-servers", strings.NewReader(`{"name":"context7","config":{"command":"uvx","args":["context7-mcp"]}}`))
+	postRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(postRec, post)
+	if postRec.Code != http.StatusCreated {
+		t.Fatalf("POST status = %d, want %d; body=%s", postRec.Code, http.StatusCreated, postRec.Body.String())
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/api/v1/mcp-servers", nil)
+	getRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(getRec, get)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d; body=%s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	var state struct {
+		Servers map[string]any `json:"mcpServers"`
+	}
+	if err := json.NewDecoder(getRec.Body).Decode(&state); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if _, ok := state.Servers["context7"]; !ok {
+		t.Fatalf("GET mcpServers = %#v, want context7", state.Servers)
+	}
+
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/mcp-servers/context7", strings.NewReader(`{"name":"remote","config":{"url":"https://mcp.example.com"}}`))
+	putRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(putRec, put)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want %d; body=%s", putRec.Code, http.StatusOK, putRec.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/mcp-servers/remote", nil)
+	deleteRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d, want %d; body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
+	}
 }
 
 func mcpServersFromConfigForTest(t *testing.T, config map[string]any) map[string]any {

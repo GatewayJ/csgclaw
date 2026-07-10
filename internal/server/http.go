@@ -15,6 +15,7 @@ import (
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/im"
 	"csgclaw/internal/llm"
+	"csgclaw/internal/mcp"
 	"csgclaw/internal/participant"
 	"csgclaw/internal/runtimecatalog"
 	"csgclaw/internal/scheduledtask"
@@ -27,6 +28,7 @@ type Options struct {
 	ListenAddr        string
 	Service           *agent.Service
 	Hub               *hub.Service
+	MCP               *mcp.Service
 	Participant       *participant.Service
 	IM                *im.Service
 	IMBus             *im.Bus
@@ -51,6 +53,7 @@ func newHandler(opts Options) *api.Handler {
 	handler := api.NewHandlerWithAuth(opts.Service, opts.IM, opts.IMBus, opts.ParticipantBridge, opts.Feishu, opts.LLM, opts.AccessToken, opts.NoAuth)
 	handler.SetParticipantService(opts.Participant)
 	handler.SetHubService(opts.Hub)
+	handler.SetMCPService(opts.MCP)
 	handler.SetTeamService(opts.Team)
 	handler.SetAgentTaskService(opts.AgentTask)
 	handler.SetScheduledTaskService(opts.ScheduledTask)

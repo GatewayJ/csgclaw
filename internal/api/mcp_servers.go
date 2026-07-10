@@ -7,36 +7,36 @@ import (
 	"net/http"
 	"strings"
 
-	"csgclaw/internal/template"
+	"csgclaw/internal/mcp"
 )
 
-type hubMCPServerRequest struct {
+type mcpServerRequest struct {
 	Config map[string]any `json:"config"`
 	Name   string         `json:"name"`
 }
 
-func (h *Handler) handleHubMCPServers(w http.ResponseWriter, r *http.Request) {
-	if h.hub == nil {
-		http.Error(w, "hub service is not configured", http.StatusServiceUnavailable)
+func (h *Handler) handleMCPServers(w http.ResponseWriter, r *http.Request) {
+	if h.mcp == nil {
+		http.Error(w, "mcp service is not configured", http.StatusServiceUnavailable)
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
-		servers, err := h.hub.ListMCPServers(r.Context())
+		servers, err := h.mcp.ListServers(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"mcpServers": servers})
+		writeJSON(w, http.StatusOK, map[string]any{mcp.ServersKey: servers})
 	case http.MethodPost:
-		req, err := decodeHubMCPServerRequest(r)
+		req, err := decodeMCPServerRequest(r)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 			return
 		}
-		state, err := h.hub.CreateMCPServer(r.Context(), req.Name, req.Config)
+		state, err := h.mcp.CreateServer(r.Context(), req.Name, req.Config)
 		if err != nil {
-			writeHubMCPError(w, err)
+			writeMCPServerError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, state)
@@ -45,9 +45,9 @@ func (h *Handler) handleHubMCPServers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) handleHubMCPServerByName(w http.ResponseWriter, r *http.Request) {
-	if h.hub == nil {
-		http.Error(w, "hub service is not configured", http.StatusServiceUnavailable)
+func (h *Handler) handleMCPServerByName(w http.ResponseWriter, r *http.Request) {
+	if h.mcp == nil {
+		http.Error(w, "mcp service is not configured", http.StatusServiceUnavailable)
 		return
 	}
 	name := strings.TrimSpace(pathValue(r, "name"))
@@ -57,7 +57,7 @@ func (h *Handler) handleHubMCPServerByName(w http.ResponseWriter, r *http.Reques
 	}
 	switch r.Method {
 	case http.MethodPut:
-		req, err := decodeHubMCPServerRequest(r)
+		req, err := decodeMCPServerRequest(r)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 			return
@@ -66,16 +66,16 @@ func (h *Handler) handleHubMCPServerByName(w http.ResponseWriter, r *http.Reques
 		if nextName == "" {
 			nextName = name
 		}
-		state, err := h.hub.UpdateMCPServer(r.Context(), name, nextName, req.Config)
+		state, err := h.mcp.UpdateServer(r.Context(), name, nextName, req.Config)
 		if err != nil {
-			writeHubMCPError(w, err)
+			writeMCPServerError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, state)
 	case http.MethodDelete:
-		state, err := h.hub.DeleteMCPServer(r.Context(), name)
+		state, err := h.mcp.DeleteServer(r.Context(), name)
 		if err != nil {
-			writeHubMCPError(w, err)
+			writeMCPServerError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, state)
@@ -84,8 +84,8 @@ func (h *Handler) handleHubMCPServerByName(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func decodeHubMCPServerRequest(r *http.Request) (hubMCPServerRequest, error) {
-	var req hubMCPServerRequest
+func decodeMCPServerRequest(r *http.Request) (mcpServerRequest, error) {
+	var req mcpServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return req, err
 	}
@@ -96,12 +96,12 @@ func decodeHubMCPServerRequest(r *http.Request) (hubMCPServerRequest, error) {
 	return req, nil
 }
 
-func writeHubMCPError(w http.ResponseWriter, err error) {
+func writeMCPServerError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
-	if errors.Is(err, template.ErrHubMCPServerExists) {
+	if errors.Is(err, mcp.ErrServerExists) {
 		status = http.StatusConflict
 	}
-	if errors.Is(err, template.ErrHubMCPServerNotFound) {
+	if errors.Is(err, mcp.ErrServerNotFound) {
 		status = http.StatusNotFound
 	}
 	http.Error(w, err.Error(), status)

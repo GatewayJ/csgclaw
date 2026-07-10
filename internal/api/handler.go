@@ -26,6 +26,7 @@ import (
 	"csgclaw/internal/connectors"
 	"csgclaw/internal/im"
 	"csgclaw/internal/llm"
+	"csgclaw/internal/mcp"
 	"csgclaw/internal/participant"
 	agentruntime "csgclaw/internal/runtime"
 	"csgclaw/internal/runtimecatalog"
@@ -50,6 +51,7 @@ type Handler struct {
 	feishu                     *feishu.Service
 	llm                        *llm.Service
 	hub                        *hub.Service
+	mcp                        *mcp.Service
 	teamSvc                    *team.Service
 	agentTaskSvc               *agenttask.Service
 	scheduledTaskSvc           *scheduledtask.Service
@@ -758,6 +760,12 @@ func (h *Handler) SetUpgradeManager(manager *upgrade.Manager) {
 
 func (h *Handler) SetHubService(svc *hub.Service) {
 	h.hub = svc
+}
+
+func (h *Handler) SetMCPService(svc *mcp.Service) {
+	if h != nil {
+		h.mcp = svc
+	}
 }
 
 func (h *Handler) SetTeamService(svc *team.Service) {
