@@ -2518,8 +2518,15 @@ func assertMCPServers(t *testing.T, raw any) {
 		t.Fatalf("context7.args = %#v, want [context7-mcp]", context7["args"])
 	}
 	env, ok := context7["env"].(map[string]any)
-	if !ok || env["CONTEXT7_API_KEY"] != "secret" {
-		t.Fatalf("context7.env = %#v, want CONTEXT7_API_KEY", context7["env"])
+	if !ok {
+		t.Fatalf("context7.env = %#v, want map", context7["env"])
+	}
+	secret, ok := env["CONTEXT7_API_KEY"].(string)
+	if !ok {
+		t.Fatalf("context7.env[CONTEXT7_API_KEY] = %#v, want string", env["CONTEXT7_API_KEY"])
+	}
+	if secret != "secret" && secret != participant.RedactedSecretValue {
+		t.Fatalf("context7.env[CONTEXT7_API_KEY] = %q, want secret or %q", secret, participant.RedactedSecretValue)
 	}
 	remote, ok := servers["remote"].(map[string]any)
 	if !ok {

@@ -204,7 +204,7 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 		Profile:          apiAgent.Profile,
 		ProfileConfig:    apiAgent.ProfileConfig,
 		RuntimeOptions:   apiAgent.Runtime.Options,
-		MCPConfig:        utils.CloneAnyMap(apiAgent.MCPConfig),
+		MCPConfig:        sanitizeMCPConfigResponse(apiAgent.MCPConfig),
 		AgentProfile:     agentProfileViewFromAPI(apiAgent.ProfileConfig),
 		UserID:           apiAgent.UserID,
 		UserName:         apiAgent.UserName,
@@ -264,7 +264,7 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 		r.RuntimeOptions = legacy.RuntimeOptions
 	}
 	if len(legacy.MCPConfig) > 0 {
-		r.MCPConfig = legacy.MCPConfig
+		r.MCPConfig = sanitizeMCPConfigResponse(legacy.MCPConfig)
 	}
 	if len(legacy.RuntimeOptionSchemas) > 0 {
 		r.RuntimeOptionSchemas = legacy.RuntimeOptionSchemas
@@ -2799,12 +2799,58 @@ func presentAgent(item agent.Agent) agentResponse {
 		UpdatedAt:        item.UpdatedAt,
 		Profile:          item.Profile,
 		RuntimeOptions:   runtimeOptions,
-		MCPConfig:        utils.CloneAnyMap(item.MCPConfig),
+		MCPConfig:        sanitizeMCPConfigResponse(item.MCPConfig),
 		ProfileConfig:    profile,
 		AgentProfile:     av,
 		ProfileComplete:  item.ProfileComplete,
 		DetectionResults: append([]agent.ProfileDetectionResult(nil), item.DetectionResults...),
 	}
+}
+
+func sanitizeMCPConfigResponse(config map[string]any) map[string]any {
+	config = utils.CloneAnyMap(config)
+	if len(config) == 0 {
+		return nil
+	}
+	mcpServers, ok := config[agentruntime.MCPConfigServersKey].(map[string]any)
+	if !ok || len(mcpServers) == 0 {
+		return config
+	}
+	sanitizedServers := make(map[string]any, len(mcpServers))
+	for name, rawServer := range mcpServers {
+		server, ok := rawServer.(map[string]any)
+		if !ok {
+			sanitizedServers[name] = rawServer
+			continue
+		}
+		server = utils.CloneAnyMap(server)
+		if env, ok := server["env"].(map[string]any); ok {
+			server = utils.OverlayAnyMap(server, map[string]any{
+				"env": sanitizeMCPSecretMap(env),
+			})
+		}
+		if headers, ok := server["headers"].(map[string]any); ok {
+			server = utils.OverlayAnyMap(server, map[string]any{
+				"headers": sanitizeMCPSecretMap(headers),
+			})
+		}
+		sanitizedServers[name] = server
+	}
+	if len(sanitizedServers) > 0 {
+		config[agentruntime.MCPConfigServersKey] = sanitizedServers
+	}
+	return config
+}
+
+func sanitizeMCPSecretMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(values))
+	for key := range values {
+		out[key] = participant.RedactedSecretValue
+	}
+	return out
 }
 
 func profileResponseFromAgentView(view agent.AgentProfileView) apitypes.AgentProfile {

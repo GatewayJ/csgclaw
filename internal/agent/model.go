@@ -498,20 +498,8 @@ func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
 		out.SandboxEnabled != nil
 	out.RuntimeSelectionRequested = rawRuntimeSelectionRequested && updateFieldMaskRequestsRuntimeSelection(out.FieldMask)
 	if out.RuntimeOptions != nil {
-		var existingMCPConfig map[string]any
-		if out.MCPConfig != nil {
-			existingMCPConfig = *out.MCPConfig
-		}
-		options, mcpConfig, legacyMCPSet, err := splitLegacyRuntimeOptionsMCPStrictWithPresence(*out.RuntimeOptions, existingMCPConfig, out.MCPConfigSet)
-		if err != nil {
-			return err
-		}
-		out.RuntimeOptions = &options
-		if !out.MCPConfigSet && legacyMCPSet {
-			if mcpConfig != nil {
-				out.MCPConfig = &mcpConfig
-			}
-			out.MCPConfigSet = true
+		if _, legacyMCPSet := (*out.RuntimeOptions)[agentruntime.RuntimeOptionMCPKey]; legacyMCPSet {
+			return fmt.Errorf("runtime_options.%s is deprecated, use mcp_config instead", agentruntime.RuntimeOptionMCPKey)
 		}
 	}
 	if len(out.FieldMask) > 0 {

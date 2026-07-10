@@ -1730,8 +1730,8 @@ func TestUpdateMCPConfigRecreatesOpenClawAndProvisionsLatestConfig(t *testing.T)
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
-	if mcpReconcileCalls != 1 {
-		t.Fatalf("ReconcileMCPConfig() calls = %d, want 1", mcpReconcileCalls)
+	if mcpReconcileCalls != 0 {
+		t.Fatalf("ReconcileMCPConfig() calls = %d, want 0", mcpReconcileCalls)
 	}
 	if len(provisionCalls) != 1 {
 		t.Fatalf("Provision() calls = %d, want 1", len(provisionCalls))
@@ -1826,7 +1826,7 @@ func TestUpdateMCPConfigRecreateFailureKeepsRestartRequired(t *testing.T) {
 	}
 }
 
-func TestUpdatePicoClawMCPConfigIsAccepted(t *testing.T) {
+func TestUpdatePicoClawMCPConfigUsesLegacyRuntimeOptionsMCPIsRejected(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1853,31 +1853,18 @@ func TestUpdatePicoClawMCPConfigIsAccepted(t *testing.T) {
 	nextRuntimeOptions := map[string]any{
 		"mcp": map[string]any{"mcpServers": map[string]any{}},
 	}
-	updated, err := svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if _, ok := updated.MCPConfig["mcpServers"].(map[string]any); !ok {
-		t.Fatalf("Update().MCPConfig = %#v, want managed empty config", updated.MCPConfig)
+	_, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
+	if err == nil || !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
+		t.Fatalf("Update() error = %v, want legacy runtime_options.mcp rejection", err)
 	}
 }
 
 func TestUpdateRequestLegacyMCPRuntimeOptionsNullMarksMCPConfigClear(t *testing.T) {
 	var req UpdateRequest
-	if err := json.Unmarshal([]byte(`{"runtime_options":{"local_workspace_dir":"/tmp/project","mcp":null}}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal(UpdateRequest) error = %v", err)
-	}
-	if !req.MCPConfigSet {
-		t.Fatal("UpdateRequest.MCPConfigSet = false, want true for legacy runtime_options.mcp null")
-	}
-	if req.MCPConfig != nil {
-		t.Fatalf("UpdateRequest.MCPConfig = %#v, want nil clear", *req.MCPConfig)
-	}
-	if req.RuntimeOptions == nil {
-		t.Fatal("UpdateRequest.RuntimeOptions = nil, want legacy mcp stripped options")
-	}
-	if _, ok := (*req.RuntimeOptions)[agentruntime.RuntimeOptionMCPKey]; ok {
-		t.Fatalf("UpdateRequest.RuntimeOptions still contains legacy mcp: %#v", *req.RuntimeOptions)
+	if err := json.Unmarshal([]byte(`{"runtime_options":{"local_workspace_dir":"/tmp/project","mcp":null}}`), &req); err == nil {
+		t.Fatal("json.Unmarshal(UpdateRequest) error = nil, want legacy runtime_options.mcp rejection")
+	} else if !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
+		t.Fatalf("json.Unmarshal(UpdateRequest) error = %v, want deprecated runtime_options.mcp rejection", err)
 	}
 }
 
@@ -1917,15 +1904,10 @@ func TestUpdateLegacyMCPRuntimeOptionsNullClearsMCPConfig(t *testing.T) {
 		"local_workspace_dir": "/tmp/project",
 		"mcp":                 nil,
 	}
-	updated, err := svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if updated.MCPConfig != nil {
-		t.Fatalf("Update().MCPConfig = %#v, want nil after legacy mcp null", updated.MCPConfig)
-	}
-	if _, ok := updated.RuntimeOptions[agentruntime.RuntimeOptionMCPKey]; ok {
-		t.Fatalf("Update().RuntimeOptions still contains legacy mcp: %#v", updated.RuntimeOptions)
+	if _, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions}); err == nil {
+		t.Fatal("Update() error = nil, want legacy runtime_options.mcp rejection")
+	} else if !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
+		t.Fatalf("Update() error = %v, want legacy runtime_options.mcp rejection", err)
 	}
 }
 
@@ -1954,9 +1936,10 @@ func TestUpdateLegacyMCPRuntimeOptionsRejectsInvalidRoot(t *testing.T) {
 	}
 
 	runtimeOptions := map[string]any{"mcp": "invalid"}
-	_, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &runtimeOptions})
-	if err == nil || !strings.Contains(err.Error(), "runtime_options.mcp must be an object or null") {
-		t.Fatalf("Update() error = %v, want legacy mcp object error", err)
+	if _, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &runtimeOptions}); err == nil {
+		t.Fatal("Update() error = nil, want legacy runtime_options.mcp rejection")
+	} else if !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
+		t.Fatalf("Update() error = %v, want legacy runtime_options.mcp rejection", err)
 	}
 }
 

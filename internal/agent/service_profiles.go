@@ -471,8 +471,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 		}
 	}
 	if mcpConfigUpdated {
-		if err := s.reconcileMCPConfig(ctx, previous, current); err != nil {
-			return Agent{}, err
+		skipMCPReconcileForRestartingGateway := strings.EqualFold(strings.TrimSpace(runtimeKind), RuntimeKindOpenClawSandbox) && restartRequired
+		if !skipMCPReconcileForRestartingGateway {
+			if err := s.reconcileMCPConfig(ctx, previous, current); err != nil {
+				return Agent{}, err
+			}
 		}
 	}
 	if restartRequired && runtimeRunning && !isGatewayRuntimeKind(runtimeKind) {
