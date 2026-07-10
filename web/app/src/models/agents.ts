@@ -25,7 +25,6 @@ export type BotType = typeof BOT_TYPE_NORMAL | typeof BOT_TYPE_NOTIFICATION | st
 export type ProviderName = "csghub_lite" | "csghub" | "codex" | "claude_code" | "api" | string;
 export type JSONRecord = Record<string, unknown>;
 
-export const MCP_RUNTIME_OPTION_KEY = "mcp";
 export const MCP_CONFIG_EXAMPLE: JSONRecord = {
   mcpServers: {
     context7: {
@@ -322,10 +321,6 @@ export function agentMCPConfig(item: AgentLike | AgentProfileLike | null | undef
   if (agent?.mcp_config && typeof agent.mcp_config === "object" && !Array.isArray(agent.mcp_config)) {
     return { ...(agent.mcp_config as JSONRecord) };
   }
-  const legacyMCP = agentRuntimeOptions(item)[MCP_RUNTIME_OPTION_KEY];
-  if (legacyMCP && typeof legacyMCP === "object" && !Array.isArray(legacyMCP)) {
-    return { ...(legacyMCP as JSONRecord) };
-  }
   return {};
 }
 
@@ -598,12 +593,6 @@ export function setMCPConfig(value: JSONRecord | null): JSONRecord | undefined {
     return undefined;
   }
   return normalizeRuntimeOptionsRecord(value);
-}
-
-export function stripLegacyMCPRuntimeOption(runtimeOptions: JSONRecord | null | undefined): JSONRecord {
-  const next = normalizeRuntimeOptionsRecord(runtimeOptions);
-  delete next[MCP_RUNTIME_OPTION_KEY];
-  return next;
 }
 
 export function isManagerAgent(item: AgentLike | null | undefined): boolean {
