@@ -195,6 +195,7 @@ type CreateAgentSpec struct {
 	Profile        string         `json:"profile,omitempty"`
 	RuntimeOptions map[string]any `json:"runtime_options,omitempty"`
 	MCPConfig      map[string]any `json:"mcp_config,omitempty"`
+	MCPConfigSet   bool           `json:"-"`
 	AgentProfile   AgentProfile   `json:"agent_profile,omitempty"`
 }
 
@@ -326,6 +327,12 @@ func (s *CreateAgentSpec) UnmarshalJSON(data []byte) error {
 		MCPConfig:      utils.CloneAnyMap(decoded.MCPConfig),
 		AgentProfile:   cloneProfile(decoded.AgentProfile),
 	}
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawFields); err == nil {
+		if _, ok := rawFields["mcp_config"]; ok {
+			out.MCPConfigSet = true
+		}
+	}
 	if decoded.SandboxEnabled != nil {
 		out.SandboxEnabled = *decoded.SandboxEnabled
 	}
@@ -352,7 +359,11 @@ func (s *CreateAgentSpec) UnmarshalJSON(data []byte) error {
 			out.SandboxEnabled = *decoded.Runtime.SandboxEnabled
 		}
 	}
-	out.RuntimeOptions, out.MCPConfig = splitLegacyRuntimeOptionsMCP(out.RuntimeOptions, out.MCPConfig)
+	var legacyMCPSet bool
+	out.RuntimeOptions, out.MCPConfig, legacyMCPSet, _ = splitLegacyRuntimeOptionsMCPValue(out.RuntimeOptions, out.MCPConfig, out.MCPConfigSet, false)
+	if legacyMCPSet {
+		out.MCPConfigSet = true
+	}
 	out.SetRuntimeConfig(out.RuntimeConfig())
 	profilePayload := decoded.ModelConfig
 	if len(profilePayload) == 0 || string(profilePayload) == "null" {
@@ -635,6 +646,14 @@ func cloneAgent(src *Agent) *Agent {
 func splitLegacyRuntimeOptionsMCP(runtimeOptions map[string]any, mcpConfig map[string]any) (map[string]any, map[string]any) {
 	options, currentMCP, _, _ := splitLegacyRuntimeOptionsMCPValue(runtimeOptions, mcpConfig, mcpConfig != nil, false)
 	return options, currentMCP
+}
+
+func runtimeOptionsHasLegacyMCP(runtimeOptions map[string]any) bool {
+	if runtimeOptions == nil {
+		return false
+	}
+	_, ok := runtimeOptions[agentruntime.RuntimeOptionMCPKey]
+	return ok
 }
 
 func splitLegacyRuntimeOptionsMCPStrict(runtimeOptions map[string]any, mcpConfig map[string]any, mcpConfigProvided bool) (map[string]any, map[string]any, error) {

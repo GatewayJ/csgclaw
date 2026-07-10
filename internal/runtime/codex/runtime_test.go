@@ -1424,6 +1424,56 @@ func TestRuntimeProvisionSeedsCodexWorkerTemplateSkills(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateWritesManagerMCPConfig(t *testing.T) {
+	root := t.TempDir()
+	hostHome := t.TempDir()
+	t.Setenv("HOME", hostHome)
+
+	rt := newTestCodexRuntime(root, func(h agentruntime.Handle) (AgentRef, error) {
+		return AgentRef{
+			ID:        agent.ManagerUserID,
+			Name:      agent.ManagerName,
+			RuntimeID: h.RuntimeID,
+			Profile: agentruntime.Profile{
+				ModelID: "gpt-5.5",
+			},
+			MCPConfig: map[string]any{
+				agentruntime.MCPConfigServersKey: map[string]any{
+					"context7": map[string]any{
+						"command": "npx",
+						"args":    []any{"-y", "@upstash/context7-mcp"},
+					},
+				},
+			},
+		}, nil
+	})
+
+	if _, err := rt.New(context.Background(), agentruntime.Spec{
+		RuntimeID: "rt-" + agent.ManagerUserID,
+		AgentID:   agent.ManagerUserID,
+		AgentName: agent.ManagerName,
+		Profile:   agentruntime.Profile{ModelID: "gpt-5.5"},
+	}); err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	configPath := filepath.Join(root, agent.ManagerUserID, ".codex", "home", "config.toml")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read manager codex config: %v", err)
+	}
+	config := string(raw)
+	for _, want := range []string{
+		`[mcp_servers."context7"]`,
+		`command = "npx"`,
+		`args = ["-y", "@upstash/context7-mcp"]`,
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("manager codex config missing %q:\n%s", want, config)
+		}
+	}
+}
+
 func TestRuntimeProvisionSyncsCodexOverlaySkills(t *testing.T) {
 	root := t.TempDir()
 	hostHome := t.TempDir()
