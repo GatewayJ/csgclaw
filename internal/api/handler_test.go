@@ -2204,7 +2204,7 @@ func TestHandleAgentsMCPConfigClosedLoopForSupportedRuntimes(t *testing.T) {
 				if !ok {
 					t.Fatalf("openclaw config missing mcp object: %+v", cfg["mcp"])
 				}
-				assertMCPServers(t, mcpRoot["servers"])
+				assertPersistedMCPServers(t, mcpRoot["servers"])
 			},
 		},
 		{
@@ -2228,7 +2228,7 @@ func TestHandleAgentsMCPConfigClosedLoopForSupportedRuntimes(t *testing.T) {
 				if enabled, _ := mcpRoot["enabled"].(bool); !enabled {
 					t.Fatalf("picoclaw tools.mcp.enabled = %v, want true", mcpRoot["enabled"])
 				}
-				assertMCPServers(t, mcpRoot["servers"])
+				assertPersistedMCPServers(t, mcpRoot["servers"])
 			},
 		},
 		{
@@ -2297,6 +2297,84 @@ func TestHandleAgentsMCPConfigClosedLoopForSupportedRuntimes(t *testing.T) {
 			assertMCPConfigResponse(t, updated.MCPConfig)
 			tt.assertFile(t, updated)
 		})
+	}
+}
+
+func TestAgentMCPConfigResponsesRedactSecrets(t *testing.T) {
+	svc, _ := mustNewSeededServiceWithPath(t, nil)
+	srv := &Handler{svc: svc}
+	secretConfig := map[string]any{
+		"mcpServers": map[string]any{
+			"context7": map[string]any{
+				"command": "uvx",
+				"env": map[string]any{
+					"CONTEXT7_API_KEY": "secret-env",
+				},
+				"headers": map[string]any{
+					"Authorization": "Bearer secret-header",
+				},
+			},
+		},
+	}
+
+	created := doAgentJSON(t, srv, http.MethodPost, "/api/v1/agents", map[string]any{
+		"id":           "u-mcp-secrets",
+		"name":         "mcp-secrets",
+		"role":         agent.RoleWorker,
+		"runtime_kind": agent.RuntimeKindPicoClawSandbox,
+		"image":        "picoclaw-image:test",
+		"agent_profile": map[string]any{
+			"profile_complete": true,
+		},
+		"mcp_config": secretConfig,
+	}, http.StatusCreated)
+	assertMCPConfigSecretsRedacted(t, created.MCPConfig)
+
+	updated := doAgentJSON(t, srv, http.MethodPatch, "/api/v1/agents/"+created.ID, map[string]any{
+		"field_mask": []string{"mcp_config"},
+		"mcp_config": secretConfig,
+	}, http.StatusOK)
+	assertMCPConfigSecretsRedacted(t, updated.MCPConfig)
+
+	detail := doAgentJSON(t, srv, http.MethodGet, "/api/v1/agents/"+created.ID, nil, http.StatusOK)
+	assertMCPConfigSecretsRedacted(t, detail.MCPConfig)
+
+	listRec := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	srv.Routes().ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d; body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var listed []agentResponse
+	if err := json.NewDecoder(listRec.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	for _, item := range listed {
+		if item.ID == created.ID {
+			assertMCPConfigSecretsRedacted(t, item.MCPConfig)
+			return
+		}
+	}
+	t.Fatalf("list response missing agent %q", created.ID)
+}
+
+func TestSanitizeMCPConfigResponseRedactsStringMaps(t *testing.T) {
+	env := map[string]string{"CONTEXT7_API_KEY": "secret-env"}
+	headers := map[string]string{"Authorization": "Bearer secret-header"}
+	config := map[string]any{
+		agentruntime.MCPConfigServersKey: map[string]any{
+			"context7": map[string]any{
+				"env":     env,
+				"headers": headers,
+			},
+		},
+	}
+
+	got := sanitizeMCPConfigResponse(config)
+	assertMCPConfigSecretsRedacted(t, got)
+
+	if env["CONTEXT7_API_KEY"] != "secret-env" || headers["Authorization"] != "Bearer secret-header" {
+		t.Fatalf("sanitizeMCPConfigResponse() modified the source config: %#v", config)
 	}
 }
 
@@ -2495,10 +2573,10 @@ func assertMCPConfigResponse(t *testing.T, cfg map[string]any) {
 	if len(cfg) == 0 {
 		t.Fatal("response missing mcp_config")
 	}
-	assertMCPServers(t, cfg[agentruntime.MCPConfigServersKey])
+	assertRedactedMCPServers(t, cfg[agentruntime.MCPConfigServersKey])
 }
 
-func assertMCPServers(t *testing.T, raw any) {
+func assertRedactedMCPServers(t *testing.T, raw any) {
 	t.Helper()
 	servers, ok := raw.(map[string]any)
 	if !ok {
@@ -2523,8 +2601,8 @@ func assertMCPServers(t *testing.T, raw any) {
 	if !ok {
 		t.Fatalf("context7.env[CONTEXT7_API_KEY] = %#v, want string", env["CONTEXT7_API_KEY"])
 	}
-	if secret != "secret" && secret != participant.RedactedSecretValue {
-		t.Fatalf("context7.env[CONTEXT7_API_KEY] = %q, want secret or %q", secret, participant.RedactedSecretValue)
+	if secret != participant.RedactedSecretValue {
+		t.Fatalf("context7.env[CONTEXT7_API_KEY] = %q, want %q", secret, participant.RedactedSecretValue)
 	}
 	remote, ok := servers["remote"].(map[string]any)
 	if !ok {
@@ -2535,6 +2613,46 @@ func assertMCPServers(t *testing.T, raw any) {
 	}
 	if envVar, _ := remote["bearer_token_env_var"].(string); envVar != "MCP_TOKEN" {
 		t.Fatalf("remote.bearer_token_env_var = %q, want MCP_TOKEN", envVar)
+	}
+}
+
+func assertPersistedMCPServers(t *testing.T, raw any) {
+	t.Helper()
+	servers, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("MCP servers = %#v, want object", raw)
+	}
+	context7, ok := servers["context7"].(map[string]any)
+	if !ok {
+		t.Fatalf("MCP servers missing context7: %+v", servers)
+	}
+	env, ok := context7["env"].(map[string]any)
+	if !ok {
+		t.Fatalf("context7.env = %#v, want map", context7["env"])
+	}
+	if got := env["CONTEXT7_API_KEY"]; got != "secret" {
+		t.Fatalf("context7.env[CONTEXT7_API_KEY] = %#v, want persisted secret", got)
+	}
+}
+
+func assertMCPConfigSecretsRedacted(t *testing.T, config map[string]any) {
+	t.Helper()
+	servers, ok := config[agentruntime.MCPConfigServersKey].(map[string]any)
+	if !ok {
+		t.Fatalf("mcpServers = %#v, want object", config[agentruntime.MCPConfigServersKey])
+	}
+	context7, ok := servers["context7"].(map[string]any)
+	if !ok {
+		t.Fatalf("context7 config = %#v, want object", servers["context7"])
+	}
+	for section, key := range map[string]string{"env": "CONTEXT7_API_KEY", "headers": "Authorization"} {
+		values, ok := context7[section].(map[string]any)
+		if !ok {
+			t.Fatalf("context7.%s = %#v, want object", section, context7[section])
+		}
+		if got := values[key]; got != participant.RedactedSecretValue {
+			t.Fatalf("context7.%s[%q] = %#v, want %q", section, key, got, participant.RedactedSecretValue)
+		}
 	}
 }
 

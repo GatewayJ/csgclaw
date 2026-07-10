@@ -82,7 +82,7 @@ export function WorkspaceSidebar({
   onOpenCreateTask,
   onOpenCreateScheduledTask,
   hub,
-  onSelectHubMCP,
+  onSelectMCPServer,
   onSelectHubSkill,
   onSelectHubTemplate,
   onSelectHub,
@@ -128,7 +128,7 @@ export function WorkspaceSidebar({
   const firstNotificationAgent = notificationAgentItems[0] ?? null;
   const firstTeam = teams[0] ?? null;
   const firstHubTemplate = hub?.templates[0] ?? null;
-  const firstHubMCP = hub?.mcps?.[0] ?? null;
+  const firstMCPServer = hub?.mcps?.[0] ?? null;
   const firstHubSkill = hub?.skills[0] ?? null;
   const firstModelProvider = modelProviders?.providers[0] ?? null;
   const notificationAgentIds = useMemo(
@@ -286,15 +286,15 @@ export function WorkspaceSidebar({
             },
           },
           {
-            active: activeContextSectionId === WorkspaceContextSectionIds.hubMCPs,
+            active: activeContextSectionId === WorkspaceContextSectionIds.mcpServers,
             badge: badgeCount(hub?.mcps?.length),
-            groupId: WorkspaceContextSectionIds.hubMCPs,
+            groupId: WorkspaceContextSectionIds.mcpServers,
             icon: navigationIcon(Server),
             id: "mcps",
             label: t("resourcesMCPLabel"),
             onSelect: () => {
-              if (firstHubMCP && onSelectHubMCP) {
-                onSelectHubMCP(firstHubMCP);
+              if (firstMCPServer && onSelectMCPServer) {
+                onSelectMCPServer(firstMCPServer);
                 return;
               }
               onSelectHub();
@@ -338,7 +338,7 @@ export function WorkspaceSidebar({
       activePane.type,
       activeTaskBoardView,
       currentUser,
-      firstHubMCP,
+      firstMCPServer,
       firstHubSkill,
       firstHubTemplate,
       firstModelProvider,
@@ -352,7 +352,7 @@ export function WorkspaceSidebar({
       onSelectAgent,
       onSelectComputer,
       onSelectHub,
-      onSelectHubMCP,
+      onSelectMCPServer,
       onSelectHubSkill,
       onSelectHubTemplate,
       onSelectHuman,
@@ -537,7 +537,7 @@ export function WorkspaceSidebar({
               onOpenCreateTask={onOpenCreateTask}
               onOpenCreateScheduledTask={onOpenCreateScheduledTask}
               hub={hub}
-              onSelectHubMCP={onSelectHubMCP}
+              onSelectMCPServer={onSelectMCPServer}
               onSelectHubSkill={onSelectHubSkill}
               onSelectHubTemplate={onSelectHubTemplate}
               onSelectTask={onSelectTask}
@@ -599,7 +599,7 @@ function contextSectionIdForPane({
       return WorkspaceContextSectionIds.hubSkills;
     }
     if (activePane.resourceType === "mcp") {
-      return WorkspaceContextSectionIds.hubMCPs;
+      return WorkspaceContextSectionIds.mcpServers;
     }
     if (activePane.resourceType === "template") {
       return WorkspaceContextSectionIds.hubTemplates;
@@ -664,7 +664,7 @@ function contextTitleForSection(sectionId: WorkspaceContextSectionId, fallback: 
   if (sectionId === WorkspaceContextSectionIds.hubTemplates) {
     return t("resourcesTemplatesSection");
   }
-  if (sectionId === WorkspaceContextSectionIds.hubMCPs) {
+  if (sectionId === WorkspaceContextSectionIds.mcpServers) {
     return t("resourcesMCPLabel");
   }
   if (sectionId === WorkspaceContextSectionIds.hubSkills) {
@@ -718,7 +718,7 @@ function contextBadgeCountForSection({
   if (activeContextSectionId === WorkspaceContextSectionIds.hubTemplates) {
     return hub?.templates.length ?? 0;
   }
-  if (activeContextSectionId === WorkspaceContextSectionIds.hubMCPs) {
+  if (activeContextSectionId === WorkspaceContextSectionIds.mcpServers) {
     return hub?.mcps?.length ?? 0;
   }
   if (activeContextSectionId === WorkspaceContextSectionIds.hubSkills) {
@@ -804,7 +804,7 @@ function contextCreateActionForSection({
       onClick: () => setSkillUploadOpen(true),
     };
   }
-  if (activeContextSectionId === WorkspaceContextSectionIds.hubMCPs && hub?.openCreateMCPDialog) {
+  if (activeContextSectionId === WorkspaceContextSectionIds.mcpServers && hub?.openCreateMCPDialog) {
     return {
       label: t("resourcesMCPAdd"),
       onClick: hub.openCreateMCPDialog,

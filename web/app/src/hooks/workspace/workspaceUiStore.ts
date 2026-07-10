@@ -29,7 +29,7 @@ export type WorkspaceUiState = {
   isSidebarCollapsed: boolean;
   locale: LocaleCode;
   selectedHubResourceType: HubResourceType;
-  selectedHubMCPName: string;
+  selectedMCPServerName: string;
   selectedHubSkillName: string;
   selectedHubSkillPath: string;
   selectedHubTemplateId: string;
@@ -43,7 +43,7 @@ export type WorkspaceUiState = {
   setIsSidebarCollapsed: (value: MaybeUpdater<boolean>) => void;
   setLocale: (locale: LocaleCode) => void;
   setSelectedHubResourceType: (value: MaybeUpdater<HubResourceType>) => void;
-  setSelectedHubMCPName: (value: MaybeUpdater<string>) => void;
+  setSelectedMCPServerName: (value: MaybeUpdater<string>) => void;
   setSelectedHubSkillName: (value: MaybeUpdater<string>) => void;
   setSelectedHubSkillPath: (value: MaybeUpdater<string>) => void;
   setSelectedHubTemplateId: (value: MaybeUpdater<string>) => void;
@@ -65,7 +65,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
   floatingChatOpen: false,
   workspaceTab: workspaceTabForPane(initialPane),
   selectedHubResourceType: HubResourceTypes.template,
-  selectedHubMCPName: "",
+  selectedMCPServerName: "",
   selectedHubSkillName: "",
   selectedHubSkillPath: "",
   selectedHubTemplateId: "",
@@ -95,9 +95,9 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
     set((state) => ({
       selectedHubResourceType: typeof value === "function" ? value(state.selectedHubResourceType) : value,
     })),
-  setSelectedHubMCPName: (value) =>
+  setSelectedMCPServerName: (value) =>
     set((state) => ({
-      selectedHubMCPName: typeof value === "function" ? value(state.selectedHubMCPName) : value,
+      selectedMCPServerName: typeof value === "function" ? value(state.selectedMCPServerName) : value,
     })),
   setSelectedHubSkillName: (value) =>
     set((state) => ({

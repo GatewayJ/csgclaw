@@ -12,7 +12,7 @@ import type {
 import type { AuthStatus } from "@/models/auth";
 import type { AuthEnvironmentDraft } from "@/models/authEnvironment";
 import type { HubTemplate } from "@/models/hubWorkspace";
-import type { HubMCPServer } from "@/models/mcpHub";
+import type { MCPServer } from "@/models/mcp";
 import type { ModelProvider, ModelProviderCatalog } from "@/models/modelProviders";
 import type { SkillSummary } from "@/models/skillhub";
 import type { CollapsedWorkspaceGroups, WorkspacePane, WorkspaceTab } from "@/models/routing";
@@ -34,7 +34,7 @@ export const WorkspaceContextSectionIds = {
   notifications: "notifications",
   teams: "teams",
   hubTemplates: "hub-templates",
-  hubMCPs: "hub-mcps",
+  mcpServers: "mcp-servers",
   hubSkills: "hub-skills",
   models: "models",
   tasks: "tasks",
@@ -86,7 +86,7 @@ export type WorkspaceSidebarProps = {
   onSelectConversation: (id: string) => void;
   onSelectHuman: (user: IMUser | null | undefined) => void;
   onSelectHub: () => void;
-  onSelectHubMCP?: (item: HubMCPServer | null | undefined) => void;
+  onSelectMCPServer?: (item: MCPServer | null | undefined) => void;
   onSelectHubSkill: (item: SkillSummary | null | undefined) => void;
   onSelectHubTemplate: (item: HubTemplate | null | undefined) => void;
   onSelectModelProvider?: (item: ModelProvider | null | undefined) => void;

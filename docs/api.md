@@ -323,7 +323,7 @@ Runtime adapters map this shared input as follows:
 
 MCP commands run inside the target runtime environment, so filesystem server
 directory arguments must be paths visible to that runtime. MCP is configured
-only through the top-level `mcp_config` field or by adding Hub MCP servers by
+only through the top-level `mcp_config` field or by adding MCP catalog servers by
 name with `POST /api/v1/agents/{id}/mcp-servers`; `runtime_options.mcp` is not
 a supported input.
 
@@ -362,7 +362,7 @@ Notes:
 - Omitted fields are left unchanged
 - `runtime_options` uses whole-object replacement when submitted
 - `mcp_config` uses whole-object replacement when submitted; send `null` to clear CSGClaw-managed MCP config
-- `POST /api/v1/agents/{id}/mcp-servers` accepts `{ "names": [...] }` and merges matching Hub MCP server configs into the agent MCP config
+- `POST /api/v1/agents/{id}/mcp-servers` accepts `{ "names": [...] }` and merges matching MCP catalog server configs into the agent MCP config
 - Updating MCP config on OpenClaw, PicoClaw, or Codex CLI agents may recreate that agent runtime so the native config takes effect
 - If `agent_profile.api_key` is sent empty, the server keeps the existing key
 - If `agent_profile.env` changes, `env_restart_required` may become `true` in the response

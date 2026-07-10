@@ -132,7 +132,7 @@ func writeAgentMCPMutationError(w http.ResponseWriter, err error) {
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "not found") {
 		status = http.StatusNotFound
-	} else if strings.Contains(message, "hub mcp server") && strings.Contains(message, "config") {
+	} else if strings.Contains(message, "mcp server") && strings.Contains(message, "config") {
 		status = http.StatusBadGateway
 	}
 	http.Error(w, err.Error(), status)

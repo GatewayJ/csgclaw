@@ -70,7 +70,7 @@ const hub: WorkspaceSidebarProps["hub"] = {
   loaded: true,
   selectedHubTemplateId: "",
   selectedHubResourceType: "skill",
-  selectedHubMCPName: "filesystem",
+  selectedMCPServerName: "filesystem",
   selectedHubSkillName: "demo-skill",
   mcps: [
     {
@@ -209,7 +209,7 @@ describe("WorkspaceTabPanels", () => {
   });
 
   it("renders hub templates, MCP servers, and skills in separate workspace groups", () => {
-    const onSelectHubMCP = vi.fn();
+    const onSelectMCPServer = vi.fn();
     render(
       <WorkspaceTabPanels
         activePane={{ type: WorkspacePaneTypes.hub, id: "hub" }}
@@ -234,7 +234,7 @@ describe("WorkspaceTabPanels", () => {
         onSelectComputer={() => {}}
         onSelectConversation={() => {}}
         onSelectHuman={() => {}}
-        onSelectHubMCP={onSelectHubMCP}
+        onSelectMCPServer={onSelectMCPServer}
         onSelectHubSkill={() => {}}
         onSelectHubTemplate={() => {}}
         onSelectTask={() => {}}
@@ -263,7 +263,7 @@ describe("WorkspaceTabPanels", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /github/ }));
 
-    expect(onSelectHubMCP).toHaveBeenCalledWith(expect.objectContaining({ name: "github" }));
+    expect(onSelectMCPServer).toHaveBeenCalledWith(expect.objectContaining({ name: "github" }));
   });
 
   it("shows Tasks sidebar subcategories while preserving counts", () => {

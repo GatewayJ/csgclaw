@@ -2832,14 +2832,14 @@ func sanitizeMCPConfigResponse(config map[string]any) map[string]any {
 			continue
 		}
 		server = utils.CloneAnyMap(server)
-		if env, ok := server["env"].(map[string]any); ok {
+		if env, ok := sanitizeMCPSecretValues(server["env"]); ok {
 			server = utils.OverlayAnyMap(server, map[string]any{
-				"env": sanitizeMCPSecretMap(env),
+				"env": env,
 			})
 		}
-		if headers, ok := server["headers"].(map[string]any); ok {
+		if headers, ok := sanitizeMCPSecretValues(server["headers"]); ok {
 			server = utils.OverlayAnyMap(server, map[string]any{
-				"headers": sanitizeMCPSecretMap(headers),
+				"headers": headers,
 			})
 		}
 		sanitizedServers[name] = server
@@ -2850,15 +2850,30 @@ func sanitizeMCPConfigResponse(config map[string]any) map[string]any {
 	return config
 }
 
-func sanitizeMCPSecretMap(values map[string]any) map[string]any {
-	if len(values) == 0 {
-		return nil
+func sanitizeMCPSecretValues(raw any) (map[string]any, bool) {
+	var keys []string
+	switch values := raw.(type) {
+	case map[string]any:
+		keys = make([]string, 0, len(values))
+		for key := range values {
+			keys = append(keys, key)
+		}
+	case map[string]string:
+		keys = make([]string, 0, len(values))
+		for key := range values {
+			keys = append(keys, key)
+		}
+	default:
+		return nil, false
 	}
-	out := make(map[string]any, len(values))
-	for key := range values {
+	if len(keys) == 0 {
+		return nil, true
+	}
+	out := make(map[string]any, len(keys))
+	for _, key := range keys {
 		out[key] = participant.RedactedSecretValue
 	}
-	return out
+	return out, true
 }
 
 func profileResponseFromAgentView(view agent.AgentProfileView) apitypes.AgentProfile {

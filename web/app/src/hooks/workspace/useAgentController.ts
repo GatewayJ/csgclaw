@@ -102,11 +102,7 @@ import type {
   RuntimeKind,
 } from "@/models/agents";
 import { isDirectConversation, localIdentitiesMatch, upsertUserInData } from "@/models/conversations";
-import {
-  hubMCPServersFromConfig,
-  mcpConfigWithServers,
-  mcpServerRecordFromConfig,
-} from "@/models/mcpHub";
+import { mcpServersFromConfig, mcpConfigWithServers, mcpServerRecordFromConfig } from "@/models/mcp";
 import { displayTeam } from "@/models/tasks";
 import type { WorkspaceTeam } from "@/models/tasks";
 import {
@@ -415,16 +411,16 @@ export function useAgentController({
   agentsQuery,
   bootstrapConfig,
   data,
-  hubMCPServers = [],
-  hubMCPServersError = "",
-  hubMCPServersLoading = false,
+  catalogMCPServers = [],
+  catalogMCPServersError = "",
+  catalogMCPServersLoading = false,
   hubTemplates,
   locale,
   managerProfile,
   modelProviders = null,
   modelProvidersLoaded = false,
   profileDetailAgentID = "",
-  refreshHubMCPServers = async () => null,
+  refreshMCPServers = async () => null,
   refreshHubTemplates,
   refreshWorkspaceAgents,
   refreshWorkspaceBootstrap,
@@ -651,14 +647,14 @@ export function useAgentController({
     : "";
   const agentMCPServers = useMemo(() => {
     if (agentMCPConfigQuery.data) {
-      return hubMCPServersFromConfig(agentMCPConfigQuery.data.actual ?? { mcpServers: {} });
+      return mcpServersFromConfig(agentMCPConfigQuery.data.actual ?? { mcpServers: {} });
     }
-    return hubMCPServersFromConfig(agentPageDraft?.mcp_config);
+    return mcpServersFromConfig(agentPageDraft?.mcp_config);
   }, [agentMCPConfigQuery.data, agentPageDraft?.mcp_config]);
   const agentMCPCandidates = useMemo(() => {
     const currentNames = new Set(agentMCPServers.map((server) => server.name));
-    return hubMCPServers.filter((server) => server.name && !currentNames.has(server.name));
-  }, [agentMCPServers, hubMCPServers]);
+    return catalogMCPServers.filter((server) => server.name && !currentNames.has(server.name));
+  }, [agentMCPServers, catalogMCPServers]);
   const activeConversation = useMemo(
     () => data?.rooms.find((item) => item.id === activeConversationId) ?? null,
     [data, activeConversationId],
@@ -2111,12 +2107,7 @@ export function useAgentController({
         setAgentMCPAddBusy(false);
       }
     },
-    [
-      agentMCPAddBusy,
-      queryClient,
-      agentDetailAgentID,
-      t,
-    ],
+    [agentMCPAddBusy, queryClient, agentDetailAgentID, t],
   );
 
   const deleteAgentMCPServer = useCallback(
@@ -2155,7 +2146,14 @@ export function useAgentController({
         setAgentMCPDeleteBusy(false);
       }
     },
-    [agentMCPConfigQuery.data?.actual, agentMCPDeleteBusy, agentPageDraft?.mcp_config, queryClient, agentDetailAgentID, t],
+    [
+      agentMCPConfigQuery.data?.actual,
+      agentMCPDeleteBusy,
+      agentPageDraft?.mcp_config,
+      queryClient,
+      agentDetailAgentID,
+      t,
+    ],
   );
 
   function directConversationForUser(
@@ -2275,8 +2273,8 @@ export function useAgentController({
       skillDeleteBusy: agentSkillDeleteBusy,
       skillDeleteError: agentSkillDeleteError,
       mcpCandidates: agentMCPCandidates,
-      mcpCandidatesLoading: hubMCPServersLoading,
-      mcpCandidatesError: hubMCPServersError,
+      mcpCandidatesLoading: catalogMCPServersLoading,
+      mcpCandidatesError: catalogMCPServersError,
       mcpServers: agentMCPServers,
       mcpAddBusy: agentMCPAddBusy,
       mcpAddError: agentMCPAddError,
@@ -2304,7 +2302,7 @@ export function useAgentController({
       onDeleteSkill: deleteAgentSkill,
       onInstallMCPServers: installAgentMCPServers,
       onDeleteMCPServer: deleteAgentMCPServer,
-      onRetryMCPServers: refreshHubMCPServers,
+      onRetryMCPServers: refreshMCPServers,
       teamActionBusy,
       teamActionError,
       onCreateTeam: createAgentTeam,

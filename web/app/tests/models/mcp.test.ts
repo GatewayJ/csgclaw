@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   formatMCPServerWrapper,
-  hubMCPServersFromResponse,
+  mcpServersFromResponse,
   mcpServerPayloadFromConfig,
   parseMCPServerWrapper,
   runtimeMCPServerConfig,
-} from "@/models/mcpHub";
+} from "@/models/mcp";
 
-describe("MCP hub helpers", () => {
+describe("MCP catalog helpers", () => {
   it("splits state mcpServers into individual sorted server entries", () => {
     expect(
-      hubMCPServersFromResponse({
+      mcpServersFromResponse({
         mcpServers: {
           github: { url: "https://github.example/mcp" },
           filesystem: {
@@ -60,7 +60,7 @@ describe("MCP hub helpers", () => {
     });
   });
 
-  it("keeps runtime MCP fields while removing hub display metadata", () => {
+  it("keeps runtime MCP fields while removing catalog display metadata", () => {
     expect(
       runtimeMCPServerConfig({
         command: "uvx",

@@ -35,7 +35,7 @@ import { WorkspacePaneTypes } from "@/models/routing";
 import type { WorkspacePane } from "@/models/routing";
 import type { AgentLike, AgentProfileLike, RuntimeBootstrapConfig } from "@/models/agents";
 import type { IMConversation, IMData, TranslateFn } from "@/models/conversations";
-import type { HubMCPServer } from "@/models/mcpHub";
+import type { MCPServer } from "@/models/mcp";
 import { normalizeModelProviderCatalog } from "@/models/modelProviders";
 import type { ModelProviderCatalog } from "@/models/modelProviders";
 import type { ApiError } from "@/api/client";
@@ -187,14 +187,14 @@ function useAgentControllerHarness(
     activePane?: WorkspacePane;
     agents?: AgentLike[];
     data?: IMData | null;
-    hubMCPServers?: HubMCPServer[];
-    hubMCPServersError?: string;
-    hubMCPServersLoading?: boolean;
+    catalogMCPServers?: MCPServer[];
+    catalogMCPServersError?: string;
+    catalogMCPServersLoading?: boolean;
     managerProfile?: AgentProfileLike | null;
     modelProviders?: ModelProviderCatalog | null;
     modelProvidersLoaded?: boolean;
     bootstrapConfig?: RuntimeBootstrapConfig | null;
-    refreshHubMCPServers?: () => Promise<unknown>;
+    refreshMCPServers?: () => Promise<unknown>;
     t?: TranslateFn;
   } = {},
 ) {
@@ -237,15 +237,15 @@ function useAgentControllerHarness(
     } as UseQueryResult<AgentLike[]>,
     bootstrapConfig: options.bootstrapConfig ?? null,
     data,
-    hubMCPServers: options.hubMCPServers ?? [],
-    hubMCPServersError: options.hubMCPServersError ?? "",
-    hubMCPServersLoading: options.hubMCPServersLoading ?? false,
+    catalogMCPServers: options.catalogMCPServers ?? [],
+    catalogMCPServersError: options.catalogMCPServersError ?? "",
+    catalogMCPServersLoading: options.catalogMCPServersLoading ?? false,
     hubTemplates: [],
     locale: "en",
     managerProfile: options.managerProfile ?? null,
     modelProviders: options.modelProviders ?? null,
     modelProvidersLoaded: options.modelProvidersLoaded ?? false,
-    refreshHubMCPServers: options.refreshHubMCPServers ?? vi.fn(async () => null),
+    refreshMCPServers: options.refreshMCPServers ?? vi.fn(async () => null),
     refreshHubTemplates: vi.fn(async () => undefined),
     refreshWorkspaceAgents,
     refreshWorkspaceBootstrap,
@@ -770,14 +770,14 @@ describe("useAgentController", () => {
     vi.mocked(fetchAgentMCPConfig).mockResolvedValueOnce({
       actual: {
         mcpServers: {
-          hub: { command: "npx", args: ["hub-mcp"] },
+          catalog: { command: "npx", args: ["catalog-mcp"] },
           manual: { command: "uvx", args: ["manual-mcp"] },
         },
       },
       agent_id: "u-manager",
       desired: {
         mcpServers: {
-          hub: { command: "npx", args: ["hub-mcp"] },
+          catalog: { command: "npx", args: ["catalog-mcp"] },
         },
       },
       runtime_kind: "codex",
@@ -786,7 +786,7 @@ describe("useAgentController", () => {
     const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
 
     await waitFor(() =>
-      expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual(["hub", "manual"]),
+      expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual(["catalog", "manual"]),
     );
 
     await act(async () => {
@@ -795,13 +795,13 @@ describe("useAgentController", () => {
 
     expect(updateAgentMCPConfigRequest).toHaveBeenCalledWith("u-manager", {
       mcpServers: {
-        hub: { command: "npx", args: ["hub-mcp"] },
+        catalog: { command: "npx", args: ["catalog-mcp"] },
       },
     });
     expect(result.current.agentViewProps.mcpDeleteError).toBe("");
   });
 
-  it("installs Hub MCP servers through the agent MCP server endpoint", async () => {
+  it("installs MCP catalog servers through the agent MCP server endpoint", async () => {
     const installedView = {
       actual: {
         mcpServers: {
@@ -829,7 +829,7 @@ describe("useAgentController", () => {
     const { result } = renderHook(
       () =>
         useAgentControllerHarness({
-          hubMCPServers: [{ name: "context7", description: "Context7", config: { command: "uvx" } }],
+          catalogMCPServers: [{ name: "context7", description: "Context7", config: { command: "uvx" } }],
         }).controller,
       { wrapper: createWrapper() },
     );

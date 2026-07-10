@@ -169,7 +169,7 @@ function renderHubSkillDetailPane() {
   );
 }
 
-function renderHubMCPDetailPane() {
+function renderMCPDetailPane() {
   const onUpdateMCP = vi.fn().mockResolvedValue(true);
   const mcp = {
     name: "grafana",
@@ -272,7 +272,7 @@ describe("HubDetailPane", () => {
 
   it("highlights and validates MCP JSON configs before saving", async () => {
     const user = userEvent.setup();
-    const { container, onUpdateMCP } = renderHubMCPDetailPane();
+    const { container, onUpdateMCP } = renderMCPDetailPane();
 
     expect(container.querySelector(".cm-editor")).toBeInTheDocument();
     expect(container.textContent).toContain("mcpServers");

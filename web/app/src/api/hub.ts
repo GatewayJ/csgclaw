@@ -1,10 +1,7 @@
-import { del, get, post, put } from "@/api/client";
-import type { JSONRecord } from "@/models/agents";
+import { del, get, post } from "@/api/client";
 import type { HubTemplate, HubWorkspaceFile, HubWorkspaceListing } from "@/models/hubWorkspace";
-import type { HubMCPServerPayload } from "@/models/mcpHub";
 
 const HUB_TEMPLATES_PATH = "/api/v1/hub/templates";
-const MCP_SERVERS_PATH = "/api/v1/mcp-servers";
 
 type PublishAgentTemplatePayload = {
   agent_id: string;
@@ -12,22 +9,6 @@ type PublishAgentTemplatePayload = {
 
 export function fetchHubTemplates(): Promise<HubTemplate[]> {
   return get<HubTemplate[]>(HUB_TEMPLATES_PATH);
-}
-
-export function fetchHubMCPServers(): Promise<JSONRecord> {
-  return get<JSONRecord>(MCP_SERVERS_PATH);
-}
-
-export function createHubMCPServerRequest(payload: HubMCPServerPayload): Promise<JSONRecord> {
-  return post<JSONRecord>(MCP_SERVERS_PATH, payload);
-}
-
-export function updateHubMCPServerRequest(name: string, payload: HubMCPServerPayload): Promise<JSONRecord> {
-  return put<JSONRecord>(hubMCPServerPath(name), payload);
-}
-
-export function deleteHubMCPServerRequest(name: string): Promise<JSONRecord> {
-  return del<JSONRecord>(hubMCPServerPath(name));
 }
 
 export function fetchHubTemplate(templateID: string): Promise<HubTemplate> {
@@ -58,8 +39,4 @@ export function deleteHubTemplateRequest(templateID: string): Promise<void> {
 
 function hubTemplatePath(templateID: string): string {
   return `${HUB_TEMPLATES_PATH}/${encodeURIComponent(String(templateID || "").trim())}`;
-}
-
-function hubMCPServerPath(name: string): string {
-  return `${MCP_SERVERS_PATH}/${encodeURIComponent(String(name || "").trim())}`;
 }

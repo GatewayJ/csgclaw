@@ -1,53 +1,53 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "@/api/client";
-import { createHubMCPServerRequest, deleteHubMCPServerRequest, updateHubMCPServerRequest } from "@/api/hub";
-import { hubMCPServersFromResponse } from "@/models/mcpHub";
-import type { HubMCPServer, HubMCPServerPayload } from "@/models/mcpHub";
-import { workspaceQueryKeys, useWorkspaceHubMCPServersQuery } from "./workspaceQueries";
+import { createMCPServerRequest, deleteMCPServerRequest, updateMCPServerRequest } from "@/api/mcp";
+import { mcpServersFromResponse } from "@/models/mcp";
+import type { MCPServer, MCPServerPayload } from "@/models/mcp";
+import { workspaceQueryKeys, useWorkspaceMCPServersQuery } from "./workspaceQueries";
 
 type HubResourceType = "template" | "skill" | "mcp";
 
-type HubMCPNameSetter = (value: string | ((current: string) => string)) => void;
+type MCPServerNameSetter = (value: string | ((current: string) => string)) => void;
 
-type UseWorkspaceHubMCPSelectionArgs = {
-  selectedHubMCPName: string;
+type UseWorkspaceMCPSelectionArgs = {
+  selectedMCPServerName: string;
   selectedHubResourceType: HubResourceType;
-  setSelectedHubMCPName: HubMCPNameSetter;
+  setSelectedMCPServerName: MCPServerNameSetter;
   setSelectedHubResourceType: (value: HubResourceType) => void;
   skillCount: number;
   t: (key: string) => string;
   templateCount: number;
 };
 
-export function useWorkspaceHubMCPSelection({
-  selectedHubMCPName,
+export function useWorkspaceMCPSelection({
+  selectedMCPServerName,
   selectedHubResourceType,
-  setSelectedHubMCPName,
+  setSelectedMCPServerName,
   setSelectedHubResourceType,
   skillCount,
   t,
   templateCount,
-}: UseWorkspaceHubMCPSelectionArgs) {
+}: UseWorkspaceMCPSelectionArgs) {
   const queryClient = useQueryClient();
   const [mcpCreateDialogOpen, setMCPCreateDialogOpen] = useState(false);
   const [mcpMutationBusy, setMCPMutationBusy] = useState(false);
   const [mcpMutationError, setMCPMutationError] = useState("");
-  const mcpServersQuery = useWorkspaceHubMCPServersQuery();
+  const mcpServersQuery = useWorkspaceMCPServersQuery();
 
-  const mcps = useMemo(() => hubMCPServersFromResponse(mcpServersQuery.data ?? null), [mcpServersQuery.data]);
-  const selectedHubMCP = useMemo(
-    () => mcps.find((item) => item.name === selectedHubMCPName) || mcps[0] || null,
-    [mcps, selectedHubMCPName],
+  const mcps = useMemo(() => mcpServersFromResponse(mcpServersQuery.data ?? null), [mcpServersQuery.data]);
+  const selectedMCPServer = useMemo(
+    () => mcps.find((item) => item.name === selectedMCPServerName) || mcps[0] || null,
+    [mcps, selectedMCPServerName],
   );
 
   useEffect(() => {
     if (!mcps.length) {
-      setSelectedHubMCPName("");
+      setSelectedMCPServerName("");
       return;
     }
-    setSelectedHubMCPName((current) => (mcps.some((item) => item.name === current) ? current : mcps[0]?.name || ""));
-  }, [mcps, setSelectedHubMCPName]);
+    setSelectedMCPServerName((current) => (mcps.some((item) => item.name === current) ? current : mcps[0]?.name || ""));
+  }, [mcps, setSelectedMCPServerName]);
 
   useEffect(() => {
     if (selectedHubResourceType === "mcp" && !mcps.length) {
@@ -69,15 +69,15 @@ export function useWorkspaceHubMCPSelection({
     setMCPCreateDialogOpen(true);
   }, [setSelectedHubResourceType]);
 
-  const createHubMCPServer = useCallback(
-    async (payload: HubMCPServerPayload) => {
+  const createMCPServer = useCallback(
+    async (payload: MCPServerPayload) => {
       setMCPMutationBusy(true);
       setMCPMutationError("");
       try {
-        const state = await createHubMCPServerRequest(payload);
+        const state = await createMCPServerRequest(payload);
         queryClient.setQueryData(workspaceQueryKeys.mcpServers(), state);
         setSelectedHubResourceType("mcp");
-        setSelectedHubMCPName(payload.name);
+        setSelectedMCPServerName(payload.name);
         setMCPCreateDialogOpen(false);
         return true;
       } catch (error) {
@@ -87,18 +87,18 @@ export function useWorkspaceHubMCPSelection({
         setMCPMutationBusy(false);
       }
     },
-    [queryClient, setSelectedHubMCPName, setSelectedHubResourceType, t],
+    [queryClient, setSelectedMCPServerName, setSelectedHubResourceType, t],
   );
 
-  const updateHubMCPServer = useCallback(
-    async (currentName: string, payload: HubMCPServerPayload) => {
+  const updateMCPServer = useCallback(
+    async (currentName: string, payload: MCPServerPayload) => {
       setMCPMutationBusy(true);
       setMCPMutationError("");
       try {
-        const state = await updateHubMCPServerRequest(currentName, payload);
+        const state = await updateMCPServerRequest(currentName, payload);
         queryClient.setQueryData(workspaceQueryKeys.mcpServers(), state);
         setSelectedHubResourceType("mcp");
-        setSelectedHubMCPName(payload.name);
+        setSelectedMCPServerName(payload.name);
         return true;
       } catch (error) {
         setMCPMutationError(errorMessage(error, t("resourcesMCPSaveFailed")));
@@ -107,11 +107,11 @@ export function useWorkspaceHubMCPSelection({
         setMCPMutationBusy(false);
       }
     },
-    [queryClient, setSelectedHubMCPName, setSelectedHubResourceType, t],
+    [queryClient, setSelectedMCPServerName, setSelectedHubResourceType, t],
   );
 
-  const deleteHubMCPServer = useCallback(
-    async (item: HubMCPServer | null | undefined) => {
+  const deleteMCPServer = useCallback(
+    async (item: MCPServer | null | undefined) => {
       const name = String(item?.name || "").trim();
       if (!name) {
         return false;
@@ -119,9 +119,9 @@ export function useWorkspaceHubMCPSelection({
       setMCPMutationBusy(true);
       setMCPMutationError("");
       try {
-        const state = await deleteHubMCPServerRequest(name);
+        const state = await deleteMCPServerRequest(name);
         queryClient.setQueryData(workspaceQueryKeys.mcpServers(), state);
-        setSelectedHubMCPName("");
+        setSelectedMCPServerName("");
         setSelectedHubResourceType("mcp");
         return true;
       } catch (error) {
@@ -131,15 +131,17 @@ export function useWorkspaceHubMCPSelection({
         setMCPMutationBusy(false);
       }
     },
-    [queryClient, setSelectedHubMCPName, setSelectedHubResourceType, t],
+    [queryClient, setSelectedMCPServerName, setSelectedHubResourceType, t],
   );
 
-  const rawMCPServersError = mcpServersQuery.error ? errorMessage(mcpServersQuery.error, t("resourcesMCPLoadFailed")) : "";
+  const rawMCPServersError = mcpServersQuery.error
+    ? errorMessage(mcpServersQuery.error, t("resourcesMCPLoadFailed"))
+    : "";
   const mcpStateError = selectedHubResourceType === "mcp" ? rawMCPServersError : "";
 
   return {
-    createHubMCPServer,
-    deleteHubMCPServer,
+    createMCPServer,
+    deleteMCPServer,
     mcpServersFetching: mcpServersQuery.isFetching,
     mcps,
     mcpCreateDialogOpen,
@@ -147,9 +149,9 @@ export function useWorkspaceHubMCPSelection({
     mcpMutationError,
     mcpStateError,
     openCreateMCPDialog,
-    refetchHubMCPServers: mcpServersQuery.refetch,
-    selectedHubMCP,
+    refetchMCPServers: mcpServersQuery.refetch,
+    selectedMCPServer,
     setMCPCreateDialogOpen,
-    updateHubMCPServer,
+    updateMCPServer,
   };
 }

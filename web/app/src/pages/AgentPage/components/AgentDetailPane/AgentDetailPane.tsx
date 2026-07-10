@@ -57,7 +57,7 @@ import {
 } from "@/models/modelProviders";
 import type { IMConversation, TranslateFn } from "@/models/conversations";
 import type { LocaleCode } from "@/models/conversations";
-import type { HubMCPServer } from "@/models/mcpHub";
+import type { MCPServer } from "@/models/mcp";
 import { skillSourceBadgeName } from "@/models/skillhub";
 import type { SkillSummary } from "@/models/skillhub";
 import type { SlashSkillOption } from "@/models/slashCommands";
@@ -146,10 +146,10 @@ export type AgentDetailPaneProps = {
   skillCandidatesLoading?: boolean;
   skillDeleteBusy?: boolean;
   skillDeleteError?: string;
-  mcpCandidates?: HubMCPServer[];
+  mcpCandidates?: MCPServer[];
   mcpCandidatesError?: string;
   mcpCandidatesLoading?: boolean;
-  mcpServers?: HubMCPServer[];
+  mcpServers?: MCPServer[];
   mcpAddBusy?: boolean;
   mcpAddError?: string;
   mcpDeleteBusy?: boolean;
@@ -162,7 +162,7 @@ export type AgentDetailPaneProps = {
   onAddSkills?: (skillNames: string[]) => Promise<boolean> | boolean;
   onDeleteSkill?: (skill: SlashSkillOption | string) => Promise<boolean> | boolean;
   onInstallMCPServers?: (serverNames: string[]) => Promise<boolean> | boolean;
-  onDeleteMCPServer?: (server: HubMCPServer | string) => Promise<boolean> | boolean;
+  onDeleteMCPServer?: (server: MCPServer | string) => Promise<boolean> | boolean;
   onRetryMCPServers?: () => void | Promise<unknown>;
 };
 
@@ -237,7 +237,7 @@ export function AgentDetailPane({
   const [addMCPDialogOpen, setAddMCPDialogOpen] = useState(false);
   const [selectedMCPNames, setSelectedMCPNames] = useState<string[]>([]);
   const [deleteMCPDialogOpen, setDeleteMCPDialogOpen] = useState(false);
-  const [mcpPendingDelete, setMCPPendingDelete] = useState<HubMCPServer | null>(null);
+  const [mcpPendingDelete, setMCPPendingDelete] = useState<MCPServer | null>(null);
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const isManager = isManagerAgent(item);
@@ -1060,8 +1060,8 @@ type AgentMCPPanelProps = {
   deleteBusy: boolean;
   deleteError: string;
   onOpenAddMCP: () => void;
-  onRequestDeleteMCP: (server: HubMCPServer) => void;
-  servers: readonly HubMCPServer[];
+  onRequestDeleteMCP: (server: MCPServer) => void;
+  servers: readonly MCPServer[];
   t: TranslateFn;
 };
 

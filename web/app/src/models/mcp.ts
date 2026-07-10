@@ -1,17 +1,17 @@
 import type { JSONRecord } from "@/models/agents";
 
-export type HubMCPServer = {
+export type MCPServer = {
   config: JSONRecord;
   description?: string;
   name: string;
 };
 
-export type HubMCPServerPayload = {
+export type MCPServerPayload = {
   config: JSONRecord;
   name: string;
 };
 
-export function hubMCPServersFromResponse(response: unknown): HubMCPServer[] {
+export function mcpServersFromResponse(response: unknown): MCPServer[] {
   if (!isJSONRecord(response)) {
     return [];
   }
@@ -20,7 +20,7 @@ export function hubMCPServersFromResponse(response: unknown): HubMCPServer[] {
     return [];
   }
   return Object.entries(servers)
-    .reduce<HubMCPServer[]>((items, [name, value]) => {
+    .reduce<MCPServer[]>((items, [name, value]) => {
       const normalizedName = String(name || "").trim();
       if (!normalizedName || !isJSONRecord(value)) {
         return items;
@@ -36,13 +36,13 @@ export function hubMCPServersFromResponse(response: unknown): HubMCPServer[] {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-export function hubMCPServersFromConfig(config: unknown): HubMCPServer[] {
+export function mcpServersFromConfig(config: unknown): MCPServer[] {
   const servers = mcpServerRecordFromRoot(config);
   if (!servers) {
     return [];
   }
   return Object.entries(servers)
-    .reduce<HubMCPServer[]>((items, [name, value]) => {
+    .reduce<MCPServer[]>((items, [name, value]) => {
       const normalizedName = String(name || "").trim();
       if (!normalizedName || !isJSONRecord(value)) {
         return items;
@@ -62,7 +62,7 @@ export function mcpServerRecordFromConfig(config: unknown): Record<string, JSONR
   return cloneMCPServersRecord(mcpServerRecordFromRoot(config));
 }
 
-export function parseMCPServerWrapper(value: string): HubMCPServerPayload | null {
+export function parseMCPServerWrapper(value: string): MCPServerPayload | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -72,7 +72,7 @@ export function parseMCPServerWrapper(value: string): HubMCPServerPayload | null
   return mcpServerPayloadFromConfig(parsed);
 }
 
-export function mcpServerPayloadFromConfig(config: unknown): HubMCPServerPayload | null {
+export function mcpServerPayloadFromConfig(config: unknown): MCPServerPayload | null {
   const entries = Object.entries(cloneMCPServersRecord(mcpServerRecordFromRoot(config)));
   if (entries.length !== 1) {
     return null;

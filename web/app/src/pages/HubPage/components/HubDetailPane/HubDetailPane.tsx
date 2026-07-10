@@ -11,8 +11,8 @@ import { tags } from "@lezer/highlight";
 import { FileCode2, Server, Trash2 } from "lucide-react";
 import { formatRuntimeKindLabel } from "@/models/agents";
 import { formatHubDateTime, isDeletableHubTemplate } from "@/models/hubWorkspace";
-import { formatMCPServerWrapper, mcpServerDescription, mcpServerPayloadFromConfig } from "@/models/mcpHub";
-import type { HubMCPServerPayload } from "@/models/mcpHub";
+import { formatMCPServerWrapper, mcpServerDescription, mcpServerPayloadFromConfig } from "@/models/mcp";
+import type { MCPServerPayload } from "@/models/mcp";
 import { WorkspaceFilePreview, WorkspaceFileTree } from "@/components/business/WorkspaceFileTree";
 import { localizeTemplateSourceTag } from "@/shared/i18n";
 import { ModelsIcon } from "@/components/ui/Icons";
@@ -28,7 +28,7 @@ import {
 } from "@/components/ui";
 import type { LocaleCode, TranslateFn } from "@/models/conversations";
 import type { HubTemplate } from "@/models/hubWorkspace";
-import type { HubMCPServer } from "@/models/mcpHub";
+import type { MCPServer } from "@/models/mcp";
 import { isReadonlySkill } from "@/models/skillhub";
 import type { SkillFile, SkillSummary, SkillTree } from "@/models/skillhub";
 import type { WorkspaceEntry, WorkspaceFile } from "@/models/workspace";
@@ -42,25 +42,25 @@ type HubDetailPaneHub = {
     error: string;
     loaded: boolean;
     onDeleteSkill?: (item: SkillSummary | null | undefined) => Promise<boolean> | boolean;
-    onCreateMCP?: (payload: HubMCPServerPayload) => Promise<boolean> | boolean;
-    onDeleteMCP?: (item: HubMCPServer | null | undefined) => Promise<boolean> | boolean;
+    onCreateMCP?: (payload: MCPServerPayload) => Promise<boolean> | boolean;
+    onDeleteMCP?: (item: MCPServer | null | undefined) => Promise<boolean> | boolean;
     onDeleteTemplate?: (item: HubTemplate | null | undefined) => unknown;
     onSelectMCP?: (name: string | null | undefined) => void;
-    onUpdateMCP?: (currentName: string, payload: HubMCPServerPayload) => Promise<boolean> | boolean;
+    onUpdateMCP?: (currentName: string, payload: MCPServerPayload) => Promise<boolean> | boolean;
     onRetry: () => void | Promise<void>;
     onSelectSkill?: (name: string | null | undefined) => void;
     onSelectSkillFile?: (path: string) => void;
     onSelectTemplate?: (item: HubTemplate | null | undefined) => void;
     onSelectWorkspaceFile: (workspacePath: string) => void;
     onToggleWorkspaceDir?: (workspacePath: string) => void | Promise<void>;
-    mcps?: readonly HubMCPServer[];
+    mcps?: readonly MCPServer[];
     mcpStateError?: string;
     mcpStateLoading?: boolean;
     mcpMutationBusy?: boolean;
     mcpMutationError?: string;
     mcpCreateDialogOpen?: boolean;
     onMCPCreateDialogOpenChange?: (open: boolean) => void;
-    selectedMCP?: HubMCPServer | null;
+    selectedMCP?: MCPServer | null;
     selectedMCPName?: string;
     selectedResourceType?: "mcp" | "skill" | "template";
     selectedSkill: SkillSummary | null;
@@ -243,7 +243,7 @@ const jsonEditorExtensions: Extension[] = [
 type MCPConfigParseResult =
   | {
       kind: "valid";
-      payload: HubMCPServerPayload;
+      payload: MCPServerPayload;
     }
   | {
       kind: "structure" | "syntax";
@@ -775,7 +775,7 @@ export function HubDetailPane({
               ) : null}
               {mcpStateLoading ? <div className="workspace-empty">{t("resourcesMCPLoading")}</div> : null}
 
-              <div className="hub-workspace-block hub-mcp-config-block">
+              <div className="hub-workspace-block mcp-config-block">
                 <JSONConfigEditor
                   label={t("resourcesMCPConfigLabel")}
                   value={mcpDetailConfig}
@@ -836,7 +836,7 @@ export function HubDetailPane({
           }
         }}
       >
-        <DialogContent className="hub-mcp-dialog">
+        <DialogContent className="mcp-dialog">
           <DialogHeader className="hub-skill-delete-dialog-header">
             <div className="hub-skill-delete-dialog-copy">
               <DialogTitle>{t("resourcesMCPCreateTitle")}</DialogTitle>
@@ -844,7 +844,7 @@ export function HubDetailPane({
             </div>
             <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
           </DialogHeader>
-          <div className="hub-mcp-form">
+          <div className="mcp-form">
             <JSONConfigEditor
               label={t("resourcesMCPConfigJSONLabel")}
               value={mcpDraftConfig}

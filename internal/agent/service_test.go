@@ -1694,7 +1694,7 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 		Instructions: "keep synced",
 		CreatedAt:    time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
 	}
-	hubServers := map[string]any{
+	catalogServers := map[string]any{
 		"context7": map[string]any{
 			"command":     "uvx",
 			"args":        []any{"context7-mcp"},
@@ -1709,7 +1709,7 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 2)
 	go func() {
-		_, err := svc.AddMCPServers(ctx, "u-dev", []string{"context7"}, hubServers)
+		_, err := svc.AddMCPServers(ctx, "u-dev", []string{"context7"}, catalogServers)
 		errCh <- err
 	}()
 	select {
@@ -1718,7 +1718,7 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 		t.Fatalf("first AddMCPServers did not enter validation: %v", ctx.Err())
 	}
 	go func() {
-		_, err := svc.AddMCPServers(ctx, "u-dev", []string{"remote"}, hubServers)
+		_, err := svc.AddMCPServers(ctx, "u-dev", []string{"remote"}, catalogServers)
 		errCh <- err
 	}()
 	time.Sleep(25 * time.Millisecond)

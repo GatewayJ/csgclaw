@@ -4,13 +4,8 @@ import { fetchAgentProfileModels, fetchAgentWorkspace, fetchAgentWorkspaceFile, 
 import type { AgentProfileModelRequest } from "@/api/agents";
 import { fetchBootstrap, fetchBootstrapConfig, fetchRuntimeImages, fetchVersion } from "@/api/app";
 import type { FetchVersionOptions } from "@/api/app";
-import {
-  fetchHubMCPServers,
-  fetchHubTemplate,
-  fetchHubTemplates,
-  fetchHubWorkspace,
-  fetchHubWorkspaceFile,
-} from "@/api/hub";
+import { fetchMCPServers } from "@/api/mcp";
+import { fetchHubTemplate, fetchHubTemplates, fetchHubWorkspace, fetchHubWorkspaceFile } from "@/api/hub";
 import { fetchModelProviders } from "@/api/modelProviders";
 import { fetchAgenticHubOfficialSkillsPage, fetchSkillFile, fetchSkills, fetchSkillTree } from "@/api/skills";
 import type { AgenticHubSkillsPage } from "@/api/skills";
@@ -23,7 +18,13 @@ import {
   normalizeRuntimeOptionSchemaMap,
   parseJSONMap,
 } from "@/models/agents";
-import type { AgentLike, AgentProfileLike, AgentProfileModelsResponse, JSONRecord, RuntimeBootstrapConfig } from "@/models/agents";
+import type {
+  AgentLike,
+  AgentProfileLike,
+  AgentProfileModelsResponse,
+  JSONRecord,
+  RuntimeBootstrapConfig,
+} from "@/models/agents";
 import { normalizeIMData } from "@/models/conversations";
 import type { IMData } from "@/models/conversations";
 import type { HubTemplate, HubWorkspaceFile, HubWorkspaceListing } from "@/models/hubWorkspace";
@@ -200,10 +201,10 @@ export function useWorkspaceHubTemplatesQuery(): UseQueryResult<HubTemplate[]> {
   });
 }
 
-export function useWorkspaceHubMCPServersQuery(): UseQueryResult<JSONRecord> {
+export function useWorkspaceMCPServersQuery(): UseQueryResult<JSONRecord> {
   return useQuery<JSONRecord>({
     queryKey: workspaceQueryKeys.mcpServers(),
-    queryFn: fetchHubMCPServers,
+    queryFn: fetchMCPServers,
   });
 }
 

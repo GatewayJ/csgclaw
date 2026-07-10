@@ -485,7 +485,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 	return updated, nil
 }
 
-func (s *Service) AddMCPServers(ctx context.Context, id string, names []string, hubServers map[string]any) (Agent, error) {
+func (s *Service) AddMCPServers(ctx context.Context, id string, names []string, catalogServers map[string]any) (Agent, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Agent{}, fmt.Errorf("agent id is required")
@@ -499,11 +499,11 @@ func (s *Service) AddMCPServers(ctx context.Context, id string, names []string, 
 	}
 	serverConfigs := make(map[string]any, len(names))
 	for _, name := range names {
-		rawServer, ok := hubServers[name]
+		rawServer, ok := catalogServers[name]
 		if !ok {
-			return Agent{}, fmt.Errorf("hub mcp server %q not found", name)
+			return Agent{}, fmt.Errorf("mcp server %q not found", name)
 		}
-		serverConfig, err := runtimeMCPServerConfigFromHub(name, rawServer)
+		serverConfig, err := runtimeMCPServerConfigFromCatalog(name, rawServer)
 		if err != nil {
 			return Agent{}, err
 		}
@@ -555,10 +555,10 @@ func normalizeMCPServerNames(values []string) []string {
 	return names
 }
 
-func runtimeMCPServerConfigFromHub(name string, raw any) (map[string]any, error) {
+func runtimeMCPServerConfigFromCatalog(name string, raw any) (map[string]any, error) {
 	rawConfig, ok := raw.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("hub mcp server %q config must be an object", name)
+		return nil, fmt.Errorf("mcp server %q config must be an object", name)
 	}
 	normalized, err := agentruntime.NormalizeMCPConfig(map[string]any{
 		agentruntime.MCPConfigServersKey: map[string]any{name: rawConfig},
@@ -572,7 +572,7 @@ func runtimeMCPServerConfigFromHub(name string, raw any) (map[string]any, error)
 	}
 	serverConfig, ok := servers[name].(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("hub mcp server %q config must be an object", name)
+		return nil, fmt.Errorf("mcp server %q config must be an object", name)
 	}
 	delete(serverConfig, "description")
 	return serverConfig, nil

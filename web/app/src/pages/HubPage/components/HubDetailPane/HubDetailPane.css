@@ -202,7 +202,7 @@
   box-shadow: 0 0 0 1px oklch(0.69 0.15 194 / 0.18);
 }
 
-.hub-mcp-card.active {
+.mcp-card.active {
   border-color: color-mix(in oklab, var(--success-600) 64%, var(--line));
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--success-600) 22%, transparent);
 }
@@ -266,11 +266,11 @@
   line-height: 1.55;
 }
 
-.hub-mcp-config-block {
+.mcp-config-block {
   gap: 10px;
 }
 
-.hub-mcp-config-preview {
+.mcp-config-preview {
   max-height: 360px;
   margin: 0;
   overflow: auto;
@@ -328,11 +328,11 @@
   white-space: nowrap;
 }
 
-.hub-mcp-dialog {
+.mcp-dialog {
   max-width: 680px;
 }
 
-.hub-mcp-form {
+.mcp-form {
   display: grid;
   gap: 14px;
 }

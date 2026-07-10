@@ -39,7 +39,7 @@ const AgentSectionIds = {
 
 const HubSectionIds = {
   templates: WorkspaceContextSectionIds.hubTemplates,
-  mcps: WorkspaceContextSectionIds.hubMCPs,
+  mcps: WorkspaceContextSectionIds.mcpServers,
   skills: WorkspaceContextSectionIds.hubSkills,
   models: WorkspaceContextSectionIds.models,
 } as const;
@@ -89,7 +89,7 @@ type WorkspaceTabPanelsProps = Pick<
   | "onSelectComputer"
   | "onSelectConversation"
   | "onSelectHuman"
-  | "onSelectHubMCP"
+  | "onSelectMCPServer"
   | "onSelectHubSkill"
   | "onSelectHubTemplate"
   | "onSelectModelProvider"
@@ -258,7 +258,7 @@ export function WorkspaceTabPanels({
   onSelectThread,
   onPreviewUser,
   onSelectHuman,
-  onSelectHubMCP = () => {},
+  onSelectMCPServer = () => {},
   onSelectHubSkill,
   agentItems,
   modelProviders = null,
@@ -289,7 +289,7 @@ export function WorkspaceTabPanels({
   const resourcesUploadError = hub?.uploadError ?? "";
   const resourcesLoaded = hub?.loaded ?? false;
   const selectedHubResourceType = hub?.selectedHubResourceType ?? "template";
-  const selectedHubMCPName = hub?.selectedHubMCPName ?? "";
+  const selectedMCPServerName = hub?.selectedMCPServerName ?? "";
   const selectedHubSkillName = hub?.selectedHubSkillName ?? "";
   const selectedHubTemplateId = hub?.selectedHubTemplateId ?? "";
   const resourcesPaneActive = activePane.type === WorkspacePaneTypes.hub;
@@ -859,18 +859,18 @@ export function WorkspaceTabPanels({
     );
   }
 
-  function renderHubMCPSection(presentation: "group" | "flat" = "group") {
+  function renderMCPSection(presentation: "group" | "flat" = "group") {
     const flat = presentation === "flat";
     const visibleMCPs = resourcesMCPs.filter(mcpMatchesQuery);
     return (
       <WorkspaceGroup
-        id="hub-mcps"
+        id="mcp-servers"
         title={t("resourcesMCPLabel")}
         count={resourcesMCPs.length}
-        collapsed={flat ? false : Boolean(collapsedWorkspaceGroups["hub-mcps"])}
-        onToggle={() => onToggleWorkspaceGroup("hub-mcps")}
+        collapsed={flat ? false : Boolean(collapsedWorkspaceGroups["mcp-servers"])}
+        onToggle={() => onToggleWorkspaceGroup("mcp-servers")}
         onAdd={() => {
-          onSelectHubMCP(null);
+          onSelectMCPServer(null);
           hub?.openCreateMCPDialog?.();
         }}
         addLabel={t("resourcesMCPAdd")}
@@ -885,11 +885,11 @@ export function WorkspaceTabPanels({
                 rowStyles.row,
                 styles.hubTemplateRow,
                 resourcesPaneActive &&
-                  selectedHubMCPName === item.name &&
+                  selectedMCPServerName === item.name &&
                   selectedHubResourceType === "mcp" &&
                   rowStyles.active,
               )}
-              onClick={() => onSelectHubMCP(item)}
+              onClick={() => onSelectMCPServer(item)}
             >
               <span className={rowStyles.icon}>
                 <Server size={16} strokeWidth={2} aria-hidden="true" />
@@ -1008,7 +1008,7 @@ export function WorkspaceTabPanels({
           aria-label={contextSectionLabel(sectionId)}
         >
           {sectionId === HubSectionIds.templates ? renderHubTemplateSection("flat") : null}
-          {sectionId === HubSectionIds.mcps ? renderHubMCPSection("flat") : null}
+          {sectionId === HubSectionIds.mcps ? renderMCPSection("flat") : null}
           {sectionId === HubSectionIds.skills ? renderHubSkillSection("flat") : null}
           {sectionId === HubSectionIds.models ? renderModelProviderSection("flat") : null}
           {renderSkillUploadDialog()}
@@ -1129,7 +1129,7 @@ export function WorkspaceTabPanels({
       ) : workspaceTab === WorkspaceTabs.hub ? (
         <div className={styles.panel} role="tabpanel" aria-label={t("resourcesTab")}>
           {renderHubTemplateSection()}
-          {renderHubMCPSection()}
+          {renderMCPSection()}
           {renderHubSkillSection()}
           {renderModelProviderSection()}
           {renderSkillUploadDialog()}

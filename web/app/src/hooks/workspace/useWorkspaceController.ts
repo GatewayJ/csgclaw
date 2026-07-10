@@ -30,7 +30,7 @@ import { useWorkspaceRealtime } from "./useWorkspaceRealtime";
 import type { CreateTeamPayload } from "@/api/tasks";
 import type { AgentLike } from "@/models/agents";
 import type { HubTemplate } from "@/models/hubWorkspace";
-import type { HubMCPServer } from "@/models/mcpHub";
+import type { MCPServer } from "@/models/mcp";
 import type { IMConversation, IMData, IMUser } from "@/models/conversations";
 import type { SkillSummary } from "@/models/skillhub";
 
@@ -234,7 +234,8 @@ export function useWorkspaceController() {
     refreshWorkspaceHubTemplates,
     t,
   });
-  const { setSelectedHubMCPName, setSelectedHubResourceType, setSelectedHubSkillName, setSelectedHubTemplateId } = hub;
+  const { setSelectedMCPServerName, setSelectedHubResourceType, setSelectedHubSkillName, setSelectedHubTemplateId } =
+    hub;
   const upgrade = useUpgradeController({
     appVersion,
     refreshWorkspaceAppVersion,
@@ -257,16 +258,16 @@ export function useWorkspaceController() {
     agentsQuery,
     bootstrapConfig,
     data: displayData,
-    hubMCPServers: hub.mcps,
-    hubMCPServersError: hub.mcpStateError,
-    hubMCPServersLoading: hub.hubWorkspaceStateFileLoading,
+    catalogMCPServers: hub.mcps,
+    catalogMCPServersError: hub.mcpStateError,
+    catalogMCPServersLoading: hub.mcpServersLoading,
     hubTemplates,
     locale,
     managerProfile,
     modelProviders,
     modelProvidersLoaded,
     profileDetailAgentID: conversationProfileDetailAgentID,
-    refreshHubMCPServers: hub.refetchHubWorkspaceStateFile,
+    refreshMCPServers: hub.refetchMCPServers,
     refreshHubTemplates,
     refreshWorkspaceAgents,
     refreshWorkspaceModelProviders,
@@ -626,17 +627,17 @@ export function useWorkspaceController() {
     },
     [navigatePane, rooms, selectHub, setSelectedHubResourceType, setSelectedHubSkillName],
   );
-  const selectHubMCP = useCallback(
-    (item: HubMCPServer | null | undefined) => {
+  const selectMCPServer = useCallback(
+    (item: MCPServer | null | undefined) => {
       if (!item?.name) {
         selectHub();
         return;
       }
       setSelectedHubResourceType("mcp");
-      setSelectedHubMCPName(item.name);
+      setSelectedMCPServerName(item.name);
       navigatePane({ type: WorkspacePaneTypes.hub, id: item.name, resourceType: "mcp" }, rooms);
     },
-    [navigatePane, rooms, selectHub, setSelectedHubMCPName, setSelectedHubResourceType],
+    [navigatePane, rooms, selectHub, setSelectedMCPServerName, setSelectedHubResourceType],
   );
 
   function openCreateModelProviderModal() {
@@ -686,11 +687,11 @@ export function useWorkspaceController() {
     }
     if (activePane.resourceType === "mcp" && activePane.id) {
       setSelectedHubResourceType("mcp");
-      setSelectedHubMCPName(String(activePane.id));
+      setSelectedMCPServerName(String(activePane.id));
     }
   }, [
     activePane,
-    setSelectedHubMCPName,
+    setSelectedMCPServerName,
     setSelectedHubResourceType,
     setSelectedHubSkillName,
     setSelectedHubTemplateId,
@@ -705,10 +706,10 @@ export function useWorkspaceController() {
         onSelectSkill: (name: string | null | undefined) =>
           selectHubSkill(name ? ({ name, description: "" } as SkillSummary) : null),
         onSelectMCP: (name: string | null | undefined) =>
-          selectHubMCP(name ? ({ name, config: {} } as HubMCPServer) : null),
+          selectMCPServer(name ? ({ name, config: {} } as MCPServer) : null),
       },
     }),
-    [hub, selectHubMCP, selectHubSkill, selectHubTemplate],
+    [hub, selectMCPServer, selectHubSkill, selectHubTemplate],
   );
 
   if (!displayData) {
@@ -805,7 +806,7 @@ export function useWorkspaceController() {
       teamActionError: agent.agentViewProps.teamActionError,
       onOpenCreateTeam: agent.openCreateTeamModal,
       hub,
-      onSelectHubMCP: selectHubMCP,
+      onSelectMCPServer: selectMCPServer,
       onSelectHubSkill: selectHubSkill,
       onSelectHubTemplate: selectHubTemplate,
       onSelectHub: () => shell.selectWorkspaceTab(WorkspaceTabs.hub),
