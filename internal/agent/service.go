@@ -176,6 +176,7 @@ type Service struct {
 	agentsRoot              string
 	sandbox                 sandbox.Provider
 	mu                      sync.RWMutex
+	mcpServerAddMu          sync.Mutex
 	runtimes                map[string]sandbox.Runtime
 	agents                  map[string]Agent
 	runtimeRecords          map[string]RuntimeRecord

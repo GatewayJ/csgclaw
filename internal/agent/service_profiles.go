@@ -485,6 +485,99 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 	return updated, nil
 }
 
+func (s *Service) AddMCPServers(ctx context.Context, id string, names []string, hubServers map[string]any) (Agent, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Agent{}, fmt.Errorf("agent id is required")
+	}
+	if s == nil {
+		return Agent{}, fmt.Errorf("agent service is required")
+	}
+	names = normalizeMCPServerNames(names)
+	if len(names) == 0 {
+		return Agent{}, fmt.Errorf("mcp server names are required")
+	}
+	serverConfigs := make(map[string]any, len(names))
+	for _, name := range names {
+		rawServer, ok := hubServers[name]
+		if !ok {
+			return Agent{}, fmt.Errorf("hub mcp server %q not found", name)
+		}
+		serverConfig, err := runtimeMCPServerConfigFromHub(name, rawServer)
+		if err != nil {
+			return Agent{}, err
+		}
+		serverConfigs[name] = serverConfig
+	}
+
+	s.mcpServerAddMu.Lock()
+	defer s.mcpServerAddMu.Unlock()
+
+	s.mu.RLock()
+	current, _, ok := s.agentByIDLocked(id)
+	s.mu.RUnlock()
+	if !ok {
+		return Agent{}, fmt.Errorf("agent %q not found", id)
+	}
+	currentServers, err := agentruntime.MCPConfigServers(current.MCPConfig)
+	if err != nil {
+		return Agent{}, err
+	}
+	mergedServers := make(map[string]any, len(currentServers)+len(serverConfigs))
+	for name, serverConfig := range currentServers {
+		mergedServers[name] = serverConfig
+	}
+	for _, name := range names {
+		mergedServers[name] = serverConfigs[name]
+	}
+	nextConfig := map[string]any{agentruntime.MCPConfigServersKey: mergedServers}
+	return s.Update(ctx, id, UpdateRequest{
+		MCPConfig:    &nextConfig,
+		MCPConfigSet: true,
+		FieldMask:    []string{"mcp_config"},
+	})
+}
+
+func normalizeMCPServerNames(values []string) []string {
+	names := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		name := strings.TrimSpace(value)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names
+}
+
+func runtimeMCPServerConfigFromHub(name string, raw any) (map[string]any, error) {
+	rawConfig, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("hub mcp server %q config must be an object", name)
+	}
+	normalized, err := agentruntime.NormalizeMCPConfig(map[string]any{
+		agentruntime.MCPConfigServersKey: map[string]any{name: rawConfig},
+	})
+	if err != nil {
+		return nil, err
+	}
+	servers, err := agentruntime.MCPConfigServers(normalized)
+	if err != nil {
+		return nil, err
+	}
+	serverConfig, ok := servers[name].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("hub mcp server %q config must be an object", name)
+	}
+	delete(serverConfig, "description")
+	return serverConfig, nil
+}
+
 func validateManagerUpdateRuntimeSpec(req UpdateRequest) error {
 	if !req.RuntimeSelectionRequested {
 		return nil

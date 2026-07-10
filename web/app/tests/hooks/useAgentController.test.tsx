@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import {
+  addAgentMCPServersRequest,
   batchAddAgentSkillsRequest,
   createBotRequest,
   createNotificationBotRequest,
@@ -65,6 +66,7 @@ vi.mock("@/api/agents", async () => {
   const actual = await vi.importActual<typeof import("@/api/agents")>("@/api/agents");
   return {
     ...actual,
+    addAgentMCPServersRequest: vi.fn(),
     batchAddAgentSkillsRequest: vi.fn(),
     createBotRequest: vi.fn(),
     createNotificationBotRequest: vi.fn(),
@@ -186,10 +188,13 @@ function useAgentControllerHarness(
     agents?: AgentLike[];
     data?: IMData | null;
     hubMCPServers?: HubMCPServer[];
+    hubMCPServersError?: string;
+    hubMCPServersLoading?: boolean;
     managerProfile?: AgentProfileLike | null;
     modelProviders?: ModelProviderCatalog | null;
     modelProvidersLoaded?: boolean;
     bootstrapConfig?: RuntimeBootstrapConfig | null;
+    refreshHubMCPServers?: () => Promise<unknown>;
     t?: TranslateFn;
   } = {},
 ) {
@@ -233,11 +238,14 @@ function useAgentControllerHarness(
     bootstrapConfig: options.bootstrapConfig ?? null,
     data,
     hubMCPServers: options.hubMCPServers ?? [],
+    hubMCPServersError: options.hubMCPServersError ?? "",
+    hubMCPServersLoading: options.hubMCPServersLoading ?? false,
     hubTemplates: [],
     locale: "en",
     managerProfile: options.managerProfile ?? null,
     modelProviders: options.modelProviders ?? null,
     modelProvidersLoaded: options.modelProvidersLoaded ?? false,
+    refreshHubMCPServers: options.refreshHubMCPServers ?? vi.fn(async () => null),
     refreshHubTemplates: vi.fn(async () => undefined),
     refreshWorkspaceAgents,
     refreshWorkspaceBootstrap,
@@ -271,6 +279,7 @@ function useAgentControllerHarness(
 
 describe("useAgentController", () => {
   beforeEach(() => {
+    vi.mocked(addAgentMCPServersRequest).mockReset();
     vi.mocked(fetchAgent).mockReset();
     vi.mocked(fetchAgentProfile).mockReset();
     vi.mocked(fetchAgentProfileDefaults).mockReset();
@@ -385,6 +394,15 @@ describe("useAgentController", () => {
       desired: mcpConfig,
       runtime_kind: "picoclaw_sandbox",
     }));
+    vi.mocked(addAgentMCPServersRequest).mockImplementation(async (agentID, serverNames) => {
+      const servers = Object.fromEntries(serverNames.map((name) => [name, { command: "uvx", args: [`${name}-mcp`] }]));
+      return {
+        actual: { mcpServers: servers },
+        agent_id: agentID,
+        desired: { mcpServers: servers },
+        runtime_kind: "picoclaw_sandbox",
+      };
+    });
     vi.mocked(updateAgentRequest).mockResolvedValue(latestAgent);
     vi.mocked(patchCsgclawUserRequest).mockImplementation(async (userID, payload) => ({
       avatar: payload.avatar || "",
@@ -781,6 +799,55 @@ describe("useAgentController", () => {
       },
     });
     expect(result.current.agentViewProps.mcpDeleteError).toBe("");
+  });
+
+  it("installs Hub MCP servers through the agent MCP server endpoint", async () => {
+    const installedView = {
+      actual: {
+        mcpServers: {
+          context7: { command: "uvx", args: ["context7-mcp"] },
+        },
+      },
+      agent_id: "u-manager",
+      desired: {
+        mcpServers: {
+          context7: { command: "uvx", args: ["context7-mcp"] },
+        },
+      },
+      runtime_kind: "picoclaw_sandbox",
+    };
+    vi.mocked(fetchAgentMCPConfig)
+      .mockResolvedValueOnce({
+        actual: null,
+        agent_id: "u-manager",
+        desired: null,
+        runtime_kind: "picoclaw_sandbox",
+      })
+      .mockResolvedValue(installedView);
+    vi.mocked(addAgentMCPServersRequest).mockResolvedValueOnce(installedView);
+
+    const { result } = renderHook(
+      () =>
+        useAgentControllerHarness({
+          hubMCPServers: [{ name: "context7", description: "Context7", config: { command: "uvx" } }],
+        }).controller,
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() =>
+      expect(result.current.agentViewProps.mcpCandidates.map((server) => server.name)).toEqual(["context7"]),
+    );
+
+    await act(async () => {
+      await result.current.agentViewProps.onInstallMCPServers?.(["context7"]);
+    });
+
+    expect(addAgentMCPServersRequest).toHaveBeenCalledWith("u-manager", ["context7"]);
+    expect(updateAgentMCPConfigRequest).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual(["context7"]),
+    );
+    expect(result.current.agentViewProps.mcpAddError).toBe("");
   });
 
   it("submits an empty MCP config when deleting the last actual MCP server", async () => {

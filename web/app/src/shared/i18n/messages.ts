@@ -1,6 +1,7 @@
 export const messages = {
   zh: {
     pageTitle: "CSGClaw",
+    retry: "重试",
     localIdentityFallback: "本地用户",
     settings: "设置",
     settingsPageSubtitle: "集中管理产品相关设置",
@@ -1015,6 +1016,7 @@ export const messages = {
   },
   en: {
     pageTitle: "CSGClaw",
+    retry: "Retry",
     localIdentityFallback: "Local user",
     settings: "Settings",
     settingsPageSubtitle: "Manage product settings in one place.",

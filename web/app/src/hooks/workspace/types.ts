@@ -243,12 +243,15 @@ export type UseAgentControllerArgs = {
   bootstrapConfig: RuntimeBootstrapConfig | null;
   data: IMData | null;
   hubMCPServers?: HubMCPServer[];
+  hubMCPServersError?: string;
+  hubMCPServersLoading?: boolean;
   hubTemplates: HubTemplate[];
   locale: LocaleCode;
   managerProfile: AgentProfileLike | null;
   modelProviders?: ModelProviderCatalog | null;
   modelProvidersLoaded?: boolean;
   profileDetailAgentID?: string;
+  refreshHubMCPServers?: () => Promise<unknown>;
   refreshHubTemplates: () => Promise<void>;
   refreshWorkspaceAgents: (options?: FetchAgentsOptions) => Promise<AgentLike[]>;
   refreshWorkspaceBootstrap: () => Promise<IMData | null>;

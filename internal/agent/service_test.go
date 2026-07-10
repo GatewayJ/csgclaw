@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1648,6 +1649,104 @@ func TestUpdateCodexLocalWorkspaceDirMarksRunningRuntimeForRestart(t *testing.T)
 	}
 	if len(observer.stopCalls) != 1 || observer.stopCalls[0] != "u-dev" {
 		t.Fatalf("StopAgent() calls = %+v, want [u-dev]", observer.stopCalls)
+	}
+}
+
+func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	var validateCalls atomic.Int32
+	firstValidateEntered := make(chan struct{})
+	releaseFirstValidate := make(chan struct{})
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindCodex,
+			mcpValidate: func(ctx context.Context, current agentruntime.MCPConfigSnapshot) error {
+				if validateCalls.Add(1) == 1 {
+					close(firstValidateEntered)
+					select {
+					case <-releaseFirstValidate:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				return agentruntime.ValidateMCPConfig(current.Config)
+			},
+			mcpRestart: func(agentruntime.MCPConfigChange) (bool, error) {
+				return false, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-dev"] = Agent{
+		ID:           "u-dev",
+		Name:         "dev",
+		RuntimeID:    "rt-u-dev",
+		RuntimeKind:  RuntimeKindCodex,
+		Role:         RoleWorker,
+		Status:       string(agentruntime.StateStopped),
+		Instructions: "keep synced",
+		CreatedAt:    time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+	hubServers := map[string]any{
+		"context7": map[string]any{
+			"command":     "uvx",
+			"args":        []any{"context7-mcp"},
+			"description": "Context7",
+		},
+		"remote": map[string]any{
+			"url":       "https://mcp.example.com/mcp",
+			"transport": "streamable-http",
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	errCh := make(chan error, 2)
+	go func() {
+		_, err := svc.AddMCPServers(ctx, "u-dev", []string{"context7"}, hubServers)
+		errCh <- err
+	}()
+	select {
+	case <-firstValidateEntered:
+	case <-ctx.Done():
+		t.Fatalf("first AddMCPServers did not enter validation: %v", ctx.Err())
+	}
+	go func() {
+		_, err := svc.AddMCPServers(ctx, "u-dev", []string{"remote"}, hubServers)
+		errCh <- err
+	}()
+	time.Sleep(25 * time.Millisecond)
+	close(releaseFirstValidate)
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("AddMCPServers() error = %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatalf("AddMCPServers() timed out: %v", ctx.Err())
+		}
+	}
+
+	got, ok := svc.Agent("u-dev")
+	if !ok {
+		t.Fatal("Agent(\"u-dev\") not found")
+	}
+	servers, err := agentruntime.MCPConfigServers(got.MCPConfig)
+	if err != nil {
+		t.Fatalf("MCPConfigServers() error = %v", err)
+	}
+	if _, ok := servers["context7"]; !ok {
+		t.Fatalf("merged MCP servers = %#v, want context7", servers)
+	}
+	if _, ok := servers["remote"]; !ok {
+		t.Fatalf("merged MCP servers = %#v, want remote", servers)
 	}
 }
 

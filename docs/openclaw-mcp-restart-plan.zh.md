@@ -1,6 +1,6 @@
 # MCP 配置控制器实现说明
 
-本文档记录当前分支对 CSGClaw MCP 配置接入的实现。旧方案把 OpenClaw 的 MCP 配置放在 `runtime_options.mcp`；当前实现已调整为独立的顶层 `mcp_config`，并在 runtime 接口层增加 `MCPConfigController`，由各 runtime adapter 负责把统一输入转换为自己的原生配置格式。
+本文档记录当前分支对 CSGClaw MCP 配置接入的实现。当前实现使用独立的顶层 `mcp_config`，并在 runtime 接口层增加 `MCPConfigController`，由各 runtime adapter 负责把统一输入转换为自己的原生配置格式。
 
 ## 1. 目标与边界
 
@@ -11,7 +11,7 @@
 - runtime 层新增 `MCPConfigController`，与现有 start/stop/provision 和 runtime config controller 分离。
 - OpenClaw、PicoClaw、Codex CLI 三类 agent 都接入 MCP server 配置。
 - 前端创建、编辑和详情页使用同一份 MCP Server JSON 配置形态。
-- 旧客户端提交的 `runtime_options.mcp` 会迁移到 `mcp_config`，并从 `runtime_options` 中剥离。
+- `runtime_options.mcp` 不作为 MCP 配置入口，也不保留兼容迁移逻辑。
 
 当前未覆盖：
 
@@ -236,15 +236,15 @@ Codex adapter 会将统一输入中的共享字段转换为 Codex TOML 语义，
 
 兼容逻辑：
 
-- create/update 收到旧 `runtime_options.mcp` 时，会迁移到 `MCPConfig`。
-- 迁移后保存的 runtime options 不再包含 `mcp`。
-- 如果同一次请求同时提交 `mcp_config` 和 `runtime_options.mcp`，以显式 `mcp_config` 为准。
+- MCP 是本 PR 新增能力，尚未对用户发布，不保留旧方案兼容。
+- create/update 只接受顶层 `mcp_config` 作为 MCP 配置输入。
+- `runtime_options.mcp` 不会迁移到 `mcp_config`，也不会作为 MCP 配置生效。
 
 ## 6. 保存与重建
 
 更新 `mcp_config` 的流程：
 
-1. 解析请求并迁移 legacy `runtime_options.mcp`。
+1. 解析请求中的顶层 `mcp_config`。
 2. 通过对应 runtime 的 `MCPConfigController.ValidateMCPConfig` 校验。
 3. 持久化新的 `Agent.MCPConfig`。
 4. 通过 `MCPConfigRestartRequired` 判断是否需要 recreate。
@@ -282,7 +282,7 @@ Codex adapter 会将统一输入中的共享字段转换为 Codex TOML 语义，
 已覆盖的后端测试重点：
 
 - `mcp_config` 缺失、空对象、空 `mcpServers`、非空 `mcpServers` 的语义。
-- legacy `runtime_options.mcp` 迁移。
+- `runtime_options.mcp` 不作为 MCP 配置入口。
 - OpenClaw/PicoClaw 接受 MCP 配置。
 - Codex 生成 `[mcp_servers."<name>"]` 配置块。
 - MCP 配置变更触发 recreate，失败时保留 restart required 状态。

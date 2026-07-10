@@ -147,6 +147,8 @@ export type AgentDetailPaneProps = {
   skillDeleteBusy?: boolean;
   skillDeleteError?: string;
   mcpCandidates?: HubMCPServer[];
+  mcpCandidatesError?: string;
+  mcpCandidatesLoading?: boolean;
   mcpServers?: HubMCPServer[];
   mcpAddBusy?: boolean;
   mcpAddError?: string;
@@ -161,6 +163,7 @@ export type AgentDetailPaneProps = {
   onDeleteSkill?: (skill: SlashSkillOption | string) => Promise<boolean> | boolean;
   onInstallMCPServers?: (serverNames: string[]) => Promise<boolean> | boolean;
   onDeleteMCPServer?: (server: HubMCPServer | string) => Promise<boolean> | boolean;
+  onRetryMCPServers?: () => void | Promise<unknown>;
 };
 
 export function AgentDetailPane({
@@ -198,6 +201,8 @@ export function AgentDetailPane({
   skillDeleteBusy = false,
   skillDeleteError = "",
   mcpCandidates = [],
+  mcpCandidatesError = "",
+  mcpCandidatesLoading = false,
   mcpServers = [],
   mcpAddBusy = false,
   mcpAddError = "",
@@ -220,6 +225,7 @@ export function AgentDetailPane({
   onDeleteSkill,
   onInstallMCPServers,
   onDeleteMCPServer,
+  onRetryMCPServers,
 }: AgentDetailPaneProps) {
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
@@ -833,7 +839,25 @@ export function AgentDetailPane({
           </DialogHeader>
           <div className="agent-skills-dialog-body">
             {mcpAddError ? <div className="form-error">{mcpAddError}</div> : null}
-            {!mcpCandidates.length ? (
+            {mcpCandidatesError ? (
+              <div className="form-error">
+                <span>{mcpCandidatesError}</span>
+                {onRetryMCPServers ? (
+                  <Button
+                    variant="secondaryGray"
+                    size="sm"
+                    disabled={mcpCandidatesLoading}
+                    onClick={() => {
+                      void onRetryMCPServers();
+                    }}
+                  >
+                    {t("retry")}
+                  </Button>
+                ) : null}
+              </div>
+            ) : mcpCandidatesLoading && !mcpCandidates.length ? (
+              <div className="agent-skills-empty">{t("resourcesMCPLoading")}</div>
+            ) : !mcpCandidates.length ? (
               <div className="agent-skills-empty">{t("agentMCPAddEmpty")}</div>
             ) : (
               <div className="agent-skill-candidates-list" role="list">
@@ -870,7 +894,12 @@ export function AgentDetailPane({
               size="sm"
               loading={mcpAddBusy}
               loadingLabel={t("agentMCPAdd")}
-              disabled={!selectedMCPNames.length || mcpAddBusy}
+              disabled={
+                !selectedMCPNames.length ||
+                mcpAddBusy ||
+                Boolean(mcpCandidatesError) ||
+                (mcpCandidatesLoading && !mcpCandidates.length)
+              }
               onClick={handleAddMCPConfirm}
             >
               {t("agentMCPAdd")}
