@@ -1194,7 +1194,7 @@ describe("AgentProfileModal", () => {
     expect(screen.getByLabelText("MCP Servers")).toBeInTheDocument();
   });
 
-  it("preserves MCP config when switching between MCP-capable runtimes", async () => {
+  it("preserves MCP config when switching from OpenClaw to Codex", async () => {
     const user = userEvent.setup();
     const onAgentDraftChange = vi.fn();
     const openclawDraft: AgentDraft = {
@@ -1264,11 +1264,12 @@ describe("AgentProfileModal", () => {
 
     expect(screen.getByLabelText("MCP Servers")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("combobox", { name: "Runtime" }));
-    await user.click(screen.getByRole("option", { name: "PicoClaw" }));
+    await user.click(screen.getByRole("checkbox", { name: "Sandbox" }));
 
     const nextDraft = onAgentDraftChange.mock.calls.at(-1)?.[0] as AgentDraft;
-    expect(nextDraft.runtime_kind).toBe("picoclaw_sandbox");
+    expect(nextDraft.sandbox_enabled).toBe(false);
+    expect(nextDraft.runtime_name).toBe("codex");
+    expect(nextDraft.runtime_kind).toBe("codex");
     expect(nextDraft.runtime_options).toEqual({ local_workspace_dir: "/tmp/project" });
     expect(nextDraft.mcp_config).toEqual({
       mcpServers: {

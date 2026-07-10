@@ -2575,6 +2575,32 @@ func TestHandleAgentsCreateManagerRejectsNonCodexRuntime(t *testing.T) {
 	}
 }
 
+func TestHandleAgentsCreateManagerRejectsLegacyRuntimeOptionsMCP(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
+
+	for name, body := range map[string]string{
+		"top-level-runtime-options": `{"id":"manager","name":"manager","runtime_options":{"mcp":{"mcpServers":{"context7":{"command":"npx"}}}}}`,
+		"compact-runtime-options":   `{"id":"manager","name":"manager","runtime":{"options":{"mcp":{"mcpServers":{"context7":{"command":"npx"}}}}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := mustNewService(t)
+			srv := &Handler{svc: svc}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+			rec := httptest.NewRecorder()
+
+			srv.Routes().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "manager mcp_config must be updated through the MCP config endpoint") {
+				t.Fatalf("body = %q, want manager mcp_config rejection", rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandleAgentsCreateReplaceUsesUnifiedServiceEntry(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
@@ -4068,6 +4094,34 @@ func TestHandleAgentsCreateReplaceManagerRejectsNonCodexRuntime(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "manager runtime is fixed to codex") {
 		t.Fatalf("body = %q, want fixed codex runtime rejection", rec.Body.String())
+	}
+}
+
+func TestHandleAgentsCreateReplaceManagerRejectsLegacyRuntimeOptionsMCP(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
+
+	svc := mustNewService(t)
+	if _, err := svc.Create(context.Background(), agent.CreateRequest{
+		Spec: agent.CreateAgentSpec{
+			ID:   agent.ManagerUserID,
+			Name: agent.ManagerName,
+		},
+	}); err != nil {
+		t.Fatalf("seed Create() error = %v", err)
+	}
+
+	srv := &Handler{svc: svc}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(`{"id":"u-manager","name":"manager","replace":true,"field_mask":["runtime_options"],"runtime_options":{"mcp":{"mcpServers":{"context7":{"command":"npx"}}}}}`))
+	rec := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "manager mcp_config must be updated through the MCP config endpoint") {
+		t.Fatalf("body = %q, want manager mcp_config rejection", rec.Body.String())
 	}
 }
 

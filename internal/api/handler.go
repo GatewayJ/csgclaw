@@ -1349,6 +1349,7 @@ func agentCreateRequestFromAPI(req apitypes.CreateAgentRequest) agent.CreateRequ
 			Profile:        req.Profile,
 			RuntimeOptions: runtimeOptions,
 			MCPConfig:      utils.CloneAnyMapShallowNestedStringMaps(req.MCPConfig),
+			MCPConfigSet:   req.MCPConfigSet,
 			AgentProfile:   prof,
 		},
 		Replace:   req.Replace,
