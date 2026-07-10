@@ -2294,9 +2294,6 @@ func TestHandleAgentsMCPConfigClosedLoopForSupportedRuntimes(t *testing.T) {
 				"mcp_config": mcpConfig,
 			}, http.StatusOK)
 			assertMCPConfigResponse(t, updated.MCPConfig)
-			if _, ok := updated.RuntimeOptions[agentruntime.RuntimeOptionMCPKey]; ok {
-				t.Fatalf("runtime_options contains legacy %q after mcp_config patch: %+v", agentruntime.RuntimeOptionMCPKey, updated.RuntimeOptions)
-			}
 			tt.assertFile(t, updated)
 		})
 	}
@@ -2582,7 +2579,7 @@ func TestHandleAgentsCreateManagerRejectsNonCodexRuntime(t *testing.T) {
 	}
 }
 
-func TestHandleAgentsCreateManagerRejectsLegacyRuntimeOptionsMCP(t *testing.T) {
+func TestHandleAgentsCreateManagerRuntimeOptionsMCPDoesNotSetMCPConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
 
@@ -2598,11 +2595,11 @@ func TestHandleAgentsCreateManagerRejectsLegacyRuntimeOptionsMCP(t *testing.T) {
 
 			srv.Routes().ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 			}
-			if !strings.Contains(rec.Body.String(), "manager mcp_config must be updated through the MCP config endpoint") {
-				t.Fatalf("body = %q, want manager mcp_config rejection", rec.Body.String())
+			if strings.Contains(rec.Body.String(), "mcp_config") {
+				t.Fatalf("body = %q, want no mcp_config from runtime_options.mcp", rec.Body.String())
 			}
 		})
 	}
@@ -3191,7 +3188,132 @@ func newAgentSkillManagementTestServer(t *testing.T) (*Handler, *agent.Service, 
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	return &Handler{svc: svc}, svc, created
+	return &Handler{svc: svc, hub: hubSvc}, svc, created
+}
+
+func TestHandleAgentMCPServersAddsHubServersByName(t *testing.T) {
+	srv, svc, created := newAgentMCPManagementTestServer(t)
+
+	if _, err := srv.hub.CreateMCPServer(context.Background(), "context7", map[string]any{
+		"command":     "uvx",
+		"args":        []any{"context7-mcp"},
+		"description": "Context7",
+	}); err != nil {
+		t.Fatalf("CreateMCPServer(context7) error = %v", err)
+	}
+	if _, err := srv.hub.CreateMCPServer(context.Background(), "remote", map[string]any{
+		"url":         "https://mcp.example.com/mcp",
+		"transport":   "streamable-http",
+		"description": "Remote",
+	}); err != nil {
+		t.Fatalf("CreateMCPServer(remote) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(`{"names":["context7","remote","context7"]}`))
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var view agent.MCPConfigView
+	if err := json.NewDecoder(rec.Body).Decode(&view); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	servers := mcpServersFromConfigForTest(t, view.Desired)
+	context7 := mcpServerForTest(t, servers, "context7")
+	if command, _ := context7["command"].(string); command != "uvx" {
+		t.Fatalf("context7.command = %q, want uvx", command)
+	}
+	if _, ok := context7["description"]; ok {
+		t.Fatalf("context7 contains hub-only description: %#v", context7)
+	}
+	remote := mcpServerForTest(t, servers, "remote")
+	if url, _ := remote["url"].(string); url != "https://mcp.example.com/mcp" {
+		t.Fatalf("remote.url = %q, want https://mcp.example.com/mcp", url)
+	}
+
+	saved, ok := svc.Agent(created.ID)
+	if !ok {
+		t.Fatalf("Agent(%q) not found", created.ID)
+	}
+	savedServers := mcpServersFromConfigForTest(t, saved.MCPConfig)
+	if len(savedServers) != 2 {
+		t.Fatalf("saved mcpServers = %#v, want 2 entries", savedServers)
+	}
+}
+
+func TestHandleAgentMCPServersReturnsNotFoundWhenHubServerMissing(t *testing.T) {
+	srv, _, created := newAgentMCPManagementTestServer(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(`{"names":["missing"]}`))
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+}
+
+func newAgentMCPManagementTestServer(t *testing.T) (*Handler, *agent.Service, agent.Agent) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
+
+	hubSvc, err := hub.NewService(config.HubConfig{}, hub.DefaultStoreFactory)
+	if err != nil {
+		t.Fatalf("hub.NewService() error = %v", err)
+	}
+
+	svc, err := agent.NewService(config.ModelConfig{
+		Provider: config.ProviderLLMAPI,
+		BaseURL:  "http://127.0.0.1:4000",
+		APIKey:   "sk-test",
+		ModelID:  "model-1",
+	}, config.ServerConfig{}, "manager-image:test", "",
+		agent.WithHubService(hubSvc),
+		agent.WithBootstrapDefaultTemplates(config.BootstrapConfig{
+			DefaultManagerTemplate: config.DefaultBootstrapManagerTemplate,
+			DefaultWorkerTemplate:  config.DefaultBootstrapWorkerTemplate,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	created, err := svc.Create(context.Background(), agent.CreateRequest{
+		Spec: agent.CreateAgentSpec{
+			Name:        "mcp-agent",
+			Role:        agent.RoleWorker,
+			RuntimeKind: agent.RuntimeKindPicoClawSandbox,
+			Image:       "picoclaw-image:test",
+			AgentProfile: agent.AgentProfile{
+				ProfileComplete: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	return &Handler{svc: svc, hub: hubSvc}, svc, created
+}
+
+func mcpServersFromConfigForTest(t *testing.T, config map[string]any) map[string]any {
+	t.Helper()
+	servers, ok := config[agentruntime.MCPConfigServersKey].(map[string]any)
+	if !ok {
+		t.Fatalf("mcpServers = %#v, want object", config[agentruntime.MCPConfigServersKey])
+	}
+	return servers
+}
+
+func mcpServerForTest(t *testing.T, servers map[string]any, name string) map[string]any {
+	t.Helper()
+	server, ok := servers[name].(map[string]any)
+	if !ok {
+		t.Fatalf("mcpServers[%q] = %#v, want object", name, servers[name])
+	}
+	return server
 }
 
 func TestHandleSkillsListsGlobalSkillsAndBrowsesFiles(t *testing.T) {
@@ -4104,7 +4226,7 @@ func TestHandleAgentsCreateReplaceManagerRejectsNonCodexRuntime(t *testing.T) {
 	}
 }
 
-func TestHandleAgentsCreateReplaceManagerRejectsLegacyRuntimeOptionsMCP(t *testing.T) {
+func TestHandleAgentsCreateReplaceManagerRuntimeOptionsMCPDoesNotSetMCPConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
 
@@ -4124,11 +4246,19 @@ func TestHandleAgentsCreateReplaceManagerRejectsLegacyRuntimeOptionsMCP(t *testi
 
 	srv.Routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "manager mcp_config must be updated through the MCP config endpoint") {
-		t.Fatalf("body = %q, want manager mcp_config rejection", rec.Body.String())
+
+	var got agent.Agent
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.ID != "u-manager" && got.ID != agent.ManagerUserID {
+		t.Fatalf("agent id = %q, want %q or %q", got.ID, "u-manager", agent.ManagerUserID)
+	}
+	if got.MCPConfig != nil {
+		t.Fatalf("agent mcp_config = %#v, want nil", got.MCPConfig)
 	}
 }
 

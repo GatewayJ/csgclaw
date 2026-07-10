@@ -192,6 +192,10 @@ export function updateAgentMCPConfigRequest(
   return put(`api/v1/agents/${encodeURIComponent(agentID)}/mcp`, { mcp_config: mcpConfig });
 }
 
+export function addAgentMCPServersRequest(agentID: string, serverNames: string[]): Promise<AgentMCPConfigView> {
+  return post(`api/v1/agents/${encodeURIComponent(agentID)}/mcp-servers`, { names: serverNames });
+}
+
 export function batchAddAgentSkillsRequest(agentID: string, skillNames: string[]): Promise<void> {
   return post(`api/v1/agents/${encodeURIComponent(agentID)}/skills:batchAdd`, { names: skillNames });
 }

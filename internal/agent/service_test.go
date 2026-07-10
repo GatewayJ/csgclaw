@@ -1826,7 +1826,7 @@ func TestUpdateMCPConfigRecreateFailureKeepsRestartRequired(t *testing.T) {
 	}
 }
 
-func TestUpdatePicoClawMCPConfigUsesLegacyRuntimeOptionsMCPIsRejected(t *testing.T) {
+func TestUpdatePicoClawRuntimeOptionsMCPDoesNotUpdateMCPConfig(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1849,101 +1849,25 @@ func TestUpdatePicoClawMCPConfigUsesLegacyRuntimeOptionsMCPIsRejected(t *testing
 		ProfileComplete: false,
 		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
 	}
-
 	nextRuntimeOptions := map[string]any{
 		"mcp": map[string]any{"mcpServers": map[string]any{}},
 	}
-	_, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions})
-	if err == nil || !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
-		t.Fatalf("Update() error = %v, want legacy runtime_options.mcp rejection", err)
+	if _, err := svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	got, ok := svc.Agent("u-dev")
+	if !ok {
+		t.Fatal("Agent(u-dev) not found")
+	}
+	if _, ok := got.RuntimeOptions["mcp"]; !ok {
+		t.Fatalf("Agent().RuntimeOptions = %#v, want ordinary mcp runtime option preserved", got.RuntimeOptions)
+	}
+	if got.MCPConfig != nil {
+		t.Fatalf("Agent().MCPConfig = %#v, want nil", got.MCPConfig)
 	}
 }
 
-func TestUpdateRequestLegacyMCPRuntimeOptionsNullMarksMCPConfigClear(t *testing.T) {
-	var req UpdateRequest
-	if err := json.Unmarshal([]byte(`{"runtime_options":{"local_workspace_dir":"/tmp/project","mcp":null}}`), &req); err == nil {
-		t.Fatal("json.Unmarshal(UpdateRequest) error = nil, want legacy runtime_options.mcp rejection")
-	} else if !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
-		t.Fatalf("json.Unmarshal(UpdateRequest) error = %v, want deprecated runtime_options.mcp rejection", err)
-	}
-}
-
-func TestUpdateLegacyMCPRuntimeOptionsNullClearsMCPConfig(t *testing.T) {
-	svc, err := NewService(
-		testModelConfig(),
-		config.ServerConfig{},
-		"manager-image:test",
-		"",
-		WithRuntime(fakeAgentRuntime{kind: RuntimeKindPicoClawSandbox}),
-	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	svc.agents["u-dev"] = Agent{
-		ID:          "u-dev",
-		Name:        "dev",
-		RuntimeID:   "rt-u-dev",
-		RuntimeKind: RuntimeKindPicoClawSandbox,
-		Image:       "picoclaw-image:test",
-		Role:        RoleWorker,
-		Status:      "profile_incomplete",
-		RuntimeOptions: map[string]any{
-			"local_workspace_dir": "/tmp/project",
-		},
-		MCPConfig: map[string]any{
-			"mcpServers": map[string]any{
-				"context7": map[string]any{"command": "uvx"},
-			},
-		},
-		AgentProfile:    AgentProfile{Name: "dev"},
-		ProfileComplete: false,
-		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
-	}
-
-	nextRuntimeOptions := map[string]any{
-		"local_workspace_dir": "/tmp/project",
-		"mcp":                 nil,
-	}
-	if _, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions}); err == nil {
-		t.Fatal("Update() error = nil, want legacy runtime_options.mcp rejection")
-	} else if !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
-		t.Fatalf("Update() error = %v, want legacy runtime_options.mcp rejection", err)
-	}
-}
-
-func TestUpdateLegacyMCPRuntimeOptionsRejectsInvalidRoot(t *testing.T) {
-	svc, err := NewService(
-		testModelConfig(),
-		config.ServerConfig{},
-		"manager-image:test",
-		"",
-		WithRuntime(fakeAgentRuntime{kind: RuntimeKindPicoClawSandbox}),
-	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	svc.agents["u-dev"] = Agent{
-		ID:              "u-dev",
-		Name:            "dev",
-		RuntimeID:       "rt-u-dev",
-		RuntimeKind:     RuntimeKindPicoClawSandbox,
-		Image:           "picoclaw-image:test",
-		Role:            RoleWorker,
-		Status:          "profile_incomplete",
-		AgentProfile:    AgentProfile{Name: "dev"},
-		ProfileComplete: false,
-		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
-	}
-
-	runtimeOptions := map[string]any{"mcp": "invalid"}
-	if _, err = svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &runtimeOptions}); err == nil {
-		t.Fatal("Update() error = nil, want legacy runtime_options.mcp rejection")
-	} else if !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
-		t.Fatalf("Update() error = %v, want legacy runtime_options.mcp rejection", err)
-	}
-}
-
-func TestCreatePicoClawLegacyRuntimeOptionsMCPIsRejected(t *testing.T) {
+func TestCreatePicoClawRuntimeOptionsMCPDoesNotPopulateMCPConfig(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1955,8 +1879,8 @@ func TestCreatePicoClawLegacyRuntimeOptionsMCPIsRejected(t *testing.T) {
 		t.Fatalf("NewService() error = %v", err)
 	}
 
-	_, err = svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
-		Name:        "dev",
+	created, err := svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
+		Name:        "dev2",
 		Role:        RoleWorker,
 		RuntimeKind: RuntimeKindPicoClawSandbox,
 		Image:       "picoclaw-image:test",
@@ -1964,12 +1888,18 @@ func TestCreatePicoClawLegacyRuntimeOptionsMCPIsRejected(t *testing.T) {
 			"mcp": map[string]any{"mcpServers": map[string]any{}},
 		},
 	}})
-	if err == nil || !strings.Contains(err.Error(), "runtime_options.mcp is deprecated") {
-		t.Fatalf("Create() error = %v, want legacy runtime_options.mcp rejection", err)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if _, ok := created.RuntimeOptions["mcp"]; !ok {
+		t.Fatalf("Create().RuntimeOptions = %#v, want mcp key preserved", created.RuntimeOptions)
+	}
+	if created.MCPConfig != nil {
+		t.Fatalf("Create().MCPConfig = %#v, want nil", created.MCPConfig)
 	}
 
-	created, err := svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
-		Name:        "dev2",
+	created, err = svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
+		Name:        "dev3",
 		Role:        RoleWorker,
 		RuntimeKind: RuntimeKindPicoClawSandbox,
 		Image:       "picoclaw-image:test",
@@ -3577,23 +3507,6 @@ func TestCreateManagerRejectsInlineMCPConfig(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "manager mcp_config must be updated through the MCP config endpoint") {
 		t.Fatalf("Create(manager with mcp_config) error = %v, want manager mcp_config rejection", err)
 	}
-
-	_, err = svc.Create(context.Background(), CreateRequest{
-		Spec: CreateAgentSpec{
-			ID:   ManagerUserID,
-			Name: ManagerName,
-			RuntimeOptions: map[string]any{
-				agentruntime.RuntimeOptionMCPKey: map[string]any{
-					agentruntime.MCPConfigServersKey: map[string]any{
-						"context7": map[string]any{"command": "npx"},
-					},
-				},
-			},
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "manager mcp_config must be updated through the MCP config endpoint") {
-		t.Fatalf("Create(manager with legacy runtime_options.mcp) error = %v, want manager mcp_config rejection", err)
-	}
 }
 
 func TestCreateReplaceManagerRejectsInlineMCPConfig(t *testing.T) {
@@ -3644,24 +3557,6 @@ func TestCreateReplaceManagerRejectsInlineMCPConfig(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "manager mcp_config must be updated through the MCP config endpoint") {
 		t.Fatalf("Create(--replace manager with mcp_config field mask) error = %v, want manager mcp_config rejection", err)
-	}
-
-	_, err = svc.Create(context.Background(), CreateRequest{
-		Spec: CreateAgentSpec{
-			ID: ManagerUserID,
-			RuntimeOptions: map[string]any{
-				agentruntime.RuntimeOptionMCPKey: map[string]any{
-					agentruntime.MCPConfigServersKey: map[string]any{
-						"context7": map[string]any{"command": "npx"},
-					},
-				},
-			},
-		},
-		Replace:   true,
-		FieldMask: []string{"runtime_options"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "manager mcp_config must be updated through the MCP config endpoint") {
-		t.Fatalf("Create(--replace manager with legacy runtime_options.mcp) error = %v, want manager mcp_config rejection", err)
 	}
 }
 

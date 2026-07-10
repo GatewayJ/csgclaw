@@ -1240,7 +1240,7 @@ func managerReplaceSetsMCPConfig(req CreateRequest) bool {
 }
 
 func createSpecSetsMCPConfig(spec CreateAgentSpec) bool {
-	return spec.MCPConfigSet || runtimeOptionsHasLegacyMCP(spec.RuntimeOptions)
+	return spec.MCPConfigSet
 }
 
 func (s *Service) validateReplaceWorkerSpecBeforeDelete(ctx context.Context, spec CreateAgentSpec) error {
@@ -1252,11 +1252,6 @@ func (s *Service) validateReplaceWorkerSpecBeforeDelete(ctx context.Context, spe
 		return fmt.Errorf("image is required for runtime_kind %q", runtimeKind)
 	}
 	if _, err := s.runtimeForKind(runtimeKind); err != nil {
-		return err
-	}
-	var err error
-	spec.RuntimeOptions, spec.MCPConfig, err = splitLegacyRuntimeOptionsMCPStrict(spec.RuntimeOptions, spec.MCPConfig, spec.MCPConfig != nil)
-	if err != nil {
 		return err
 	}
 	normalizedMCPConfig, err := normalizeMCPConfig(spec.MCPConfig)
@@ -1902,9 +1897,6 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 			defer cleanup()
 		}
 	}
-	if runtimeOptionsHasLegacyMCP(spec.RuntimeOptions) {
-		return Agent{}, fmt.Errorf("runtime_options.%s is deprecated, use mcp_config instead", agentruntime.RuntimeOptionMCPKey)
-	}
 	id := strings.TrimSpace(spec.ID)
 	name := strings.TrimSpace(spec.Name)
 	description := strings.TrimSpace(spec.Description)
@@ -1918,10 +1910,6 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		return Agent{}, err
 	}
 	spec.SetRuntimeConfig(runtimeCfg)
-	spec.RuntimeOptions, spec.MCPConfig, err = splitLegacyRuntimeOptionsMCPStrict(spec.RuntimeOptions, spec.MCPConfig, spec.MCPConfig != nil)
-	if err != nil {
-		return Agent{}, err
-	}
 	normalizedMCPConfig, err := normalizeMCPConfig(spec.MCPConfig)
 	if err != nil {
 		return Agent{}, err
@@ -2159,7 +2147,6 @@ func newWorkerAgent(id, name, description, instructions, image, avatar, runtimeK
 	if len(runtimeOptions) > 0 {
 		agentRX = utils.CloneAnyMap(runtimeOptions)
 	}
-	agentRX, mcpConfig = splitLegacyRuntimeOptionsMCP(agentRX, mcpConfig)
 	runtimeCfg, _ := agentruntime.RuntimeConfigFromSelection(runtimeKind, runtimeName, sandboxEnabled)
 	resolvedRuntimeKind := runtimeCfg.LegacyKind()
 	resolvedRuntimeName := runtimeCfg.Name

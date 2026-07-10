@@ -181,7 +181,7 @@ func runtimeRecordForAgent(a Agent) RuntimeRecord {
 	if a.CreatedAt.IsZero() {
 		createdAt = time.Time{}
 	}
-	runtimeOptions, _ := splitLegacyRuntimeOptionsMCP(a.RuntimeOptions, a.MCPConfig)
+	runtimeOptions := a.RuntimeOptions
 	return normalizeRuntimeRecord(RuntimeRecord{
 		ID:        normalizeRuntimeID(a.RuntimeID, a.ID),
 		Kind:      a.RuntimeConfig().LegacyKind(),

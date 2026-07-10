@@ -345,9 +345,6 @@ func (r *CreateAgentRequest) UnmarshalJSON(data []byte) error {
 	if len(decoded.Runtime.Options) > 0 {
 		r.Runtime.Options = decoded.Runtime.Options
 	}
-	if createRuntimeOptionsHasLegacyMCP(decoded.RuntimeOptions) || createRuntimeOptionsHasLegacyMCP(decoded.Runtime.Options) {
-		r.MCPConfigSet = true
-	}
 	if decoded.SandboxEnabled != nil {
 		r.SandboxEnabled = *decoded.SandboxEnabled
 	}
@@ -385,14 +382,6 @@ func (r *CreateAgentRequest) UnmarshalJSON(data []byte) error {
 		r.RuntimeKind = runtimeKindFromSelection(r.RuntimeName, r.SandboxEnabled)
 	}
 	return nil
-}
-
-func createRuntimeOptionsHasLegacyMCP(runtimeOptions map[string]any) bool {
-	if runtimeOptions == nil {
-		return false
-	}
-	_, ok := runtimeOptions["mcp"]
-	return ok
 }
 
 type CreateAgentProfile struct {

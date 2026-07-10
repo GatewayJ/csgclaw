@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -154,7 +153,6 @@ func (a *Agent) UnmarshalJSON(data []byte) error {
 			out.SandboxEnabled = *decoded.Runtime.SandboxEnabled
 		}
 	}
-	out.RuntimeOptions, out.MCPConfig = splitLegacyRuntimeOptionsMCP(out.RuntimeOptions, out.MCPConfig)
 	out.SetRuntimeConfig(out.RuntimeConfig())
 	profilePayload := decoded.ModelConfig
 	if len(profilePayload) == 0 || string(profilePayload) == "null" {
@@ -327,9 +325,6 @@ func (s *CreateAgentSpec) UnmarshalJSON(data []byte) error {
 		MCPConfig:      utils.CloneAnyMap(decoded.MCPConfig),
 		AgentProfile:   cloneProfile(decoded.AgentProfile),
 	}
-	if runtimeOptionsHasLegacyMCP(out.RuntimeOptions) {
-		return fmt.Errorf("runtime_options.%s is deprecated, use mcp_config instead", agentruntime.RuntimeOptionMCPKey)
-	}
 	var rawFields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &rawFields); err == nil {
 		if _, ok := rawFields["mcp_config"]; ok {
@@ -361,11 +356,6 @@ func (s *CreateAgentSpec) UnmarshalJSON(data []byte) error {
 		if decoded.Runtime.SandboxEnabled != nil {
 			out.SandboxEnabled = *decoded.Runtime.SandboxEnabled
 		}
-	}
-	var legacyMCPSet bool
-	out.RuntimeOptions, out.MCPConfig, legacyMCPSet, _ = splitLegacyRuntimeOptionsMCPValue(out.RuntimeOptions, out.MCPConfig, out.MCPConfigSet, false)
-	if legacyMCPSet {
-		out.MCPConfigSet = true
 	}
 	out.SetRuntimeConfig(out.RuntimeConfig())
 	profilePayload := decoded.ModelConfig
@@ -500,11 +490,6 @@ func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
 		strings.TrimSpace(out.RuntimeName) != "" ||
 		out.SandboxEnabled != nil
 	out.RuntimeSelectionRequested = rawRuntimeSelectionRequested && updateFieldMaskRequestsRuntimeSelection(out.FieldMask)
-	if out.RuntimeOptions != nil {
-		if _, legacyMCPSet := (*out.RuntimeOptions)[agentruntime.RuntimeOptionMCPKey]; legacyMCPSet {
-			return fmt.Errorf("runtime_options.%s is deprecated, use mcp_config instead", agentruntime.RuntimeOptionMCPKey)
-		}
-	}
 	if len(out.FieldMask) > 0 {
 		out.FieldMask = normalizeCompactUpdateFieldMask(out.FieldMask, profileField, decoded.Runtime != nil)
 	}
@@ -632,83 +617,4 @@ func cloneAgent(src *Agent) *Agent {
 	dst.RuntimeOptions = utils.CloneAnyMap(src.RuntimeOptions)
 	dst.MCPConfig = utils.CloneAnyMap(src.MCPConfig)
 	return &dst
-}
-
-func splitLegacyRuntimeOptionsMCP(runtimeOptions map[string]any, mcpConfig map[string]any) (map[string]any, map[string]any) {
-	options, currentMCP, _, _ := splitLegacyRuntimeOptionsMCPValue(runtimeOptions, mcpConfig, mcpConfig != nil, false)
-	return options, currentMCP
-}
-
-func runtimeOptionsHasLegacyMCP(runtimeOptions map[string]any) bool {
-	if runtimeOptions == nil {
-		return false
-	}
-	_, ok := runtimeOptions[agentruntime.RuntimeOptionMCPKey]
-	return ok
-}
-
-func splitLegacyRuntimeOptionsMCPStrict(runtimeOptions map[string]any, mcpConfig map[string]any, mcpConfigProvided bool) (map[string]any, map[string]any, error) {
-	options, currentMCP, _, err := splitLegacyRuntimeOptionsMCPValue(runtimeOptions, mcpConfig, mcpConfigProvided, true)
-	return options, currentMCP, err
-}
-
-func splitLegacyRuntimeOptionsMCPStrictWithPresence(runtimeOptions map[string]any, mcpConfig map[string]any, mcpConfigProvided bool) (map[string]any, map[string]any, bool, error) {
-	return splitLegacyRuntimeOptionsMCPValue(runtimeOptions, mcpConfig, mcpConfigProvided, true)
-}
-
-func splitLegacyRuntimeOptionsMCPValue(runtimeOptions map[string]any, mcpConfig map[string]any, mcpConfigProvided, strict bool) (map[string]any, map[string]any, bool, error) {
-	options := utils.CloneAnyMap(runtimeOptions)
-	currentMCP := cloneAnyMapPreserveEmpty(mcpConfig)
-	if options == nil {
-		return nil, currentMCP, false, nil
-	}
-	raw, ok := options[agentruntime.RuntimeOptionMCPKey]
-	if !ok {
-		if len(options) == 0 {
-			return nil, currentMCP, false, nil
-		}
-		return options, currentMCP, false, nil
-	}
-	delete(options, agentruntime.RuntimeOptionMCPKey)
-	if !mcpConfigProvided {
-		if raw == nil {
-			currentMCP = nil
-		} else {
-			rawMap, ok := raw.(map[string]any)
-			if !ok {
-				if strict {
-					return nil, nil, true, fmt.Errorf("runtime_options.%s must be an object or null", agentruntime.RuntimeOptionMCPKey)
-				}
-			} else if normalized, err := agentruntime.NormalizeMCPConfig(rawMap); err == nil {
-				currentMCP = normalized
-			} else if strict {
-				return nil, nil, true, legacyRuntimeOptionsMCPErrorPath(err)
-			} else {
-				currentMCP = cloneAnyMapPreserveEmpty(rawMap)
-			}
-		}
-	}
-	if len(options) == 0 {
-		options = nil
-	}
-	return options, currentMCP, true, nil
-}
-
-func legacyRuntimeOptionsMCPErrorPath(err error) error {
-	if err == nil {
-		return nil
-	}
-	message := strings.ReplaceAll(err.Error(), "mcp_config", "runtime_options."+agentruntime.RuntimeOptionMCPKey)
-	return fmt.Errorf("%s", message)
-}
-
-func cloneAnyMapPreserveEmpty(src map[string]any) map[string]any {
-	if src == nil {
-		return nil
-	}
-	out := make(map[string]any, len(src))
-	for key, value := range src {
-		out[key] = value
-	}
-	return out
 }

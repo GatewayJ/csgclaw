@@ -39,6 +39,7 @@ func (h *Handler) registerCoreRoutes(router chi.Router) {
 				r.Delete("/skills/{name}", h.handleAgentSkillDelete)
 				r.Get("/mcp", h.handleAgentMCPByID)
 				r.Put("/mcp", h.handleAgentMCPByID)
+				r.Post("/mcp-servers", h.handleAgentMCPServersByID)
 				r.Route("/profile", func(r chi.Router) {
 					r.Get("/", h.getAgentProfile)
 					r.Put("/", h.updateAgentProfile)

@@ -12,7 +12,6 @@ import (
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/config"
 	"csgclaw/internal/modelcap"
-	agentruntime "csgclaw/internal/runtime"
 )
 
 //go:embed defaults/openclaw-gateway.json
@@ -51,14 +50,6 @@ func HostGatewayLogPath(agentHome string) string {
 
 func EnsureConfig(agentHome, participantID, agentID string, server config.ServerConfig, model config.ModelConfig, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) (string, error) {
 	return EnsureConfigWithMCPConfig(agentHome, participantID, agentID, server, model, nil, resolveBaseURL, feishuProvider)
-}
-
-func EnsureConfigWithRuntimeOptions(agentHome, participantID, agentID string, server config.ServerConfig, model config.ModelConfig, runtimeOptions map[string]any, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) (string, error) {
-	mcpConfig, err := mcpConfigFromLegacyRuntimeOptions(runtimeOptions)
-	if err != nil {
-		return "", err
-	}
-	return EnsureConfigWithMCPConfig(agentHome, participantID, agentID, server, model, mcpConfig, resolveBaseURL, feishuProvider)
 }
 
 func EnsureConfigWithMCPConfig(agentHome, participantID, agentID string, server config.ServerConfig, model config.ModelConfig, mcpConfig map[string]any, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) (string, error) {
@@ -159,14 +150,6 @@ func renderConfig(participantID, agentID string, server config.ServerConfig, mod
 	return renderConfigWithMCPConfig(participantID, agentID, server, model, nil, resolveBaseURL, feishuProvider)
 }
 
-func renderConfigWithRuntimeOptions(participantID, agentID string, server config.ServerConfig, model config.ModelConfig, runtimeOptions map[string]any, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) ([]byte, error) {
-	mcpConfig, err := mcpConfigFromLegacyRuntimeOptions(runtimeOptions)
-	if err != nil {
-		return nil, err
-	}
-	return renderConfigWithMCPConfig(participantID, agentID, server, model, mcpConfig, resolveBaseURL, feishuProvider)
-}
-
 func renderConfigWithMCPConfig(participantID, agentID string, server config.ServerConfig, model config.ModelConfig, mcpConfig map[string]any, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) ([]byte, error) {
 	participantID = strings.TrimSpace(participantID)
 	agentID = strings.TrimSpace(agentID)
@@ -201,30 +184,6 @@ func renderConfigWithMCPConfig(participantID, agentID string, server config.Serv
 		return nil, fmt.Errorf("encode openclaw config: %w", err)
 	}
 	return data, nil
-}
-
-func mcpConfigFromLegacyRuntimeOptions(runtimeOptions map[string]any) (map[string]any, error) {
-	raw, ok := runtimeOptions[agentruntime.RuntimeOptionMCPKey]
-	if !ok || raw == nil {
-		return nil, nil
-	}
-	mcpConfig, ok := raw.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("runtime_options.%s must be an object or null", agentruntime.RuntimeOptionMCPKey)
-	}
-	normalized, err := agentruntime.NormalizeMCPConfig(mcpConfig)
-	if err != nil {
-		return nil, legacyMCPConfigErrorPath(err)
-	}
-	return normalized, nil
-}
-
-func legacyMCPConfigErrorPath(err error) error {
-	if err == nil {
-		return nil
-	}
-	message := strings.ReplaceAll(err.Error(), "mcp_config", "runtime_options."+agentruntime.RuntimeOptionMCPKey)
-	return fmt.Errorf("%s", message)
 }
 
 func updateOpenClawModelProvider(cfg map[string]any, botID string, server config.ServerConfig, modelCfg config.ModelConfig, resolveBaseURL BaseURLResolver) error {

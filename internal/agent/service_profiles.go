@@ -369,20 +369,6 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 				req.RuntimeOptions = &empty
 			}
 			patch = *req.RuntimeOptions
-			var legacyMCPConfig map[string]any
-			var legacyMCPSet bool
-			var err error
-			patch, legacyMCPConfig, legacyMCPSet, err = splitLegacyRuntimeOptionsMCPStrictWithPresence(patch, nil, false)
-			if err != nil {
-				s.mu.Unlock()
-				return Agent{}, err
-			}
-			if !mcpConfigUpdated && legacyMCPSet {
-				if legacyMCPConfig != nil {
-					req.MCPConfig = &legacyMCPConfig
-				}
-				mcpConfigUpdated = true
-			}
 		}
 		mergedFlat := runtimeOptionsAfterPatch(current.RuntimeKind, current.RuntimeOptions, nil)
 		if runtimeOptionsUpdated {

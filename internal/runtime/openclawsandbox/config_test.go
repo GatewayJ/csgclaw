@@ -180,49 +180,47 @@ func TestRenderAgentOpenClawConfigUsesBridgeWhenBaseURLEmpty(t *testing.T) {
 }
 
 func TestRenderAgentOpenClawConfigRendersMCPServers(t *testing.T) {
-	data, err := renderConfigWithRuntimeOptions("u-worker-1", "u-worker-1", config.ServerConfig{
+	data, err := renderConfigWithMCPConfig("u-worker-1", "u-worker-1", config.ServerConfig{
 		ListenAddr:       "127.0.0.1:18080",
 		AdvertiseBaseURL: "http://127.0.0.1:18080",
 		AccessToken:      "shared-token",
 	}, config.ModelConfig{
 		ModelID: "MiniMax-M2.7",
 	}, map[string]any{
-		"mcp": map[string]any{
-			"mcpServers": map[string]any{
-				"context7": map[string]any{
-					"command":             "uvx",
-					"args":                []any{"context7-mcp"},
-					"startup_timeout_sec": float64(90),
-					"tool_timeout_sec":    120,
-					"env": map[string]any{
-						"CONTEXT7_API_KEY": "secret",
-					},
+		"mcpServers": map[string]any{
+			"context7": map[string]any{
+				"command":             "uvx",
+				"args":                []any{"context7-mcp"},
+				"startup_timeout_sec": float64(90),
+				"tool_timeout_sec":    120,
+				"env": map[string]any{
+					"CONTEXT7_API_KEY": "secret",
 				},
-				"filesystem": map[string]any{
-					"command": "npx",
-					"args": []any{
-						"-y",
-						"@modelcontextprotocol/server-filesystem",
-						"/home/user/workspace",
-						"/home/user/workspace/nested",
-						"${workspace}",
-						"${workspace}/from-placeholder",
-						"--root=/home/user/workspace",
-					},
+			},
+			"filesystem": map[string]any{
+				"command": "npx",
+				"args": []any{
+					"-y",
+					"@modelcontextprotocol/server-filesystem",
+					"/home/user/workspace",
+					"/home/user/workspace/nested",
+					"${workspace}",
+					"${workspace}/from-placeholder",
+					"--root=/home/user/workspace",
 				},
-				"remote-search": map[string]any{
-					"command":   nil,
-					"url":       "https://mcp.example.com/mcp",
-					"transport": "streamable-http",
-					"headers": map[string]any{
-						"Authorization": "Bearer secret",
-					},
+			},
+			"remote-search": map[string]any{
+				"command":   nil,
+				"url":       "https://mcp.example.com/mcp",
+				"transport": "streamable-http",
+				"headers": map[string]any{
+					"Authorization": "Bearer secret",
 				},
 			},
 		},
 	}, testBaseURLResolver, nil)
 	if err != nil {
-		t.Fatalf("renderConfigWithRuntimeOptions() error = %v", err)
+		t.Fatalf("renderConfigWithMCPConfig() error = %v", err)
 	}
 	var cfg map[string]any
 	if err := json.Unmarshal(data, &cfg); err != nil {
@@ -284,37 +282,33 @@ func TestRenderAgentOpenClawConfigMCPEmptyAndClearSemantics(t *testing.T) {
 	}
 	baseModel := config.ModelConfig{ModelID: "MiniMax-M2.7"}
 	for _, tc := range []struct {
-		name           string
-		runtimeOptions map[string]any
-		wantMCP        bool
-		wantServers    bool
+		name        string
+		mcpConfig   map[string]any
+		wantMCP     bool
+		wantServers bool
 	}{
 		{
 			name: "absent does not write mcp",
 		},
 		{
-			name:           "null clears managed mcp",
-			runtimeOptions: map[string]any{"mcp": nil},
-		},
-		{
-			name:           "empty object writes empty servers",
-			runtimeOptions: map[string]any{"mcp": map[string]any{}},
-			wantMCP:        true,
-			wantServers:    true,
+			name:        "empty object writes empty servers",
+			mcpConfig:   map[string]any{},
+			wantMCP:     true,
+			wantServers: true,
 		},
 		{
 			name: "empty mcpServers writes empty servers",
-			runtimeOptions: map[string]any{
-				"mcp": map[string]any{"mcpServers": map[string]any{}},
+			mcpConfig: map[string]any{
+				"mcpServers": map[string]any{},
 			},
 			wantMCP:     true,
 			wantServers: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			data, err := renderConfigWithRuntimeOptions("u-worker-1", "u-worker-1", baseServer, baseModel, tc.runtimeOptions, testBaseURLResolver, nil)
+			data, err := renderConfigWithMCPConfig("u-worker-1", "u-worker-1", baseServer, baseModel, tc.mcpConfig, testBaseURLResolver, nil)
 			if err != nil {
-				t.Fatalf("renderConfigWithRuntimeOptions() error = %v", err)
+				t.Fatalf("renderConfigWithMCPConfig() error = %v", err)
 			}
 			var cfg map[string]any
 			if err := json.Unmarshal(data, &cfg); err != nil {
@@ -347,14 +341,9 @@ func TestRenderAgentOpenClawConfigRejectsInvalidMCPServer(t *testing.T) {
 	baseModel := config.ModelConfig{ModelID: "MiniMax-M2.7"}
 	for _, tc := range []struct {
 		name string
-		mcp  any
+		mcp  map[string]any
 		want string
 	}{
-		{
-			name: "mcp root must be object",
-			mcp:  "invalid",
-			want: "must be an object or null",
-		},
 		{
 			name: "mcpServers must be object",
 			mcp:  map[string]any{"mcpServers": []any{}},
@@ -412,9 +401,9 @@ func TestRenderAgentOpenClawConfigRejectsInvalidMCPServer(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := renderConfigWithRuntimeOptions("u-worker-1", "u-worker-1", baseServer, baseModel, map[string]any{"mcp": tc.mcp}, testBaseURLResolver, nil)
+			_, err := renderConfigWithMCPConfig("u-worker-1", "u-worker-1", baseServer, baseModel, tc.mcp, testBaseURLResolver, nil)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("renderConfigWithRuntimeOptions() error = %v, want containing %q", err, tc.want)
+				t.Fatalf("renderConfigWithMCPConfig() error = %v, want containing %q", err, tc.want)
 			}
 		})
 	}

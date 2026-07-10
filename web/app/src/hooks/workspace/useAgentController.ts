@@ -4,6 +4,7 @@ import { useBlocker } from "react-router-dom";
 import { errorMessage } from "@/api/client";
 import { loginCLIProxyProviderRequest } from "@/api/cliproxy";
 import {
+  addAgentMCPServersRequest,
   batchAddAgentSkillsRequest,
   createBotRequest,
   createManagerAgentRequest,
@@ -105,7 +106,6 @@ import {
   hubMCPServersFromConfig,
   mcpConfigWithServers,
   mcpServerRecordFromConfig,
-  runtimeMCPServerConfig,
 } from "@/models/mcpHub";
 import { displayTeam } from "@/models/tasks";
 import type { WorkspaceTeam } from "@/models/tasks";
@@ -121,7 +121,6 @@ import { useCLIProxyAuthStatuses } from "./useCLIProxyAuthStatuses";
 import { workspaceQueryKeys } from "./workspaceQueries";
 import type { MessageAction, MessageActionError, MessageLike } from "@/components/business/MessageContent/types";
 import type { IMConversation, IMUser } from "@/models/conversations";
-import type { HubMCPServer } from "@/models/mcpHub";
 import type { UseAgentControllerArgs } from "./types";
 
 type ManagerRebuildOptions = {
@@ -2089,24 +2088,12 @@ export function useAgentController({
       if (!names.length) {
         return false;
       }
-      const byName = new Map(hubMCPServers.map((server) => [server.name, server]));
-      const selectedServers = names
-        .map((name) => byName.get(name))
-        .filter((server): server is HubMCPServer => Boolean(server));
-      if (!selectedServers.length) {
-        return false;
-      }
-      const baseConfig = agentMCPConfigQuery.data?.actual ?? agentPageDraft?.mcp_config;
-      const servers = mcpServerRecordFromConfig(baseConfig);
-      selectedServers.forEach((server) => {
-        servers[server.name] = runtimeMCPServerConfig(server.config);
-      });
-      const nextMCPConfig = mcpConfigWithServers(baseConfig, servers);
       setAgentMCPAddBusy(true);
       setAgentMCPAddError("");
       setAgentMCPDeleteError("");
       try {
-        await updateAgentMCPConfigRequest(agentDetailAgentID, nextMCPConfig);
+        const view = await addAgentMCPServersRequest(agentDetailAgentID, names);
+        const nextMCPConfig = view.desired ?? view.actual ?? undefined;
         setAgentPageDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
         setAgentPageSavedDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
         await Promise.all([
@@ -2123,9 +2110,6 @@ export function useAgentController({
     },
     [
       agentMCPAddBusy,
-      agentMCPConfigQuery.data?.actual,
-      agentPageDraft?.mcp_config,
-      hubMCPServers,
       queryClient,
       agentDetailAgentID,
       t,
