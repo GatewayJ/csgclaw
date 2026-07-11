@@ -266,24 +266,8 @@
   line-height: 1.55;
 }
 
-.mcp-config-block {
+.mcp-server-document-block {
   gap: 10px;
-}
-
-.mcp-config-preview {
-  max-height: 360px;
-  margin: 0;
-  overflow: auto;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: color-mix(in oklab, var(--gray-50) 76%, var(--surface));
-  color: var(--gray-700);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .hub-json-editor {

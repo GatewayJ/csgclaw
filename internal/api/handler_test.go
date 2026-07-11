@@ -48,6 +48,15 @@ type fakeCompatRuntime struct {
 	info    func(context.Context, agentruntime.Handle) (agentruntime.Info, error)
 }
 
+type failingMCPServersListRuntime struct {
+	fakeCompatRuntime
+	err error
+}
+
+func (f failingMCPServersListRuntime) ListMCPServers(context.Context, agentruntime.Handle, agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error) {
+	return agentruntime.MCPServersSnapshot{}, f.err
+}
+
 func init() {
 	codexPath := filepath.Join(os.TempDir(), "csgclaw-test-codex.exe")
 	_ = os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0o755)
@@ -2120,7 +2129,7 @@ func TestHandleAgentsCreateCodexWorkerEnsuresCodexBridge(t *testing.T) {
 	}
 }
 
-func TestHandleAgentsMCPConfigClosedLoopForSupportedRuntimes(t *testing.T) {
+func TestHandleAgentsMCPServersClosedLoopForSupportedRuntimes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
 
@@ -2166,19 +2175,17 @@ func TestHandleAgentsMCPConfigClosedLoopForSupportedRuntimes(t *testing.T) {
 	}
 	srv := &Handler{svc: svc, im: im.NewService()}
 
-	mcpConfig := map[string]any{
-		"mcpServers": map[string]any{
-			"context7": map[string]any{
-				"command": "uvx",
-				"args":    []any{"context7-mcp"},
-				"env": map[string]any{
-					"CONTEXT7_API_KEY": "secret",
-				},
+	mcpServers := map[string]any{
+		"context7": map[string]any{
+			"command": "uvx",
+			"args":    []any{"context7-mcp"},
+			"env": map[string]any{
+				"CONTEXT7_API_KEY": "secret",
 			},
-			"remote": map[string]any{
-				"url":                  "https://mcp.example.com/mcp",
-				"bearer_token_env_var": "MCP_TOKEN",
-			},
+		},
+		"remote": map[string]any{
+			"url":                  "https://mcp.example.com/mcp",
+			"bearer_token_env_var": "MCP_TOKEN",
 		},
 	}
 
@@ -2291,28 +2298,26 @@ func TestHandleAgentsMCPConfigClosedLoopForSupportedRuntimes(t *testing.T) {
 			}
 
 			updated := doAgentJSON(t, srv, http.MethodPatch, "/api/v1/agents/"+created.ID, map[string]any{
-				"field_mask": []string{"mcp_config"},
-				"mcp_config": mcpConfig,
+				"field_mask": []string{"mcpServers"},
+				"mcpServers": mcpServers,
 			}, http.StatusOK)
-			assertMCPConfigResponse(t, updated.MCPConfig)
+			assertMCPServersResponse(t, updated.MCPServers)
 			tt.assertFile(t, updated)
 		})
 	}
 }
 
-func TestAgentMCPConfigResponsesRedactSecrets(t *testing.T) {
+func TestAgentMCPServersResponsesRedactSecrets(t *testing.T) {
 	svc, _ := mustNewSeededServiceWithPath(t, nil)
 	srv := &Handler{svc: svc}
 	secretConfig := map[string]any{
-		"mcpServers": map[string]any{
-			"context7": map[string]any{
-				"command": "uvx",
-				"env": map[string]any{
-					"CONTEXT7_API_KEY": "secret-env",
-				},
-				"headers": map[string]any{
-					"Authorization": "Bearer secret-header",
-				},
+		"context7": map[string]any{
+			"command": "uvx",
+			"env": map[string]any{
+				"CONTEXT7_API_KEY": "secret-env",
+			},
+			"headers": map[string]any{
+				"Authorization": "Bearer secret-header",
 			},
 		},
 	}
@@ -2326,18 +2331,18 @@ func TestAgentMCPConfigResponsesRedactSecrets(t *testing.T) {
 		"agent_profile": map[string]any{
 			"profile_complete": true,
 		},
-		"mcp_config": secretConfig,
+		"mcpServers": secretConfig,
 	}, http.StatusCreated)
-	assertMCPConfigSecretsRedacted(t, created.MCPConfig)
+	assertMCPServersSecretsRedacted(t, created.MCPServers)
 
 	updated := doAgentJSON(t, srv, http.MethodPatch, "/api/v1/agents/"+created.ID, map[string]any{
-		"field_mask": []string{"mcp_config"},
-		"mcp_config": secretConfig,
+		"field_mask": []string{"mcpServers"},
+		"mcpServers": secretConfig,
 	}, http.StatusOK)
-	assertMCPConfigSecretsRedacted(t, updated.MCPConfig)
+	assertMCPServersSecretsRedacted(t, updated.MCPServers)
 
 	detail := doAgentJSON(t, srv, http.MethodGet, "/api/v1/agents/"+created.ID, nil, http.StatusOK)
-	assertMCPConfigSecretsRedacted(t, detail.MCPConfig)
+	assertMCPServersSecretsRedacted(t, detail.MCPServers)
 
 	listRec := httptest.NewRecorder()
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
@@ -2351,30 +2356,192 @@ func TestAgentMCPConfigResponsesRedactSecrets(t *testing.T) {
 	}
 	for _, item := range listed {
 		if item.ID == created.ID {
-			assertMCPConfigSecretsRedacted(t, item.MCPConfig)
+			assertMCPServersSecretsRedacted(t, item.MCPServers)
 			return
 		}
 	}
 	t.Fatalf("list response missing agent %q", created.ID)
 }
 
-func TestSanitizeMCPConfigResponseRedactsStringMaps(t *testing.T) {
-	env := map[string]string{"CONTEXT7_API_KEY": "secret-env"}
-	headers := map[string]string{"Authorization": "Bearer secret-header"}
-	config := map[string]any{
-		agentruntime.MCPConfigServersKey: map[string]any{
-			"context7": map[string]any{
-				"env":     env,
-				"headers": headers,
+func TestAgentMCPServersDedicatedEndpointsUseDirectRawMaps(t *testing.T) {
+	srv, svc, created := newAgentMCPManagementTestServer(t)
+	desired := map[string]any{
+		"context7": map[string]any{
+			"command": "uvx",
+			"env": map[string]any{
+				"CONTEXT7_API_KEY": "secret-env",
 			},
 		},
 	}
 
-	got := sanitizeMCPConfigResponse(config)
-	assertMCPConfigSecretsRedacted(t, got)
+	putBody, err := json.Marshal(map[string]any{"mcpServers": desired})
+	if err != nil {
+		t.Fatalf("marshal MCP servers request: %v", err)
+	}
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/agents/"+created.ID+"/mcp-servers", bytes.NewReader(putBody))
+	putRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(putRec, put)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want %d; body=%s", putRec.Code, http.StatusOK, putRec.Body.String())
+	}
+	var updated agent.MCPServersView
+	if err := json.NewDecoder(putRec.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode PUT response: %v", err)
+	}
+	assertDedicatedMCPServersView(t, updated, "secret-env")
+
+	get := httptest.NewRequest(http.MethodGet, "/api/v1/agents/"+created.ID+"/mcp-servers", nil)
+	getRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(getRec, get)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d; body=%s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	var fetched agent.MCPServersView
+	if err := json.NewDecoder(getRec.Body).Decode(&fetched); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	assertDedicatedMCPServersView(t, fetched, "secret-env")
+
+	saved, ok := svc.Agent(created.ID)
+	if !ok {
+		t.Fatalf("Agent(%q) not found", created.ID)
+	}
+	if got := mcpServerForTest(t, mcpServersForTest(t, saved.MCPServers), "context7"); got["command"] != "uvx" {
+		t.Fatalf("saved context7 = %#v, want direct server configuration", got)
+	}
+
+	legacyGet := httptest.NewRequest(http.MethodGet, "/api/v1/agents/"+created.ID+"/mcp", nil)
+	legacyGetRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(legacyGetRec, legacyGet)
+	if legacyGetRec.Code != http.StatusNotFound {
+		t.Fatalf("legacy GET /mcp status = %d, want %d", legacyGetRec.Code, http.StatusNotFound)
+	}
+
+	legacyPost := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(`{"names":["context7"]}`))
+	legacyPostRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(legacyPostRec, legacyPost)
+	if legacyPostRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("legacy POST /mcp-servers status = %d, want %d", legacyPostRec.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func assertDedicatedMCPServersView(t *testing.T, view agent.MCPServersView, wantSecret string) {
+	t.Helper()
+	if _, wrapped := view.Desired["mcpServers"]; wrapped {
+		t.Fatalf("desired = %#v, want direct MCP server map", view.Desired)
+	}
+	context7 := mcpServerForTest(t, mcpServersForTest(t, view.Desired), "context7")
+	env, ok := context7["env"].(map[string]any)
+	if !ok {
+		t.Fatalf("desired context7.env = %#v, want object", context7["env"])
+	}
+	if got := env["CONTEXT7_API_KEY"]; got != wantSecret {
+		t.Fatalf("desired context7.env[CONTEXT7_API_KEY] = %#v, want raw secret %q", got, wantSecret)
+	}
+	if _, wrapped := view.Actual["mcpServers"]; wrapped {
+		t.Fatalf("actual = %#v, want direct MCP server map", view.Actual)
+	}
+}
+
+func TestGetAgentMCPServersReturnsDesiredWhenRuntimeActualIsUnreadable(t *testing.T) {
+	readErr := errors.New("native MCP config is unreadable")
+	desired := map[string]any{
+		"context7": map[string]any{
+			"command": "uvx",
+			"env": map[string]any{
+				"CONTEXT7_API_KEY": "secret",
+			},
+		},
+	}
+	svc := mustNewSeededServiceWithOptions(t, []agent.Agent{
+		{
+			ID:          "u-mcp-view",
+			Name:        "mcp-view",
+			RuntimeID:   "rt-u-mcp-view",
+			RuntimeKind: agent.RuntimeKindCodex,
+			RuntimeName: agent.RuntimeNameCodex,
+			Role:        agent.RoleWorker,
+			MCPServers:  desired,
+		},
+	}, agent.WithRuntime(failingMCPServersListRuntime{
+		fakeCompatRuntime: fakeCompatRuntime{kind: agent.RuntimeKindCodex},
+		err:               readErr,
+	}))
+	srv := &Handler{svc: svc}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/u-mcp-view/mcp-servers", nil)
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var response struct {
+		Desired     map[string]any  `json:"desired"`
+		Actual      json.RawMessage `json:"actual"`
+		ActualError string          `json:"actual_error"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	server := mcpServerForTest(t, response.Desired, "context7")
+	env, ok := server["env"].(map[string]any)
+	if !ok || env["CONTEXT7_API_KEY"] != "secret" {
+		t.Fatalf("desired = %#v, want raw persisted secret", response.Desired)
+	}
+	if got := string(response.Actual); got != "null" {
+		t.Fatalf("actual = %s, want null", got)
+	}
+	if !strings.Contains(response.ActualError, readErr.Error()) {
+		t.Fatalf("actual_error = %q, want %q", response.ActualError, readErr)
+	}
+}
+
+func TestPutAgentMCPServersPreservesNullAndExplicitEmptyDesired(t *testing.T) {
+	srv, _, created := newAgentMCPManagementTestServer(t)
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "clear unmanaged set", body: `{"mcpServers":null}`, want: "null"},
+		{name: "explicitly manage empty set", body: `{"mcpServers":{}}`, want: "{}"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(test.body))
+			rec := httptest.NewRecorder()
+			srv.Routes().ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("PUT status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+			}
+			var fields map[string]json.RawMessage
+			if err := json.NewDecoder(rec.Body).Decode(&fields); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if got := string(fields["desired"]); got != test.want {
+				t.Fatalf("desired = %s, want %s", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeMCPServersResponseRedactsStringMaps(t *testing.T) {
+	env := map[string]string{"CONTEXT7_API_KEY": "secret-env"}
+	headers := map[string]string{"Authorization": "Bearer secret-header"}
+	servers := map[string]any{
+		"context7": map[string]any{
+			"env":     env,
+			"headers": headers,
+		},
+	}
+
+	got := sanitizeMCPServersResponse(servers)
+	assertMCPServersSecretsRedacted(t, got)
 
 	if env["CONTEXT7_API_KEY"] != "secret-env" || headers["Authorization"] != "Bearer secret-header" {
-		t.Fatalf("sanitizeMCPConfigResponse() modified the source config: %#v", config)
+		t.Fatalf("sanitizeMCPServersResponse() modified the source servers: %#v", servers)
 	}
 }
 
@@ -2419,7 +2586,7 @@ func codexAgentRefFromStateFile(path, runtimeID string, fallback agentruntime.Pr
 			BoxID          string               `json:"box_id,omitempty"`
 			Runtime        *agent.RuntimeRecord `json:"runtime,omitempty"`
 			RuntimeOptions map[string]any       `json:"runtime_options,omitempty"`
-			MCPConfig      map[string]any       `json:"mcp_config,omitempty"`
+			MCPServers     map[string]any       `json:"mcpServers,omitempty"`
 			ModelConfig    agent.AgentProfile   `json:"model_config,omitempty"`
 			AgentProfile   agent.AgentProfile   `json:"agent_profile,omitempty"`
 		} `json:"agents"`
@@ -2432,7 +2599,7 @@ func codexAgentRefFromStateFile(path, runtimeID string, fallback agentruntime.Pr
 			BoxID          string               `json:"box_id,omitempty"`
 			Runtime        *agent.RuntimeRecord `json:"runtime,omitempty"`
 			RuntimeOptions map[string]any       `json:"runtime_options,omitempty"`
-			MCPConfig      map[string]any       `json:"mcp_config,omitempty"`
+			MCPServers     map[string]any       `json:"mcpServers,omitempty"`
 			ModelConfig    agent.AgentProfile   `json:"model_config,omitempty"`
 			AgentProfile   agent.AgentProfile   `json:"agent_profile,omitempty"`
 		} `json:"items"`
@@ -2449,7 +2616,7 @@ func codexAgentRefFromStateFile(path, runtimeID string, fallback agentruntime.Pr
 		BoxID          string
 		Runtime        *agent.RuntimeRecord
 		RuntimeOptions map[string]any
-		MCPConfig      map[string]any
+		MCPServers     map[string]any
 		ModelConfig    agent.AgentProfile
 		AgentProfile   agent.AgentProfile
 	}
@@ -2464,7 +2631,7 @@ func codexAgentRefFromStateFile(path, runtimeID string, fallback agentruntime.Pr
 			BoxID:          item.BoxID,
 			Runtime:        item.Runtime,
 			RuntimeOptions: item.RuntimeOptions,
-			MCPConfig:      item.MCPConfig,
+			MCPServers:     item.MCPServers,
 			ModelConfig:    item.ModelConfig,
 			AgentProfile:   item.AgentProfile,
 		})
@@ -2479,7 +2646,7 @@ func codexAgentRefFromStateFile(path, runtimeID string, fallback agentruntime.Pr
 			BoxID:          item.BoxID,
 			Runtime:        item.Runtime,
 			RuntimeOptions: item.RuntimeOptions,
-			MCPConfig:      item.MCPConfig,
+			MCPServers:     item.MCPServers,
 			ModelConfig:    item.ModelConfig,
 			AgentProfile:   item.AgentProfile,
 		})
@@ -2538,7 +2705,7 @@ func codexAgentRefFromStateFile(path, runtimeID string, fallback agentruntime.Pr
 			HandleID:       boxID,
 			Instructions:   item.Instructions,
 			RuntimeOptions: options,
-			MCPConfig:      item.MCPConfig,
+			MCPServers:     item.MCPServers,
 			Profile:        profile,
 		}, nil
 	}
@@ -2568,12 +2735,12 @@ func readJSONMap(t *testing.T, path string) map[string]any {
 	return got
 }
 
-func assertMCPConfigResponse(t *testing.T, cfg map[string]any) {
+func assertMCPServersResponse(t *testing.T, cfg map[string]any) {
 	t.Helper()
 	if len(cfg) == 0 {
-		t.Fatal("response missing mcp_config")
+		t.Fatal("response missing mcpServers")
 	}
-	assertRedactedMCPServers(t, cfg[agentruntime.MCPConfigServersKey])
+	assertRedactedMCPServers(t, cfg)
 }
 
 func assertRedactedMCPServers(t *testing.T, raw any) {
@@ -2635,15 +2802,14 @@ func assertPersistedMCPServers(t *testing.T, raw any) {
 	}
 }
 
-func assertMCPConfigSecretsRedacted(t *testing.T, config map[string]any) {
+func assertMCPServersSecretsRedacted(t *testing.T, config map[string]any) {
 	t.Helper()
-	servers, ok := config[agentruntime.MCPConfigServersKey].(map[string]any)
-	if !ok {
-		t.Fatalf("mcpServers = %#v, want object", config[agentruntime.MCPConfigServersKey])
+	if len(config) == 0 {
+		t.Fatalf("mcpServers = %#v, want a non-empty map", config)
 	}
-	context7, ok := servers["context7"].(map[string]any)
+	context7, ok := config["context7"].(map[string]any)
 	if !ok {
-		t.Fatalf("context7 config = %#v, want object", servers["context7"])
+		t.Fatalf("context7 config = %#v, want object", config["context7"])
 	}
 	for section, key := range map[string]string{"env": "CONTEXT7_API_KEY", "headers": "Authorization"} {
 		values, ok := context7[section].(map[string]any)
@@ -2698,7 +2864,7 @@ func TestHandleAgentsCreateManagerRejectsNonCodexRuntime(t *testing.T) {
 	}
 }
 
-func TestHandleAgentsCreateManagerRuntimeOptionsMCPDoesNotSetMCPConfig(t *testing.T) {
+func TestHandleAgentsCreateManagerRejectsMCPRuntimeOptions(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
 
@@ -2714,11 +2880,11 @@ func TestHandleAgentsCreateManagerRuntimeOptionsMCPDoesNotSetMCPConfig(t *testin
 
 			srv.Routes().ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusCreated {
-				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
 			}
-			if strings.Contains(rec.Body.String(), "mcp_config") {
-				t.Fatalf("body = %q, want no mcp_config from runtime_options.mcp", rec.Body.String())
+			if !strings.Contains(rec.Body.String(), "runtime_options.mcp is not supported") {
+				t.Fatalf("body = %q, want MCP runtime option rejection", rec.Body.String())
 			}
 		})
 	}
@@ -3328,18 +3494,18 @@ func TestHandleBatchAddAgentMCPServersAddsCatalogServersByName(t *testing.T) {
 		t.Fatalf("CreateServer(remote) error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(`{"names":["context7","remote","context7"]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers:batchAdd", strings.NewReader(`{"names":["context7","remote","context7"]}`))
 	rec := httptest.NewRecorder()
 	srv.Routes().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	var view agent.MCPConfigView
+	var view agent.MCPServersView
 	if err := json.NewDecoder(rec.Body).Decode(&view); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	servers := mcpServersFromConfigForTest(t, view.Desired)
+	servers := mcpServersForTest(t, view.Desired)
 	context7 := mcpServerForTest(t, servers, "context7")
 	if command, _ := context7["command"].(string); command != "uvx" {
 		t.Fatalf("context7.command = %q, want uvx", command)
@@ -3356,7 +3522,7 @@ func TestHandleBatchAddAgentMCPServersAddsCatalogServersByName(t *testing.T) {
 	if !ok {
 		t.Fatalf("Agent(%q) not found", created.ID)
 	}
-	savedServers := mcpServersFromConfigForTest(t, saved.MCPConfig)
+	savedServers := mcpServersForTest(t, saved.MCPServers)
 	if len(savedServers) != 2 {
 		t.Fatalf("saved mcpServers = %#v, want 2 entries", savedServers)
 	}
@@ -3365,7 +3531,7 @@ func TestHandleBatchAddAgentMCPServersAddsCatalogServersByName(t *testing.T) {
 func TestHandleBatchAddAgentMCPServersReturnsNotFoundWhenCatalogServerMissing(t *testing.T) {
 	srv, _, created := newAgentMCPManagementTestServer(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(`{"names":["missing"]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers:batchAdd", strings.NewReader(`{"names":["missing"]}`))
 	rec := httptest.NewRecorder()
 	srv.Routes().ServeHTTP(rec, req)
 
@@ -3460,11 +3626,10 @@ func TestHandleMCPServersUsesMCPService(t *testing.T) {
 	}
 }
 
-func mcpServersFromConfigForTest(t *testing.T, config map[string]any) map[string]any {
+func mcpServersForTest(t *testing.T, servers map[string]any) map[string]any {
 	t.Helper()
-	servers, ok := config[agentruntime.MCPConfigServersKey].(map[string]any)
-	if !ok {
-		t.Fatalf("mcpServers = %#v, want object", config[agentruntime.MCPConfigServersKey])
+	if servers == nil {
+		t.Fatal("mcpServers is nil, want object")
 	}
 	return servers
 }
@@ -4388,7 +4553,7 @@ func TestHandleAgentsCreateReplaceManagerRejectsNonCodexRuntime(t *testing.T) {
 	}
 }
 
-func TestHandleAgentsCreateReplaceManagerRuntimeOptionsMCPDoesNotSetMCPConfig(t *testing.T) {
+func TestHandleAgentsCreateReplaceManagerRejectsMCPRuntimeOptions(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
 
@@ -4408,19 +4573,11 @@ func TestHandleAgentsCreateReplaceManagerRuntimeOptionsMCPDoesNotSetMCPConfig(t 
 
 	srv.Routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
 	}
-
-	var got agent.Agent
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if got.ID != "u-manager" && got.ID != agent.ManagerUserID {
-		t.Fatalf("agent id = %q, want %q or %q", got.ID, "u-manager", agent.ManagerUserID)
-	}
-	if got.MCPConfig != nil {
-		t.Fatalf("agent mcp_config = %#v, want nil", got.MCPConfig)
+	if !strings.Contains(rec.Body.String(), "runtime_options.mcp is not supported") {
+		t.Fatalf("body = %q, want MCP runtime option rejection", rec.Body.String())
 	}
 }
 

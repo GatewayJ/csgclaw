@@ -70,11 +70,11 @@
   background: var(--danger);
 }
 
-.mcp-config-panel {
+.mcp-servers-panel {
   min-width: 0;
 }
 
-.mcp-config-header {
+.mcp-servers-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -82,7 +82,7 @@
   min-width: 0;
 }
 
-.mcp-config-header > label {
+.mcp-servers-header > label {
   min-width: 0;
   color: var(--text);
   font-size: var(--text-sm-size);
@@ -90,14 +90,14 @@
   line-height: var(--text-sm-line-height);
 }
 
-.mcp-config-actions {
+.mcp-servers-actions {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
 }
 
-.mcp-config-textarea {
+.mcp-servers-textarea {
   min-height: 168px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
@@ -106,16 +106,16 @@
 }
 
 @media (max-width: 680px) {
-  .mcp-config-header {
+  .mcp-servers-header {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .mcp-config-actions {
+  .mcp-servers-actions {
     width: 100%;
   }
 
-  .mcp-config-actions .btn {
+  .mcp-servers-actions .btn {
     flex: 1 1 0;
     min-width: 0;
   }

@@ -64,15 +64,15 @@ func (r *Runtime) ReconcileConfig(ctx context.Context, h agentruntime.Handle, ch
 	return r.RefreshCodexHomeAgentsFile(ctx, h)
 }
 
-func (r *Runtime) ValidateMCPConfig(_ context.Context, current agentruntime.MCPConfigSnapshot) error {
-	return agentruntime.ValidateMCPConfig(current.Config)
+func (r *Runtime) ValidateMCPServers(_ context.Context, current agentruntime.MCPServersSnapshot) error {
+	return agentruntime.ValidateMCPServers(current.Servers)
 }
 
-func (r *Runtime) MCPConfigRestartRequired(change agentruntime.MCPConfigChange) (bool, error) {
-	return agentruntime.MCPConfigNeedsRestart(change.Previous.Config, change.Current.Config)
+func (r *Runtime) MCPServersRestartRequired(change agentruntime.MCPServersChange) (bool, error) {
+	return agentruntime.MCPServersNeedsRestart(change.Previous.Servers, change.Current.Servers)
 }
 
-func (r *Runtime) ReconcileMCPConfig(_ context.Context, h agentruntime.Handle, _ agentruntime.MCPConfigChange) error {
+func (r *Runtime) ReconcileMCPServers(_ context.Context, h agentruntime.Handle, _ agentruntime.MCPServersChange) error {
 	agentRef, err := r.resolveAgent(h)
 	if err != nil {
 		return err
@@ -85,31 +85,31 @@ func (r *Runtime) ReconcileMCPConfig(_ context.Context, h agentruntime.Handle, _
 	if err != nil {
 		return err
 	}
-	return r.seedCodexHomeConfig(codexHomeDir, workspaceDir, agentRef.Profile.Normalized(), agentRef.MCPConfig)
+	return r.seedCodexHomeConfig(codexHomeDir, workspaceDir, agentRef.Profile.Normalized(), agentRef.MCPServers)
 }
 
-func (r *Runtime) ListMCPConfig(_ context.Context, h agentruntime.Handle, _ agentruntime.MCPConfigSnapshot) (agentruntime.MCPConfigSnapshot, error) {
+func (r *Runtime) ListMCPServers(_ context.Context, h agentruntime.Handle, _ agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error) {
 	agentRef, err := r.resolveAgent(h)
 	if err != nil {
-		return agentruntime.MCPConfigSnapshot{}, err
+		return agentruntime.MCPServersSnapshot{}, err
 	}
 	codexHomeDir, err := r.resolveCodexHomeDir(agentRef.ID)
 	if err != nil {
-		return agentruntime.MCPConfigSnapshot{}, err
+		return agentruntime.MCPServersSnapshot{}, err
 	}
 	configPath := filepath.Join(codexHomeDir, configFileName)
 	raw, err := r.readFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return agentruntime.MCPConfigSnapshot{}, nil
+			return agentruntime.MCPServersSnapshot{}, nil
 		}
-		return agentruntime.MCPConfigSnapshot{}, fmt.Errorf("read runtime codex mcp config %s: %w", configPath, err)
+		return agentruntime.MCPServersSnapshot{}, fmt.Errorf("read runtime codex mcp config %s: %w", configPath, err)
 	}
-	config, err := parseCodexMCPConfig(string(raw))
+	config, err := parseCodexMCPServers(string(raw))
 	if err != nil {
-		return agentruntime.MCPConfigSnapshot{}, err
+		return agentruntime.MCPServersSnapshot{}, err
 	}
-	return agentruntime.MCPConfigSnapshot{Config: config}, nil
+	return agentruntime.MCPServersSnapshot{Servers: config}, nil
 }
 
 type responsesProbeTargetConfig struct {

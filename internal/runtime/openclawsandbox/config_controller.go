@@ -9,12 +9,11 @@ import (
 	"path/filepath"
 
 	agentruntime "csgclaw/internal/runtime"
-	"csgclaw/internal/runtime/sandboxgateway"
 )
 
 var _ agentruntime.RuntimeConfigController = (*Runtime)(nil)
-var _ agentruntime.MCPConfigController = (*Runtime)(nil)
-var _ agentruntime.MCPConfigListController = (*Runtime)(nil)
+var _ agentruntime.MCPServersController = (*Runtime)(nil)
+var _ agentruntime.MCPServersListController = (*Runtime)(nil)
 
 func (r *Runtime) ValidateConfig(_ context.Context, current agentruntime.RuntimeConfigSnapshot) error {
 	return nil
@@ -36,82 +35,53 @@ func (r *Runtime) ReconcileConfig(_ context.Context, h agentruntime.Handle, _ ag
 	return refreshWorkspaceAgentsFile(filepath.Join(r.Layout(agentHome).WorkspaceRoot, "AGENTS.md"), agentRef.Instructions)
 }
 
-func (r *Runtime) ValidateMCPConfig(_ context.Context, current agentruntime.MCPConfigSnapshot) error {
-	return validateOpenClawMCPConfig(current.Config)
+func (r *Runtime) ValidateMCPServers(_ context.Context, current agentruntime.MCPServersSnapshot) error {
+	return validateOpenClawMCPServers(current.Servers)
 }
 
-func (r *Runtime) MCPConfigRestartRequired(change agentruntime.MCPConfigChange) (bool, error) {
-	return openClawMCPRestartRequired(change.Previous.Config, change.Current.Config)
+func (r *Runtime) MCPServersRestartRequired(change agentruntime.MCPServersChange) (bool, error) {
+	return openClawMCPRestartRequired(change.Previous.Servers, change.Current.Servers)
 }
 
-func (r *Runtime) ReconcileMCPConfig(_ context.Context, h agentruntime.Handle, change agentruntime.MCPConfigChange) error {
-	prepared, err := r.PreparedGatewayProvisionForHandle(h)
-	if errors.Is(err, sandboxgateway.ErrPreparedGatewayProvisionNotAvailable) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
+func (r *Runtime) ListMCPServers(_ context.Context, h agentruntime.Handle, _ agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error) {
 	agentHome, err := r.AgentHomeForHandle(h)
 	if err != nil {
-		return err
+		return agentruntime.MCPServersSnapshot{}, err
 	}
-	profile := prepared.Profile.Normalized()
-	if profile.ModelID == "" {
-		profile.ModelID = prepared.ModelID
-	}
-	_, err = EnsureConfigWithMCPConfig(
-		agentHome,
-		prepared.ParticipantID,
-		prepared.AgentID,
-		prepared.Server,
-		configModelFromProfile(profile),
-		change.Current.Config,
-		fixedBaseURL(prepared.ManagerBaseURL),
-		r.CurrentFeishuProvider(),
-	)
-	return err
+	return readOpenClawMCPServers(filepath.Join(Root(agentHome), HostConfig))
 }
 
-func (r *Runtime) ListMCPConfig(_ context.Context, h agentruntime.Handle, _ agentruntime.MCPConfigSnapshot) (agentruntime.MCPConfigSnapshot, error) {
-	agentHome, err := r.AgentHomeForHandle(h)
-	if err != nil {
-		return agentruntime.MCPConfigSnapshot{}, err
-	}
-	return readOpenClawMCPConfig(filepath.Join(Root(agentHome), HostConfig))
-}
-
-func readOpenClawMCPConfig(path string) (agentruntime.MCPConfigSnapshot, error) {
+func readOpenClawMCPServers(path string) (agentruntime.MCPServersSnapshot, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return agentruntime.MCPConfigSnapshot{}, nil
+			return agentruntime.MCPServersSnapshot{}, nil
 		}
-		return agentruntime.MCPConfigSnapshot{}, fmt.Errorf("read openclaw mcp config: %w", err)
+		return agentruntime.MCPServersSnapshot{}, fmt.Errorf("read openclaw mcp config: %w", err)
 	}
 	var cfg map[string]any
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return agentruntime.MCPConfigSnapshot{}, fmt.Errorf("decode openclaw mcp config: %w", err)
+		return agentruntime.MCPServersSnapshot{}, fmt.Errorf("decode openclaw mcp config: %w", err)
 	}
 	rawMCPRoot, ok := cfg["mcp"]
 	if !ok || rawMCPRoot == nil {
-		return agentruntime.MCPConfigSnapshot{}, nil
+		return agentruntime.MCPServersSnapshot{}, nil
 	}
 	mcpRoot, ok := rawMCPRoot.(map[string]any)
 	if !ok {
-		return agentruntime.MCPConfigSnapshot{}, fmt.Errorf("openclaw mcp config mcp must be an object")
+		return agentruntime.MCPServersSnapshot{}, fmt.Errorf("openclaw mcp config mcp must be an object")
 	}
 	rawServers, ok := mcpRoot["servers"]
 	if !ok || rawServers == nil {
-		return agentruntime.MCPConfigSnapshot{}, nil
+		return agentruntime.MCPServersSnapshot{}, nil
 	}
 	servers, ok := rawServers.(map[string]any)
 	if !ok {
-		return agentruntime.MCPConfigSnapshot{}, fmt.Errorf("openclaw mcp config servers must be an object")
+		return agentruntime.MCPServersSnapshot{}, fmt.Errorf("openclaw mcp config servers must be an object")
 	}
-	normalized, err := agentruntime.NormalizeMCPConfig(map[string]any{agentruntime.MCPConfigServersKey: servers})
+	normalized, err := agentruntime.NormalizeMCPServers(servers)
 	if err != nil {
-		return agentruntime.MCPConfigSnapshot{}, err
+		return agentruntime.MCPServersSnapshot{}, err
 	}
-	return agentruntime.MCPConfigSnapshot{Config: normalized}, nil
+	return agentruntime.MCPServersSnapshot{Servers: normalized}, nil
 }

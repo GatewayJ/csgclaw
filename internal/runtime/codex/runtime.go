@@ -49,7 +49,7 @@ type AgentRef struct {
 	HandleID       string
 	Instructions   string
 	RuntimeOptions map[string]any
-	MCPConfig      map[string]any
+	MCPServers     map[string]any
 	Profile        agentruntime.Profile
 }
 
@@ -146,8 +146,9 @@ var (
 	_ agentruntime.ConversationStarter         = (*Runtime)(nil)
 	_ agentruntime.RuntimeOptionSchemaProvider = (*Runtime)(nil)
 	_ agentruntime.RuntimeConfigController     = (*Runtime)(nil)
-	_ agentruntime.MCPConfigController         = (*Runtime)(nil)
-	_ agentruntime.MCPConfigListController     = (*Runtime)(nil)
+	_ agentruntime.MCPServersController        = (*Runtime)(nil)
+	_ agentruntime.MCPServersReconciler        = (*Runtime)(nil)
+	_ agentruntime.MCPServersListController    = (*Runtime)(nil)
 )
 
 func New(deps Dependencies) *Runtime {
@@ -452,7 +453,7 @@ func (r *Runtime) ensureSession(ctx context.Context, spec SessionSpec) (*Session
 	if err := r.seedCodexHomeAuth(spec.CodexHomeDir); err != nil {
 		return nil, err
 	}
-	if err := r.seedCodexHomeConfig(spec.CodexHomeDir, spec.WorkspaceDir, spec.Profile, agentRef.MCPConfig); err != nil {
+	if err := r.seedCodexHomeConfig(spec.CodexHomeDir, spec.WorkspaceDir, spec.Profile, agentRef.MCPServers); err != nil {
 		return nil, err
 	}
 	if err := r.seedCodexHomeSkills(spec.CodexHomeDir); err != nil {
@@ -546,7 +547,7 @@ func (r *Runtime) hydratePersistedSession(ctx context.Context, manager *appServe
 	if err := r.seedCodexHomeAuth(spec.CodexHomeDir); err != nil {
 		return nil, err
 	}
-	if err := r.seedCodexHomeConfig(spec.CodexHomeDir, spec.WorkspaceDir, spec.Profile, agentRef.MCPConfig); err != nil {
+	if err := r.seedCodexHomeConfig(spec.CodexHomeDir, spec.WorkspaceDir, spec.Profile, agentRef.MCPServers); err != nil {
 		return nil, err
 	}
 	if err := r.seedCodexHomeSkills(spec.CodexHomeDir); err != nil {
@@ -620,12 +621,12 @@ func (r *Runtime) seedCodexHomeAuth(runtimeCodexHome string) error {
 	return nil
 }
 
-func (r *Runtime) seedCodexHomeConfig(runtimeCodexHome, workspaceDir string, profile agentruntime.Profile, mcpConfig map[string]any) error {
+func (r *Runtime) seedCodexHomeConfig(runtimeCodexHome, workspaceDir string, profile agentruntime.Profile, mcpServers map[string]any) error {
 	runtimeCodexHome = strings.TrimSpace(runtimeCodexHome)
 	if runtimeCodexHome == "" {
 		return fmt.Errorf("codex home dir is required")
 	}
-	if err := agentruntime.ValidateMCPConfig(mcpConfig); err != nil {
+	if err := agentruntime.ValidateMCPServers(mcpServers); err != nil {
 		return err
 	}
 	configPath := filepath.Join(runtimeCodexHome, configFileName)
@@ -649,7 +650,7 @@ func (r *Runtime) seedCodexHomeConfig(runtimeCodexHome, workspaceDir string, pro
 		}
 	}
 
-	rendered := configureCodexHomeConfigWithWorkspace(string(configRaw), profile, mcpConfig, workspaceDir)
+	rendered := configureCodexHomeConfigWithWorkspace(string(configRaw), profile, mcpServers, workspaceDir)
 	if err := r.writeFile(configPath, []byte(rendered), 0o600); err != nil {
 		return fmt.Errorf("write runtime codex config %s: %w", configPath, err)
 	}

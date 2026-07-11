@@ -8,29 +8,29 @@ import (
 	agentruntime "csgclaw/internal/runtime"
 )
 
-func validateOpenClawMCPConfig(config map[string]any) error {
-	return agentruntime.ValidateMCPConfig(config)
+func validateOpenClawMCPServers(config map[string]any) error {
+	return agentruntime.ValidateMCPServers(config)
 }
 
 func openClawMCPRestartRequired(previous, current map[string]any) (bool, error) {
-	return agentruntime.MCPConfigNeedsRestart(previous, current)
+	return agentruntime.MCPServersNeedsRestart(previous, current)
 }
 
-func updateOpenClawMCP(cfg map[string]any, mcpConfig map[string]any) error {
-	resolved, err := resolveOpenClawMCPWorkspaceConfig(mcpConfig, workspaceGuestPathForGOOS(goruntime.GOOS))
+func updateOpenClawMCP(cfg map[string]any, mcpServers map[string]any) error {
+	resolved, err := resolveOpenClawMCPWorkspaceConfig(mcpServers, workspaceGuestPathForGOOS(goruntime.GOOS))
 	if err != nil {
 		return err
 	}
 	return agentruntime.UpdateJSONMCPServers(cfg, resolved)
 }
 
-func resolveOpenClawMCPWorkspaceConfig(mcpConfig map[string]any, workspaceGuestPath string) (map[string]any, error) {
-	servers, err := agentruntime.MCPConfigServers(mcpConfig)
+func resolveOpenClawMCPWorkspaceConfig(mcpServers map[string]any, workspaceGuestPath string) (map[string]any, error) {
+	servers, err := agentruntime.NormalizeMCPServers(mcpServers)
 	if err != nil {
 		return nil, err
 	}
 	if servers == nil {
-		return mcpConfig, nil
+		return nil, nil
 	}
 	resolvedServers := make(map[string]any, len(servers))
 	for name, rawEntry := range servers {
@@ -48,7 +48,7 @@ func resolveOpenClawMCPWorkspaceConfig(mcpConfig map[string]any, workspaceGuestP
 		}
 		resolvedServers[name] = next
 	}
-	return map[string]any{agentruntime.MCPConfigServersKey: resolvedServers}, nil
+	return resolvedServers, nil
 }
 
 func resolveOpenClawMCPWorkspaceArgs(args []any, workspaceGuestPath string) []any {

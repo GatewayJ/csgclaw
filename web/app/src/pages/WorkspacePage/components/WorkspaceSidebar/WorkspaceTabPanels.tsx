@@ -39,7 +39,7 @@ const AgentSectionIds = {
 
 const HubSectionIds = {
   templates: WorkspaceContextSectionIds.hubTemplates,
-  mcps: WorkspaceContextSectionIds.mcpServers,
+  mcpServers: WorkspaceContextSectionIds.mcpServers,
   skills: WorkspaceContextSectionIds.hubSkills,
   models: WorkspaceContextSectionIds.models,
 } as const;
@@ -281,7 +281,7 @@ export function WorkspaceTabPanels({
   const normalizedContextQuery = normalizeSearchQuery(contextQuery);
   const resourcesTemplates = hub?.templates ?? [];
   const resourcesSkills = hub?.skills ?? [];
-  const resourcesMCPs = hub?.mcps ?? [];
+  const resourcesMCPServers = hub?.mcpServers ?? [];
   const resourcesError = hub?.listError ?? "";
   const resourcesSkillsError = hub?.skillsError ?? "";
   const resourcesMCPError = hub?.mcpStateError ?? "";
@@ -429,7 +429,7 @@ export function WorkspaceTabPanels({
     return matchesSearch(normalizedContextQuery, item.name, item.description);
   }
 
-  function mcpMatchesQuery(item: (typeof resourcesMCPs)[number]) {
+  function mcpServerMatchesQuery(item: (typeof resourcesMCPServers)[number]) {
     return matchesSearch(normalizedContextQuery, item.name, item.description);
   }
 
@@ -820,7 +820,7 @@ export function WorkspaceTabPanels({
           <div className={styles.empty}>{resourcesError}</div>
         ) : resourcesLoaded &&
           resourcesTemplates.length === 0 &&
-          resourcesMCPs.length === 0 &&
+          resourcesMCPServers.length === 0 &&
           resourcesSkills.length === 0 ? (
           <div className={styles.empty}>{t("resourcesEmpty")}</div>
         ) : resourcesLoaded && resourcesTemplates.length > 0 && !visibleTemplates.length ? (
@@ -861,12 +861,12 @@ export function WorkspaceTabPanels({
 
   function renderMCPSection(presentation: "group" | "flat" = "group") {
     const flat = presentation === "flat";
-    const visibleMCPs = resourcesMCPs.filter(mcpMatchesQuery);
+    const visibleMCPServers = resourcesMCPServers.filter(mcpServerMatchesQuery);
     return (
       <WorkspaceGroup
         id="mcp-servers"
         title={t("resourcesMCPLabel")}
-        count={resourcesMCPs.length}
+        count={resourcesMCPServers.length}
         collapsed={flat ? false : Boolean(collapsedWorkspaceGroups["mcp-servers"])}
         onToggle={() => onToggleWorkspaceGroup("mcp-servers")}
         onAdd={() => {
@@ -877,8 +877,8 @@ export function WorkspaceTabPanels({
         addIcon={<Plus size={15} strokeWidth={2.2} aria-hidden="true" />}
         presentation={presentation}
       >
-        {visibleMCPs.length ? (
-          visibleMCPs.map((item) => (
+        {visibleMCPServers.length ? (
+          visibleMCPServers.map((item) => (
             <button
               key={item.name}
               className={classNames(
@@ -902,9 +902,9 @@ export function WorkspaceTabPanels({
           ))
         ) : resourcesMCPError ? (
           <div className={styles.empty}>{resourcesMCPError}</div>
-        ) : resourcesMCPs.length ? (
+        ) : resourcesMCPServers.length ? (
           <div className={styles.empty}>{t("workspaceSearchNoResults")}</div>
-        ) : flat || (resourcesLoaded && resourcesMCPs.length === 0) ? (
+        ) : flat || (resourcesLoaded && resourcesMCPServers.length === 0) ? (
           <div className={styles.empty}>{t("resourcesMCPEmpty")}</div>
         ) : null}
       </WorkspaceGroup>
@@ -1008,7 +1008,7 @@ export function WorkspaceTabPanels({
           aria-label={contextSectionLabel(sectionId)}
         >
           {sectionId === HubSectionIds.templates ? renderHubTemplateSection("flat") : null}
-          {sectionId === HubSectionIds.mcps ? renderMCPSection("flat") : null}
+          {sectionId === HubSectionIds.mcpServers ? renderMCPSection("flat") : null}
           {sectionId === HubSectionIds.skills ? renderHubSkillSection("flat") : null}
           {sectionId === HubSectionIds.models ? renderModelProviderSection("flat") : null}
           {renderSkillUploadDialog()}
@@ -1031,7 +1031,7 @@ export function WorkspaceTabPanels({
   function isHubSectionId(value: WorkspaceContextSectionId): value is HubSectionId {
     return (
       value === HubSectionIds.templates ||
-      value === HubSectionIds.mcps ||
+      value === HubSectionIds.mcpServers ||
       value === HubSectionIds.skills ||
       value === HubSectionIds.models
     );
@@ -1056,7 +1056,7 @@ export function WorkspaceTabPanels({
     if (sectionId === HubSectionIds.templates) {
       return t("resourcesTemplatesSection");
     }
-    if (sectionId === HubSectionIds.mcps) {
+    if (sectionId === HubSectionIds.mcpServers) {
       return t("resourcesMCPLabel");
     }
     if (sectionId === HubSectionIds.skills) {

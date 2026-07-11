@@ -81,7 +81,7 @@ type Agent struct {
 	RuntimeKind      string         `json:"-"`
 	RuntimeName      string         `json:"runtime_name,omitempty"`
 	SandboxEnabled   bool           `json:"sandbox_enabled,omitempty"`
-	MCPConfig        map[string]any `json:"mcp_config,omitempty"`
+	MCPServers       map[string]any `json:"mcpServers,omitempty"`
 	Image            string         `json:"image,omitempty"`
 	Avatar           string         `json:"-"`
 	BoxID            string         `json:"-"`
@@ -140,7 +140,6 @@ func (a *Agent) UnmarshalJSON(data []byte) error {
 		Status         string         `json:"status"`
 		BoxID          string         `json:"box_id"`
 		RuntimeOptions map[string]any `json:"runtime_options"`
-		MCPConfig      map[string]any `json:"mcp_config"`
 	}
 	if err := json.Unmarshal(data, &legacy); err != nil {
 		return err
@@ -174,9 +173,6 @@ func (a *Agent) UnmarshalJSON(data []byte) error {
 	}
 	if len(a.Runtime.Options) == 0 && len(legacy.RuntimeOptions) > 0 {
 		a.Runtime.Options = legacy.RuntimeOptions
-	}
-	if len(a.MCPConfig) == 0 && len(legacy.MCPConfig) > 0 {
-		a.MCPConfig = legacy.MCPConfig
 	}
 	if strings.TrimSpace(a.RuntimeName) == "" {
 		a.RuntimeName = strings.TrimSpace(a.Runtime.Name)
@@ -234,8 +230,8 @@ type CreateAgentRequest struct {
 	CreatedAt      time.Time           `json:"created_at,omitempty"`
 	Runtime        AgentRuntime        `json:"runtime,omitempty"`
 	RuntimeOptions map[string]any      `json:"runtime_options,omitempty"`
-	MCPConfig      map[string]any      `json:"mcp_config,omitempty"`
-	MCPConfigSet   bool                `json:"-"`
+	MCPServers     map[string]any      `json:"mcpServers,omitempty"`
+	MCPServersSet  bool                `json:"-"`
 	Profile        string              `json:"-"`
 	ProfileConfig  *CreateAgentProfile `json:"model_config,omitempty"`
 	AgentProfile   *CreateAgentProfile `json:"agent_profile,omitempty"`
@@ -258,7 +254,7 @@ func (r CreateAgentRequest) MarshalJSON() ([]byte, error) {
 		CreatedAt      time.Time           `json:"created_at,omitempty"`
 		Runtime        AgentRuntime        `json:"runtime,omitempty"`
 		RuntimeOptions map[string]any      `json:"runtime_options,omitempty"`
-		MCPConfig      map[string]any      `json:"mcp_config,omitempty"`
+		MCPServers     json.RawMessage     `json:"mcpServers,omitempty"`
 		ModelConfig    *CreateAgentProfile `json:"model_config,omitempty"`
 		Profile        string              `json:"profile,omitempty"`
 		AgentProfile   *CreateAgentProfile `json:"agent_profile,omitempty"`
@@ -280,6 +276,14 @@ func (r CreateAgentRequest) MarshalJSON() ([]byte, error) {
 	if !runtime.SandboxEnabled {
 		runtime.SandboxEnabled = r.SandboxEnabled
 	}
+	var mcpServers json.RawMessage
+	if r.MCPServersSet || r.MCPServers != nil {
+		encoded, err := json.Marshal(r.MCPServers)
+		if err != nil {
+			return nil, err
+		}
+		mcpServers = encoded
+	}
 	return json.Marshal(createAgentRequestJSON{
 		ID:             r.ID,
 		Name:           r.Name,
@@ -296,7 +300,7 @@ func (r CreateAgentRequest) MarshalJSON() ([]byte, error) {
 		CreatedAt:      r.CreatedAt,
 		Runtime:        runtime,
 		RuntimeOptions: r.RuntimeOptions,
-		MCPConfig:      r.MCPConfig,
+		MCPServers:     mcpServers,
 		ModelConfig:    r.ProfileConfig,
 		Profile:        profile,
 		AgentProfile:   r.AgentProfile,
@@ -312,7 +316,7 @@ func (r *CreateAgentRequest) UnmarshalJSON(data []byte) error {
 		RuntimeName    string              `json:"runtime_name,omitempty"`
 		SandboxEnabled *bool               `json:"sandbox_enabled,omitempty"`
 		RuntimeOptions map[string]any      `json:"runtime_options,omitempty"`
-		MCPConfig      map[string]any      `json:"mcp_config,omitempty"`
+		MCPServers     map[string]any      `json:"mcpServers,omitempty"`
 		ModelConfig    *CreateAgentProfile `json:"model_config,omitempty"`
 		AgentProfile   *CreateAgentProfile `json:"agent_profile,omitempty"`
 		Runtime        struct {
@@ -331,13 +335,13 @@ func (r *CreateAgentRequest) UnmarshalJSON(data []byte) error {
 	r.RuntimeKind = strings.TrimSpace(decoded.RuntimeKind)
 	r.RuntimeName = strings.TrimSpace(decoded.RuntimeName)
 	r.RuntimeOptions = decoded.RuntimeOptions
-	r.MCPConfig = decoded.MCPConfig
+	r.MCPServers = decoded.MCPServers
 	r.ProfileConfig = decoded.ModelConfig
 	r.AgentProfile = decoded.AgentProfile
 	var rawFields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &rawFields); err == nil {
-		if _, ok := rawFields["mcp_config"]; ok {
-			r.MCPConfigSet = true
+		if _, ok := rawFields["mcpServers"]; ok {
+			r.MCPServersSet = true
 		}
 	}
 	r.Runtime.Kind = strings.TrimSpace(decoded.Runtime.Kind)

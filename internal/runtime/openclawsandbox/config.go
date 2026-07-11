@@ -49,15 +49,15 @@ func HostGatewayLogPath(agentHome string) string {
 }
 
 func EnsureConfig(agentHome, participantID, agentID string, server config.ServerConfig, model config.ModelConfig, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) (string, error) {
-	return EnsureConfigWithMCPConfig(agentHome, participantID, agentID, server, model, nil, resolveBaseURL, feishuProvider)
+	return EnsureConfigWithMCPServers(agentHome, participantID, agentID, server, model, nil, resolveBaseURL, feishuProvider)
 }
 
-func EnsureConfigWithMCPConfig(agentHome, participantID, agentID string, server config.ServerConfig, model config.ModelConfig, mcpConfig map[string]any, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) (string, error) {
+func EnsureConfigWithMCPServers(agentHome, participantID, agentID string, server config.ServerConfig, model config.ModelConfig, mcpServers map[string]any, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) (string, error) {
 	hostRoot := Root(agentHome)
 	if err := os.MkdirAll(hostRoot, 0o755); err != nil {
 		return "", fmt.Errorf("create openclaw config dir: %w", err)
 	}
-	data, err := renderConfigWithMCPConfig(participantID, agentID, server, model, mcpConfig, resolveBaseURL, feishuProvider)
+	data, err := renderConfigWithMCPServers(participantID, agentID, server, model, mcpServers, resolveBaseURL, feishuProvider)
 	if err != nil {
 		return "", err
 	}
@@ -147,10 +147,10 @@ func updateOpenClawWorkspaceDefault(cfg map[string]any, workspace string) {
 	defaults["workspace"] = workspace
 }
 func renderConfig(participantID, agentID string, server config.ServerConfig, model config.ModelConfig, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) ([]byte, error) {
-	return renderConfigWithMCPConfig(participantID, agentID, server, model, nil, resolveBaseURL, feishuProvider)
+	return renderConfigWithMCPServers(participantID, agentID, server, model, nil, resolveBaseURL, feishuProvider)
 }
 
-func renderConfigWithMCPConfig(participantID, agentID string, server config.ServerConfig, model config.ModelConfig, mcpConfig map[string]any, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) ([]byte, error) {
+func renderConfigWithMCPServers(participantID, agentID string, server config.ServerConfig, model config.ModelConfig, mcpServers map[string]any, resolveBaseURL BaseURLResolver, feishuProvider feishu.AgentCredentialProvider) ([]byte, error) {
 	participantID = strings.TrimSpace(participantID)
 	agentID = strings.TrimSpace(agentID)
 	if participantID == "" {
@@ -176,7 +176,7 @@ func renderConfigWithMCPConfig(participantID, agentID string, server config.Serv
 		return nil, err
 	}
 	updateOpenClawWorkspaceDefault(cfg, workspaceGuestPathForGOOS(goruntime.GOOS))
-	if err := updateOpenClawMCP(cfg, mcpConfig); err != nil {
+	if err := updateOpenClawMCP(cfg, mcpServers); err != nil {
 		return nil, err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")

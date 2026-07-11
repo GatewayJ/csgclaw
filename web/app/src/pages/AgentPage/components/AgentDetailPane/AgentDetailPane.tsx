@@ -44,7 +44,7 @@ import {
   isManagerAgent,
   isNotifierRuntimeDraftOnAgentPage,
   runtimeOptionSchemasForAgent,
-  supportsMCPConfig,
+  supportsMCPServers,
 } from "@/models/agents";
 import type { AgentDraft, AgentLike } from "@/models/agents";
 import {
@@ -235,7 +235,7 @@ export function AgentDetailPane({
   const [deleteSkillDialogOpen, setDeleteSkillDialogOpen] = useState(false);
   const [skillPendingDelete, setSkillPendingDelete] = useState<SlashSkillOption | null>(null);
   const [addMCPDialogOpen, setAddMCPDialogOpen] = useState(false);
-  const [selectedMCPNames, setSelectedMCPNames] = useState<string[]>([]);
+  const [selectedMCPServerNames, setSelectedMCPServerNames] = useState<string[]>([]);
   const [deleteMCPDialogOpen, setDeleteMCPDialogOpen] = useState(false);
   const [mcpPendingDelete, setMCPPendingDelete] = useState<MCPServer | null>(null);
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -280,8 +280,8 @@ export function AgentDetailPane({
   const selectedProviderModels = selectedProvider?.models ?? [];
   const selectedModelValue = draft?.model_id || "";
   const isNotifierDraft = Boolean(draft && isNotifierRuntimeDraftOnAgentPage(draft, item));
-  const showMCPConfig = Boolean(
-    draft && !isNotifierDraft && supportsMCPConfig(draft.runtime_kind || item.runtime_kind),
+  const showMCPServers = Boolean(
+    draft && !isNotifierDraft && supportsMCPServers(draft.runtime_kind || item.runtime_kind),
   );
   const profileTabs = useMemo(
     () =>
@@ -289,13 +289,15 @@ export function AgentDetailPane({
         ? [
             { id: "profile" as const, label: t("agentProfileTab") },
             { id: "activity" as const, label: t("agentActivityTab") },
-            ...(!isNotificationBotAgent(item) ? [{ id: "channels" as const, label: t("agentChannelsTitle") }] : []),
             ...(!isNotifierDraft ? [{ id: "instructions" as const, label: t("agentInstructions") }] : []),
-            ...(workspaceSupported ? [{ id: "skills" as const, label: t("agentProfileSkillsTab") }] : []),
-            ...(showMCPConfig ? [{ id: "mcp" as const, label: t("agentProfileMCPTab") }] : []),
+            ...(workspaceSupported
+              ? [{ id: "skills" as const, label: t("agentProfileSkillsTab"), count: skills.length }]
+              : []),
+            ...(!isNotificationBotAgent(item) ? [{ id: "channels" as const, label: t("agentChannelsTitle") }] : []),
+            ...(showMCPServers ? [{ id: "mcp" as const, label: t("agentProfileMCPTab") }] : []),
           ]
         : [],
-    [draft, isNotifierDraft, item, showMCPConfig, t, workspaceSupported],
+    [draft, isNotifierDraft, item, showMCPServers, skills.length, t, workspaceSupported],
   );
   const visibleActiveProfileTab = profileTabs.some((tab) => tab.id === activeProfileTab)
     ? activeProfileTab
@@ -337,17 +339,17 @@ export function AgentDetailPane({
 
   useEffect(() => {
     if (!addMCPDialogOpen) {
-      setSelectedMCPNames([]);
+      setSelectedMCPServerNames([]);
     }
   }, [addMCPDialogOpen]);
 
   useEffect(() => {
-    if (!showMCPConfig) {
+    if (!showMCPServers) {
       setAddMCPDialogOpen(false);
       setDeleteMCPDialogOpen(false);
       setMCPPendingDelete(null);
     }
-  }, [showMCPConfig]);
+  }, [showMCPServers]);
 
   async function handleAddSkillsConfirm(): Promise<void> {
     if (!selectedSkillNames.length) {
@@ -371,10 +373,10 @@ export function AgentDetailPane({
   }
 
   async function handleAddMCPConfirm(): Promise<void> {
-    if (!selectedMCPNames.length) {
+    if (!selectedMCPServerNames.length) {
       return;
     }
-    const installed = await onInstallMCPServers?.(selectedMCPNames);
+    const installed = await onInstallMCPServers?.(selectedMCPServerNames);
     if (installed) {
       setAddMCPDialogOpen(false);
     }
@@ -585,7 +587,12 @@ export function AgentDetailPane({
                   aria-controls={`agent-profile-${section.id}`}
                   onClick={() => selectProfileTab(section.id)}
                 >
-                  {section.label}
+                  <span>{section.label}</span>
+                  {typeof section.count === "number" ? (
+                    <span className="agent-profile-section-tab-count" aria-label={String(section.count)}>
+                      {section.count}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -697,7 +704,7 @@ export function AgentDetailPane({
               />
             ) : null}
 
-            {showMCPConfig && visibleActiveProfileTab === "mcp" ? (
+            {showMCPServers && visibleActiveProfileTab === "mcp" ? (
               <AgentMCPPanel
                 addBusy={mcpAddBusy}
                 addError={mcpAddError}
@@ -862,7 +869,7 @@ export function AgentDetailPane({
             ) : (
               <div className="agent-skill-candidates-list" role="list">
                 {mcpCandidates.map((server) => {
-                  const checked = selectedMCPNames.includes(server.name);
+                  const checked = selectedMCPServerNames.includes(server.name);
                   return (
                     <label key={server.name} className={`agent-skill-candidate ${checked ? "selected" : ""}`.trim()}>
                       <input
@@ -870,7 +877,7 @@ export function AgentDetailPane({
                         checked={checked}
                         onChange={(event) => {
                           const nextChecked = event.currentTarget.checked;
-                          setSelectedMCPNames((current) =>
+                          setSelectedMCPServerNames((current) =>
                             nextChecked ? [...current, server.name] : current.filter((name) => name !== server.name),
                           );
                         }}
@@ -895,7 +902,7 @@ export function AgentDetailPane({
               loading={mcpAddBusy}
               loadingLabel={t("agentMCPAdd")}
               disabled={
-                !selectedMCPNames.length ||
+                !selectedMCPServerNames.length ||
                 mcpAddBusy ||
                 Boolean(mcpCandidatesError) ||
                 (mcpCandidatesLoading && !mcpCandidates.length)

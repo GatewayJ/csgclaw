@@ -11,7 +11,7 @@ import { tags } from "@lezer/highlight";
 import { FileCode2, Server, Trash2 } from "lucide-react";
 import { formatRuntimeKindLabel } from "@/models/agents";
 import { formatHubDateTime, isDeletableHubTemplate } from "@/models/hubWorkspace";
-import { formatMCPServerWrapper, mcpServerDescription, mcpServerPayloadFromConfig } from "@/models/mcp";
+import { formatMCPServerDocument, mcpServerDescription, mcpServerPayloadFromDocument } from "@/models/mcp";
 import type { MCPServerPayload } from "@/models/mcp";
 import { WorkspaceFilePreview, WorkspaceFileTree } from "@/components/business/WorkspaceFileTree";
 import { localizeTemplateSourceTag } from "@/shared/i18n";
@@ -53,15 +53,15 @@ type HubDetailPaneHub = {
     onSelectTemplate?: (item: HubTemplate | null | undefined) => void;
     onSelectWorkspaceFile: (workspacePath: string) => void;
     onToggleWorkspaceDir?: (workspacePath: string) => void | Promise<void>;
-    mcps?: readonly MCPServer[];
+    mcpServers?: readonly MCPServer[];
     mcpStateError?: string;
     mcpStateLoading?: boolean;
     mcpMutationBusy?: boolean;
     mcpMutationError?: string;
     mcpCreateDialogOpen?: boolean;
     onMCPCreateDialogOpenChange?: (open: boolean) => void;
-    selectedMCP?: MCPServer | null;
-    selectedMCPName?: string;
+    selectedMCPServer?: MCPServer | null;
+    selectedMCPServerName?: string;
     selectedResourceType?: "mcp" | "skill" | "template";
     selectedSkill: SkillSummary | null;
     selectedSkillPath: string;
@@ -91,14 +91,14 @@ const EMPTY_HUB_DETAIL_PROPS: HubDetailPaneHub["detailPaneProps"] = {
   error: "",
   loaded: false,
   onRetry: () => {},
-  mcps: [],
+  mcpServers: [],
   mcpStateError: "",
   mcpStateLoading: false,
   mcpMutationBusy: false,
   mcpMutationError: "",
   mcpCreateDialogOpen: false,
-  selectedMCP: null,
-  selectedMCPName: "",
+  selectedMCPServer: null,
+  selectedMCPServerName: "",
   onSelectSkillFile: () => {},
   onSelectWorkspaceFile: () => {},
   onToggleWorkspaceDir: () => {},
@@ -128,7 +128,7 @@ const EMPTY_HUB_DETAIL_PROPS: HubDetailPaneHub["detailPaneProps"] = {
   loadingWorkspaceDirs: new Set(),
 };
 
-const DEFAULT_MCP_CONFIG_TEXT =
+const DEFAULT_MCP_SERVER_DOCUMENT =
   '{\n  "mcpServers": {\n    "filesystem": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspace}"],\n      "startup_timeout_sec": 60\n    }\n  }\n}';
 
 const jsonEditorTheme = EditorView.theme({
@@ -240,7 +240,7 @@ const jsonEditorExtensions: Extension[] = [
   jsonEditorTheme,
 ];
 
-type MCPConfigParseResult =
+type MCPServerDocumentParseResult =
   | {
       kind: "valid";
       payload: MCPServerPayload;
@@ -250,19 +250,19 @@ type MCPConfigParseResult =
       message: string;
     };
 
-function parseMCPConfigText(value: string, t: TranslateFn): MCPConfigParseResult {
+function parseMCPServerDocument(value: string, t: TranslateFn): MCPServerDocumentParseResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
   } catch {
-    return { kind: "syntax", message: t("resourcesMCPConfigInvalid") };
+    return { kind: "syntax", message: t("resourcesMCPServerDocumentInvalid") };
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { kind: "structure", message: t("resourcesMCPConfigObjectRequired") };
+    return { kind: "structure", message: t("resourcesMCPServerDocumentObjectRequired") };
   }
-  const payload = mcpServerPayloadFromConfig(parsed);
+  const payload = mcpServerPayloadFromDocument(parsed);
   if (!payload) {
-    return { kind: "structure", message: t("resourcesMCPConfigWrappedInvalid") };
+    return { kind: "structure", message: t("resourcesMCPServerDocumentInvalidShape") };
   }
   return { kind: "valid", payload };
 }
@@ -394,12 +394,12 @@ export function HubDetailPane({
   const {
     templates,
     skills,
-    mcps = [],
+    mcpServers = [],
     selectedTemplate,
     selectedTemplateId,
     selectedSkill,
     selectedSkillPath,
-    selectedMCP,
+    selectedMCPServer,
     selectedResourceType = "template",
     loaded,
     error,
@@ -437,7 +437,7 @@ export function HubDetailPane({
   const canDeleteSkill = Boolean(selectedSkill && !isReadonlySkill(selectedSkill));
   const skillEntries = skillTree?.entries ?? EMPTY_WORKSPACE_ENTRIES;
   const activeResourceType = useMemo(() => {
-    if (selectedResourceType === "mcp" && mcps.length) {
+    if (selectedResourceType === "mcp" && mcpServers.length) {
       return "mcp";
     }
     if (selectedResourceType === "skill" && skills.length) {
@@ -446,37 +446,37 @@ export function HubDetailPane({
     if (templates.length) {
       return "template";
     }
-    if (mcps.length) {
+    if (mcpServers.length) {
       return "mcp";
     }
     if (skills.length) {
       return "skill";
     }
     return "template";
-  }, [mcps.length, selectedResourceType, skills.length, templates.length]);
+  }, [mcpServers.length, selectedResourceType, skills.length, templates.length]);
   const [isInspectorScrolling, setIsInspectorScrolling] = useState(false);
   const [deleteSkillDialogOpen, setDeleteSkillDialogOpen] = useState(false);
   const [mcpDeleteDialogOpen, setMCPDeleteDialogOpen] = useState(false);
-  const [mcpDraftConfig, setMCPDraftConfig] = useState(DEFAULT_MCP_CONFIG_TEXT);
-  const [mcpDetailConfig, setMCPDetailConfig] = useState("");
+  const [mcpDraftDocument, setMCPDraftDocument] = useState(DEFAULT_MCP_SERVER_DOCUMENT);
+  const [mcpDetailDocument, setMCPDetailDocument] = useState("");
   const [mcpDetailError, setMCPDetailError] = useState("");
   const [mcpFormError, setMCPFormError] = useState("");
   const inspectorScrollTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (mcpCreateDialogOpen) {
-      setMCPDraftConfig(DEFAULT_MCP_CONFIG_TEXT);
+      setMCPDraftDocument(DEFAULT_MCP_SERVER_DOCUMENT);
       setMCPFormError("");
     }
   }, [mcpCreateDialogOpen]);
   useEffect(() => {
-    if (!selectedMCP) {
-      setMCPDetailConfig("");
+    if (!selectedMCPServer) {
+      setMCPDetailDocument("");
       setMCPDetailError("");
       return;
     }
-    setMCPDetailConfig(formatMCPServerWrapper(selectedMCP.name, selectedMCP.config));
+    setMCPDetailDocument(formatMCPServerDocument(selectedMCPServer.name, selectedMCPServer.config));
     setMCPDetailError("");
-  }, [selectedMCP]);
+  }, [selectedMCPServer]);
   useEffect(
     () => () => {
       if (inspectorScrollTimerRef.current) {
@@ -505,7 +505,7 @@ export function HubDetailPane({
   }
 
   async function handleSaveMCP() {
-    const result = parseMCPConfigText(mcpDraftConfig, t);
+    const result = parseMCPServerDocument(mcpDraftDocument, t);
     if (result.kind !== "valid") {
       setMCPFormError(result.kind === "structure" ? result.message : "");
       return;
@@ -517,36 +517,36 @@ export function HubDetailPane({
   }
 
   async function handleSaveMCPDetail() {
-    if (!selectedMCP) {
+    if (!selectedMCPServer) {
       return;
     }
-    const result = parseMCPConfigText(mcpDetailConfig, t);
+    const result = parseMCPServerDocument(mcpDetailDocument, t);
     if (result.kind !== "valid") {
       setMCPDetailError(result.kind === "structure" ? result.message : "");
       return;
     }
-    const saved = await onUpdateMCP?.(selectedMCP.name, result.payload);
+    const saved = await onUpdateMCP?.(selectedMCPServer.name, result.payload);
     if (saved) {
       setMCPDetailError("");
     }
   }
 
   async function handleDeleteMCPConfirm() {
-    const deleted = await onDeleteMCP?.(selectedMCP);
+    const deleted = await onDeleteMCP?.(selectedMCPServer);
     if (deleted) {
       setMCPDeleteDialogOpen(false);
     }
   }
 
-  function handleMCPDraftConfigChange(value: string) {
-    setMCPDraftConfig(value);
-    const result = parseMCPConfigText(value, t);
+  function handleMCPDraftDocumentChange(value: string) {
+    setMCPDraftDocument(value);
+    const result = parseMCPServerDocument(value, t);
     setMCPFormError(result.kind === "structure" ? result.message : "");
   }
 
-  function handleMCPDetailConfigChange(value: string) {
-    setMCPDetailConfig(value);
-    const result = parseMCPConfigText(value, t);
+  function handleMCPDetailDocumentChange(value: string) {
+    setMCPDetailDocument(value);
+    const result = parseMCPServerDocument(value, t);
     setMCPDetailError(result.kind === "structure" ? result.message : "");
   }
 
@@ -560,7 +560,7 @@ export function HubDetailPane({
       {error ? <div className="form-error">{error}</div> : null}
       {!loaded && !error ? (
         <div className="workspace-empty">{t("resourcesLoading")}</div>
-      ) : templates.length === 0 && skills.length === 0 && mcps.length === 0 ? (
+      ) : templates.length === 0 && skills.length === 0 && mcpServers.length === 0 ? (
         <div className="empty-state shell-empty-state hub-empty-state">
           <span className="rich-empty-mark" aria-hidden="true">
             *
@@ -738,7 +738,7 @@ export function HubDetailPane({
                 </div>
               </div>
             </>
-          ) : activeResourceType === "mcp" && selectedMCP ? (
+          ) : activeResourceType === "mcp" && selectedMCPServer ? (
             <>
               <div className="hub-inspector-hero">
                 <div className="hub-inspector-hero-row">
@@ -748,9 +748,13 @@ export function HubDetailPane({
                         <span className="hub-inspector-title-icon" aria-hidden="true">
                           <Server size={18} strokeWidth={2} />
                         </span>
-                        <h2>{selectedMCP.name}</h2>
+                        <h2>{selectedMCPServer.name}</h2>
                       </div>
-                      <p>{selectedMCP.description || mcpServerDescription(selectedMCP.config) || selectedMCP.name}</p>
+                      <p>
+                        {selectedMCPServer.description ||
+                          mcpServerDescription(selectedMCPServer.config) ||
+                          selectedMCPServer.name}
+                      </p>
                     </div>
                   </div>
                   <div className="hub-template-actions">
@@ -775,11 +779,11 @@ export function HubDetailPane({
               ) : null}
               {mcpStateLoading ? <div className="workspace-empty">{t("resourcesMCPLoading")}</div> : null}
 
-              <div className="hub-workspace-block mcp-config-block">
+              <div className="hub-workspace-block mcp-server-document-block">
                 <JSONConfigEditor
-                  label={t("resourcesMCPConfigLabel")}
-                  value={mcpDetailConfig}
-                  onChange={handleMCPDetailConfigChange}
+                  label={t("resourcesMCPServerDocumentLabel")}
+                  value={mcpDetailDocument}
+                  onChange={handleMCPDetailDocumentChange}
                   invalid={Boolean(mcpDetailError)}
                   minRows={12}
                 />
@@ -792,7 +796,7 @@ export function HubDetailPane({
                 *
               </span>
               <strong>
-                {templates.length || skills.length || mcps.length ? t("resourcesLoading") : t("resourcesEmpty")}
+                {templates.length || skills.length || mcpServers.length ? t("resourcesLoading") : t("resourcesEmpty")}
               </strong>
             </div>
           )}
@@ -828,7 +832,7 @@ export function HubDetailPane({
         open={mcpCreateDialogOpen}
         onOpenChange={(open) => {
           if (open) {
-            setMCPDraftConfig(DEFAULT_MCP_CONFIG_TEXT);
+            setMCPDraftDocument(DEFAULT_MCP_SERVER_DOCUMENT);
             setMCPFormError("");
             onMCPCreateDialogOpenChange?.(true);
           } else {
@@ -846,9 +850,9 @@ export function HubDetailPane({
           </DialogHeader>
           <div className="mcp-form">
             <JSONConfigEditor
-              label={t("resourcesMCPConfigJSONLabel")}
-              value={mcpDraftConfig}
-              onChange={handleMCPDraftConfigChange}
+              label={t("resourcesMCPServerDocumentJSONLabel")}
+              value={mcpDraftDocument}
+              onChange={handleMCPDraftDocumentChange}
               invalid={Boolean(mcpFormError)}
               minRows={12}
             />
@@ -872,7 +876,7 @@ export function HubDetailPane({
             <div className="hub-skill-delete-dialog-copy">
               <DialogTitle>{t("resourcesMCPDelete")}</DialogTitle>
               <DialogDescription>
-                {t("resourcesMCPDeleteConfirmMessage", { name: selectedMCP?.name || "" })}
+                {t("resourcesMCPDeleteConfirmMessage", { name: selectedMCPServer?.name || "" })}
               </DialogDescription>
             </div>
             <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />

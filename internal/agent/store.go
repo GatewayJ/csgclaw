@@ -77,7 +77,7 @@ type persistedAgent struct {
 	BoxID            string                   `json:"box_id,omitempty"`
 	Runtime          *RuntimeRecord           `json:"runtime,omitempty"`
 	RuntimeOptions   map[string]any           `json:"-"`
-	MCPConfig        map[string]any           `json:"-"`
+	MCPServers       map[string]any           `json:"-"`
 	Role             string                   `json:"role"`
 	Status           string                   `json:"status,omitempty"`
 	CreatedAt        time.Time                `json:"created_at"`
@@ -133,8 +133,8 @@ func (a persistedAgent) MarshalJSON() ([]byte, error) {
 	if !profileEmpty(profile) {
 		out["model_config"] = profile
 	}
-	if len(a.MCPConfig) > 0 {
-		out["mcp_config"] = a.MCPConfig
+	if a.MCPServers != nil {
+		out["mcpServers"] = a.MCPServers
 	}
 	if len(a.DetectionResults) > 0 {
 		out["detection_results"] = a.DetectionResults
@@ -149,7 +149,7 @@ func (a *persistedAgent) UnmarshalJSON(data []byte) error {
 		ModelConfig    json.RawMessage `json:"model_config"`
 		Profile        json.RawMessage `json:"profile"`
 		RuntimeOptions map[string]any  `json:"runtime_options"`
-		MCPConfig      map[string]any  `json:"mcp_config"`
+		MCPServers     map[string]any  `json:"mcpServers"`
 	}
 	var decoded persistedAgentJSON
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -157,7 +157,7 @@ func (a *persistedAgent) UnmarshalJSON(data []byte) error {
 	}
 	*a = persistedAgent(decoded.persistedAgentAlias)
 	a.RuntimeOptions = utils.CloneAnyMap(decoded.RuntimeOptions)
-	a.MCPConfig = utils.CloneAnyMap(decoded.MCPConfig)
+	a.MCPServers = cloneMCPServers(decoded.MCPServers)
 	profilePayload := decoded.ModelConfig
 	if len(profilePayload) == 0 || string(profilePayload) == "null" {
 		profilePayload = decoded.Profile
@@ -218,7 +218,7 @@ func newPersistedAgent(a Agent) persistedAgent {
 		Image:            a.Image,
 		Runtime:          compactPersistedRuntime(runtimeRecordForAgent(a), topRX),
 		RuntimeOptions:   topRX,
-		MCPConfig:        utils.CloneAnyMap(a.MCPConfig),
+		MCPServers:       cloneMCPServers(a.MCPServers),
 		Role:             a.Role,
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        updatedAt,
@@ -233,7 +233,7 @@ func (a persistedAgent) toAgent() Agent {
 		ap = cloneProfile(a.AgentProfile)
 	}
 	rx := utils.CloneAnyMap(a.RuntimeOptions)
-	mcpConfig := utils.CloneAnyMap(a.MCPConfig)
+	mcpServers := cloneMCPServers(a.MCPServers)
 	if strings.TrimSpace(ap.Name) == "" {
 		ap.Name = a.Name
 	}
@@ -291,7 +291,7 @@ func (a persistedAgent) toAgent() Agent {
 		Avatar:           a.Avatar,
 		BoxID:            boxID,
 		RuntimeOptions:   rx,
-		MCPConfig:        utils.CloneAnyMap(mcpConfig),
+		MCPServers:       cloneMCPServers(mcpServers),
 		Role:             a.Role,
 		Status:           status,
 		CreatedAt:        a.CreatedAt,

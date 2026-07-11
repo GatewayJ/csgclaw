@@ -41,15 +41,15 @@ func TestRenderConfigDisablesUnconfiguredFeishuChannel(t *testing.T) {
 	}
 }
 
-func TestRenderConfigWithMCPConfigWritesPicoClawToolsMCP(t *testing.T) {
+func TestRenderConfigWithMCPServersWritesPicoClawToolsMCP(t *testing.T) {
 	baseServer := config.ServerConfig{AccessToken: "shared-token"}
 	baseModel := config.ModelConfig{ModelID: "gpt-5.5"}
 	resolver := fixedBaseURL("http://127.0.0.1:18080")
 
 	t.Run("absent disables mcp", func(t *testing.T) {
-		data, err := RenderConfigWithMCPConfig("manager", "u-manager", baseServer, baseModel, nil, resolver)
+		data, err := RenderConfigWithMCPServers("manager", "u-manager", baseServer, baseModel, nil, resolver)
 		if err != nil {
-			t.Fatalf("RenderConfigWithMCPConfig() error = %v", err)
+			t.Fatalf("RenderConfigWithMCPServers() error = %v", err)
 		}
 		mcpRoot := renderedToolsMCP(t, data)
 		if got, want := mcpRoot["enabled"], false; got != want {
@@ -61,9 +61,9 @@ func TestRenderConfigWithMCPConfigWritesPicoClawToolsMCP(t *testing.T) {
 	})
 
 	t.Run("empty managed config enables empty servers", func(t *testing.T) {
-		data, err := RenderConfigWithMCPConfig("manager", "u-manager", baseServer, baseModel, map[string]any{}, resolver)
+		data, err := RenderConfigWithMCPServers("manager", "u-manager", baseServer, baseModel, map[string]any{}, resolver)
 		if err != nil {
-			t.Fatalf("RenderConfigWithMCPConfig() error = %v", err)
+			t.Fatalf("RenderConfigWithMCPServers() error = %v", err)
 		}
 		mcpRoot := renderedToolsMCP(t, data)
 		if got, want := mcpRoot["enabled"], true; got != want {
@@ -79,27 +79,25 @@ func TestRenderConfigWithMCPConfigWritesPicoClawToolsMCP(t *testing.T) {
 	})
 
 	t.Run("server config is preserved", func(t *testing.T) {
-		data, err := RenderConfigWithMCPConfig("manager", "u-manager", baseServer, baseModel, map[string]any{
-			"mcpServers": map[string]any{
-				"context7": map[string]any{
-					"command":             "uvx",
-					"args":                []any{"context7-mcp"},
-					"startup_timeout_sec": float64(90),
-				},
-				"filesystem": map[string]any{
-					"command": "npx",
-					"args": []any{
-						"-y",
-						"@modelcontextprotocol/server-filesystem",
-						"/home/user/workspace",
-						"${workspace}",
-						"${workspace}/from-placeholder",
-					},
+		data, err := RenderConfigWithMCPServers("manager", "u-manager", baseServer, baseModel, map[string]any{
+			"context7": map[string]any{
+				"command":             "uvx",
+				"args":                []any{"context7-mcp"},
+				"startup_timeout_sec": float64(90),
+			},
+			"filesystem": map[string]any{
+				"command": "npx",
+				"args": []any{
+					"-y",
+					"@modelcontextprotocol/server-filesystem",
+					"/home/user/workspace",
+					"${workspace}",
+					"${workspace}/from-placeholder",
 				},
 			},
 		}, resolver)
 		if err != nil {
-			t.Fatalf("RenderConfigWithMCPConfig() error = %v", err)
+			t.Fatalf("RenderConfigWithMCPServers() error = %v", err)
 		}
 		mcpRoot := renderedToolsMCP(t, data)
 		if got, want := mcpRoot["enabled"], true; got != want {
@@ -130,12 +128,12 @@ func TestRenderConfigWithMCPConfigWritesPicoClawToolsMCP(t *testing.T) {
 	})
 }
 
-func TestRenderConfigWithMCPConfigRejectsInvalidPicoClawMCP(t *testing.T) {
-	_, err := RenderConfigWithMCPConfig("manager", "u-manager", config.ServerConfig{}, config.ModelConfig{ModelID: "gpt-5.5"}, map[string]any{
-		"mcpServers": []any{},
+func TestRenderConfigWithMCPServersRejectsInvalidPicoClawMCP(t *testing.T) {
+	_, err := RenderConfigWithMCPServers("manager", "u-manager", config.ServerConfig{}, config.ModelConfig{ModelID: "gpt-5.5"}, map[string]any{
+		"broken": []any{},
 	}, fixedBaseURL("http://127.0.0.1:18080"))
-	if err == nil || !strings.Contains(err.Error(), "mcp_config.mcpServers must be an object") {
-		t.Fatalf("RenderConfigWithMCPConfig() error = %v, want mcpServers object error", err)
+	if err == nil || !strings.Contains(err.Error(), "mcpServers.broken must be an object") {
+		t.Fatalf("RenderConfigWithMCPServers() error = %v, want invalid server error", err)
 	}
 }
 
@@ -145,11 +143,11 @@ func renderedToolsMCP(t *testing.T, data []byte) map[string]any {
 		Tools map[string]any `json:"tools"`
 	}
 	if err := json.Unmarshal(data, &rendered); err != nil {
-		t.Fatalf("RenderConfigWithMCPConfig() produced invalid JSON: %v", err)
+		t.Fatalf("RenderConfigWithMCPServers() produced invalid JSON: %v", err)
 	}
 	mcpRoot, ok := rendered.Tools["mcp"].(map[string]any)
 	if !ok {
-		t.Fatalf("RenderConfigWithMCPConfig() missing tools.mcp in:\n%s", data)
+		t.Fatalf("RenderConfigWithMCPServers() missing tools.mcp in:\n%s", data)
 	}
 	return mcpRoot
 }

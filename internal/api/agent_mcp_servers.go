@@ -13,8 +13,8 @@ type batchAddAgentMCPServersRequest struct {
 	Names []string `json:"names"`
 }
 
-func (h *Handler) handleAgentMCPByID(w http.ResponseWriter, r *http.Request) {
-	h.handleAgentMCP(w, r, pathValue(r, "id"))
+func (h *Handler) handleAgentMCPServersByID(w http.ResponseWriter, r *http.Request) {
+	h.handleAgentMCPServers(w, r, pathValue(r, "id"))
 }
 
 func (h *Handler) handleBatchAddAgentMCPServers(w http.ResponseWriter, r *http.Request) {
@@ -56,13 +56,13 @@ func (h *Handler) handleBatchAddAgentMCPServers(w http.ResponseWriter, r *http.R
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	updated, err := h.svc.AddMCPServers(r.Context(), id, req.Names, servers)
+	updated, err := h.svc.AddMCPServersFromHub(r.Context(), id, req.Names, servers)
 	if err != nil {
-		writeAgentMCPMutationError(w, err)
+		writeAgentMCPServersMutationError(w, err)
 		return
 	}
 	h.publishUpdatedAgentUser(updated)
-	view, err := h.svc.MCPConfigView(r.Context(), updated.ID)
+	view, err := h.svc.MCPServersView(r.Context(), updated.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -70,7 +70,7 @@ func (h *Handler) handleBatchAddAgentMCPServers(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, view)
 }
 
-func (h *Handler) handleAgentMCP(w http.ResponseWriter, r *http.Request, id string) {
+func (h *Handler) handleAgentMCPServers(w http.ResponseWriter, r *http.Request, id string) {
 	if h.svc == nil {
 		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
@@ -82,7 +82,7 @@ func (h *Handler) handleAgentMCP(w http.ResponseWriter, r *http.Request, id stri
 	}
 	switch r.Method {
 	case http.MethodGet:
-		view, err := h.svc.MCPConfigView(r.Context(), id)
+		view, err := h.svc.MCPServersView(r.Context(), id)
 		if err != nil {
 			status := http.StatusBadRequest
 			if strings.Contains(strings.ToLower(err.Error()), "not found") {
@@ -93,19 +93,19 @@ func (h *Handler) handleAgentMCP(w http.ResponseWriter, r *http.Request, id stri
 		}
 		writeJSON(w, http.StatusOK, view)
 	case http.MethodPut:
-		cfg, set, err := decodeAgentMCPConfigRequest(r)
+		cfg, set, err := decodeAgentMCPServersRequest(r)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 			return
 		}
 		if !set {
-			http.Error(w, "mcp_config is required", http.StatusBadRequest)
+			http.Error(w, "mcpServers is required", http.StatusBadRequest)
 			return
 		}
 		updated, err := h.svc.Update(r.Context(), id, agent.UpdateRequest{
-			MCPConfig:    cfg,
-			MCPConfigSet: true,
-			FieldMask:    []string{"mcp_config"},
+			MCPServers:    cfg,
+			MCPServersSet: true,
+			FieldMask:     []string{"mcpServers"},
 		})
 		if err != nil {
 			status := http.StatusBadRequest
@@ -116,7 +116,7 @@ func (h *Handler) handleAgentMCP(w http.ResponseWriter, r *http.Request, id stri
 			return
 		}
 		h.publishUpdatedAgentUser(updated)
-		view, err := h.svc.MCPConfigView(r.Context(), updated.ID)
+		view, err := h.svc.MCPServersView(r.Context(), updated.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -127,7 +127,7 @@ func (h *Handler) handleAgentMCP(w http.ResponseWriter, r *http.Request, id stri
 	}
 }
 
-func writeAgentMCPMutationError(w http.ResponseWriter, err error) {
+func writeAgentMCPServersMutationError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "not found") {
@@ -138,12 +138,12 @@ func writeAgentMCPMutationError(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), status)
 }
 
-func decodeAgentMCPConfigRequest(r *http.Request) (*map[string]any, bool, error) {
+func decodeAgentMCPServersRequest(r *http.Request) (*map[string]any, bool, error) {
 	var raw map[string]json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		return nil, false, err
 	}
-	payload, ok := raw["mcp_config"]
+	payload, ok := raw["mcpServers"]
 	if !ok {
 		return nil, false, nil
 	}

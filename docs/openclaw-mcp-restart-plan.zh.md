@@ -1,169 +1,187 @@
-# MCP 配置控制器实现说明
+# MCP Server 统一管理实现说明
 
-本文档记录当前分支对 CSGClaw MCP 配置接入的实现。当前实现使用独立的顶层 `mcp_config`，并在 runtime 接口层增加 `MCPConfigController`，由各 runtime adapter 负责把统一输入转换为自己的原生配置格式。
+本文档说明 CSGClaw 的 MCP server 管理契约、API 边界和 runtime 落地方式。
+这是一个新能力：系统只接受这里定义的统一接口，不提供旧字段、旧路由或迁移分支。
 
-## 1. 目标与边界
+## 1. 统一数据模型
 
-已实现目标：
-
-- API、持久化和前端使用统一的顶层 `mcp_config` 字段。
-- `mcp_config` 的输入形态固定为 `{"mcpServers": {...}}`。
-- runtime 层新增 `MCPConfigController`，与现有 start/stop/provision 和 runtime config controller 分离。
-- OpenClaw、PicoClaw、Codex CLI 三类 agent 都接入 MCP server 配置。
-- 前端创建、编辑和详情页使用同一份 MCP Server JSON 配置形态。
-- `runtime_options.mcp` 不作为 MCP 配置入口，也不保留兼容迁移逻辑。
-
-当前未覆盖：
-
-- 不做 MCP marketplace、自动安装、连接测试或动态发现。
-- 不承诺 runtime hot reload；需要重启/重建时仍走现有 runtime recreate 路径。
-- 暂不做 MCP secret 脱敏体验，`mcp_config` 仍按普通 JSON 配置回显。
-
-## 2. 统一配置形态
-
-API 输入：
+Agent 的 MCP server 状态使用顶层 `mcpServers` 字段。它的值是从 server
+名称到 server 配置的直接映射：
 
 ```json
 {
-  "runtime_kind": "openclaw_sandbox",
-  "mcp_config": {
-    "mcpServers": {
-      "context7": {
-        "command": "uvx",
-        "args": ["context7-mcp"],
-        "env": {
-          "CONTEXT7_API_KEY": "secret"
-        }
-      },
-      "remote-search": {
-        "url": "https://mcp.example.com/mcp",
-        "transport": "streamable-http",
-        "headers": {
-          "Authorization": "Bearer secret"
-        }
+  "mcpServers": {
+    "context7": {
+      "command": "uvx",
+      "args": ["context7-mcp"],
+      "env": {
+        "CONTEXT7_API_KEY": "secret"
+      }
+    },
+    "remote-search": {
+      "url": "https://mcp.example.com/stream",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer secret"
       }
     }
   }
 }
 ```
 
-语义：
+`mcpServers` 的值本身就是 server 集合；不会再嵌套一层配置对象。
 
-- `mcp_config` 字段缺失：不修改已有 MCP 配置。
-- `mcp_config: null`：清除 CSGClaw 托管 MCP 配置。
-- `mcp_config: {}` 或 `{"mcpServers": {}}`：显式托管空集合。
-- 非空 `mcpServers`：使用 CSGClaw 托管 server 集合。
-- 顶层仅支持 `mcpServers`，避免混入 runtime 原生 MCP 配置导致合并语义不清。
+更新语义如下：
+
+- `PATCH` 中省略 `mcpServers`：不修改已有集合。
+- `mcpServers: null`：清除 CSGClaw 托管的集合。
+- `mcpServers: {}`：显式托管一个空集合。
+- 非空映射：整体替换为提交的 server 集合。
 
 校验规则：
 
-- `mcpServers` 必须是 object。
-- server 名称去空白后不能为空，重复名称报错。
-- 每个 server entry 必须是 object。
-- 每个 server entry 必须声明 `command` 或 `url`。
-- `args` 必须是 string array。
-- `env`、`headers` 必须是 string map。
-- `transport` 必须是 string。
+- server 名称去除首尾空白后不能为空，不能重复。
+- 每个 server 条目必须是 object，且至少声明 `command` 或 `url`。
+- `args` 必须是 string array；`env`、`headers` 必须是 string map。
+- `transport` 必须是 string；`startup_timeout_sec` 与 `tool_timeout_sec`
+  必须是正整数。
 
-## 3. Runtime 接口
+## 2. 代码边界
 
-共享接口定义在 `internal/runtime/mcp_config.go`：
+Agent 领域模型与 API DTO 都使用相同的直接映射：
 
-```go
-type MCPConfigController interface {
-    ValidateMCPConfig(ctx context.Context, current MCPConfigSnapshot) error
-    MCPConfigRestartRequired(change MCPConfigChange) (bool, error)
-    ReconcileMCPConfig(ctx context.Context, h Handle, change MCPConfigChange) error
-}
-```
+- `agent.Agent.MCPServers`
+- `agent.CreateAgentSpec.MCPServers`
+- `agent.UpdateRequest.MCPServers`
+- `apitypes.Agent.MCPServers`
+- Web `AgentLike.mcpServers` 与 `AgentDraft.mcpServers`
 
-它的职责：
-
-- 校验当前 runtime 是否支持 `mcp_config` 以及配置是否符合该 runtime 的约束。
-- 判断 MCP 配置变更是否需要 runtime recreate。
-- 对无需 recreate 的 runtime，或需要即时重写本地配置的 runtime，执行 reconcile。
-
-`ProvisionRequest` 也新增了独立字段：
+runtime 层的共享协议位于 `internal/runtime/mcp_servers.go`：
 
 ```go
-type ProvisionRequest struct {
-    MCPConfig map[string]any
+type MCPServersSnapshot struct {
+    Servers map[string]any
+}
+
+type MCPServersController interface {
+    ValidateMCPServers(ctx context.Context, current MCPServersSnapshot) error
+    MCPServersRestartRequired(change MCPServersChange) (bool, error)
+}
+
+type MCPServersReconciler interface {
+    ReconcileMCPServers(ctx context.Context, h Handle, change MCPServersChange) error
 }
 ```
 
-这样 MCP 不再通过通用 `RuntimeOptions` 传递，runtime options 和 MCP 配置的生命周期可以独立演进。
+`MCPServersListController` 从已生成的 runtime 原生配置读取实际 server 集合。
+`MCPServersReconciler` 仅由可以安全在线写入原生配置的 runtime 实现；OpenClaw
+只在 provisioning/recreate 时写入 MCP servers，避免和正在运行的 gateway 争用配置文件。
+`ProvisionRequest.MCPServers` 将同一个直接映射传给 runtime provisioning。
+这样通用 runtime options、MCP 状态和 runtime 的原生渲染可以独立演进。
 
-## 4. Runtime Adapter 映射
+## 3. HTTP API
 
-### OpenClaw
+### Agent 创建与更新
 
-OpenClaw 接收统一 `mcp_config.mcpServers`，渲染到 OpenClaw 原生配置：
+`POST /api/v1/agents` 和 `PATCH /api/v1/agents/{id}` 都接受顶层
+`mcpServers` 字段。它是整体替换字段，和 `runtime_options` 的生命周期相互
+独立；`runtime_options` 中的 `mcp` 或 `mcpServers` 会被拒绝，不能作为另一条
+MCP servers 通道。
+
+`GET /api/v1/agents` 与 `GET /api/v1/agents/{id}` 会返回 `mcpServers`，但
+属于通用 Agent 视图：每个 server 的 `env` 与 `headers` 中的密钥值都会被
+脱敏。该响应适合列表、摘要和普通详情，不能用来回写配置。
+
+### Agent 的原始 MCP servers 视图
+
+配置页面使用下面的专用接口：
+
+- `GET /api/v1/agents/{id}/mcp-servers`
+- `PUT /api/v1/agents/{id}/mcp-servers`
+- `POST /api/v1/agents/{id}/mcp-servers:batchAdd`
+
+`GET` 返回：
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "context7": {
-        "command": "uvx",
-        "args": ["context7-mcp"]
-      }
+  "agent_id": "u-alice",
+  "runtime_kind": "openclaw_sandbox",
+  "desired": {
+    "context7": {
+      "command": "uvx",
+      "args": ["context7-mcp"],
+      "env": { "CONTEXT7_API_KEY": "secret" }
+    }
+  },
+  "actual": {
+    "context7": {
+      "command": "uvx",
+      "args": ["context7-mcp"],
+      "env": { "CONTEXT7_API_KEY": "secret" }
     }
   }
 }
 ```
 
-OpenClaw 配置文件路径仍是：
+非空的 `desired` 和 `actual` 都是直接 server 映射，且专用接口不脱敏，供有权限的
+配置页面回显和编辑 token。`desired` 是持久化的声明，保留 `null`（未托管）与
+`{}`（显式托管空集合）的区别；`actual` 是从 runtime 原生配置读回的结果。若 runtime
+展开了 workspace 占位符，二者在路径值上可以不同，删除和保存应以 `desired` 为准。
+如果原生配置暂时无法读取，接口仍会返回 `desired`，并将 `actual` 设为 `null`，同时
+在可选的 `actual_error` 中说明读取失败原因，避免配置页无法修复期望配置。
 
-```text
-~/.csgclaw/agents/<agent-id>/.openclaw/openclaw.json
-```
+`PUT` 接收 Agent 的顶层 `mcpServers` 字段并整体替换集合；响应与 `GET`
+相同。`batchAdd` 接收 `{ "names": ["..."] }`，把 MCP catalog 中同名的
+server 定义合并到该 Agent 的集合后返回同一视图。
 
-sandbox 内读取路径：
+### MCP catalog
 
-```text
-/home/node/.openclaw/openclaw.json
-```
+可复用的资源级 server 定义由 `/api/v1/mcp-servers` 管理：
 
-OpenClaw adapter 使用共享 JSON helper 更新 `mcp.servers`。MCP command 在 OpenClaw sandbox 内执行，filesystem server 参数必须是容器内可见路径。
+- `GET /api/v1/mcp-servers`：列出 catalog，响应中的 `mcpServers` 是直接
+  server 映射。
+- `POST /api/v1/mcp-servers`：以 `{ "name": "...", "config": { ... } }`
+  创建一个 catalog server。
+- `PUT /api/v1/mcp-servers/{name}`：以同一单个 server 请求形态替换指定
+  server。
+- `DELETE /api/v1/mcp-servers/{name}`：删除指定 server。
 
-### PicoClaw
+资源编辑页读取 catalog 资源本身；Agent 编辑页则在打开编辑器时读取专用 Agent
+视图。两者不依赖通用 Agent 响应，因此不会把脱敏后的值写回状态。
 
-PicoClaw 接收同样的 `mcp_config.mcpServers`，渲染到 PicoClaw config：
+## 4. Runtime 原生配置映射
 
-```json
-{
-  "tools": {
-    "mcp": {
-      "enabled": true,
-      "servers": {
-        "context7": {
-          "command": "uvx",
-          "args": ["context7-mcp"]
-        }
-      }
-    }
-  }
-}
-```
+所有 runtime 都接受同一个 `mcpServers` 直接映射，再由 adapter 渲染为各自
+的原生格式。
 
-当 `mcp_config` 缺失时，adapter 会关闭 CSGClaw 托管 MCP：
+### OpenClaw sandbox
 
-```json
-{
-  "tools": {
-    "mcp": {
-      "enabled": false
-    }
-  }
-}
-```
+- 主机文件：`<agent-home>/.openclaw/openclaw.json`
+- 容器文件：`/home/node/.openclaw/openclaw.json`
+- 原生位置：`mcp.servers`
+
+OpenClaw 在 sandbox 内执行 command。filesystem server 的目录参数必须是
+容器可见路径。
+
+### PicoClaw sandbox
+
+- 主机文件：`<agent-home>/.picoclaw/config.json`
+- 容器文件：`/home/picoclaw/.picoclaw/config.json`
+- 原生位置：`tools.mcp.servers`
+
+当集合为显式空映射时，PicoClaw 保持 MCP enabled 并写入空的 `servers`；当
+集合为 `null` 时，adapter 关闭其托管 MCP 部分。
 
 ### Codex CLI
 
-Codex CLI 接收同样的 `mcp_config.mcpServers`，写入隔离 Codex home 的 `config.toml` 管理块：
+- 隔离 Codex home：`<agent-home>/.codex/home`
+- 文件：`<agent-home>/.codex/home/config.toml`
+- 原生位置：由 CSGClaw 管理的 `[mcp_servers."<name>"]` TOML block。
+
+例如：
 
 ```toml
-# BEGIN csgclaw-managed mcp
+# BEGIN csgclaw-managed mcp (do not edit; regenerated by runtime)
 [mcp_servers."context7"]
 command = "uvx"
 args = ["context7-mcp"]
@@ -171,133 +189,39 @@ env = { "CONTEXT7_API_KEY" = "secret" }
 # END csgclaw-managed mcp
 ```
 
-远程 server 会写入 Codex 支持的字段：
+远程 server 的 `headers` 会转写为 Codex 的 `http_headers`。各 adapter 在
+写入原生配置前解析 `${workspace}`、`${workspaceDir}`、`{workspace}` 与
+`{workspaceDir}` 占位符；因此 `actual` 中可能显示已解析的运行时路径。
 
-```toml
-[mcp_servers."remote-search"]
-url = "https://mcp.example.com/mcp"
-bearer_token_env_var = "MCP_TOKEN"
-oauth_client_id = "client-id"
-oauth_resource = "resource"
-```
+## 5. 保存、同步与失败处理
 
-Codex adapter 会将统一输入中的共享字段转换为 Codex TOML 语义，例如远程 server 的 `headers` 会写为 `http_headers`；`transport` 不作为 TOML 字段写入，Codex 通过 `url` 隐式使用 streamable HTTP。
+更新流程如下：
 
-## 5. API 与持久化
+1. 解析并校验提交的直接 server 映射。
+2. 用 runtime 的 `ValidateMCPServers` 校验 runtime 特定约束。
+3. 持久化新的 `Agent.MCPServers`。
+4. 通过 `MCPServersRestartRequired` 判断是否需要重建 runtime。
+5. 无需重建时调用 `ReconcileMCPServers`；需要重建时由既有 lifecycle
+   流程 provision 新 runtime 配置。
+6. 若同步或重建失败，保留已保存的期望状态并暴露既有 restart-required
+   状态，用户可以通过现有重建动作重试。
 
-涉及字段：
+`MCPServersListController` 在读取实际原生文件时生成 `actual`，用于让配置页
+识别“期望状态已保存但 runtime 尚未同步”的情况。
 
-- `agent.Agent.MCPConfig`
-- `agent.CreateAgentSpec.MCPConfig`
-- `agent.UpdateRequest.MCPConfig`
-- `apitypes.Agent.MCPConfig`
-- participant agent binding 中的 create payload
-- Web `AgentLike.mcp_config` / `AgentDraft.mcp_config`
+## 6. 前端行为与验证
 
-创建 agent：
+前端创建和编辑 Agent 都以 `mcpServers` 作为草稿字段。通用 Agent 查询仅用于
+展示脱敏摘要；打开 MCP 编辑器时，前端获取专用原始视图并将 `desired` 合并进
+草稿。保存时只提交直接映射，避免 token 被脱敏占位值或 runtime 已解析的路径
+覆盖。
 
-```json
-{
-  "name": "alice",
-  "runtime_kind": "picoclaw_sandbox",
-  "mcp_config": {
-    "mcpServers": {
-      "context7": {
-        "command": "uvx",
-        "args": ["context7-mcp"]
-      }
-    }
-  }
-}
-```
+验证覆盖应至少包括：
 
-更新 agent：
-
-```json
-{
-  "mcp_config": {
-    "mcpServers": {
-      "context7": {
-        "command": "uvx",
-        "args": ["context7-mcp"]
-      }
-    }
-  }
-}
-```
-
-清除 MCP：
-
-```json
-{
-  "mcp_config": null
-}
-```
-
-兼容逻辑：
-
-- MCP 是本 PR 新增能力，尚未对用户发布，不保留旧方案兼容。
-- create/update 只接受顶层 `mcp_config` 作为 MCP 配置输入。
-- `runtime_options.mcp` 不会迁移到 `mcp_config`，也不会作为 MCP 配置生效。
-
-## 6. 保存与重建
-
-更新 `mcp_config` 的流程：
-
-1. 解析请求中的顶层 `mcp_config`。
-2. 通过对应 runtime 的 `MCPConfigController.ValidateMCPConfig` 校验。
-3. 持久化新的 `Agent.MCPConfig`。
-4. 通过 `MCPConfigRestartRequired` 判断是否需要 recreate。
-5. 需要 recreate 时，设置 `env_restart_required = true`，再调用现有 `Recreate`。
-6. recreate 成功后，新 runtime provision 使用最新 `MCPConfig` 生成原生配置，并清除 `env_restart_required`。
-7. recreate 失败时，已保存的 `mcp_config` 保留，`env_restart_required` 继续为 true，用户可通过现有重建动作重试。
-8. 如果 runtime 支持无需重建的配置同步，则通过 `ReconcileMCPConfig` 完成。
-
-当前 OpenClaw、PicoClaw 和 Codex 的 MCP 配置变更都按需要重建处理，Codex 同时实现了 `ReconcileMCPConfig` 用于重写隔离 Codex home 配置。
-
-## 7. 前端行为
-
-前端保留现有 MCP JSON 编辑器组件，但读写对象改为 `draft.mcp_config`。
-
-展示位置：
-
-- 创建 agent modal 的 runtime section。
-- Agent 详情页 runtime section。
-
-展示条件：
-
-- `openclaw_sandbox`
-- `picoclaw_sandbox`
-- `codex`
-
-保存行为：
-
-- 创建 agent 时，非空 MCP JSON 写入 create payload 的 `mcp_config`。
-- 编辑 agent 时，MCP JSON 变化写入 update payload 的 `mcp_config`。
-- 清除配置时，update payload 写入 `mcp_config: null`。
-- `runtime_options` 和 `mcp_config` 独立比较、独立提交，避免 MCP 编辑覆盖其它 runtime option，例如 Codex 的 `local_workspace_dir`。
-
-## 8. 验证
-
-已覆盖的后端测试重点：
-
-- `mcp_config` 缺失、空对象、空 `mcpServers`、非空 `mcpServers` 的语义。
-- `runtime_options.mcp` 不作为 MCP 配置入口。
-- OpenClaw/PicoClaw 接受 MCP 配置。
-- Codex 生成 `[mcp_servers."<name>"]` 配置块。
-- MCP 配置变更触发 recreate，失败时保留 restart required 状态。
-
-已覆盖的前端测试重点：
-
-- 模型层解析、保存和清除 `mcp_config`。
-- OpenClaw/PicoClaw/Codex runtime 都展示 MCP 配置入口。
-- Agent 创建/编辑 payload 使用顶层 `mcp_config`。
-- MCP 编辑不覆盖普通 `runtime_options`。
-
-本分支使用过的验证命令：
-
-```bash
-go test ./internal/runtime/openclawsandbox ./internal/runtime/picoclawsandbox ./internal/runtime/codex ./internal/agent ./internal/api ./internal/apitypes
-pnpm exec vitest run tests/models/agents.test.ts tests/components/AgentProfileModal.test.tsx tests/components/AgentActions.test.tsx
-pnpm exec tsc --noEmit
-```
+- 缺失、`null`、空映射与非空映射的更新语义。
+- direct map 的字段校验与持久化。
+- 通用 Agent 响应的 `env`/`headers` 脱敏，以及专用视图的原始回显。
+- 精确的 Agent 和 catalog 路由，包括 batchAdd 后缀。
+- OpenClaw、PicoClaw、Codex 的原生渲染和实际配置读取。
+- workspace 占位符的解析不会污染 `desired`。
+- MCP 编辑不会覆盖无关的 `runtime_options` 或 profile 字段。

@@ -1489,7 +1489,7 @@ func TestRuntimeProvisionSeedsCodexWorkerTemplateSkills(t *testing.T) {
 	}
 }
 
-func TestRuntimeCreateWritesManagerMCPConfig(t *testing.T) {
+func TestRuntimeCreateWritesManagerMCPServers(t *testing.T) {
 	root := t.TempDir()
 	hostHome := t.TempDir()
 	t.Setenv("HOME", hostHome)
@@ -1502,12 +1502,10 @@ func TestRuntimeCreateWritesManagerMCPConfig(t *testing.T) {
 			Profile: agentruntime.Profile{
 				ModelID: "gpt-5.5",
 			},
-			MCPConfig: map[string]any{
-				agentruntime.MCPConfigServersKey: map[string]any{
-					"context7": map[string]any{
-						"command": "npx",
-						"args":    []any{"-y", "@upstash/context7-mcp"},
-					},
+			MCPServers: map[string]any{
+				"context7": map[string]any{
+					"command": "npx",
+					"args":    []any{"-y", "@upstash/context7-mcp"},
 				},
 			},
 		}, nil
@@ -1814,28 +1812,26 @@ func TestConfigureCodexHomeConfigIncompleteProfileSkipsProvider(t *testing.T) {
 
 func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
 	config := configureCodexHomeConfig("approval_policy = \"manual\"\n", agentruntime.Profile{}, map[string]any{
-		"mcpServers": map[string]any{
-			"context7": map[string]any{
-				"command":             "uvx",
-				"args":                []any{"context7-mcp"},
-				"startup_timeout_sec": float64(90),
-				"tool_timeout_sec":    120,
-				"enabled":             true,
-				"required":            false,
-				"enabled_tools":       []any{"search"},
-				"disabled_tools":      []any{"delete"},
-				"env": map[string]any{
-					"CONTEXT7_API_KEY": "secret",
-				},
+		"context7": map[string]any{
+			"command":             "uvx",
+			"args":                []any{"context7-mcp"},
+			"startup_timeout_sec": float64(90),
+			"tool_timeout_sec":    120,
+			"enabled":             true,
+			"required":            false,
+			"enabled_tools":       []any{"search"},
+			"disabled_tools":      []any{"delete"},
+			"env": map[string]any{
+				"CONTEXT7_API_KEY": "secret",
 			},
-			"remote": map[string]any{
-				"url":                  "https://mcp.example.com/mcp",
-				"bearer_token_env_var": "MCP_TOKEN",
-				"headers": map[string]any{
-					"X-MCP-Trace": "trace-id",
-				},
-				"transport": "streamable-http",
+		},
+		"remote": map[string]any{
+			"url":                  "https://mcp.example.com/mcp",
+			"bearer_token_env_var": "MCP_TOKEN",
+			"headers": map[string]any{
+				"X-MCP-Trace": "trace-id",
 			},
+			"transport": "streamable-http",
 		},
 	})
 
@@ -1863,16 +1859,15 @@ func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
 		}
 	}
 
-	parsed, err := parseCodexMCPConfig(config)
+	parsed, err := parseCodexMCPServers(config)
 	if err != nil {
-		t.Fatalf("parseCodexMCPConfig() error = %v", err)
+		t.Fatalf("parseCodexMCPServers() error = %v", err)
 	}
-	servers := parsed["mcpServers"].(map[string]any)
-	context7 := servers["context7"].(map[string]any)
+	context7 := parsed["context7"].(map[string]any)
 	if got, want := context7["startup_timeout_sec"], int64(90); got != want {
 		t.Fatalf("context7 startup_timeout_sec = %#v, want %#v", got, want)
 	}
-	remote := servers["remote"].(map[string]any)
+	remote := parsed["remote"].(map[string]any)
 	headers := remote["headers"].(map[string]any)
 	if got, want := headers["X-MCP-Trace"], "trace-id"; got != want {
 		t.Fatalf("remote headers X-MCP-Trace = %#v, want %q", got, want)
@@ -1891,28 +1886,25 @@ func TestConfigureCodexHomeConfigRendersMCPServers(t *testing.T) {
 func TestConfigureCodexHomeConfigResolvesWorkspaceMCPArgs(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "project")
 	config := configureCodexHomeConfigWithWorkspace("approval_policy = \"manual\"\n", agentruntime.Profile{}, map[string]any{
-		"mcpServers": map[string]any{
-			"filesystem": map[string]any{
-				"command": "npx",
-				"args": []any{
-					"-y",
-					"@modelcontextprotocol/server-filesystem",
-					"/home/user/workspace",
-					"/home/user/workspace/nested",
-					"${workspace}",
-					"${workspace}/from-placeholder",
-					"--root=/home/user/workspace",
-				},
+		"filesystem": map[string]any{
+			"command": "npx",
+			"args": []any{
+				"-y",
+				"@modelcontextprotocol/server-filesystem",
+				"/home/user/workspace",
+				"/home/user/workspace/nested",
+				"${workspace}",
+				"${workspace}/from-placeholder",
+				"--root=/home/user/workspace",
 			},
 		},
 	}, workspace)
 
-	parsed, err := parseCodexMCPConfig(config)
+	parsed, err := parseCodexMCPServers(config)
 	if err != nil {
-		t.Fatalf("parseCodexMCPConfig() error = %v", err)
+		t.Fatalf("parseCodexMCPServers() error = %v", err)
 	}
-	servers := parsed["mcpServers"].(map[string]any)
-	filesystem := servers["filesystem"].(map[string]any)
+	filesystem := parsed["filesystem"].(map[string]any)
 	got := filesystem["args"]
 	want := []any{
 		"-y",
@@ -1942,11 +1934,9 @@ func TestConfigureCodexHomeConfigReplacesExistingMCPServerTablesWhenManaged(t *t
 	}, "\n")
 
 	config := configureCodexHomeConfig(existing, agentruntime.Profile{}, map[string]any{
-		"mcpServers": map[string]any{
-			"context7": map[string]any{
-				"command": "npx",
-				"args":    []any{"context7-mcp"},
-			},
+		"context7": map[string]any{
+			"command": "npx",
+			"args":    []any{"context7-mcp"},
 		},
 	})
 

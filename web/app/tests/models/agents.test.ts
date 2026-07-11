@@ -31,14 +31,14 @@ import {
   mergeAgentIntoList,
   isNotificationBotAgent,
   mapToEnvRows,
-  mcpConfigText,
+  mcpServersText,
   partitionWorkspaceAgentItems,
   notifierComputedPullRoutes,
   notifierFormIsComplete,
   notifierThirdPartyRelayWebhookURL,
   normalizeAuthProviderName,
   normalizeRuntimeKind,
-  parseMCPConfigText,
+  parseMCPServersText,
   notificationPushWebhookPathForBot,
   parseJSONMap,
   pickDefaultAgentTemplate,
@@ -50,12 +50,12 @@ import {
   resolveAgentAvatarSource,
   runtimeImageForKind,
   runtimeOptionSchemasForAgent,
-  setMCPConfig,
+  setMCPServers,
   localizedRuntimeOptionLabel,
   localizedRuntimeOptionDescription,
   isAgentUpgradeNeeded,
-  draftMCPConfigForSave,
-  supportsMCPConfig,
+  draftMCPServersForSave,
+  supportsMCPServers,
   shouldWaitForManagerRuntimeAfterProfileSave,
   workerSelectableTemplates,
 } from "@/models/agents";
@@ -533,41 +533,41 @@ describe("agent model helpers", () => {
     ).toBe("Leave empty to use the default agent workspace.");
   });
 
-  it("parses and saves MCP config under top-level mcp_config", () => {
-    const parsed = parseMCPConfigText('{"mcpServers":{"context7":{"command":"npx","args":["-y"]}}}');
+  it("parses and saves MCP servers as a direct map", () => {
+    const parsed = parseMCPServersText('{"context7":{"command":"npx","args":["-y"]}}');
 
     expect(parsed).toEqual({
       ok: true,
       value: {
-        mcpServers: {
-          context7: {
-            command: "npx",
-            args: ["-y"],
-          },
-        },
-      },
-    });
-    expect(parseMCPConfigText("")).toEqual({ ok: true, value: null });
-    expect(parseMCPConfigText("[1]")).toEqual({ ok: false, error: "object_required" });
-    expect(parseMCPConfigText("{")).toEqual({ ok: false, error: "invalid_json" });
-    expect(supportsMCPConfig("openclaw_sandbox")).toBe(true);
-    expect(supportsMCPConfig("picoclaw_sandbox")).toBe(true);
-    expect(supportsMCPConfig("codex")).toBe(true);
-
-    const mcpConfig = setMCPConfig({ mcpServers: { context7: { command: "npx" } } });
-    expect(mcpConfig).toEqual({
-      mcpServers: {
         context7: {
           command: "npx",
+          args: ["-y"],
         },
       },
     });
-    expect(mcpConfigText(mcpConfig)).toContain('"mcpServers"');
-    expect(draftMCPConfigForSave({ mcp_config: mcpConfig })).toEqual(mcpConfig);
+    expect(parseMCPServersText("")).toEqual({ ok: true, value: null });
+    expect(parseMCPServersText("[1]")).toEqual({ ok: false, error: "object_required" });
+    expect(parseMCPServersText("{")).toEqual({ ok: false, error: "invalid_json" });
+    expect(supportsMCPServers("openclaw_sandbox")).toBe(true);
+    expect(supportsMCPServers("picoclaw_sandbox")).toBe(true);
+    expect(supportsMCPServers("codex")).toBe(true);
+
+    const mcpServers = setMCPServers({ context7: { command: "npx" } });
+    expect(mcpServers).toEqual({
+      context7: {
+        command: "npx",
+      },
+    });
+    expect(mcpServersText(mcpServers)).toContain('"context7"');
+    expect(draftMCPServersForSave({ mcpServers })).toEqual(mcpServers);
+    expect(mcpServersText({})).toBe("{}");
+    expect(draftMCPServersForSave({ mcpServers: undefined })).toBeUndefined();
+    expect(draftMCPServersForSave({ mcpServers: null })).toBeNull();
+    expect(draftMCPServersForSave({ mcpServers: {} })).toEqual({});
     expect(draftRuntimeOptionsForSave({ runtime_options: { local_workspace_dir: "/tmp/project" } })).toEqual({
       local_workspace_dir: "/tmp/project",
     });
-    expect(setMCPConfig(null)).toBeUndefined();
+    expect(setMCPServers(null)).toBeNull();
   });
 
   it("selects runtime-specific templates and images", () => {

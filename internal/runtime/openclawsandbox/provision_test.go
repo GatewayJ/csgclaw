@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -31,10 +30,8 @@ func TestProvisionPreparesGatewayAssets(t *testing.T) {
 		AgentID:   "u-alice",
 		AgentName: "alice",
 		Profile:   agentruntime.Profile{},
-		MCPConfig: map[string]any{
-			"mcpServers": map[string]any{
-				"context7": map[string]any{"command": "uvx", "args": []any{"context7-mcp"}},
-			},
+		MCPServers: map[string]any{
+			"context7": map[string]any{"command": "uvx", "args": []any{"context7-mcp"}},
 		},
 		WorkspaceOverlay: overlayRoot,
 		Gateway: &agentruntime.GatewayProvision{
@@ -186,70 +183,6 @@ func TestReconcileConfigRefreshesWorkspaceInstructions(t *testing.T) {
 	}
 	if strings.Count(text, workspaceInstructionsBlockStart) != 1 {
 		t.Fatalf("AGENTS.md marker count = %d, want 1", strings.Count(text, workspaceInstructionsBlockStart))
-	}
-}
-
-func TestReconcileMCPConfigWritesProvisionedGatewayConfig(t *testing.T) {
-	agentHome := t.TempDir()
-	projectsRoot := t.TempDir()
-	rt := New(Dependencies{
-		AgentHome: func(string) (string, error) {
-			return agentHome, nil
-		},
-		ResolveAgent: func(agentruntime.Handle) (AgentRef, error) {
-			return AgentRef{ID: "u-alice", Name: "alice"}, nil
-		},
-	})
-
-	if err := rt.Provision(context.Background(), agentruntime.ProvisionRequest{
-		RuntimeID: "rt-1",
-		AgentID:   "u-alice",
-		AgentName: "alice",
-		Profile:   agentruntime.Profile{},
-		MCPConfig: map[string]any{
-			"mcpServers": map[string]any{
-				"context7": map[string]any{"command": "uvx", "args": []any{"context7-mcp"}},
-			},
-		},
-		Gateway: &agentruntime.GatewayProvision{
-			ModelFallback:     "fallback-model",
-			Server:            config.ServerConfig{AdvertiseBaseURL: "http://127.0.0.1:18080", AccessToken: "shared-token"},
-			ManagerBaseURL:    "http://127.0.0.1:18080",
-			AgentHome:         agentHome,
-			ProjectsRoot:      projectsRoot,
-			WorkspaceTemplate: templateembed.OpenClawWorkerRoot,
-		},
-	}); err != nil {
-		t.Fatalf("Provision() error = %v", err)
-	}
-
-	if err := rt.ReconcileMCPConfig(context.Background(), agentruntime.Handle{RuntimeID: "rt-1", HandleID: "box-1"}, agentruntime.MCPConfigChange{
-		Current: agentruntime.MCPConfigSnapshot{Config: map[string]any{
-			"mcpServers": map[string]any{
-				"filesystem": map[string]any{"command": "npx", "args": []any{"-y", "@modelcontextprotocol/server-filesystem", "${workspace}"}},
-			},
-		}},
-	}); err != nil {
-		t.Fatalf("ReconcileMCPConfig() error = %v", err)
-	}
-
-	snapshot, err := readOpenClawMCPConfig(filepath.Join(Root(agentHome), HostConfig))
-	if err != nil {
-		t.Fatalf("readOpenClawMCPConfig() error = %v", err)
-	}
-	servers, err := agentruntime.MCPConfigServers(snapshot.Config)
-	if err != nil {
-		t.Fatalf("MCPConfigServers() error = %v", err)
-	}
-	if _, ok := servers["context7"]; ok {
-		t.Fatalf("reconciled openclaw config kept stale context7 server: %#v", servers)
-	}
-	filesystem := servers["filesystem"].(map[string]any)
-	if got, want := filesystem["command"], "npx"; got != want {
-		t.Fatalf("filesystem.command = %#v, want %q", got, want)
-	}
-	if got, want := filesystem["args"], []any{"-y", "@modelcontextprotocol/server-filesystem", workspaceGuestPathForGOOS(runtime.GOOS)}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("filesystem.args = %#v, want %#v", got, want)
 	}
 }
 

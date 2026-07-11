@@ -164,19 +164,23 @@ func TestOnlySetDefaultServiceOption(opt ServiceOption) func() {
 }
 
 type Service struct {
-	model                   config.ModelConfig
-	llm                     config.LLMConfig
-	server                  config.ServerConfig
-	hub                     templateService
-	defaultManagerTemplate  string
-	defaultWorkerTemplate   string
-	managerImage            string
-	gatewayRuntime          string
-	state                   string
-	agentsRoot              string
-	sandbox                 sandbox.Provider
-	mu                      sync.RWMutex
-	mcpServerAddMu          sync.Mutex
+	model                  config.ModelConfig
+	llm                    config.LLMConfig
+	server                 config.ServerConfig
+	hub                    templateService
+	defaultManagerTemplate string
+	defaultWorkerTemplate  string
+	managerImage           string
+	gatewayRuntime         string
+	state                  string
+	agentsRoot             string
+	sandbox                sandbox.Provider
+	mu                     sync.RWMutex
+	// mcpServersMu serializes all MCP server mutations. A catalog batch add
+	// first reads the current set before issuing its update, so it must share
+	// the same lock as direct PUT/PATCH-style updates to avoid stale snapshots
+	// overwriting a concurrent edit.
+	mcpServersMu            sync.Mutex
 	runtimes                map[string]sandbox.Runtime
 	agents                  map[string]Agent
 	runtimeRecords          map[string]RuntimeRecord
@@ -486,32 +490,32 @@ func validateCodexManagerRuntimeOverride(runtimeOverride string) error {
 
 func (s *Service) ensureCodexManager(ctx context.Context, forceRecreate bool) (Agent, error) {
 	managerDisplayName, managerDescription, managerInstructions, managerAvatar, managerCreatedAt := s.managerMetadata()
-	managerMCPConfig := s.managerMCPConfig()
+	managerMCPServers := s.managerMCPServers()
 	startProfile, detectionResults := s.managerStartupProfile(ctx)
 	startProfile = normalizeProfile(startProfile, managerDisplayName, managerDescription)
 
 	if !startProfile.ProfileComplete {
 		manager := s.newCodexManagerAgent(managerDisplayName, managerDescription, managerInstructions, managerAvatar, managerCreatedAt, "", agentruntime.StateUnknown, "profile_incomplete", startProfile, detectionResults)
-		applyManagerMCPConfig(&manager, managerMCPConfig)
+		applyManagerMCPServers(&manager, managerMCPServers)
 		manager.ProfileComplete = false
 		return s.persistManagerAgent(ctx, manager, false)
 	}
 
 	if _, err := locateCodexCLI(); err != nil {
 		manager := s.newCodexManagerAgent(managerDisplayName, managerDescription, managerInstructions, managerAvatar, managerCreatedAt, "", agentruntime.StateUnknown, StatusRuntimeUnavailable, startProfile, detectionResults)
-		applyManagerMCPConfig(&manager, managerMCPConfig)
+		applyManagerMCPServers(&manager, managerMCPServers)
 		return s.persistManagerAgent(ctx, manager, false)
 	}
 
 	runtimeImpl, err := s.runtimeForKind(RuntimeKindCodex)
 	if err != nil {
 		manager := s.newCodexManagerAgent(managerDisplayName, managerDescription, managerInstructions, managerAvatar, managerCreatedAt, "", agentruntime.StateUnknown, StatusRuntimeUnavailable, startProfile, detectionResults)
-		applyManagerMCPConfig(&manager, managerMCPConfig)
+		applyManagerMCPServers(&manager, managerMCPServers)
 		return s.persistManagerAgent(ctx, manager, false)
 	}
 
 	existing, _ := s.Agent(ManagerUserID)
-	if err := s.validateMCPConfig(ctx, RuntimeKindCodex, mcpConfigSnapshotForAgent(managerMCPConfig)); err != nil {
+	if err := s.validateMCPServers(ctx, RuntimeKindCodex, mcpServersSnapshotForAgent(managerMCPServers)); err != nil {
 		return Agent{}, err
 	}
 	legacyCleanupKeys := s.legacyManagerSandboxCleanupKeys()
@@ -522,7 +526,7 @@ func (s *Service) ensureCodexManager(ctx context.Context, forceRecreate bool) (A
 	}
 
 	runtimeAgent := s.newCodexManagerAgent(managerDisplayName, managerDescription, managerInstructions, managerAvatar, managerCreatedAt, "", agentruntime.StateCreated, string(agentruntime.StateCreated), startProfile, detectionResults)
-	applyManagerMCPConfig(&runtimeAgent, managerMCPConfig)
+	applyManagerMCPServers(&runtimeAgent, managerMCPServers)
 	runtimeProfile := s.runtimeProfileForAgentWithProfile(runtimeAgent, s.hydrateProfileFromCatalog(startProfile))
 	provisionReq := agentruntime.ProvisionRequest{
 		RuntimeID:     runtimeIDForAgentID(ManagerUserID),
@@ -530,7 +534,7 @@ func (s *Service) ensureCodexManager(ctx context.Context, forceRecreate bool) (A
 		ParticipantID: ManagerParticipantID,
 		AgentName:     managerDisplayName,
 		Profile:       runtimeProfile,
-		MCPConfig:     utils.CloneAnyMap(runtimeAgent.MCPConfig),
+		MCPServers:    cloneMCPServers(runtimeAgent.MCPServers),
 	}
 	if err := s.provisionRuntime(ctx, runtimeImpl, RuntimeKindCodex, provisionReq); err != nil {
 		return Agent{}, fmt.Errorf("provision manager runtime: %w", err)
@@ -560,7 +564,7 @@ func (s *Service) ensureCodexManager(ctx context.Context, forceRecreate bool) (A
 		info.State = agentruntime.StateRunning
 	}
 	manager := s.newCodexManagerAgent(managerDisplayName, managerDescription, managerInstructions, managerAvatar, managerCreatedAt, info.HandleID, info.State, string(info.State), startProfile, detectionResults)
-	applyManagerMCPConfig(&manager, managerMCPConfig)
+	applyManagerMCPServers(&manager, managerMCPServers)
 	manager.AgentProfile.EnvRestartRequired = false
 	manager.AgentProfile.ImageUpgradeRequired = false
 	if !info.CreatedAt.IsZero() {
@@ -570,8 +574,8 @@ func (s *Service) ensureCodexManager(ctx context.Context, forceRecreate bool) (A
 	if err != nil {
 		return Agent{}, err
 	}
-	if !reflect.DeepEqual(managerMCPConfig, persisted.MCPConfig) {
-		if err := s.reconcileMCPConfig(ctx, manager, persisted); err != nil {
+	if !reflect.DeepEqual(managerMCPServers, persisted.MCPServers) {
+		if err := s.reconcileMCPServers(ctx, manager, persisted); err != nil {
 			return Agent{}, err
 		}
 	}
@@ -660,28 +664,28 @@ func managerMetadataFromAgent(existing Agent) (name, description, instructions, 
 	return name, strings.TrimSpace(existing.Description), strings.TrimSpace(existing.Instructions), strings.TrimSpace(existing.Avatar), existing.CreatedAt.UTC()
 }
 
-func (s *Service) managerMCPConfig() map[string]any {
+func (s *Service) managerMCPServers() map[string]any {
 	if s == nil {
 		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if existing, ok := s.agents[ManagerUserID]; ok {
-		return utils.CloneAnyMap(existing.MCPConfig)
+		return cloneMCPServers(existing.MCPServers)
 	}
 	for _, existing := range s.agents {
 		if isManagerAgent(existing) {
-			return utils.CloneAnyMap(existing.MCPConfig)
+			return cloneMCPServers(existing.MCPServers)
 		}
 	}
 	return nil
 }
 
-func applyManagerMCPConfig(manager *Agent, mcpConfig map[string]any) {
+func applyManagerMCPServers(manager *Agent, mcpServers map[string]any) {
 	if manager == nil {
 		return
 	}
-	manager.MCPConfig = utils.CloneAnyMap(mcpConfig)
+	manager.MCPServers = cloneMCPServers(mcpServers)
 }
 
 func (s *Service) newCodexManagerAgent(name, description, instructions, avatar string, createdAt time.Time, handleID string, state agentruntime.State, status string, profile AgentProfile, detectionResults []ProfileDetectionResult) Agent {
@@ -746,7 +750,7 @@ func (s *Service) persistManagerAgent(ctx context.Context, manager Agent, syncLi
 
 	s.mu.Lock()
 	if existing, ok := s.agents[ManagerUserID]; ok {
-		manager.MCPConfig = utils.CloneAnyMap(existing.MCPConfig)
+		manager.MCPServers = cloneMCPServers(existing.MCPServers)
 		if existing.AgentProfile.EnvRestartRequired {
 			manager.AgentProfile.EnvRestartRequired = true
 		}
@@ -950,8 +954,11 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Agent, error) 
 		if err := validateManagerRuntimeSpec(req.Spec); err != nil {
 			return Agent{}, err
 		}
-		if !req.Replace && createSpecSetsMCPConfig(req.Spec) {
-			return Agent{}, fmt.Errorf("manager mcp_config must be updated through the MCP config endpoint")
+		if err := validateRuntimeOptionsWithoutMCP(req.Spec.RuntimeOptions); err != nil {
+			return Agent{}, err
+		}
+		if !req.Replace && createSpecSetsMCPServers(req.Spec) {
+			return Agent{}, fmt.Errorf("manager mcpServers must be updated through the MCP servers endpoint")
 		}
 	}
 	if req.Replace {
@@ -1191,8 +1198,11 @@ func (s *Service) replace(ctx context.Context, req CreateRequest) (Agent, error)
 	spec.SetRuntimeConfig(runtimeCfg)
 
 	if isManagerAgent(existing) || isManagerCreateSpec(spec) {
-		if managerReplaceSetsMCPConfig(req) {
-			return Agent{}, fmt.Errorf("manager mcp_config must be updated through the MCP config endpoint")
+		if err := validateRuntimeOptionsWithoutMCP(spec.RuntimeOptions); err != nil {
+			return Agent{}, err
+		}
+		if managerReplaceSetsMCPServers(req) {
+			return Agent{}, fmt.Errorf("manager mcpServers must be updated through the MCP servers endpoint")
 		}
 		if managerRuntimeRequested {
 			if err := validateManagerRuntimeSpec(spec); err != nil {
@@ -1223,16 +1233,16 @@ func managerRuntimeRequested(spec CreateAgentSpec) bool {
 	return strings.TrimSpace(spec.RuntimeKind) != "" || strings.TrimSpace(spec.RuntimeName) != "" || spec.SandboxEnabled
 }
 
-func managerReplaceSetsMCPConfig(req CreateRequest) bool {
+func managerReplaceSetsMCPServers(req CreateRequest) bool {
 	if len(req.FieldMask) == 0 {
-		return createSpecSetsMCPConfig(req.Spec)
+		return createSpecSetsMCPServers(req.Spec)
 	}
 	for _, field := range req.FieldMask {
 		switch strings.ToLower(strings.TrimSpace(field)) {
-		case "mcp_config":
+		case "mcpservers":
 			return true
 		case "runtime", "runtime_options":
-			if createSpecSetsMCPConfig(req.Spec) {
+			if createSpecSetsMCPServers(req.Spec) {
 				return true
 			}
 		}
@@ -1240,8 +1250,8 @@ func managerReplaceSetsMCPConfig(req CreateRequest) bool {
 	return false
 }
 
-func createSpecSetsMCPConfig(spec CreateAgentSpec) bool {
-	return spec.MCPConfigSet
+func createSpecSetsMCPServers(spec CreateAgentSpec) bool {
+	return spec.MCPServersSet || spec.MCPServers != nil
 }
 
 func (s *Service) validateReplaceWorkerSpecBeforeDelete(ctx context.Context, spec CreateAgentSpec) error {
@@ -1255,11 +1265,11 @@ func (s *Service) validateReplaceWorkerSpecBeforeDelete(ctx context.Context, spe
 	if _, err := s.runtimeForKind(runtimeKind); err != nil {
 		return err
 	}
-	normalizedMCPConfig, err := normalizeMCPConfig(spec.MCPConfig)
+	normalizedMCPServers, err := normalizeMCPServers(spec.MCPServers)
 	if err != nil {
 		return err
 	}
-	spec.MCPConfig = normalizedMCPConfig
+	spec.MCPServers = normalizedMCPServers
 	resolvedProfile, err := s.profileForCreateRequest(ctx, &spec)
 	if err != nil {
 		return err
@@ -1267,7 +1277,7 @@ func (s *Service) validateReplaceWorkerSpecBeforeDelete(ctx context.Context, spe
 	if err := s.validateRuntimeConfig(ctx, runtimeKind, runtimeConfigSnapshotForAgent(s.hydrateProfileFromCatalog(resolvedProfile), spec.RuntimeOptions)); err != nil {
 		return err
 	}
-	return s.validateMCPConfig(ctx, runtimeKind, mcpConfigSnapshotForAgent(spec.MCPConfig))
+	return s.validateMCPServers(ctx, runtimeKind, mcpServersSnapshotForAgent(spec.MCPServers))
 }
 
 func mergeReplaceSpec(existing Agent, next CreateAgentSpec, fieldMask []string) (CreateAgentSpec, error) {
@@ -1287,7 +1297,7 @@ func mergeReplaceSpec(existing Agent, next CreateAgentSpec, fieldMask []string) 
 		UpdatedAt:      existing.UpdatedAt,
 		Profile:        existing.Profile,
 		RuntimeOptions: utils.CloneAnyMap(existing.RuntimeOptions),
-		MCPConfig:      utils.CloneAnyMap(existing.MCPConfig),
+		MCPServers:     cloneMCPServers(existing.MCPServers),
 		AgentProfile:   cloneProfile(existing.AgentProfile),
 	}
 	for _, field := range fieldMask {
@@ -1322,7 +1332,6 @@ func mergeReplaceSpec(existing Agent, next CreateAgentSpec, fieldMask []string) 
 			merged.RuntimeName = next.RuntimeName
 			merged.SandboxEnabled = next.SandboxEnabled
 			merged.RuntimeOptions = utils.CloneAnyMap(next.RuntimeOptions)
-			merged.MCPConfig = utils.CloneAnyMap(next.MCPConfig)
 		case "role":
 			merged.Role = next.Role
 		case "status":
@@ -1340,8 +1349,8 @@ func mergeReplaceSpec(existing Agent, next CreateAgentSpec, fieldMask []string) 
 			merged.AgentProfile = cloneProfile(next.AgentProfile)
 		case "runtime_options":
 			merged.RuntimeOptions = utils.CloneAnyMap(next.RuntimeOptions)
-		case "mcp_config":
-			merged.MCPConfig = utils.CloneAnyMap(next.MCPConfig)
+		case "mcpservers":
+			merged.MCPServers = cloneMCPServers(next.MCPServers)
 		default:
 			return CreateAgentSpec{}, fmt.Errorf("unsupported agent field mask path %q", field)
 		}
@@ -1513,7 +1522,7 @@ func (s *Service) Start(ctx context.Context, id string) (Agent, error) {
 	if err := s.validateRuntimeConfig(ctx, strings.TrimSpace(got.RuntimeKind), runtimeConfigSnapshotForAgent(startProfile, got.RuntimeOptions)); err != nil {
 		return Agent{}, err
 	}
-	if err := s.validateMCPConfig(ctx, strings.TrimSpace(got.RuntimeKind), mcpConfigSnapshotForAgent(got.MCPConfig)); err != nil {
+	if err := s.validateMCPServers(ctx, strings.TrimSpace(got.RuntimeKind), mcpServersSnapshotForAgent(got.MCPServers)); err != nil {
 		return Agent{}, err
 	}
 
@@ -1770,7 +1779,7 @@ func (s *Service) recreateLegacyNamedGatewayAgentBox(ctx context.Context, got Ag
 		_ = s.closeBox(box)
 		return got, false, err
 	}
-	if err := s.validateMCPConfig(ctx, strings.TrimSpace(got.RuntimeKind), mcpConfigSnapshotForAgent(got.MCPConfig)); err != nil {
+	if err := s.validateMCPServers(ctx, strings.TrimSpace(got.RuntimeKind), mcpServersSnapshotForAgent(got.MCPServers)); err != nil {
 		_ = s.closeBox(box)
 		return got, false, err
 	}
@@ -1911,11 +1920,11 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		return Agent{}, err
 	}
 	spec.SetRuntimeConfig(runtimeCfg)
-	normalizedMCPConfig, err := normalizeMCPConfig(spec.MCPConfig)
+	normalizedMCPServers, err := normalizeMCPServers(spec.MCPServers)
 	if err != nil {
 		return Agent{}, err
 	}
-	spec.MCPConfig = normalizedMCPConfig
+	spec.MCPServers = normalizedMCPServers
 	runtimeKind := spec.RuntimeKind
 	runtimeName := spec.RuntimeName
 	sandboxed := spec.SandboxEnabled
@@ -1992,7 +2001,7 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 	if err := s.validateRuntimeConfig(ctx, runtimeKind, runtimeConfigSnapshotForAgent(runtimeResolvedProfile, spec.RuntimeOptions)); err != nil {
 		return Agent{}, err
 	}
-	if err := s.validateMCPConfig(ctx, runtimeKind, mcpConfigSnapshotForAgent(spec.MCPConfig)); err != nil {
+	if err := s.validateMCPServers(ctx, runtimeKind, mcpServersSnapshotForAgent(spec.MCPServers)); err != nil {
 		return Agent{}, err
 	}
 	runtimeProfile := s.runtimeProfileForKind(runtimeKind, id, name, description, runtimeResolvedProfile)
@@ -2004,7 +2013,7 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		Instructions:     instructions,
 		Profile:          runtimeProfile,
 		RuntimeOptions:   utils.CloneAnyMap(spec.RuntimeOptions),
-		MCPConfig:        utils.CloneAnyMap(spec.MCPConfig),
+		MCPServers:       cloneMCPServers(spec.MCPServers),
 		WorkspaceOverlay: strings.TrimSpace(spec.FromTemplate),
 	}); err != nil {
 		return Agent{}, fmt.Errorf("provision worker runtime: %w", err)
@@ -2028,14 +2037,14 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		defer func() {
 			_ = s.closeBox(box)
 		}()
-		return s.persistCreatedWorker(ctx, id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxed, resolvedProfile, spec.RuntimeOptions, spec.MCPConfig, agentruntime.Info{
+		return s.persistCreatedWorker(ctx, id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxed, resolvedProfile, spec.RuntimeOptions, spec.MCPServers, agentruntime.Info{
 			HandleID:  strings.TrimSpace(info.ID),
 			State:     agentruntime.State(info.State),
 			CreatedAt: info.CreatedAt.UTC(),
 		})
 	}
 	if runtimeKind == RuntimeKindCodex {
-		if err := s.persistStartingWorker(ctx, id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxed, resolvedProfile, spec.RuntimeOptions, spec.MCPConfig); err != nil {
+		if err := s.persistStartingWorker(ctx, id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxed, resolvedProfile, spec.RuntimeOptions, spec.MCPServers); err != nil {
 			return Agent{}, err
 		}
 		defer func() {
@@ -2060,10 +2069,10 @@ func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent
 		CreatedAt: time.Now().UTC(),
 	}
 
-	return s.persistCreatedWorker(ctx, id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxed, resolvedProfile, spec.RuntimeOptions, spec.MCPConfig, info)
+	return s.persistCreatedWorker(ctx, id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxed, resolvedProfile, spec.RuntimeOptions, spec.MCPServers, info)
 }
 
-func (s *Service) persistStartingWorker(ctx context.Context, id, name, description, instructions, image, avatar, runtimeKind, runtimeName string, sandboxEnabled bool, profile AgentProfile, runtimeOptions map[string]any, mcpConfig map[string]any) error {
+func (s *Service) persistStartingWorker(ctx context.Context, id, name, description, instructions, image, avatar, runtimeKind, runtimeName string, sandboxEnabled bool, profile AgentProfile, runtimeOptions map[string]any, mcpServers map[string]any) error {
 	s.mu.Lock()
 
 	if _, _, ok := s.agentByIDLocked(id); ok {
@@ -2075,7 +2084,7 @@ func (s *Service) persistStartingWorker(ctx context.Context, id, name, descripti
 		return fmt.Errorf("agent name %q already exists", name)
 	}
 
-	worker := newWorkerAgent(id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxEnabled, profile, runtimeOptions, mcpConfig, agentruntime.Info{
+	worker := newWorkerAgent(id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxEnabled, profile, runtimeOptions, mcpServers, agentruntime.Info{
 		State:     agentruntime.StateCreated,
 		CreatedAt: time.Now().UTC(),
 	})
@@ -2102,7 +2111,7 @@ func (s *Service) removeStartingWorker(ctx context.Context, id string) error {
 	return err
 }
 
-func (s *Service) persistCreatedWorker(ctx context.Context, id, name, description, instructions, image, avatar, runtimeKind, runtimeName string, sandboxEnabled bool, profile AgentProfile, createRuntimeExt map[string]any, mcpConfig map[string]any, info agentruntime.Info) (Agent, error) {
+func (s *Service) persistCreatedWorker(ctx context.Context, id, name, description, instructions, image, avatar, runtimeKind, runtimeName string, sandboxEnabled bool, profile AgentProfile, createRuntimeExt map[string]any, mcpServers map[string]any, info agentruntime.Info) (Agent, error) {
 	s.mu.Lock()
 
 	if existing, _, ok := s.agentByIDLocked(id); ok && !isStartingWorker(existing) {
@@ -2114,7 +2123,7 @@ func (s *Service) persistCreatedWorker(ctx context.Context, id, name, descriptio
 		return Agent{}, fmt.Errorf("agent name %q already exists", name)
 	}
 
-	worker := newWorkerAgent(id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxEnabled, profile, createRuntimeExt, mcpConfig, info)
+	worker := newWorkerAgent(id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxEnabled, profile, createRuntimeExt, mcpServers, info)
 	s.agents[worker.ID] = worker
 	s.syncRuntimeRecordLocked(worker)
 	if worker.AgentProfile.ProfileComplete {
@@ -2134,7 +2143,7 @@ func (s *Service) persistCreatedWorker(ctx context.Context, id, name, descriptio
 	return created, nil
 }
 
-func newWorkerAgent(id, name, description, instructions, image, avatar, runtimeKind, runtimeName string, sandboxEnabled bool, profile AgentProfile, runtimeOptions map[string]any, mcpConfig map[string]any, info agentruntime.Info) Agent {
+func newWorkerAgent(id, name, description, instructions, image, avatar, runtimeKind, runtimeName string, sandboxEnabled bool, profile AgentProfile, runtimeOptions map[string]any, mcpServers map[string]any, info agentruntime.Info) Agent {
 	createdAt := info.CreatedAt.UTC()
 	if info.CreatedAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -2167,7 +2176,7 @@ func newWorkerAgent(id, name, description, instructions, image, avatar, runtimeK
 		CreatedAt:       createdAt,
 		UpdatedAt:       createdAt,
 		RuntimeOptions:  agentRX,
-		MCPConfig:       utils.CloneAnyMap(mcpConfig),
+		MCPServers:      cloneMCPServers(mcpServers),
 		Profile:         profileSelector(prof),
 		AgentProfile:    prof,
 		ProfileComplete: prof.ProfileComplete,
@@ -2228,7 +2237,7 @@ func (s *Service) provisionRuntimeForAgent(ctx context.Context, rt agentruntime.
 		Instructions:     strings.TrimSpace(got.Instructions),
 		Profile:          s.runtimeProfileForAgent(got),
 		RuntimeOptions:   utils.CloneAnyMap(got.RuntimeOptions),
-		MCPConfig:        utils.CloneAnyMap(got.MCPConfig),
+		MCPServers:       cloneMCPServers(got.MCPServers),
 		WorkspaceOverlay: strings.TrimSpace(workspaceOverlay),
 	})
 }

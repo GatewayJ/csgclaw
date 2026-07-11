@@ -31,6 +31,15 @@ func normalizeUpdateFieldMask(fieldMask []string) map[string]struct{} {
 	return out
 }
 
+func updateIncludesMCPServers(req UpdateRequest) bool {
+	fieldMask := normalizeUpdateFieldMask(req.FieldMask)
+	if len(fieldMask) == 0 {
+		return req.MCPServersSet
+	}
+	_, ok := fieldMask["mcpservers"]
+	return ok
+}
+
 func (s *Service) AgentProfileView(id string) (AgentProfileView, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -188,7 +197,7 @@ func (s *Service) syncGatewayHostConfig(got Agent, profile AgentProfile) error {
 		if err != nil {
 			return err
 		}
-		if _, err := picoclawsandbox.EnsureConfigWithMCPConfig(agentHome, participantID, got.ID, s.server, modelCfg, got.MCPConfig, resolveManagerBaseURL, feishuProvider); err != nil {
+		if _, err := picoclawsandbox.EnsureConfigWithMCPServers(agentHome, participantID, got.ID, s.server, modelCfg, got.MCPServers, resolveManagerBaseURL, feishuProvider); err != nil {
 			return fmt.Errorf("sync gateway picoclaw config: %w", err)
 		}
 	case RuntimeKindOpenClawSandbox:
@@ -197,7 +206,7 @@ func (s *Service) syncGatewayHostConfig(got Agent, profile AgentProfile) error {
 			return err
 		}
 		feishuProvider := s.currentFeishuProviderForRuntime(RuntimeKindOpenClawSandbox)
-		if _, err := openclawsandbox.EnsureConfigWithMCPConfig(agentHome, participantID, got.ID, s.server, modelCfg, got.MCPConfig, resolveManagerBaseURL, feishuProvider); err != nil {
+		if _, err := openclawsandbox.EnsureConfigWithMCPServers(agentHome, participantID, got.ID, s.server, modelCfg, got.MCPServers, resolveManagerBaseURL, feishuProvider); err != nil {
 			return fmt.Errorf("sync gateway openclaw config: %w", err)
 		}
 	default:
@@ -233,6 +242,17 @@ func (s *Service) currentFeishuProviderForRuntime(runtimeKind string) feishu.Age
 }
 
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Agent, error) {
+	if s == nil {
+		return Agent{}, fmt.Errorf("agent service is required")
+	}
+	if updateIncludesMCPServers(req) {
+		s.mcpServersMu.Lock()
+		defer s.mcpServersMu.Unlock()
+	}
+	return s.update(ctx, id, req)
+}
+
+func (s *Service) update(ctx context.Context, id string, req UpdateRequest) (Agent, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Agent{}, fmt.Errorf("agent id is required")
@@ -269,10 +289,10 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 	}
 	instructionsUpdated := updateRequested("instructions", req.Instructions != nil)
 	runtimeOptionsUpdated := updateRequested("runtime_options", req.RuntimeOptions != nil)
-	mcpConfigUpdated := updateRequested("mcp_config", req.MCPConfigSet)
-	if mcpConfigUpdated && !req.MCPConfigSet {
+	mcpServersUpdated := updateRequested("mcpservers", req.MCPServersSet)
+	if mcpServersUpdated && !req.MCPServersSet {
 		s.mu.Unlock()
-		return Agent{}, fmt.Errorf("field_mask includes mcp_config but request is missing mcp_config")
+		return Agent{}, fmt.Errorf("field_mask includes mcpServers but request is missing mcpServers")
 	}
 	if updateRequested("name", req.Name != nil) {
 		if req.Name == nil {
@@ -348,7 +368,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 			agentProfileUpdated = true
 		}
 	}
-	if agentProfileUpdated || runtimeOptionsUpdated || mcpConfigUpdated {
+	if agentProfileUpdated || runtimeOptionsUpdated || mcpServersUpdated {
 		runtimeAffectingUpdate = true
 		profile := current.AgentProfile
 		if agentProfileUpdated {
@@ -369,6 +389,10 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 				req.RuntimeOptions = &empty
 			}
 			patch = *req.RuntimeOptions
+			if err := validateRuntimeOptionsWithoutMCP(patch); err != nil {
+				s.mu.Unlock()
+				return Agent{}, err
+			}
 		}
 		mergedFlat := runtimeOptionsAfterPatch(current.RuntimeKind, current.RuntimeOptions, nil)
 		if runtimeOptionsUpdated {
@@ -377,23 +401,23 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 		} else {
 			current.RuntimeOptions = nextAgentRuntimeOptions(current.RuntimeKind, current.RuntimeOptions, mergedFlat)
 		}
-		if mcpConfigUpdated {
-			if req.MCPConfig == nil {
-				current.MCPConfig = nil
+		if mcpServersUpdated {
+			if req.MCPServers == nil {
+				current.MCPServers = nil
 			} else {
-				normalizedMCPConfig, err := agentruntime.NormalizeMCPConfig(*req.MCPConfig)
+				normalizedMCPServers, err := agentruntime.NormalizeMCPServers(*req.MCPServers)
 				if err != nil {
 					s.mu.Unlock()
 					return Agent{}, err
 				}
-				current.MCPConfig = normalizedMCPConfig
+				current.MCPServers = normalizedMCPServers
 			}
 		}
 		normalized := normalizeProfileForAgentRuntime(profile, current.RuntimeOptions, current.Name, current.Description, current.RuntimeKind, mergedFlat)
 		runtimePrevious := s.hydrateProfileFromCatalogLocked(previous.AgentProfile)
 		runtimeNormalized := s.hydrateProfileFromCatalogLocked(normalized)
 		change := runtimeConfigChangeForAgent(runtimePrevious, runtimeNormalized, previous.RuntimeOptions, current.RuntimeOptions)
-		mcpChange := mcpConfigChangeForAgent(previous.MCPConfig, current.MCPConfig)
+		mcpChange := mcpServersChangeForAgent(previous.MCPServers, current.MCPServers)
 		runtimeConfigUpdated := agentProfileUpdated || runtimeOptionsUpdated
 		restartRequired = profileRestartRequired(previous, normalized)
 		if runtimeConfigUpdated {
@@ -404,8 +428,8 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 			}
 			restartRequired = restartRequired || controllerRestartRequired
 		}
-		if mcpConfigUpdated {
-			controllerMCPRestartRequired, err := s.mcpConfigRestartRequired(runtimeKind, mcpChange)
+		if mcpServersUpdated {
+			controllerMCPRestartRequired, err := s.mcpServersRestartRequired(runtimeKind, mcpChange)
 			if err != nil {
 				s.mu.Unlock()
 				return Agent{}, err
@@ -420,15 +444,15 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 		if current.ProfileComplete && strings.EqualFold(strings.TrimSpace(current.Status), "profile_incomplete") {
 			current.Status = string(sandbox.StateStopped)
 		}
-		if (runtimeConfigUpdated && runtimeNormalized.ProfileComplete) || mcpConfigUpdated {
+		if (runtimeConfigUpdated && runtimeNormalized.ProfileComplete) || mcpServersUpdated {
 			s.mu.Unlock()
 			if runtimeConfigUpdated && runtimeNormalized.ProfileComplete {
 				if err := s.validateRuntimeConfig(ctx, runtimeKind, change.Current); err != nil {
 					return Agent{}, err
 				}
 			}
-			if mcpConfigUpdated {
-				if err := s.validateMCPConfig(ctx, runtimeKind, mcpChange.Current); err != nil {
+			if mcpServersUpdated {
+				if err := s.validateMCPServers(ctx, runtimeKind, mcpChange.Current); err != nil {
 					return Agent{}, err
 				}
 			}
@@ -456,10 +480,13 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 			return Agent{}, err
 		}
 	}
-	if mcpConfigUpdated {
-		skipMCPReconcileForRestartingGateway := strings.EqualFold(strings.TrimSpace(runtimeKind), RuntimeKindOpenClawSandbox) && restartRequired
-		if !skipMCPReconcileForRestartingGateway {
-			if err := s.reconcileMCPConfig(ctx, previous, current); err != nil {
+	if mcpServersUpdated {
+		// OpenClaw consumes MCP settings during provisioning/recreation. Writing
+		// its live config here can race the gateway process, including for an
+		// idempotent save that does not require a restart.
+		skipMCPReconcileForOpenClaw := strings.EqualFold(strings.TrimSpace(runtimeKind), RuntimeKindOpenClawSandbox)
+		if !skipMCPReconcileForOpenClaw {
+			if err := s.reconcileMCPServers(ctx, previous, current); err != nil {
 				return Agent{}, err
 			}
 		}
@@ -485,7 +512,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Age
 	return updated, nil
 }
 
-func (s *Service) AddMCPServers(ctx context.Context, id string, names []string, catalogServers map[string]any) (Agent, error) {
+func (s *Service) AddMCPServersFromHub(ctx context.Context, id string, names []string, catalogServers map[string]any) (Agent, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Agent{}, fmt.Errorf("agent id is required")
@@ -510,8 +537,8 @@ func (s *Service) AddMCPServers(ctx context.Context, id string, names []string, 
 		serverConfigs[name] = serverConfig
 	}
 
-	s.mcpServerAddMu.Lock()
-	defer s.mcpServerAddMu.Unlock()
+	s.mcpServersMu.Lock()
+	defer s.mcpServersMu.Unlock()
 
 	s.mu.RLock()
 	current, _, ok := s.agentByIDLocked(id)
@@ -519,7 +546,7 @@ func (s *Service) AddMCPServers(ctx context.Context, id string, names []string, 
 	if !ok {
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}
-	currentServers, err := agentruntime.MCPConfigServers(current.MCPConfig)
+	currentServers, err := agentruntime.NormalizeMCPServers(current.MCPServers)
 	if err != nil {
 		return Agent{}, err
 	}
@@ -530,11 +557,10 @@ func (s *Service) AddMCPServers(ctx context.Context, id string, names []string, 
 	for _, name := range names {
 		mergedServers[name] = serverConfigs[name]
 	}
-	nextConfig := map[string]any{agentruntime.MCPConfigServersKey: mergedServers}
-	return s.Update(ctx, id, UpdateRequest{
-		MCPConfig:    &nextConfig,
-		MCPConfigSet: true,
-		FieldMask:    []string{"mcp_config"},
+	return s.update(ctx, id, UpdateRequest{
+		MCPServers:    &mergedServers,
+		MCPServersSet: true,
+		FieldMask:     []string{"mcpServers"},
 	})
 }
 
@@ -560,17 +586,11 @@ func runtimeMCPServerConfigFromCatalog(name string, raw any) (map[string]any, er
 	if !ok {
 		return nil, fmt.Errorf("mcp server %q config must be an object", name)
 	}
-	normalized, err := agentruntime.NormalizeMCPConfig(map[string]any{
-		agentruntime.MCPConfigServersKey: map[string]any{name: rawConfig},
-	})
+	normalized, err := agentruntime.NormalizeMCPServers(map[string]any{name: rawConfig})
 	if err != nil {
 		return nil, err
 	}
-	servers, err := agentruntime.MCPConfigServers(normalized)
-	if err != nil {
-		return nil, err
-	}
-	serverConfig, ok := servers[name].(map[string]any)
+	serverConfig, ok := normalized[name].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("mcp server %q config must be an object", name)
 	}
@@ -644,15 +664,15 @@ func runtimeConfigSnapshotForAgent(profile AgentProfile, options map[string]any)
 	}
 }
 
-func mcpConfigChangeForAgent(previousConfig, currentConfig map[string]any) agentruntime.MCPConfigChange {
-	return agentruntime.MCPConfigChange{
-		Previous: mcpConfigSnapshotForAgent(previousConfig),
-		Current:  mcpConfigSnapshotForAgent(currentConfig),
+func mcpServersChangeForAgent(previousConfig, currentConfig map[string]any) agentruntime.MCPServersChange {
+	return agentruntime.MCPServersChange{
+		Previous: mcpServersSnapshotForAgent(previousConfig),
+		Current:  mcpServersSnapshotForAgent(currentConfig),
 	}
 }
 
-func mcpConfigSnapshotForAgent(config map[string]any) agentruntime.MCPConfigSnapshot {
-	return agentruntime.MCPConfigSnapshot{Config: utils.CloneAnyMap(config)}
+func mcpServersSnapshotForAgent(servers map[string]any) agentruntime.MCPServersSnapshot {
+	return agentruntime.MCPServersSnapshot{Servers: cloneMCPServers(servers)}
 }
 
 func (s *Service) hydrateProfileFromCatalog(profile AgentProfile) AgentProfile {
@@ -767,11 +787,11 @@ func (s *Service) runtimeConfigRestartRequired(runtimeKind string, change agentr
 	return controller.RestartRequired(change)
 }
 
-func (s *Service) validateMCPConfig(ctx context.Context, runtimeKind string, current agentruntime.MCPConfigSnapshot) error {
+func (s *Service) validateMCPServers(ctx context.Context, runtimeKind string, current agentruntime.MCPServersSnapshot) error {
 	if s == nil {
 		return fmt.Errorf("agent service is required")
 	}
-	if current.Config == nil {
+	if current.Servers == nil {
 		return nil
 	}
 	runtimeKind = strings.TrimSpace(runtimeKind)
@@ -782,18 +802,18 @@ func (s *Service) validateMCPConfig(ctx context.Context, runtimeKind string, cur
 	if err != nil {
 		return err
 	}
-	controller, ok := rt.(agentruntime.MCPConfigController)
+	controller, ok := rt.(agentruntime.MCPServersController)
 	if !ok {
-		return fmt.Errorf("mcp_config is not supported for runtime_kind %q", runtimeKind)
+		return fmt.Errorf("mcpServers is not supported for runtime_kind %q", runtimeKind)
 	}
-	return controller.ValidateMCPConfig(ctx, current)
+	return controller.ValidateMCPServers(ctx, current)
 }
 
-func (s *Service) mcpConfigRestartRequired(runtimeKind string, change agentruntime.MCPConfigChange) (bool, error) {
+func (s *Service) mcpServersRestartRequired(runtimeKind string, change agentruntime.MCPServersChange) (bool, error) {
 	if s == nil {
 		return false, fmt.Errorf("agent service is required")
 	}
-	if change.Previous.Config == nil && change.Current.Config == nil {
+	if change.Previous.Servers == nil && change.Current.Servers == nil {
 		return false, nil
 	}
 	runtimeKind = strings.TrimSpace(runtimeKind)
@@ -804,11 +824,11 @@ func (s *Service) mcpConfigRestartRequired(runtimeKind string, change agentrunti
 	if err != nil {
 		return false, err
 	}
-	controller, ok := rt.(agentruntime.MCPConfigController)
+	controller, ok := rt.(agentruntime.MCPServersController)
 	if !ok {
-		return false, fmt.Errorf("mcp_config is not supported for runtime_kind %q", runtimeKind)
+		return false, fmt.Errorf("mcpServers is not supported for runtime_kind %q", runtimeKind)
 	}
-	return controller.MCPConfigRestartRequired(change)
+	return controller.MCPServersRestartRequired(change)
 }
 
 func (s *Service) reconcileRuntimeConfig(ctx context.Context, previous, current Agent) error {
@@ -832,7 +852,7 @@ func (s *Service) reconcileRuntimeConfig(ctx context.Context, previous, current 
 	return controller.ReconcileConfig(ctx, runtimeHandleForAgent(current), runtimeConfigChangeForAgent(previous.AgentProfile, current.AgentProfile, previous.RuntimeOptions, current.RuntimeOptions))
 }
 
-func (s *Service) reconcileMCPConfig(ctx context.Context, previous, current Agent) error {
+func (s *Service) reconcileMCPServers(ctx context.Context, previous, current Agent) error {
 	if s == nil {
 		return fmt.Errorf("agent service is required")
 	}
@@ -844,21 +864,18 @@ func (s *Service) reconcileMCPConfig(ctx context.Context, previous, current Agen
 	if err != nil {
 		return err
 	}
-	controller, ok := rt.(agentruntime.MCPConfigController)
+	controller, ok := rt.(agentruntime.MCPServersReconciler)
 	if !ok {
-		if current.MCPConfig == nil {
-			return nil
-		}
-		return fmt.Errorf("mcp_config is not supported for runtime_kind %q", runtimeKind)
+		return fmt.Errorf("mcpServers live reconciliation is not supported for runtime_kind %q", runtimeKind)
 	}
-	return controller.ReconcileMCPConfig(ctx, runtimeHandleForAgent(current), mcpConfigChangeForAgent(previous.MCPConfig, current.MCPConfig))
+	return controller.ReconcileMCPServers(ctx, runtimeHandleForAgent(current), mcpServersChangeForAgent(previous.MCPServers, current.MCPServers))
 }
 
-func normalizeMCPConfig(config map[string]any) (map[string]any, error) {
+func normalizeMCPServers(config map[string]any) (map[string]any, error) {
 	if config == nil {
 		return nil, nil
 	}
-	return agentruntime.NormalizeMCPConfig(config)
+	return agentruntime.NormalizeMCPServers(config)
 }
 
 func (s *Service) storedAPIKeyForModelRequest(req ProfileModelRequest, profile AgentProfile) string {
@@ -950,7 +967,7 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 	if err := s.validateRuntimeConfig(ctx, strings.TrimSpace(got.RuntimeKind), runtimeConfigSnapshotForAgent(profile, got.RuntimeOptions)); err != nil {
 		return Agent{}, err
 	}
-	if err := s.validateMCPConfig(ctx, strings.TrimSpace(got.RuntimeKind), mcpConfigSnapshotForAgent(got.MCPConfig)); err != nil {
+	if err := s.validateMCPServers(ctx, strings.TrimSpace(got.RuntimeKind), mcpServersSnapshotForAgent(got.MCPServers)); err != nil {
 		return Agent{}, err
 	}
 
@@ -1033,7 +1050,7 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 		Instructions:   strings.TrimSpace(got.Instructions),
 		Profile:        runtimeProfile,
 		RuntimeOptions: utils.CloneAnyMap(got.RuntimeOptions),
-		MCPConfig:      utils.CloneAnyMap(got.MCPConfig),
+		MCPServers:     cloneMCPServers(got.MCPServers),
 	}); err != nil {
 		return Agent{}, fmt.Errorf("provision agent runtime: %w", err)
 	}
@@ -1155,6 +1172,9 @@ func (s *Service) profileForCreateRequest(ctx context.Context, spec *CreateAgent
 	}
 	profile = s.withDefaultAPIKeyForMatchingProfile(profile)
 	runtimeOptionsAfterPatch := runtimeOptionsAfterPatch(rk, nil, spec.RuntimeOptions)
+	if err := validateRuntimeOptionsWithoutMCP(runtimeOptionsAfterPatch); err != nil {
+		return AgentProfile{}, err
+	}
 	profile = normalizeProfileForAgentRuntime(profile, nil, spec.Name, spec.Description, spec.RuntimeKind, runtimeOptionsAfterPatch)
 	runtimeProfile := s.hydrateProfileFromCatalog(profile)
 	if !profile.ProfileComplete {
@@ -1184,6 +1204,15 @@ func runtimeOptionsAfterPatch(runtimeKind string, currentRuntimeOptions, patchRu
 		return utils.CloneAnyMap(patchRuntimeOptions)
 	}
 	return utils.OverlayAnyMap(utils.CloneAnyMap(currentRuntimeOptions), patchRuntimeOptions)
+}
+
+func validateRuntimeOptionsWithoutMCP(runtimeOptions map[string]any) error {
+	for _, key := range []string{"mcp", "mcpServers"} {
+		if _, exists := runtimeOptions[key]; exists {
+			return fmt.Errorf("runtime_options.%s is not supported; use mcpServers", key)
+		}
+	}
+	return nil
 }
 
 func nextAgentRuntimeOptions(runtimeKind string, currentRuntimeOptions, mergedRuntimeOptions map[string]any) map[string]any {

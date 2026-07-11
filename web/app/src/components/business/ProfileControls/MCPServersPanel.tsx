@@ -1,33 +1,33 @@
 import { useEffect, useId, useState } from "react";
 import {
-  MCP_CONFIG_EXAMPLE,
-  mcpConfigText,
-  parseMCPConfigText,
-  setMCPConfig,
+  MCP_SERVERS_EXAMPLE,
+  mcpServersText,
+  parseMCPServersText,
+  setMCPServers,
   type AgentDraft,
   type JSONRecord,
 } from "@/models/agents";
 import type { TranslateFn } from "@/models/conversations";
 import { Button } from "@/components/ui/Button/Button";
 
-export type MCPConfigPanelProps = {
+export type MCPServersPanelProps = {
   draft: AgentDraft;
   onDraftChange: (draft: AgentDraft) => void;
   onInvalidChange?: (invalid: boolean) => void;
   t: TranslateFn;
 };
 
-function cloneMCPExample(): JSONRecord {
-  return JSON.parse(JSON.stringify(MCP_CONFIG_EXAMPLE)) as JSONRecord;
+function cloneMCPServersExample(): JSONRecord {
+  return JSON.parse(JSON.stringify(MCP_SERVERS_EXAMPLE)) as JSONRecord;
 }
 
 function errorMessageForKey(key: "invalid_json" | "object_required", t: TranslateFn): string {
   return key === "invalid_json" ? t("profileMCPServersInvalidJSON") : t("profileMCPServersObjectRequired");
 }
 
-export function MCPConfigPanel({ draft, onDraftChange, onInvalidChange, t }: MCPConfigPanelProps) {
+export function MCPServersPanel({ draft, onDraftChange, onInvalidChange, t }: MCPServersPanelProps) {
   const textareaId = useId();
-  const draftText = mcpConfigText(draft.mcp_config);
+  const draftText = mcpServersText(draft.mcpServers);
   const [text, setText] = useState(draftText);
   const [error, setError] = useState("");
 
@@ -39,7 +39,7 @@ export function MCPConfigPanel({ draft, onDraftChange, onInvalidChange, t }: MCP
 
   function commitText(nextText: string) {
     setText(nextText);
-    const parsed = parseMCPConfigText(nextText);
+    const parsed = parseMCPServersText(nextText);
     if (!parsed.ok) {
       setError(errorMessageForKey(parsed.error, t));
       onInvalidChange?.(true);
@@ -49,47 +49,47 @@ export function MCPConfigPanel({ draft, onDraftChange, onInvalidChange, t }: MCP
     onInvalidChange?.(false);
     onDraftChange({
       ...draft,
-      mcp_config: setMCPConfig(parsed.value),
+      mcpServers: setMCPServers(parsed.value),
     });
   }
 
   function fillExample() {
-    const example = cloneMCPExample();
+    const example = cloneMCPServersExample();
     setError("");
     onInvalidChange?.(false);
     setText(JSON.stringify(example, null, 2));
     onDraftChange({
       ...draft,
-      mcp_config: setMCPConfig(example),
+      mcpServers: setMCPServers(example),
     });
   }
 
-  function clearMCPConfig() {
+  function clearMCPServers() {
     setError("");
     onInvalidChange?.(false);
     setText("");
     onDraftChange({
       ...draft,
-      mcp_config: setMCPConfig(null),
+      mcpServers: setMCPServers(null),
     });
   }
 
   return (
-    <div className="field span-2 mcp-config-panel">
-      <div className="mcp-config-header">
+    <div className="field span-2 mcp-servers-panel">
+      <div className="mcp-servers-header">
         <label htmlFor={textareaId}>{t("profileMCPServers")}</label>
-        <div className="mcp-config-actions">
+        <div className="mcp-servers-actions">
           <Button variant="secondaryGray" size="sm" onClick={fillExample}>
             {t("profileMCPServersUseExample")}
           </Button>
-          <Button variant="secondaryGray" size="sm" onClick={clearMCPConfig}>
+          <Button variant="secondaryGray" size="sm" onClick={clearMCPServers}>
             {t("profileMCPServersClear")}
           </Button>
         </div>
       </div>
       <textarea
         id={textareaId}
-        className="compact-textarea mcp-config-textarea"
+        className="compact-textarea mcp-servers-textarea"
         value={text}
         aria-invalid={error ? "true" : undefined}
         aria-describedby={`${textareaId}-hint`}

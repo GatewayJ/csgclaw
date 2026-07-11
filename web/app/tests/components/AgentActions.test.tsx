@@ -67,13 +67,13 @@ const labels: Record<string, string> = {
   profileRuntimeSection: "Runtime environment",
   close: "Close",
   profileMCPServers: "MCP Servers",
-  profileMCPServersHint: 'Recommended shape: {"mcpServers":{...}}.',
+  profileMCPServersHint: 'Enter MCP servers as {"server-name": {...}}.',
   profileMCPServersHubHint: "Install MCP servers from Hub.",
-  profileMCPServersPlaceholder: '{\n  "mcpServers": {}\n}',
+  profileMCPServersPlaceholder: '{\n  "context7": {}\n}',
   profileMCPServersUseExample: "Use example",
-  profileMCPServersClear: "Clear config",
+  profileMCPServersClear: "Clear servers",
   profileMCPServersInvalidJSON: "Enter a valid JSON object.",
-  profileMCPServersObjectRequired: "MCP config must be a JSON object.",
+  profileMCPServersObjectRequired: "MCP servers must be a JSON object.",
   agentName: "Name",
   agentDescription: "Description",
   agentImage: "Image",
@@ -860,11 +860,9 @@ describe("agent action visibility", () => {
       runtime_options: {
         local_workspace_dir: "/tmp/project",
       },
-      mcp_config: {
-        mcpServers: {
-          existing: {
-            command: "node",
-          },
+      mcpServers: {
+        existing: {
+          command: "node",
         },
       },
     };
@@ -923,7 +921,7 @@ describe("agent action visibility", () => {
       within(navigation)
         .getAllByRole("button")
         .map((button) => button.textContent),
-    ).toEqual(["Profile", "Activity", "Channels", "Instructions", "Skills", "MCP"]);
+    ).toEqual(["Profile", "Activity", "Instructions", "Skills0", "Channels", "MCP"]);
 
     await user.click(within(navigation).getByRole("button", { name: "MCP" }));
 
@@ -944,17 +942,15 @@ describe("agent action visibility", () => {
     expect(onDeleteMCPServer).toHaveBeenCalledWith(existingMCP);
   });
 
-  it("keeps MCP config managed by hub instead of exposing the JSON editor", async () => {
+  it("keeps agent MCP server management separate from the profile editor", async () => {
     const user = userEvent.setup();
     const item = {
       ...worker,
       runtime_kind: "openclaw_sandbox",
       runtime_options: {},
-      mcp_config: {
-        mcpServers: {
-          existing: {
-            command: "node",
-          },
+      mcpServers: {
+        existing: {
+          command: "node",
         },
       },
     };
@@ -1082,7 +1078,7 @@ describe("agent action visibility", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /^skills/ }));
+    await user.click(screen.getByRole("button", { name: /^skills/i }));
     await user.click(screen.getByRole("button", { name: "Add skill" }));
     expect(screen.getByText("Candidates come from global skills.")).toBeInTheDocument();
     expect(screen.getByText("Beta candidate")).toBeInTheDocument();
@@ -1134,7 +1130,7 @@ describe("agent action visibility", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /^skills/ }));
+    await user.click(screen.getByRole("button", { name: /^skills/i }));
     await user.click(screen.getAllByRole("button", { name: "Delete" })[0]);
     expect(screen.getByText('Delete skill "alpha" from this agent?')).toBeInTheDocument();
 
@@ -1351,12 +1347,12 @@ describe("agent action visibility", () => {
 
     const navigation = screen.getByRole("navigation", { name: "Profile sections" });
     const tabs = within(navigation).getAllByRole("button");
-    expect(tabs.map((tab) => tab.firstElementChild?.textContent)).toEqual([
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
       "Profile",
       "Activity",
-      "Channels",
       "Instructions",
-      "Skills",
+      "Skills0",
+      "Channels",
       "MCP",
     ]);
     expect(tabs[0]).toHaveAttribute("aria-current", "location");

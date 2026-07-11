@@ -4,7 +4,7 @@ import { useBlocker } from "react-router-dom";
 import { errorMessage } from "@/api/client";
 import { loginCLIProxyProviderRequest } from "@/api/cliproxy";
 import {
-  addAgentMCPServersRequest,
+  batchAddAgentMCPServersRequest,
   batchAddAgentSkillsRequest,
   createBotRequest,
   createManagerAgentRequest,
@@ -16,14 +16,14 @@ import {
   fetchAgent,
   fetchAgentProfile,
   fetchAgentProfileDefaults,
-  fetchAgentMCPConfig,
+  fetchAgentMCPServers,
   fetchAgentSkills,
   fetchAgentSkillsFile,
   finalizeFeishuRegistrationRequest,
   patchNotificationBotRequest,
   runAgentActionRequest,
   startFeishuRegistrationRequest,
-  updateAgentMCPConfigRequest,
+  updateAgentMCPServersRequest,
   updateAgentRequest,
 } from "@/api/agents";
 import type { AgentUpdatePayload, FeishuRegistration, FetchAgentsOptions } from "@/api/agents";
@@ -62,7 +62,7 @@ import {
   composeLegacyRuntimeKind,
   defaultManagerRebuildImageForRuntime,
   defaultWorkerImageForRuntime,
-  draftMCPConfigForSave,
+  draftMCPServersForSave,
   draftRuntimeOptionsForSave,
   draftToProfileComparePayload,
   draftToProfile,
@@ -102,7 +102,7 @@ import type {
   RuntimeKind,
 } from "@/models/agents";
 import { isDirectConversation, localIdentitiesMatch, upsertUserInData } from "@/models/conversations";
-import { mcpServersFromConfig, mcpConfigWithServers, mcpServerRecordFromConfig } from "@/models/mcp";
+import { mcpServersFromMap, mcpServersMap } from "@/models/mcp";
 import { displayTeam } from "@/models/tasks";
 import type { WorkspaceTeam } from "@/models/tasks";
 import {
@@ -148,6 +148,10 @@ type FeishuActionKind = "connect" | "disconnect" | "finalize";
 
 const AGENT_RUNTIME_SYNC_INTERVAL_MS = 2_000;
 const AGENT_RUNTIME_SYNC_TIMEOUT_MS = 120_000;
+
+function cloneMCPServersForDraft(servers: AgentDraft["mcpServers"]): AgentDraft["mcpServers"] {
+  return servers && typeof servers === "object" ? { ...servers } : servers;
+}
 const FEISHU_CHANNEL_ACTION = "feishu";
 const FEISHU_REGISTRATION_DEFAULT_POLL_SECONDS = 3;
 const FEISHU_REGISTRATION_MIN_POLL_SECONDS = 1;
@@ -627,9 +631,9 @@ export function useAgentController({
     },
     enabled: Boolean(agentDetailAgentID),
   });
-  const agentMCPConfigQuery = useQuery({
-    queryKey: workspaceQueryKeys.agentMCPConfig(agentDetailAgentID),
-    queryFn: () => fetchAgentMCPConfig(agentDetailAgentID),
+  const agentMCPServersQuery = useQuery({
+    queryKey: workspaceQueryKeys.agentMCPServers(agentDetailAgentID),
+    queryFn: () => fetchAgentMCPServers(agentDetailAgentID),
     enabled: Boolean(agentDetailAgentID),
   });
   const agentSkillsError = agentSkillsQuery.error
@@ -646,15 +650,15 @@ export function useAgentController({
     ? errorMessage(globalSkillsQuery.error, t("agentSkillsLoadFailed"))
     : "";
   const agentMCPServers = useMemo(() => {
-    if (agentMCPConfigQuery.data) {
-      return mcpServersFromConfig(agentMCPConfigQuery.data.actual ?? { mcpServers: {} });
-    }
-    return mcpServersFromConfig(agentPageDraft?.mcp_config);
-  }, [agentMCPConfigQuery.data, agentPageDraft?.mcp_config]);
+    return mcpServersFromMap(agentMCPServersQuery.data?.actual ?? agentMCPServersQuery.data?.desired ?? {});
+  }, [agentMCPServersQuery.data]);
+  const agentDesiredMCPServers = useMemo(() => {
+    return mcpServersFromMap(agentMCPServersQuery.data?.desired ?? {});
+  }, [agentMCPServersQuery.data]);
   const agentMCPCandidates = useMemo(() => {
-    const currentNames = new Set(agentMCPServers.map((server) => server.name));
+    const currentNames = new Set(agentDesiredMCPServers.map((server) => server.name));
     return catalogMCPServers.filter((server) => server.name && !currentNames.has(server.name));
-  }, [agentMCPServers, catalogMCPServers]);
+  }, [agentDesiredMCPServers, catalogMCPServers]);
   const activeConversation = useMemo(
     () => data?.rooms.find((item) => item.id === activeConversationId) ?? null,
     [data, activeConversationId],
@@ -716,11 +720,15 @@ export function useAgentController({
       if (isNotificationBotAgent(item)) {
         return ensureNotifierPullSubscriptionDraft(agentToDraft(item));
       }
-      const { agent, profile } = await fetchAgentWithProfile(item);
+      const [{ agent, profile }, mcpServersView] = await Promise.all([
+        fetchAgentWithProfile(item),
+        fetchAgentMCPServers(String(item.id || "").trim()),
+      ]);
       const base = agentToDraft({ ...agent, agent_profile: profile });
       const runtimeKind = normalizeRuntimeKind(agent?.runtime_kind || item?.runtime_kind || base.runtime_kind);
       return ensureNotifierPullSubscriptionDraft({
         ...base,
+        mcpServers: cloneMCPServersForDraft(mcpServersView.desired),
         runtime_kind: runtimeKind || base.runtime_kind,
         bot_type: BOT_TYPE_NORMAL,
       });
@@ -1296,12 +1304,13 @@ export function useAgentController({
     setAgentModalMode("edit");
     setAgentCreateBotKind(isNotificationBotAgent(item) ? BOT_CREATE_KIND_NOTIFICATION : BOT_CREATE_KIND_WORKER);
     setAgentCreateMode("custom");
-    setEditingAgent(item);
+    setEditingAgent(null);
     setAgentError("");
     setAgentProgress(null);
     resetAgentModels();
     try {
       const draft = await agentDraftFromItem(item);
+      setEditingAgent({ ...item, mcpServers: draft.mcpServers });
       setAgentDraft(draft);
       setShowAgentModal(true);
     } catch (err) {
@@ -1340,12 +1349,12 @@ export function useAgentController({
     return JSON.stringify(runtimeOptions || {});
   }
 
-  function mcpConfigPayloadForCompare(draft: AgentDraft | null | undefined): string {
+  function mcpServersPayloadForCompare(draft: AgentDraft | null | undefined): string {
     const normalized = normalizeDraftForCompare(draft);
     if (!normalized) {
       return "";
     }
-    return JSON.stringify(draftMCPConfigForSave(normalized));
+    return JSON.stringify({ mcpServers: draftMCPServersForSave(normalized) });
   }
 
   function hasObjectValues(value: unknown): value is Record<string, unknown> {
@@ -1383,10 +1392,10 @@ export function useAgentController({
     saved: AgentLike | null | undefined,
     profileChanged: boolean,
     runtimeOptionsChanged: boolean,
-    mcpConfigChanged: boolean,
+    mcpServersChanged: boolean,
   ): boolean {
     return Boolean(
-      saved?.id && saved.id !== MANAGER_AGENT_ID && profileChanged && !runtimeOptionsChanged && !mcpConfigChanged,
+      saved?.id && saved.id !== MANAGER_AGENT_ID && profileChanged && !runtimeOptionsChanged && !mcpServersChanged,
     );
   }
 
@@ -1430,14 +1439,14 @@ export function useAgentController({
       const runtimeOptions = draftRuntimeOptionsForSave(draft, {
         mergeNotifier: false,
       });
-      const mcpConfig = draftMCPConfigForSave(draft);
+      const mcpServers = draftMCPServersForSave(draft);
       const profileChanged = profilePayloadForCompare(draftToSave) !== profilePayloadForCompare(agentPageSavedDraft);
       const runtimeOptionsChanged =
         runtimeOptionsPayloadForCompare(draftToSave) !== runtimeOptionsPayloadForCompare(agentPageSavedDraft);
-      const mcpConfigChanged =
-        mcpConfigPayloadForCompare(draftToSave) !== mcpConfigPayloadForCompare(agentPageSavedDraft);
+      const mcpServersChanged =
+        mcpServersPayloadForCompare(draftToSave) !== mcpServersPayloadForCompare(agentPageSavedDraft);
       const hasProfileOrRuntimeChange =
-        profileChanged || (runtimeOptionsChanged && hasObjectValues(runtimeOptions)) || mcpConfigChanged;
+        profileChanged || (runtimeOptionsChanged && hasObjectValues(runtimeOptions)) || mcpServersChanged;
 
       const payload = agentPageBaseUpdatePayload(draftToSave);
       if (profileChanged) {
@@ -1447,8 +1456,8 @@ export function useAgentController({
       if (runtimeOptionsChanged) {
         payload.runtime_options = runtimeOptions || {};
       }
-      if (mcpConfigChanged) {
-        payload.mcp_config = mcpConfig;
+      if (mcpServersChanged && mcpServers !== undefined) {
+        payload.mcpServers = mcpServers;
       }
       if (!hasProfileOrRuntimeChange) {
         debugAgentPageSavePayload("meta-only", payload);
@@ -1475,7 +1484,10 @@ export function useAgentController({
       const profileIncompleteBeforeSave = !isAgentProfileMarkedComplete(agentPageSavedDraft);
       const saved = await updateAgentRequest(selectedAgentForPage.id, payload);
       await saveLinkedAgentUserAvatar(selectedAgentForPage, draft.avatar);
-      if (canApplyAgentPageProfileSaveImmediately(saved, profileChanged, runtimeOptionsChanged, mcpConfigChanged)) {
+      if (mcpServersChanged) {
+        await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPServers(selectedAgentForPage.id) });
+      }
+      if (canApplyAgentPageProfileSaveImmediately(saved, profileChanged, runtimeOptionsChanged, mcpServersChanged)) {
         const savedWithAvatar = { ...saved, avatar: draft.avatar };
         applyAgentListUpdate(savedWithAvatar);
         const savedDraft = agentToDraft(savedWithAvatar);
@@ -1603,7 +1615,7 @@ export function useAgentController({
       const runtimeOptions = draftRuntimeOptionsForSave(draft, {
         mergeNotifier: false,
       });
-      const mcpConfig = draftMCPConfigForSave(draft);
+      const mcpServers = draftMCPServersForSave(draft);
       const payload: AgentUpdatePayload = {
         name: agentDraft.name,
         role: WORKER_AGENT_ROLE,
@@ -1621,21 +1633,21 @@ export function useAgentController({
       const runtimeOptionsChanged = !isCreate
         ? runtimeOptionsPayloadForCompare(agentDraft) !== runtimeOptionsPayloadForCompare(editingDraftBaseline)
         : Boolean(runtimeOptions);
-      const mcpConfigChanged = !isCreate
-        ? mcpConfigPayloadForCompare(agentDraft) !== mcpConfigPayloadForCompare(editingDraftBaseline)
-        : Boolean(mcpConfig);
+      const mcpServersChanged = !isCreate
+        ? mcpServersPayloadForCompare(agentDraft) !== mcpServersPayloadForCompare(editingDraftBaseline)
+        : Boolean(mcpServers);
       if (isCreate) {
         if (runtimeOptions) {
           payload.runtime_options = runtimeOptions;
         }
-        if (mcpConfig) {
-          payload.mcp_config = mcpConfig;
+        if (mcpServers !== undefined && mcpServers !== null) {
+          payload.mcpServers = mcpServers;
         }
       } else if (runtimeOptionsChanged) {
         payload.runtime_options = runtimeOptions || {};
       }
-      if (!isCreate && mcpConfigChanged) {
-        payload.mcp_config = mcpConfig;
+      if (!isCreate && mcpServersChanged && mcpServers !== undefined) {
+        payload.mcpServers = mcpServers;
       }
       const saved = isCreate
         ? await (async () => {
@@ -1665,9 +1677,12 @@ export function useAgentController({
             agent_profile: payload.agent_profile,
             profile: payload.profile,
             ...(payload.runtime_options !== undefined ? { runtime_options: payload.runtime_options } : {}),
-            ...(payload.mcp_config !== undefined ? { mcp_config: payload.mcp_config } : {}),
+            ...(payload.mcpServers !== undefined ? { mcpServers: payload.mcpServers } : {}),
           });
       await saveLinkedAgentUserAvatar(saved?.participants?.length ? saved : editingAgent || saved, agentDraft.avatar);
+      if (!isCreate && mcpServersChanged) {
+        await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPServers(editingAgentID) });
+      }
       if (isCreate) {
         saveLastCreatedAgentModelPreference(agentDraft);
       }
@@ -2091,12 +2106,12 @@ export function useAgentController({
       setAgentMCPAddError("");
       setAgentMCPDeleteError("");
       try {
-        const view = await addAgentMCPServersRequest(agentDetailAgentID, names);
-        const nextMCPConfig = view.desired ?? view.actual ?? undefined;
-        setAgentPageDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
-        setAgentPageSavedDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
+        const view = await batchAddAgentMCPServersRequest(agentDetailAgentID, names);
+        const mcpServers = cloneMCPServersForDraft(view.desired);
+        setAgentPageDraft((current) => (current ? { ...current, mcpServers } : current));
+        setAgentPageSavedDraft((current) => (current ? { ...current, mcpServers } : current));
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPConfig(agentDetailAgentID) }),
+          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPServers(agentDetailAgentID) }),
           queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agents() }),
         ]);
         return true;
@@ -2120,22 +2135,20 @@ export function useAgentController({
       if (!name) {
         return false;
       }
-      const baseConfig = agentMCPConfigQuery.data?.actual ?? agentPageDraft?.mcp_config;
-      const servers = mcpServerRecordFromConfig(baseConfig);
+      const servers = mcpServersMap(agentMCPServersQuery.data?.desired);
       if (!Object.hasOwn(servers, name)) {
         return false;
       }
       delete servers[name];
-      const nextMCPConfig = mcpConfigWithServers(baseConfig, servers);
       setAgentMCPDeleteBusy(true);
       setAgentMCPAddError("");
       setAgentMCPDeleteError("");
       try {
-        await updateAgentMCPConfigRequest(agentDetailAgentID, nextMCPConfig);
-        setAgentPageDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
-        setAgentPageSavedDraft((current) => (current ? { ...current, mcp_config: nextMCPConfig } : current));
+        await updateAgentMCPServersRequest(agentDetailAgentID, servers);
+        setAgentPageDraft((current) => (current ? { ...current, mcpServers: { ...servers } } : current));
+        setAgentPageSavedDraft((current) => (current ? { ...current, mcpServers: { ...servers } } : current));
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPConfig(agentDetailAgentID) }),
+          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPServers(agentDetailAgentID) }),
           queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agents() }),
         ]);
         return true;
@@ -2146,14 +2159,7 @@ export function useAgentController({
         setAgentMCPDeleteBusy(false);
       }
     },
-    [
-      agentMCPConfigQuery.data?.actual,
-      agentMCPDeleteBusy,
-      agentPageDraft?.mcp_config,
-      queryClient,
-      agentDetailAgentID,
-      t,
-    ],
+    [agentMCPServersQuery.data?.desired, agentMCPDeleteBusy, queryClient, agentDetailAgentID, t],
   );
 
   function directConversationForUser(

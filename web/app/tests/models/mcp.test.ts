@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatMCPServerWrapper,
-  mcpServersFromResponse,
-  mcpServerPayloadFromConfig,
-  parseMCPServerWrapper,
-  runtimeMCPServerConfig,
+  formatMCPServerDocument,
+  mcpServersFromCatalogResponse,
+  mcpServersFromMap,
+  mcpServerPayloadFromDocument,
 } from "@/models/mcp";
 
 describe("MCP catalog helpers", () => {
   it("splits state mcpServers into individual sorted server entries", () => {
     expect(
-      mcpServersFromResponse({
+      mcpServersFromCatalogResponse({
         mcpServers: {
           github: { url: "https://github.example/mcp" },
           filesystem: {
@@ -34,22 +33,23 @@ describe("MCP catalog helpers", () => {
     ]);
   });
 
-  it("parses and formats a single wrapped MCP server", () => {
-    const formatted = formatMCPServerWrapper("filesystem", {
+  it("formats a single MCP server document", () => {
+    const formatted = formatMCPServerDocument("filesystem", {
       command: "npx",
       args: ["-y"],
       startup_timeout_sec: 60,
     });
 
-    expect(parseMCPServerWrapper(formatted)).toEqual({
-      name: "filesystem",
-      config: { command: "npx", args: ["-y"], startup_timeout_sec: 60 },
+    expect(JSON.parse(formatted)).toEqual({
+      mcpServers: {
+        filesystem: { command: "npx", args: ["-y"], startup_timeout_sec: 60 },
+      },
     });
   });
 
-  it("builds a single MCP server payload from an already parsed config", () => {
+  it("builds a single MCP server payload from an already parsed document", () => {
     expect(
-      mcpServerPayloadFromConfig({
+      mcpServerPayloadFromDocument({
         mcpServers: {
           filesystem: { command: "npx", args: ["-y"] },
         },
@@ -60,16 +60,17 @@ describe("MCP catalog helpers", () => {
     });
   });
 
-  it("keeps runtime MCP fields while removing catalog display metadata", () => {
+  it("reads agent MCP servers from a direct map", () => {
     expect(
-      runtimeMCPServerConfig({
-        command: "uvx",
-        description: "Grafana",
-        startup_timeout_sec: 120,
+      mcpServersFromMap({
+        context7: { command: "npx", args: ["-y", "context7-mcp"] },
       }),
-    ).toEqual({
-      command: "uvx",
-      startup_timeout_sec: 120,
-    });
+    ).toEqual([
+      {
+        name: "context7",
+        config: { command: "npx", args: ["-y", "context7-mcp"] },
+        description: "npx -y context7-mcp",
+      },
+    ]);
   });
 });

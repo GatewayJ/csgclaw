@@ -32,12 +32,12 @@ const labels: Record<string, string> = {
   modelProviderNoModels: "No models",
   profileRuntimeOptions: "Runtime Options",
   profileMCPServers: "MCP Servers",
-  profileMCPServersHint: 'Recommended shape: {"mcpServers":{...}}.',
-  profileMCPServersPlaceholder: '{\n  "mcpServers": {}\n}',
+  profileMCPServersHint: 'Enter MCP servers as {"server-name": {...}}.',
+  profileMCPServersPlaceholder: '{\n  "context7": {}\n}',
   profileMCPServersUseExample: "Use example",
-  profileMCPServersClear: "Clear config",
+  profileMCPServersClear: "Clear servers",
   profileMCPServersInvalidJSON: "Enter a valid JSON object.",
-  profileMCPServersObjectRequired: "MCP config must be a JSON object.",
+  profileMCPServersObjectRequired: "MCP servers must be a JSON object.",
   profileProvider: "Provider",
   profileRuntimeKind: "Runtime",
   profileEnv: "Environment",
@@ -1076,7 +1076,7 @@ describe("AgentProfileModal", () => {
     );
   });
 
-  it("edits MCP config for supported agent drafts", async () => {
+  it("edits MCP servers for supported agent drafts", async () => {
     const user = userEvent.setup();
     const onAgentDraftChange = vi.fn();
     const openclawDraft = {
@@ -1086,11 +1086,9 @@ describe("AgentProfileModal", () => {
       runtime_options: {
         local_workspace_dir: "/tmp/project",
       },
-      mcp_config: {
-        mcpServers: {
-          existing: {
-            command: "node",
-          },
+      mcpServers: {
+        existing: {
+          command: "node",
         },
       },
     };
@@ -1129,7 +1127,7 @@ describe("AgentProfileModal", () => {
 
     fireEvent.input(editor, {
       target: {
-        value: '{"mcpServers":{"context7":{"command":"npx"}}}',
+        value: '{"context7":{"command":"npx"}}',
       },
     });
 
@@ -1138,24 +1136,22 @@ describe("AgentProfileModal", () => {
         runtime_options: {
           local_workspace_dir: "/tmp/project",
         },
-        mcp_config: {
-          mcpServers: {
-            context7: {
-              command: "npx",
-            },
+        mcpServers: {
+          context7: {
+            command: "npx",
           },
         },
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Clear config" }));
+    await user.click(screen.getByRole("button", { name: "Clear servers" }));
 
     expect(onAgentDraftChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         runtime_options: {
           local_workspace_dir: "/tmp/project",
         },
-        mcp_config: undefined,
+        mcpServers: null,
       }),
     );
 
@@ -1166,6 +1162,7 @@ describe("AgentProfileModal", () => {
         editingAgent={null}
         agentDraft={{
           ...openclawDraft,
+          mcpServers: {},
           runtime_kind: "picoclaw_sandbox",
         }}
         locale="en"
@@ -1192,9 +1189,10 @@ describe("AgentProfileModal", () => {
     );
 
     expect(screen.getByLabelText("MCP Servers")).toBeInTheDocument();
+    expect(screen.getByLabelText("MCP Servers")).toHaveValue("{}");
   });
 
-  it("preserves MCP config when switching from OpenClaw to Codex", async () => {
+  it("preserves MCP servers when switching from OpenClaw to Codex", async () => {
     const user = userEvent.setup();
     const onAgentDraftChange = vi.fn();
     const openclawDraft: AgentDraft = {
@@ -1207,11 +1205,9 @@ describe("AgentProfileModal", () => {
       runtime_options: {
         local_workspace_dir: "/tmp/project",
       },
-      mcp_config: {
-        mcpServers: {
-          context7: {
-            command: "npx",
-          },
+      mcpServers: {
+        context7: {
+          command: "npx",
         },
       },
     };
@@ -1271,11 +1267,9 @@ describe("AgentProfileModal", () => {
     expect(nextDraft.runtime_name).toBe("codex");
     expect(nextDraft.runtime_kind).toBe("codex");
     expect(nextDraft.runtime_options).toEqual({ local_workspace_dir: "/tmp/project" });
-    expect(nextDraft.mcp_config).toEqual({
-      mcpServers: {
-        context7: {
-          command: "npx",
-        },
+    expect(nextDraft.mcpServers).toEqual({
+      context7: {
+        command: "npx",
       },
     });
     expect(screen.getByLabelText("MCP Servers")).toBeInTheDocument();

@@ -171,7 +171,7 @@ type agentResponse struct {
 	Profile              string                             `json:"-"`
 	ProfileConfig        apitypes.AgentProfile              `json:"model_config,omitempty"`
 	RuntimeOptions       map[string]any                     `json:"-"`
-	MCPConfig            map[string]any                     `json:"mcp_config,omitempty"`
+	MCPServers           map[string]any                     `json:"mcpServers,omitempty"`
 	RuntimeOptionSchemas []agentruntime.RuntimeOptionSchema `json:"-"`
 	AgentProfile         agent.AgentProfileView             `json:"-"`
 	ProfileComplete      bool                               `json:"-"`
@@ -206,7 +206,7 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 		Profile:          apiAgent.Profile,
 		ProfileConfig:    apiAgent.ProfileConfig,
 		RuntimeOptions:   apiAgent.Runtime.Options,
-		MCPConfig:        sanitizeMCPConfigResponse(apiAgent.MCPConfig),
+		MCPServers:       sanitizeMCPServersResponse(apiAgent.MCPServers),
 		AgentProfile:     agentProfileViewFromAPI(apiAgent.ProfileConfig),
 		UserID:           apiAgent.UserID,
 		UserName:         apiAgent.UserName,
@@ -232,7 +232,6 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 		BoxID                string                             `json:"box_id"`
 		Status               string                             `json:"status"`
 		RuntimeOptions       map[string]any                     `json:"runtime_options"`
-		MCPConfig            map[string]any                     `json:"mcp_config"`
 		RuntimeOptionSchemas []agentruntime.RuntimeOptionSchema `json:"runtime_option_schemas"`
 		AgentProfile         agent.AgentProfileView             `json:"agent_profile"`
 		ProfileComplete      bool                               `json:"profile_complete"`
@@ -264,9 +263,6 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 	}
 	if len(legacy.RuntimeOptions) > 0 {
 		r.RuntimeOptions = legacy.RuntimeOptions
-	}
-	if len(legacy.MCPConfig) > 0 {
-		r.MCPConfig = sanitizeMCPConfigResponse(legacy.MCPConfig)
 	}
 	if len(legacy.RuntimeOptionSchemas) > 0 {
 		r.RuntimeOptionSchemas = legacy.RuntimeOptionSchemas
@@ -1339,6 +1335,10 @@ func agentCreateRequestFromAPI(req apitypes.CreateAgentRequest) agent.CreateRequ
 	if len(runtimeOptions) == 0 {
 		runtimeOptions = utils.CloneAnyMapShallowNestedStringMaps(req.RuntimeOptions)
 	}
+	mcpServers := utils.CloneAnyMapShallowNestedStringMaps(req.MCPServers)
+	if req.MCPServers != nil && mcpServers == nil {
+		mcpServers = map[string]any{}
+	}
 	return agent.CreateRequest{
 		Spec: agent.CreateAgentSpec{
 			ID:             req.ID,
@@ -1356,8 +1356,8 @@ func agentCreateRequestFromAPI(req apitypes.CreateAgentRequest) agent.CreateRequ
 			UpdatedAt:      req.CreatedAt,
 			Profile:        req.Profile,
 			RuntimeOptions: runtimeOptions,
-			MCPConfig:      utils.CloneAnyMapShallowNestedStringMaps(req.MCPConfig),
-			MCPConfigSet:   req.MCPConfigSet,
+			MCPServers:     mcpServers,
+			MCPServersSet:  req.MCPServersSet,
 			AgentProfile:   prof,
 		},
 		Replace:   req.Replace,
@@ -2807,7 +2807,7 @@ func presentAgent(item agent.Agent) agentResponse {
 		UpdatedAt:        item.UpdatedAt,
 		Profile:          item.Profile,
 		RuntimeOptions:   runtimeOptions,
-		MCPConfig:        sanitizeMCPConfigResponse(item.MCPConfig),
+		MCPServers:       sanitizeMCPServersResponse(item.MCPServers),
 		ProfileConfig:    profile,
 		AgentProfile:     av,
 		ProfileComplete:  item.ProfileComplete,
@@ -2815,17 +2815,13 @@ func presentAgent(item agent.Agent) agentResponse {
 	}
 }
 
-func sanitizeMCPConfigResponse(config map[string]any) map[string]any {
-	config = utils.CloneAnyMap(config)
-	if len(config) == 0 {
+func sanitizeMCPServersResponse(servers map[string]any) map[string]any {
+	servers = utils.CloneAnyMap(servers)
+	if len(servers) == 0 {
 		return nil
 	}
-	mcpServers, ok := config[agentruntime.MCPConfigServersKey].(map[string]any)
-	if !ok || len(mcpServers) == 0 {
-		return config
-	}
-	sanitizedServers := make(map[string]any, len(mcpServers))
-	for name, rawServer := range mcpServers {
+	sanitizedServers := make(map[string]any, len(servers))
+	for name, rawServer := range servers {
 		server, ok := rawServer.(map[string]any)
 		if !ok {
 			sanitizedServers[name] = rawServer
@@ -2844,10 +2840,7 @@ func sanitizeMCPConfigResponse(config map[string]any) map[string]any {
 		}
 		sanitizedServers[name] = server
 	}
-	if len(sanitizedServers) > 0 {
-		config[agentruntime.MCPConfigServersKey] = sanitizedServers
-	}
-	return config
+	return sanitizedServers
 }
 
 func sanitizeMCPSecretValues(raw any) (map[string]any, bool) {

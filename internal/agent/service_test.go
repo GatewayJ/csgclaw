@@ -137,9 +137,9 @@ type fakeAgentRuntime struct {
 	validate     func(context.Context, agentruntime.RuntimeConfigSnapshot) error
 	restart      func(agentruntime.RuntimeConfigChange) (bool, error)
 	reconcile    func(context.Context, agentruntime.Handle, agentruntime.RuntimeConfigChange) error
-	mcpValidate  func(context.Context, agentruntime.MCPConfigSnapshot) error
-	mcpRestart   func(agentruntime.MCPConfigChange) (bool, error)
-	mcpReconcile func(context.Context, agentruntime.Handle, agentruntime.MCPConfigChange) error
+	mcpValidate  func(context.Context, agentruntime.MCPServersSnapshot) error
+	mcpRestart   func(agentruntime.MCPServersChange) (bool, error)
+	mcpReconcile func(context.Context, agentruntime.Handle, agentruntime.MCPServersChange) error
 	provision    func(context.Context, agentruntime.ProvisionRequest) error
 	new          func(context.Context, agentruntime.Spec) (agentruntime.Handle, error)
 	start        func(context.Context, agentruntime.Handle) (agentruntime.State, error)
@@ -266,35 +266,31 @@ func (f fakeAgentRuntime) ReconcileConfig(ctx context.Context, h agentruntime.Ha
 	return nil
 }
 
-func (f fakeAgentRuntime) ValidateMCPConfig(ctx context.Context, current agentruntime.MCPConfigSnapshot) error {
+func (f fakeAgentRuntime) ValidateMCPServers(ctx context.Context, current agentruntime.MCPServersSnapshot) error {
 	if f.mcpValidate != nil {
 		return f.mcpValidate(ctx, current)
 	}
-	return agentruntime.ValidateMCPConfig(current.Config)
+	return agentruntime.ValidateMCPServers(current.Servers)
 }
 
-func (f fakeAgentRuntime) MCPConfigRestartRequired(change agentruntime.MCPConfigChange) (bool, error) {
+func (f fakeAgentRuntime) MCPServersRestartRequired(change agentruntime.MCPServersChange) (bool, error) {
 	if f.mcpRestart != nil {
 		return f.mcpRestart(change)
 	}
-	return agentruntime.MCPConfigNeedsRestart(change.Previous.Config, change.Current.Config)
+	return agentruntime.MCPServersNeedsRestart(change.Previous.Servers, change.Current.Servers)
 }
 
-func (f fakeAgentRuntime) ReconcileMCPConfig(ctx context.Context, h agentruntime.Handle, change agentruntime.MCPConfigChange) error {
+func (f fakeAgentRuntime) ReconcileMCPServers(ctx context.Context, h agentruntime.Handle, change agentruntime.MCPServersChange) error {
 	if f.mcpReconcile != nil {
 		return f.mcpReconcile(ctx, h, change)
 	}
 	return nil
 }
 
-func assertMCPConfigHasServer(t *testing.T, cfg map[string]any, name string) {
+func assertMCPServersHasServer(t *testing.T, cfg map[string]any, name string) {
 	t.Helper()
-	root, ok := cfg[agentruntime.MCPConfigServersKey].(map[string]any)
-	if !ok {
-		t.Fatalf("MCPConfig[%q] = %#v, want object", agentruntime.MCPConfigServersKey, cfg[agentruntime.MCPConfigServersKey])
-	}
-	if _, ok := root[name]; !ok {
-		t.Fatalf("MCPConfig servers = %#v, want %q", root, name)
+	if _, ok := cfg[name]; !ok {
+		t.Fatalf("MCPServers = %#v, want %q", cfg, name)
 	}
 }
 
@@ -1665,7 +1661,7 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 		"",
 		WithRuntime(fakeAgentRuntime{
 			kind: RuntimeKindCodex,
-			mcpValidate: func(ctx context.Context, current agentruntime.MCPConfigSnapshot) error {
+			mcpValidate: func(ctx context.Context, current agentruntime.MCPServersSnapshot) error {
 				if validateCalls.Add(1) == 1 {
 					close(firstValidateEntered)
 					select {
@@ -1674,9 +1670,9 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 						return ctx.Err()
 					}
 				}
-				return agentruntime.ValidateMCPConfig(current.Config)
+				return agentruntime.ValidateMCPServers(current.Servers)
 			},
-			mcpRestart: func(agentruntime.MCPConfigChange) (bool, error) {
+			mcpRestart: func(agentruntime.MCPServersChange) (bool, error) {
 				return false, nil
 			},
 		}),
@@ -1709,16 +1705,16 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 2)
 	go func() {
-		_, err := svc.AddMCPServers(ctx, "u-dev", []string{"context7"}, catalogServers)
+		_, err := svc.AddMCPServersFromHub(ctx, "u-dev", []string{"context7"}, catalogServers)
 		errCh <- err
 	}()
 	select {
 	case <-firstValidateEntered:
 	case <-ctx.Done():
-		t.Fatalf("first AddMCPServers did not enter validation: %v", ctx.Err())
+		t.Fatalf("first AddMCPServersFromHub did not enter validation: %v", ctx.Err())
 	}
 	go func() {
-		_, err := svc.AddMCPServers(ctx, "u-dev", []string{"remote"}, catalogServers)
+		_, err := svc.AddMCPServersFromHub(ctx, "u-dev", []string{"remote"}, catalogServers)
 		errCh <- err
 	}()
 	time.Sleep(25 * time.Millisecond)
@@ -1727,10 +1723,10 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 		select {
 		case err := <-errCh:
 			if err != nil {
-				t.Fatalf("AddMCPServers() error = %v", err)
+				t.Fatalf("AddMCPServersFromHub() error = %v", err)
 			}
 		case <-ctx.Done():
-			t.Fatalf("AddMCPServers() timed out: %v", ctx.Err())
+			t.Fatalf("AddMCPServersFromHub() timed out: %v", ctx.Err())
 		}
 	}
 
@@ -1738,9 +1734,9 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 	if !ok {
 		t.Fatal("Agent(\"u-dev\") not found")
 	}
-	servers, err := agentruntime.MCPConfigServers(got.MCPConfig)
+	servers, err := agentruntime.NormalizeMCPServers(got.MCPServers)
 	if err != nil {
-		t.Fatalf("MCPConfigServers() error = %v", err)
+		t.Fatalf("NormalizeMCPServers() error = %v", err)
 	}
 	if _, ok := servers["context7"]; !ok {
 		t.Fatalf("merged MCP servers = %#v, want context7", servers)
@@ -1750,7 +1746,102 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 	}
 }
 
-func TestUpdateMCPConfigRecreatesOpenClawAndProvisionsLatestConfig(t *testing.T) {
+func TestAddMCPServersSerializesWithDirectMCPServersUpdate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	var validateCalls atomic.Int32
+	firstValidateEntered := make(chan struct{})
+	releaseFirstValidate := make(chan struct{})
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindCodex,
+			mcpValidate: func(ctx context.Context, current agentruntime.MCPServersSnapshot) error {
+				if validateCalls.Add(1) == 1 {
+					close(firstValidateEntered)
+					select {
+					case <-releaseFirstValidate:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				return agentruntime.ValidateMCPServers(current.Servers)
+			},
+			mcpRestart: func(agentruntime.MCPServersChange) (bool, error) {
+				return false, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-dev"] = Agent{
+		ID:           "u-dev",
+		Name:         "dev",
+		RuntimeID:    "rt-u-dev",
+		RuntimeKind:  RuntimeKindCodex,
+		Role:         RoleWorker,
+		Status:       string(agentruntime.StateStopped),
+		Instructions: "keep synced",
+		CreatedAt:    time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	directServers := map[string]any{
+		"direct": map[string]any{
+			"command": "direct-mcp",
+		},
+	}
+	catalogServers := map[string]any{
+		"catalog": map[string]any{
+			"command": "catalog-mcp",
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	directErr := make(chan error, 1)
+	go func() {
+		_, err := svc.Update(ctx, "u-dev", UpdateRequest{MCPServers: &directServers, MCPServersSet: true})
+		directErr <- err
+	}()
+	select {
+	case <-firstValidateEntered:
+	case <-ctx.Done():
+		t.Fatalf("direct Update did not enter validation: %v", ctx.Err())
+	}
+
+	addErr := make(chan error, 1)
+	go func() {
+		_, err := svc.AddMCPServersFromHub(ctx, "u-dev", []string{"catalog"}, catalogServers)
+		addErr <- err
+	}()
+	close(releaseFirstValidate)
+	for _, errCh := range []<-chan error{directErr, addErr} {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("MCP server mutation error = %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatalf("MCP server mutations timed out: %v", ctx.Err())
+		}
+	}
+
+	got, ok := svc.Agent("u-dev")
+	if !ok {
+		t.Fatal("Agent(\"u-dev\") not found")
+	}
+	if _, ok := got.MCPServers["direct"]; !ok {
+		t.Fatalf("MCPServers = %#v, want direct server from the direct update", got.MCPServers)
+	}
+	if _, ok := got.MCPServers["catalog"]; !ok {
+		t.Fatalf("MCPServers = %#v, want catalog server from batchAdd", got.MCPServers)
+	}
+}
+
+func TestUpdateMCPServersRecreatesOpenClawAndProvisionsLatestConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	var provisionCalls []agentruntime.ProvisionRequest
@@ -1766,10 +1857,10 @@ func TestUpdateMCPConfigRecreatesOpenClawAndProvisionsLatestConfig(t *testing.T)
 		"",
 		WithRuntime(fakeAgentRuntime{
 			kind: RuntimeKindOpenClawSandbox,
-			mcpRestart: func(change agentruntime.MCPConfigChange) (bool, error) {
-				return !reflect.DeepEqual(change.Previous.Config, change.Current.Config), nil
+			mcpRestart: func(change agentruntime.MCPServersChange) (bool, error) {
+				return !reflect.DeepEqual(change.Previous.Servers, change.Current.Servers), nil
 			},
-			mcpReconcile: func(context.Context, agentruntime.Handle, agentruntime.MCPConfigChange) error {
+			mcpReconcile: func(context.Context, agentruntime.Handle, agentruntime.MCPServersChange) error {
 				mcpReconcileCalls++
 				return nil
 			},
@@ -1817,20 +1908,18 @@ func TestUpdateMCPConfigRecreatesOpenClawAndProvisionsLatestConfig(t *testing.T)
 		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
 	}
 
-	nextMCPConfig := map[string]any{
-		"mcpServers": map[string]any{
-			"context7": map[string]any{
-				"command": "uvx",
-				"args":    []any{"context7-mcp"},
-			},
+	nextMCPServers := map[string]any{
+		"context7": map[string]any{
+			"command": "uvx",
+			"args":    []any{"context7-mcp"},
 		},
 	}
-	updated, err := svc.Update(context.Background(), "u-alice", UpdateRequest{MCPConfig: &nextMCPConfig, MCPConfigSet: true})
+	updated, err := svc.Update(context.Background(), "u-alice", UpdateRequest{MCPServers: &nextMCPServers, MCPServersSet: true})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 	if mcpReconcileCalls != 0 {
-		t.Fatalf("ReconcileMCPConfig() calls = %d, want 0", mcpReconcileCalls)
+		t.Fatalf("ReconcileMCPServers() calls = %d, want 0", mcpReconcileCalls)
 	}
 	if len(provisionCalls) != 1 {
 		t.Fatalf("Provision() calls = %d, want 1", len(provisionCalls))
@@ -1838,13 +1927,12 @@ func TestUpdateMCPConfigRecreatesOpenClawAndProvisionsLatestConfig(t *testing.T)
 	if got, want := provisionCalls[0].RuntimeOptions["local_workspace_dir"], "/tmp/keep"; got != want {
 		t.Fatalf("Provision().RuntimeOptions local_workspace_dir = %#v, want %q", got, want)
 	}
-	mcpRoot := provisionCalls[0].MCPConfig
-	if mcpRoot == nil {
-		t.Fatalf("Provision().MCPConfig = %#v, want object", provisionCalls[0].MCPConfig)
+	servers := provisionCalls[0].MCPServers
+	if servers == nil {
+		t.Fatalf("Provision().MCPServers = %#v, want object", provisionCalls[0].MCPServers)
 	}
-	servers := mcpRoot["mcpServers"].(map[string]any)
 	if _, ok := servers["context7"]; !ok {
-		t.Fatalf("Provision().MCPConfig mcpServers = %#v, want context7", servers)
+		t.Fatalf("Provision().MCPServers = %#v, want context7", servers)
 	}
 	if updated.AgentProfile.EnvRestartRequired {
 		t.Fatal("Update().AgentProfile.EnvRestartRequired = true, want false after successful recreate")
@@ -1854,7 +1942,69 @@ func TestUpdateMCPConfigRecreatesOpenClawAndProvisionsLatestConfig(t *testing.T)
 	}
 }
 
-func TestUpdateMCPConfigRecreateFailureKeepsRestartRequired(t *testing.T) {
+func TestUpdateMCPServersDoesNotLiveReconcileUnchangedOpenClawConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	mcpReconcileCalls := 0
+	provisionCalls := 0
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"openclaw-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindOpenClawSandbox,
+			mcpRestart: func(change agentruntime.MCPServersChange) (bool, error) {
+				return !reflect.DeepEqual(change.Previous.Servers, change.Current.Servers), nil
+			},
+			mcpReconcile: func(context.Context, agentruntime.Handle, agentruntime.MCPServersChange) error {
+				mcpReconcileCalls++
+				return nil
+			},
+			provision: func(context.Context, agentruntime.ProvisionRequest) error {
+				provisionCalls++
+				return nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	currentMCPServers := map[string]any{
+		"context7": map[string]any{
+			"command": "uvx",
+			"args":    []any{"context7-mcp"},
+		},
+	}
+	svc.agents["u-alice"] = Agent{
+		ID:          "u-alice",
+		Name:        "alice",
+		RuntimeID:   "rt-u-alice",
+		RuntimeKind: RuntimeKindOpenClawSandbox,
+		Image:       "openclaw-image:test",
+		BoxID:       "openclaw-box-current",
+		Role:        RoleWorker,
+		Status:      string(agentruntime.StateRunning),
+		MCPServers:  currentMCPServers,
+		CreatedAt:   time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	updated, err := svc.Update(context.Background(), "u-alice", UpdateRequest{MCPServers: &currentMCPServers, MCPServersSet: true})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if mcpReconcileCalls != 0 {
+		t.Fatalf("ReconcileMCPServers() calls = %d, want 0", mcpReconcileCalls)
+	}
+	if provisionCalls != 0 {
+		t.Fatalf("Provision() calls = %d, want 0", provisionCalls)
+	}
+	if !reflect.DeepEqual(updated.MCPServers, currentMCPServers) {
+		t.Fatalf("Update().MCPServers = %#v, want %#v", updated.MCPServers, currentMCPServers)
+	}
+}
+
+func TestUpdateMCPServersRecreateFailureKeepsRestartRequired(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	svc, err := NewService(
@@ -1868,8 +2018,8 @@ func TestUpdateMCPConfigRecreateFailureKeepsRestartRequired(t *testing.T) {
 		"",
 		WithRuntime(fakeAgentRuntime{
 			kind: RuntimeKindOpenClawSandbox,
-			mcpRestart: func(change agentruntime.MCPConfigChange) (bool, error) {
-				return !reflect.DeepEqual(change.Previous.Config, change.Current.Config), nil
+			mcpRestart: func(change agentruntime.MCPServersChange) (bool, error) {
+				return !reflect.DeepEqual(change.Previous.Servers, change.Current.Servers), nil
 			},
 			provision: func(context.Context, agentruntime.ProvisionRequest) error {
 				return fmt.Errorf("provision failed")
@@ -1901,12 +2051,10 @@ func TestUpdateMCPConfigRecreateFailureKeepsRestartRequired(t *testing.T) {
 		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
 	}
 
-	nextMCPConfig := map[string]any{
-		"mcpServers": map[string]any{
-			"context7": map[string]any{"command": "uvx"},
-		},
+	nextMCPServers := map[string]any{
+		"context7": map[string]any{"command": "uvx"},
 	}
-	_, err = svc.Update(context.Background(), "u-alice", UpdateRequest{MCPConfig: &nextMCPConfig, MCPConfigSet: true})
+	_, err = svc.Update(context.Background(), "u-alice", UpdateRequest{MCPServers: &nextMCPServers, MCPServersSet: true})
 	if err == nil || !strings.Contains(err.Error(), "provision failed") {
 		t.Fatalf("Update() error = %v, want provision failed", err)
 	}
@@ -1917,15 +2065,15 @@ func TestUpdateMCPConfigRecreateFailureKeepsRestartRequired(t *testing.T) {
 	if !got.AgentProfile.EnvRestartRequired {
 		t.Fatal("Agent().AgentProfile.EnvRestartRequired = false, want true after failed recreate")
 	}
-	if _, ok := got.MCPConfig["mcpServers"].(map[string]any); !ok {
-		t.Fatalf("Agent().MCPConfig = %#v, want saved mcp config", got.MCPConfig)
+	if _, ok := got.MCPServers["context7"].(map[string]any); !ok {
+		t.Fatalf("Agent().MCPServers = %#v, want saved mcp config", got.MCPServers)
 	}
 	if got.BoxID != "openclaw-box-old" {
 		t.Fatalf("Agent().BoxID = %q, want old box id after failed recreate", got.BoxID)
 	}
 }
 
-func TestUpdatePicoClawRuntimeOptionsMCPDoesNotUpdateMCPConfig(t *testing.T) {
+func TestUpdateRejectsMCPRuntimeOptions(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1951,22 +2099,35 @@ func TestUpdatePicoClawRuntimeOptionsMCPDoesNotUpdateMCPConfig(t *testing.T) {
 	nextRuntimeOptions := map[string]any{
 		"mcp": map[string]any{"mcpServers": map[string]any{}},
 	}
-	if _, err := svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions}); err != nil {
-		t.Fatalf("Update() error = %v", err)
+	if _, err := svc.Update(context.Background(), "u-dev", UpdateRequest{RuntimeOptions: &nextRuntimeOptions}); err == nil || !strings.Contains(err.Error(), "runtime_options.mcp is not supported") {
+		t.Fatalf("Update() error = %v, want rejected MCP runtime option", err)
 	}
 	got, ok := svc.Agent("u-dev")
 	if !ok {
 		t.Fatal("Agent(u-dev) not found")
 	}
-	if _, ok := got.RuntimeOptions["mcp"]; !ok {
-		t.Fatalf("Agent().RuntimeOptions = %#v, want ordinary mcp runtime option preserved", got.RuntimeOptions)
+	if _, ok := got.RuntimeOptions["mcp"]; ok {
+		t.Fatalf("Agent().RuntimeOptions = %#v, want rejected MCP runtime option omitted", got.RuntimeOptions)
 	}
-	if got.MCPConfig != nil {
-		t.Fatalf("Agent().MCPConfig = %#v, want nil", got.MCPConfig)
+	if got.MCPServers != nil {
+		t.Fatalf("Agent().MCPServers = %#v, want nil", got.MCPServers)
 	}
 }
 
-func TestCreatePicoClawRuntimeOptionsMCPDoesNotPopulateMCPConfig(t *testing.T) {
+func TestValidateRuntimeOptionsWithoutMCPRejectsBothReservedKeys(t *testing.T) {
+	for name, runtimeOptions := range map[string]map[string]any{
+		"mcp":        {"mcp": map[string]any{}},
+		"mcpServers": {"mcpServers": map[string]any{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateRuntimeOptionsWithoutMCP(runtimeOptions); err == nil {
+				t.Fatalf("validateRuntimeOptionsWithoutMCP(%#v) error = nil", runtimeOptions)
+			}
+		})
+	}
+}
+
+func TestCreateRejectsMCPRuntimeOptions(t *testing.T) {
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1978,7 +2139,7 @@ func TestCreatePicoClawRuntimeOptionsMCPDoesNotPopulateMCPConfig(t *testing.T) {
 		t.Fatalf("NewService() error = %v", err)
 	}
 
-	created, err := svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
+	_, err = svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
 		Name:        "dev2",
 		Role:        RoleWorker,
 		RuntimeKind: RuntimeKindPicoClawSandbox,
@@ -1987,31 +2148,80 @@ func TestCreatePicoClawRuntimeOptionsMCPDoesNotPopulateMCPConfig(t *testing.T) {
 			"mcp": map[string]any{"mcpServers": map[string]any{}},
 		},
 	}})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if _, ok := created.RuntimeOptions["mcp"]; !ok {
-		t.Fatalf("Create().RuntimeOptions = %#v, want mcp key preserved", created.RuntimeOptions)
-	}
-	if created.MCPConfig != nil {
-		t.Fatalf("Create().MCPConfig = %#v, want nil", created.MCPConfig)
+	if err == nil || !strings.Contains(err.Error(), "runtime_options.mcp is not supported") {
+		t.Fatalf("Create() error = %v, want rejected MCP runtime option", err)
 	}
 
-	created, err = svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
-		Name:        "dev3",
-		Role:        RoleWorker,
-		RuntimeKind: RuntimeKindPicoClawSandbox,
-		Image:       "picoclaw-image:test",
-		MCPConfig: map[string]any{
-			"mcpServers": map[string]any{},
-		},
-		MCPConfigSet: true,
+	created, err := svc.Create(context.Background(), CreateRequest{Spec: CreateAgentSpec{
+		Name:          "dev3",
+		Role:          RoleWorker,
+		RuntimeKind:   RuntimeKindPicoClawSandbox,
+		Image:         "picoclaw-image:test",
+		MCPServers:    map[string]any{},
+		MCPServersSet: true,
 	}})
 	if err != nil {
-		t.Fatalf("Create() error = %v", err)
+		t.Fatalf("Create(empty MCPServers) error = %v", err)
 	}
-	if _, ok := created.MCPConfig["mcpServers"].(map[string]any); !ok {
-		t.Fatalf("Create().MCPConfig = %#v, want managed empty config", created.MCPConfig)
+	if created.MCPServers == nil || len(created.MCPServers) != 0 {
+		t.Fatalf("Create().MCPServers = %#v, want an explicit empty server map", created.MCPServers)
+	}
+}
+
+func TestUpdateMCPServersClearPersistsExplicitEmptyMap(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	statePath := filepath.Join(homeDir, "agents.json")
+
+	newService := func() *Service {
+		svc, err := NewService(
+			testModelConfig(),
+			config.ServerConfig{},
+			"",
+			statePath,
+			WithRuntime(fakeAgentRuntime{kind: RuntimeKindCodex}),
+		)
+		if err != nil {
+			t.Fatalf("NewService() error = %v", err)
+		}
+		return svc
+	}
+
+	svc := newService()
+	svc.agents["u-dev"] = Agent{
+		ID:          "u-dev",
+		Name:        "dev",
+		RuntimeID:   "rt-u-dev",
+		RuntimeKind: RuntimeKindCodex,
+		RuntimeName: RuntimeNameCodex,
+		Role:        RoleWorker,
+		Status:      string(agentruntime.StateStopped),
+		CreatedAt:   time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC),
+		MCPServers: map[string]any{
+			"context7": map[string]any{"command": "npx"},
+		},
+	}
+
+	empty := map[string]any{}
+	updated, err := svc.Update(context.Background(), "u-dev", UpdateRequest{
+		MCPServers:    &empty,
+		MCPServersSet: true,
+		FieldMask:     []string{"mcpServers"},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.MCPServers == nil || len(updated.MCPServers) != 0 {
+		t.Fatalf("Update().MCPServers = %#v, want explicit empty map", updated.MCPServers)
+	}
+
+	reloaded := newService()
+	got, ok := reloaded.Agent("u-dev")
+	if !ok {
+		t.Fatal("reloaded Agent(u-dev) not found")
+	}
+	if got.MCPServers == nil || len(got.MCPServers) != 0 {
+		t.Fatalf("reloaded MCPServers = %#v, want explicit empty map", got.MCPServers)
 	}
 }
 
@@ -2036,8 +2246,8 @@ func TestReplacePreservesInheritedMCPBeforeDeletingExistingAgent(t *testing.T) {
 		BoxID:       "openclaw-box-old",
 		Role:        RoleWorker,
 		Status:      string(agentruntime.StateStopped),
-		MCPConfig: map[string]any{
-			"mcpServers": map[string]any{"context7": map[string]any{"command": "uvx"}},
+		MCPServers: map[string]any{
+			"context7": map[string]any{"command": "uvx"},
 		},
 		AgentProfile: AgentProfile{
 			Name:            "dev",
@@ -2066,9 +2276,38 @@ func TestReplacePreservesInheritedMCPBeforeDeletingExistingAgent(t *testing.T) {
 	if replaced.RuntimeKind != RuntimeKindPicoClawSandbox {
 		t.Fatalf("Create(replace).RuntimeKind = %q, want %q", replaced.RuntimeKind, RuntimeKindPicoClawSandbox)
 	}
-	servers, _ := replaced.MCPConfig["mcpServers"].(map[string]any)
-	if _, ok := servers["context7"]; !ok {
-		t.Fatalf("Create(replace).MCPConfig = %#v, want inherited context7", replaced.MCPConfig)
+	if _, ok := replaced.MCPServers["context7"]; !ok {
+		t.Fatalf("Create(replace).MCPServers = %#v, want inherited context7", replaced.MCPServers)
+	}
+}
+
+func TestMergeReplaceSpecRuntimeFieldMaskPreservesMCPServers(t *testing.T) {
+	existing := Agent{
+		ID:             "u-dev",
+		Name:           "dev",
+		RuntimeKind:    RuntimeKindCodex,
+		RuntimeName:    RuntimeNameCodex,
+		RuntimeOptions: map[string]any{"local_workspace_dir": "/tmp/old"},
+		MCPServers: map[string]any{
+			"context7": map[string]any{"command": "npx"},
+		},
+	}
+	next := CreateAgentSpec{
+		ID:             existing.ID,
+		RuntimeKind:    RuntimeKindCodex,
+		RuntimeName:    RuntimeNameCodex,
+		RuntimeOptions: map[string]any{"local_workspace_dir": "/tmp/new"},
+	}
+
+	merged, err := mergeReplaceSpec(existing, next, []string{"runtime"})
+	if err != nil {
+		t.Fatalf("mergeReplaceSpec() error = %v", err)
+	}
+	if got, want := merged.RuntimeOptions["local_workspace_dir"], "/tmp/new"; got != want {
+		t.Fatalf("merged runtime option = %#v, want %q", got, want)
+	}
+	if !reflect.DeepEqual(merged.MCPServers, existing.MCPServers) {
+		t.Fatalf("merged MCPServers = %#v, want preserved %#v", merged.MCPServers, existing.MCPServers)
 	}
 }
 
@@ -2105,18 +2344,16 @@ func TestReplaceRejectsInvalidOpenClawMCPBeforeDeletingExistingAgent(t *testing.
 
 	_, err = svc.Create(context.Background(), CreateRequest{
 		Replace:   true,
-		FieldMask: []string{"mcp_config"},
+		FieldMask: []string{"mcpServers"},
 		Spec: CreateAgentSpec{
 			ID: "u-dev",
-			MCPConfig: map[string]any{
-				"servers": map[string]any{
-					"context7": map[string]any{"command": "uvx"},
-				},
+			MCPServers: map[string]any{
+				"context7": "invalid",
 			},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), `mcp_config contains unsupported field`) {
-		t.Fatalf("Create(replace) error = %v, want unsupported mcp field", err)
+	if err == nil || !strings.Contains(err.Error(), `mcpServers.context7 must be an object`) {
+		t.Fatalf("Create(replace) error = %v, want invalid mcp server", err)
 	}
 	svc.mu.RLock()
 	_, ok := svc.agents["u-dev"]
@@ -2857,16 +3094,14 @@ func TestEnsureBootstrapManagerUsesCodexRuntimeWithoutConnectorTokenEnv(t *testi
 	}
 }
 
-func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfig(t *testing.T) {
+func TestEnsureBootstrapManagerPreservesStoredManagerMCPServers(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
-	mcpConfig := map[string]any{
-		agentruntime.MCPConfigServersKey: map[string]any{
-			"context7": map[string]any{
-				"command": "npx",
-				"args":    []any{"-y", "@upstash/context7-mcp"},
-			},
+	mcpServers := map[string]any{
+		"context7": map[string]any{
+			"command": "npx",
+			"args":    []any{"-y", "@upstash/context7-mcp"},
 		},
 	}
 	statePath := filepath.Join(homeDir, "agents.json")
@@ -2879,7 +3114,7 @@ func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfig(t *testing.T) {
 				RuntimeKind: RuntimeKindCodex,
 				Role:        RoleManager,
 				BoxID:       "codex-session-existing",
-				MCPConfig:   mcpConfig,
+				MCPServers:  mcpServers,
 				CreatedAt:   time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
 				AgentProfile: AgentProfile{
 					Name:            ManagerName,
@@ -2898,7 +3133,7 @@ func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfig(t *testing.T) {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
 
-	var provisionedMCPConfig map[string]any
+	var provisionedMCPServers map[string]any
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{ListenAddr: ":18080", AccessToken: "server-token"},
@@ -2907,7 +3142,7 @@ func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfig(t *testing.T) {
 		WithRuntime(fakeAgentRuntime{
 			kind: RuntimeKindCodex,
 			provision: func(_ context.Context, req agentruntime.ProvisionRequest) error {
-				provisionedMCPConfig = req.MCPConfig
+				provisionedMCPServers = req.MCPServers
 				return nil
 			},
 			new: func(_ context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
@@ -2925,12 +3160,12 @@ func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfig(t *testing.T) {
 	if err := svc.EnsureBootstrapManager(context.Background(), false); err != nil {
 		t.Fatalf("EnsureBootstrapManager() error = %v", err)
 	}
-	assertMCPConfigHasServer(t, provisionedMCPConfig, "context7")
+	assertMCPServersHasServer(t, provisionedMCPServers, "context7")
 	manager, ok := svc.Agent(ManagerUserID)
 	if !ok {
 		t.Fatal("manager agent not saved")
 	}
-	assertMCPConfigHasServer(t, manager.MCPConfig, "context7")
+	assertMCPServersHasServer(t, manager.MCPServers, "context7")
 
 	reloaded, err := NewService(
 		testModelConfig(),
@@ -2946,10 +3181,10 @@ func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfig(t *testing.T) {
 	if !ok {
 		t.Fatal("reloaded manager agent not saved")
 	}
-	assertMCPConfigHasServer(t, reloadedManager.MCPConfig, "context7")
+	assertMCPServersHasServer(t, reloadedManager.MCPServers, "context7")
 }
 
-func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfigWhenCodexUnavailable(t *testing.T) {
+func TestEnsureBootstrapManagerPreservesStoredManagerMCPServersWhenCodexUnavailable(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	origLocateCodexCLI := locateCodexCLI
@@ -2958,10 +3193,8 @@ func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfigWhenCodexUnavailab
 		locateCodexCLI = origLocateCodexCLI
 	})
 
-	mcpConfig := map[string]any{
-		agentruntime.MCPConfigServersKey: map[string]any{
-			"context7": map[string]any{"command": "npx"},
-		},
+	mcpServers := map[string]any{
+		"context7": map[string]any{"command": "npx"},
 	}
 	statePath := filepath.Join(homeDir, "agents.json")
 	data, err := json.Marshal(persistedState{
@@ -2972,7 +3205,7 @@ func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfigWhenCodexUnavailab
 				RuntimeID:   runtimeIDForAgentID(ManagerUserID),
 				RuntimeKind: RuntimeKindCodex,
 				Role:        RoleManager,
-				MCPConfig:   mcpConfig,
+				MCPServers:  mcpServers,
 				CreatedAt:   time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
 				AgentProfile: AgentProfile{
 					Name:            ManagerName,
@@ -3018,10 +3251,10 @@ func TestEnsureBootstrapManagerPreservesStoredManagerMCPConfigWhenCodexUnavailab
 	if manager.Status != StatusRuntimeUnavailable {
 		t.Fatalf("manager status = %q, want %q", manager.Status, StatusRuntimeUnavailable)
 	}
-	assertMCPConfigHasServer(t, manager.MCPConfig, "context7")
+	assertMCPServersHasServer(t, manager.MCPServers, "context7")
 }
 
-func TestEnsureBootstrapManagerValidatesStoredManagerMCPConfigBeforeRecreateDelete(t *testing.T) {
+func TestEnsureBootstrapManagerValidatesStoredManagerMCPServersBeforeRecreateDelete(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
@@ -3035,8 +3268,8 @@ func TestEnsureBootstrapManagerValidatesStoredManagerMCPConfigBeforeRecreateDele
 				RuntimeKind: RuntimeKindCodex,
 				Role:        RoleManager,
 				BoxID:       "codex-session-existing",
-				MCPConfig: map[string]any{
-					agentruntime.MCPConfigServersKey: "invalid",
+				MCPServers: map[string]any{
+					"invalid": "invalid",
 				},
 				CreatedAt: time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
 				AgentProfile: AgentProfile{
@@ -3082,12 +3315,12 @@ func TestEnsureBootstrapManagerValidatesStoredManagerMCPConfigBeforeRecreateDele
 	}
 
 	err = svc.EnsureBootstrapManager(context.Background(), true)
-	if err == nil || !strings.Contains(err.Error(), "mcp_config.mcpServers must be an object") {
+	if err == nil || !strings.Contains(err.Error(), "mcpServers.invalid must be an object") {
 		t.Fatalf("EnsureBootstrapManager() error = %v, want mcpServers validation error", err)
 	}
 }
 
-func TestEnsureBootstrapManagerValidatesLegacyManagerMCPConfigBeforeLegacyCleanup(t *testing.T) {
+func TestEnsureBootstrapManagerValidatesLegacyManagerMCPServersBeforeLegacyCleanup(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	ResetTestHooks()
@@ -3107,8 +3340,8 @@ func TestEnsureBootstrapManagerValidatesLegacyManagerMCPConfigBeforeLegacyCleanu
 				RuntimeKind: RuntimeKindPicoClawSandbox,
 				Role:        RoleManager,
 				BoxID:       "legacy-manager-box",
-				MCPConfig: map[string]any{
-					agentruntime.MCPConfigServersKey: "invalid",
+				MCPServers: map[string]any{
+					"invalid": "invalid",
 				},
 				CreatedAt: time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
 				AgentProfile: AgentProfile{
@@ -3151,7 +3384,7 @@ func TestEnsureBootstrapManagerValidatesLegacyManagerMCPConfigBeforeLegacyCleanu
 	}
 
 	err = svc.EnsureBootstrapManager(context.Background(), false)
-	if err == nil || !strings.Contains(err.Error(), "mcp_config.mcpServers must be an object") {
+	if err == nil || !strings.Contains(err.Error(), "mcpServers.invalid must be an object") {
 		t.Fatalf("EnsureBootstrapManager() error = %v, want mcpServers validation error", err)
 	}
 }
@@ -3231,19 +3464,15 @@ func TestEnsureBootstrapManagerIgnoresLegacyCleanupFailureForCodexManager(t *tes
 	}
 }
 
-func TestEnsureBootstrapManagerPreservesLatestManagerMCPConfigDuringStart(t *testing.T) {
+func TestEnsureBootstrapManagerPreservesLatestManagerMCPServersDuringStart(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
-	oldMCPConfig := map[string]any{
-		agentruntime.MCPConfigServersKey: map[string]any{
-			"old": map[string]any{"command": "npx"},
-		},
+	oldMCPServers := map[string]any{
+		"old": map[string]any{"command": "npx"},
 	}
-	newMCPConfig := map[string]any{
-		agentruntime.MCPConfigServersKey: map[string]any{
-			"new": map[string]any{"command": "uvx"},
-		},
+	newMCPServers := map[string]any{
+		"new": map[string]any{"command": "uvx"},
 	}
 	statePath := filepath.Join(homeDir, "agents.json")
 	data, err := json.Marshal(persistedState{
@@ -3254,7 +3483,7 @@ func TestEnsureBootstrapManagerPreservesLatestManagerMCPConfigDuringStart(t *tes
 				RuntimeID:   runtimeIDForAgentID(ManagerUserID),
 				RuntimeKind: RuntimeKindCodex,
 				Role:        RoleManager,
-				MCPConfig:   oldMCPConfig,
+				MCPServers:  oldMCPServers,
 				CreatedAt:   time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
 				AgentProfile: AgentProfile{
 					Name:            ManagerName,
@@ -3292,9 +3521,9 @@ func TestEnsureBootstrapManagerPreservesLatestManagerMCPConfigDuringStart(t *tes
 			info: func(_ context.Context, h agentruntime.Handle) (agentruntime.Info, error) {
 				return agentruntime.Info{HandleID: h.HandleID, State: agentruntime.StateRunning}, nil
 			},
-			mcpReconcile: func(_ context.Context, h agentruntime.Handle, change agentruntime.MCPConfigChange) error {
+			mcpReconcile: func(_ context.Context, h agentruntime.Handle, change agentruntime.MCPServersChange) error {
 				reconcileHandles = append(reconcileHandles, h.HandleID)
-				reconciledConfigs = append(reconciledConfigs, utils.CloneAnyMap(change.Current.Config))
+				reconciledConfigs = append(reconciledConfigs, utils.CloneAnyMap(change.Current.Servers))
 				return nil
 			},
 		}),
@@ -3309,12 +3538,12 @@ func TestEnsureBootstrapManagerPreservesLatestManagerMCPConfigDuringStart(t *tes
 	}()
 
 	<-newStarted
-	updateConfig := utils.CloneAnyMap(newMCPConfig)
+	updateConfig := utils.CloneAnyMap(newMCPServers)
 	if _, err := svc.Update(context.Background(), ManagerUserID, UpdateRequest{
-		MCPConfig:    &updateConfig,
-		MCPConfigSet: true,
+		MCPServers:    &updateConfig,
+		MCPServersSet: true,
 	}); err != nil {
-		t.Fatalf("Update(manager MCPConfig) error = %v", err)
+		t.Fatalf("Update(manager MCPServers) error = %v", err)
 	}
 	close(releaseNew)
 
@@ -3325,9 +3554,9 @@ func TestEnsureBootstrapManagerPreservesLatestManagerMCPConfigDuringStart(t *tes
 	if !ok {
 		t.Fatal("manager agent not saved")
 	}
-	assertMCPConfigHasServer(t, manager.MCPConfig, "new")
-	if servers := manager.MCPConfig[agentruntime.MCPConfigServersKey].(map[string]any); servers["old"] != nil {
-		t.Fatalf("manager MCPConfig servers = %#v, want latest config without old server", servers)
+	assertMCPServersHasServer(t, manager.MCPServers, "new")
+	if manager.MCPServers["old"] != nil {
+		t.Fatalf("manager MCPServers = %#v, want latest config without old server", manager.MCPServers)
 	}
 	if !manager.AgentProfile.EnvRestartRequired {
 		t.Fatal("manager EnvRestartRequired = false, want true after MCP update during start")
@@ -3338,7 +3567,7 @@ func TestEnsureBootstrapManagerPreservesLatestManagerMCPConfigDuringStart(t *tes
 	if got := reconcileHandles[len(reconcileHandles)-1]; got != "codex-manager-session" {
 		t.Fatalf("last MCP reconcile handle = %q, want codex-manager-session", got)
 	}
-	assertMCPConfigHasServer(t, reconciledConfigs[len(reconciledConfigs)-1], "new")
+	assertMCPServersHasServer(t, reconciledConfigs[len(reconciledConfigs)-1], "new")
 }
 
 func TestEnsureBootstrapManagerRecordsMissingCodexCLIWithoutRuntimeStart(t *testing.T) {
@@ -3577,7 +3806,7 @@ func TestEnsureManagerRejectsNonCodexRuntimeOverride(t *testing.T) {
 	}
 }
 
-func TestCreateManagerRejectsInlineMCPConfig(t *testing.T) {
+func TestCreateManagerRejectsInlineMCPServers(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	svc, err := NewService(
@@ -3595,20 +3824,18 @@ func TestCreateManagerRejectsInlineMCPConfig(t *testing.T) {
 		Spec: CreateAgentSpec{
 			ID:   ManagerUserID,
 			Name: ManagerName,
-			MCPConfig: map[string]any{
-				agentruntime.MCPConfigServersKey: map[string]any{
-					"context7": map[string]any{"command": "npx"},
-				},
+			MCPServers: map[string]any{
+				"context7": map[string]any{"command": "npx"},
 			},
-			MCPConfigSet: true,
+			MCPServersSet: true,
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "manager mcp_config must be updated through the MCP config endpoint") {
-		t.Fatalf("Create(manager with mcp_config) error = %v, want manager mcp_config rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "manager mcpServers must be updated through the MCP servers endpoint") {
+		t.Fatalf("Create(manager with mcpServers) error = %v, want manager mcpServers rejection", err)
 	}
 }
 
-func TestCreateReplaceManagerRejectsInlineMCPConfig(t *testing.T) {
+func TestCreateReplaceManagerRejectsInlineMCPServers(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	svc, err := NewService(
@@ -3633,30 +3860,18 @@ func TestCreateReplaceManagerRejectsInlineMCPConfig(t *testing.T) {
 	_, err = svc.Create(context.Background(), CreateRequest{
 		Spec: CreateAgentSpec{
 			ID: ManagerUserID,
-			MCPConfig: map[string]any{
-				agentruntime.MCPConfigServersKey: map[string]any{
-					"context7": map[string]any{"command": "npx"},
-				},
+			MCPServers: map[string]any{
+				"context7": map[string]any{"command": "npx"},
 			},
-			MCPConfigSet: true,
+			MCPServersSet: true,
 		},
 		Replace:   true,
-		FieldMask: []string{"mcp_config"},
+		FieldMask: []string{"mcpServers"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "manager mcp_config must be updated through the MCP config endpoint") {
-		t.Fatalf("Create(--replace manager with mcp_config) error = %v, want manager mcp_config rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "manager mcpServers must be updated through the MCP servers endpoint") {
+		t.Fatalf("Create(--replace manager with mcpServers) error = %v, want manager mcpServers rejection", err)
 	}
 
-	_, err = svc.Create(context.Background(), CreateRequest{
-		Spec: CreateAgentSpec{
-			ID: ManagerUserID,
-		},
-		Replace:   true,
-		FieldMask: []string{" MCP_CONFIG "},
-	})
-	if err == nil || !strings.Contains(err.Error(), "manager mcp_config must be updated through the MCP config endpoint") {
-		t.Fatalf("Create(--replace manager with mcp_config field mask) error = %v, want manager mcp_config rejection", err)
-	}
 }
 
 func TestCreateWorkerWithUTF8NameUsesAgentIDSandboxName(t *testing.T) {

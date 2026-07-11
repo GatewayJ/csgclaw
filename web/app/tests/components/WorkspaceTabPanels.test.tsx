@@ -72,7 +72,7 @@ const hub: WorkspaceSidebarProps["hub"] = {
   selectedHubResourceType: "skill",
   selectedMCPServerName: "filesystem",
   selectedHubSkillName: "demo-skill",
-  mcps: [
+  mcpServers: [
     {
       name: "filesystem",
       config: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem"] },

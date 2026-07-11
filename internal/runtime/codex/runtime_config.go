@@ -134,8 +134,8 @@ func buildMemoryConfigBlock(inMemoriesTable bool) string {
 	return b.String()
 }
 
-func buildMCPConfigBlock(mcpConfig map[string]any, workspaceDir string) (string, error) {
-	servers, err := agentruntime.MCPConfigServers(mcpConfig)
+func buildMCPServersBlock(mcpServers map[string]any, workspaceDir string) (string, error) {
+	servers, err := agentruntime.NormalizeMCPServers(mcpServers)
 	if err != nil {
 		return "", err
 	}
@@ -155,7 +155,7 @@ func buildMCPConfigBlock(mcpConfig map[string]any, workspaceDir string) (string,
 	for idx, name := range names {
 		entry, ok := servers[name].(map[string]any)
 		if !ok {
-			return "", fmt.Errorf("mcp_config.%s.%s must be an object", agentruntime.MCPConfigServersKey, name)
+			return "", fmt.Errorf("%s.%s must be an object", agentruntime.MCPServersKey, name)
 		}
 		if idx > 0 {
 			b.WriteString("\n")
@@ -172,7 +172,7 @@ func buildMCPConfigBlock(mcpConfig map[string]any, workspaceDir string) (string,
 		}
 		command := mcpTrimmedString(entry["command"])
 		if command == "" {
-			return "", fmt.Errorf("mcp_config.%s.%s must declare command or url", agentruntime.MCPConfigServersKey, name)
+			return "", fmt.Errorf("%s.%s must declare command or url", agentruntime.MCPServersKey, name)
 		}
 		fmt.Fprintf(&b, "command = %s\n", strconv.Quote(command))
 		if args := mcpStringSlice(entry["args"]); len(args) > 0 {
@@ -213,7 +213,7 @@ func resolveCodexMCPWorkspaceArg(arg, workspaceDir string) string {
 	return arg
 }
 
-func parseCodexMCPConfig(content string) (map[string]any, error) {
+func parseCodexMCPServers(content string) (map[string]any, error) {
 	if strings.TrimSpace(content) == "" {
 		return nil, nil
 	}
@@ -230,18 +230,18 @@ func parseCodexMCPConfig(content string) (map[string]any, error) {
 		return nil, fmt.Errorf("codex mcp_servers must be an object")
 	}
 	servers = codexMCPServersToGeneric(servers)
-	normalized, err := agentruntime.NormalizeMCPConfig(map[string]any{agentruntime.MCPConfigServersKey: servers})
+	normalized, err := agentruntime.NormalizeMCPServers(servers)
 	if err != nil {
 		return nil, err
 	}
 	return normalized, nil
 }
 
-func configureCodexHomeConfig(existing string, profile agentruntime.Profile, mcpConfig map[string]any) string {
-	return configureCodexHomeConfigWithWorkspace(existing, profile, mcpConfig, "")
+func configureCodexHomeConfig(existing string, profile agentruntime.Profile, mcpServers map[string]any) string {
+	return configureCodexHomeConfigWithWorkspace(existing, profile, mcpServers, "")
 }
 
-func configureCodexHomeConfigWithWorkspace(existing string, profile agentruntime.Profile, mcpConfig map[string]any, workspaceDir string) string {
+func configureCodexHomeConfigWithWorkspace(existing string, profile agentruntime.Profile, mcpServers map[string]any, workspaceDir string) string {
 	content := sanitizeCopiedCodexConfigContent(existing)
 	content = strings.TrimLeft(content, "\n")
 
@@ -251,7 +251,7 @@ func configureCodexHomeConfigWithWorkspace(existing string, profile agentruntime
 	content = stripManagedBlock(content, csgclawMemoryFeatureBeginMarker, csgclawMemoryFeatureEndMarker)
 	content = stripManagedBlock(content, csgclawMemoryConfigBeginMarker, csgclawMemoryConfigEndMarker)
 	content = stripManagedBlock(content, csgclawMCPBeginMarker, csgclawMCPEndMarker)
-	if mcpConfig != nil {
+	if mcpServers != nil {
 		content = stripTableBlocks(content, mcpServersTableHeaderRe)
 	}
 
@@ -284,7 +284,7 @@ func configureCodexHomeConfigWithWorkspace(existing string, profile agentruntime
 	if block := buildProviderConfigBlock(profile); block != "" {
 		content = hoistManagedBlock(content, block)
 	}
-	if block, err := buildMCPConfigBlock(mcpConfig, workspaceDir); err == nil && block != "" {
+	if block, err := buildMCPServersBlock(mcpServers, workspaceDir); err == nil && block != "" {
 		content = appendManagedBlock(content, block)
 	}
 

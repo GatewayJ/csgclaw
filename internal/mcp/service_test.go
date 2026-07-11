@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"csgclaw/internal/localstore"
@@ -36,17 +37,13 @@ func TestServiceUsesInjectedServerStore(t *testing.T) {
 	}
 }
 
-func TestCreateServerStoresGenericConfigWithTimeout(t *testing.T) {
+func TestCreateServerStoresRawConfigWithTimeout(t *testing.T) {
 	store := &memoryServerStore{}
 	svc := NewService(WithServerStore(store))
 
 	state, err := svc.CreateServer(context.Background(), "grafana", map[string]any{
-		"mcpServers": map[string]any{
-			"grafana": map[string]any{
-				"url":     "https://mcp.example.com/grafana",
-				"timeout": 45,
-			},
-		},
+		"url":     "https://mcp.example.com/grafana",
+		"timeout": 45,
 	})
 	if err != nil {
 		t.Fatalf("CreateServer() error = %v", err)
@@ -60,7 +57,26 @@ func TestCreateServerStoresGenericConfigWithTimeout(t *testing.T) {
 		t.Fatalf("grafana.timeout = %#v, want 45", grafana["timeout"])
 	}
 	if _, exists := grafana[ServersKey]; exists {
-		t.Fatalf("grafana config unexpectedly retained nested mcpServers: %#v", grafana)
+		t.Fatalf("grafana config unexpectedly contains nested mcpServers: %#v", grafana)
+	}
+}
+
+func TestCreateServerRejectsWrappedMCPServersConfig(t *testing.T) {
+	store := &memoryServerStore{}
+	svc := NewService(WithServerStore(store))
+
+	_, err := svc.CreateServer(context.Background(), "grafana", map[string]any{
+		ServersKey: map[string]any{
+			"grafana": map[string]any{
+				"url": "https://mcp.example.com/grafana",
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "single server object") {
+		t.Fatalf("CreateServer() error = %v, want wrapped config rejection", err)
+	}
+	if len(store.servers) != 0 {
+		t.Fatalf("CreateServer() wrote wrapped config: %#v", store.servers)
 	}
 }
 

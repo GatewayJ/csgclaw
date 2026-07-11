@@ -258,7 +258,7 @@ export function useWorkspaceController() {
     agentsQuery,
     bootstrapConfig,
     data: displayData,
-    catalogMCPServers: hub.mcps,
+    catalogMCPServers: hub.mcpServers,
     catalogMCPServersError: hub.mcpStateError,
     catalogMCPServersLoading: hub.mcpServersLoading,
     hubTemplates,

@@ -128,7 +128,7 @@ export function WorkspaceSidebar({
   const firstNotificationAgent = notificationAgentItems[0] ?? null;
   const firstTeam = teams[0] ?? null;
   const firstHubTemplate = hub?.templates[0] ?? null;
-  const firstMCPServer = hub?.mcps?.[0] ?? null;
+  const firstMCPServer = hub?.mcpServers?.[0] ?? null;
   const firstHubSkill = hub?.skills[0] ?? null;
   const firstModelProvider = modelProviders?.providers[0] ?? null;
   const notificationAgentIds = useMemo(
@@ -287,10 +287,10 @@ export function WorkspaceSidebar({
           },
           {
             active: activeContextSectionId === WorkspaceContextSectionIds.mcpServers,
-            badge: badgeCount(hub?.mcps?.length),
+            badge: badgeCount(hub?.mcpServers?.length),
             groupId: WorkspaceContextSectionIds.mcpServers,
             icon: navigationIcon(Server),
-            id: "mcps",
+            id: "mcp-servers",
             label: t("resourcesMCPLabel"),
             onSelect: () => {
               if (firstMCPServer && onSelectMCPServer) {
@@ -345,7 +345,7 @@ export function WorkspaceSidebar({
       firstNotificationAgent,
       firstTeam,
       firstWorkerAgent,
-      hub?.mcps?.length,
+      hub?.mcpServers?.length,
       hub?.templates.length,
       hub?.skills.length,
       modelProviders?.providers.length,
@@ -719,7 +719,7 @@ function contextBadgeCountForSection({
     return hub?.templates.length ?? 0;
   }
   if (activeContextSectionId === WorkspaceContextSectionIds.mcpServers) {
-    return hub?.mcps?.length ?? 0;
+    return hub?.mcpServers?.length ?? 0;
   }
   if (activeContextSectionId === WorkspaceContextSectionIds.hubSkills) {
     return hub?.skills.length ?? 0;

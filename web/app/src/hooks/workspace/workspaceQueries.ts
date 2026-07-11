@@ -67,8 +67,8 @@ export const workspaceQueryKeys = {
   agentWorkspaceFile: (agentID: string | null | undefined, workspacePath: string | null | undefined) =>
     [WORKSPACE_QUERY_SCOPE, "agent-workspace-file", agentID || "", workspacePath || ""] as const,
   agentSkills: (agentID: string | null | undefined) => [WORKSPACE_QUERY_SCOPE, "agent-skills", agentID || ""] as const,
-  agentMCPConfig: (agentID: string | null | undefined) =>
-    [WORKSPACE_QUERY_SCOPE, "agent-mcp-config", agentID || ""] as const,
+  agentMCPServers: (agentID: string | null | undefined) =>
+    [WORKSPACE_QUERY_SCOPE, "agent-mcp-servers", agentID || ""] as const,
   agentProfileModels: (requestKey: string | null | undefined) =>
     [WORKSPACE_QUERY_SCOPE, "agent-profile-models", requestKey || ""] as const,
   cliProxyAuthStatus: (provider: string | null | undefined) =>

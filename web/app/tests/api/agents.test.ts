@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
-import { batchAddAgentSkillsRequest, deleteAgentSkillRequest, startFeishuRegistrationRequest } from "@/api/agents";
+import {
+  batchAddAgentMCPServersRequest,
+  batchAddAgentSkillsRequest,
+  deleteAgentSkillRequest,
+  fetchAgentMCPServers,
+  startFeishuRegistrationRequest,
+  updateAgentMCPServersRequest,
+} from "@/api/agents";
 
 function mockFetch(): Mock<typeof fetch> {
   const fetchMock = vi.fn<typeof fetch>(async () => new Response("", { status: 200 }));
@@ -22,6 +29,39 @@ describe("agents API", () => {
       "api/v1/agents/u-manager/skills:batchAdd",
       expect.objectContaining({
         body: JSON.stringify({ names: ["alpha", "beta"] }),
+        method: "POST",
+      }),
+    );
+  });
+
+  it("uses the agent MCP servers paths and direct server map payloads", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ actual: {}, desired: {} }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchAgentMCPServers("u-manager");
+    await updateAgentMCPServersRequest("u-manager", { context7: { command: "npx" } });
+    await batchAddAgentMCPServersRequest("u-manager", ["context7"]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "api/v1/agents/u-manager/mcp-servers", expect.anything());
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "api/v1/agents/u-manager/mcp-servers",
+      expect.objectContaining({
+        body: JSON.stringify({ mcpServers: { context7: { command: "npx" } } }),
+        method: "PUT",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "api/v1/agents/u-manager/mcp-servers:batchAdd",
+      expect.objectContaining({
+        body: JSON.stringify({ names: ["context7"] }),
         method: "POST",
       }),
     );

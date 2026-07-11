@@ -6,7 +6,7 @@ import {
   EnvKeyValueEditor,
   FieldHelpTooltip,
   isBlank,
-  MCPConfigPanel,
+  MCPServersPanel,
   ModelOptionLabel,
   NotifierControls,
   requiredFieldLabel,
@@ -29,7 +29,7 @@ import {
   pickDefaultAgentTemplate,
   defaultWorkerImageForRuntime,
   runtimeOptionSchemasForAgent,
-  supportsMCPConfig,
+  supportsMCPServers,
   templateMatchesRuntime,
   workerSelectableTemplates,
 } from "@/models/agents";
@@ -108,7 +108,7 @@ export function AgentProfileModal({
   onSave,
 }: AgentProfileModalProps) {
   const [isEditorScrolling, setIsEditorScrolling] = useState(false);
-  const [mcpConfigInvalid, setMcpConfigInvalid] = useState(false);
+  const [mcpServersInvalid, setMCPServersInvalid] = useState(false);
   const editorScrollTimerRef = useRef<number | null>(null);
   const lastTemplateIDRef = useRef("");
   const createBotKind = agentModalMode === "create" ? agentCreateBotKind : undefined;
@@ -118,7 +118,7 @@ export function AgentProfileModal({
   const missingRequiredEnv = isTemplateCreate && agentDraftMissingRequiredEnv(agentDraft);
   const isCustomCreate = isWorkerCreate && agentCreateMode === "custom";
   const templateLocked = agentCreateTemplateLocked(agentDraft, agentModalMode);
-  const showMCPConfig = !isNotificationContext && supportsMCPConfig(agentDraft.runtime_kind);
+  const showMCPServers = !isNotificationContext && supportsMCPServers(agentDraft.runtime_kind);
   const runtimeOptionSchemas = isNotificationContext
     ? []
     : runtimeOptionSchemasForAgent(
@@ -271,10 +271,10 @@ export function AgentProfileModal({
   );
 
   useEffect(() => {
-    if (!showMCPConfig) {
-      setMcpConfigInvalid(false);
+    if (!showMCPServers) {
+      setMCPServersInvalid(false);
     }
-  }, [showMCPConfig]);
+  }, [showMCPServers]);
 
   function onEditorShellScroll() {
     setIsEditorScrolling(true);
@@ -615,12 +615,12 @@ export function AgentProfileModal({
                       embedded
                     />
                   ) : null}
-                  {showMCPConfig ? (
-                    <MCPConfigPanel
+                  {showMCPServers ? (
+                    <MCPServersPanel
                       draft={agentDraft}
                       t={t}
                       onDraftChange={onAgentDraftChange}
-                      onInvalidChange={setMcpConfigInvalid}
+                      onInvalidChange={setMCPServersInvalid}
                     />
                   ) : null}
                 </div>
@@ -793,7 +793,7 @@ export function AgentProfileModal({
             size="md"
             disabled={
               agentBusy ||
-              mcpConfigInvalid ||
+              mcpServersInvalid ||
               isBlank(agentDraft.name) ||
               (isNotificationContext
                 ? !notifierFormIsComplete(agentDraft, editingAgent)

@@ -14,11 +14,12 @@ function t(key: string, params: Record<string, string | number> = {}) {
     resourcesEmpty: "No templates",
     resourcesImageLabel: "Image",
     resourcesLoading: "Loading resources",
-    resourcesMCPConfigInvalid: "MCP config must be valid JSON.",
-    resourcesMCPConfigJSONLabel: "Config JSON",
-    resourcesMCPConfigLabel: "MCP config",
-    resourcesMCPConfigObjectRequired: "MCP config must be a JSON object.",
-    resourcesMCPConfigWrappedInvalid: "MCP config must be an mcpServers JSON object with exactly one server.",
+    resourcesMCPServerDocumentInvalid: "MCP server definition must be valid JSON.",
+    resourcesMCPServerDocumentJSONLabel: "MCP server JSON",
+    resourcesMCPServerDocumentLabel: "MCP server definition",
+    resourcesMCPServerDocumentObjectRequired: "MCP server definition must be a JSON object.",
+    resourcesMCPServerDocumentInvalidShape:
+      "MCP server definition must be an mcpServers JSON object with exactly one server.",
     resourcesMCPDelete: "Delete",
     resourcesMCPDeleteConfirmMessage: 'Delete MCP server "{name}"?',
     resourcesMCPLoading: "Loading MCP servers",
@@ -196,8 +197,8 @@ function renderMCPDetailPane() {
           onSelectTemplate: vi.fn(),
           onSelectWorkspaceFile: vi.fn(),
           selectedResourceType: "mcp",
-          selectedMCP: mcp,
-          selectedMCPName: mcp.name,
+          selectedMCPServer: mcp,
+          selectedMCPServerName: mcp.name,
           selectedSkill: null,
           selectedSkillPath: "",
           selectedTemplate: null,
@@ -211,7 +212,7 @@ function renderMCPDetailPane() {
           skillTreeError: "",
           skillTreeLoading: false,
           templates: [],
-          mcps: [mcp],
+          mcpServers: [mcp],
           mcpMutationBusy: false,
           mcpMutationError: "",
           mcpStateError: "",
@@ -278,12 +279,12 @@ describe("HubDetailPane", () => {
     expect(container.textContent).toContain("mcpServers");
     expect(container.textContent).toContain("grafana-mcp");
 
-    const editor = screen.getByRole("textbox", { name: "MCP config" });
+    const editor = screen.getByRole("textbox", { name: "MCP server definition" });
     await user.click(editor);
     await user.keyboard("{Control>}a{/Control}");
     await user.keyboard("not json");
 
-    expect(screen.queryByText("MCP config must be valid JSON.")).not.toBeInTheDocument();
+    expect(screen.queryByText("MCP server definition must be valid JSON.")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save" }));
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "@/api/client";
 import { createMCPServerRequest, deleteMCPServerRequest, updateMCPServerRequest } from "@/api/mcp";
-import { mcpServersFromResponse } from "@/models/mcp";
+import { mcpServersFromCatalogResponse } from "@/models/mcp";
 import type { MCPServer, MCPServerPayload } from "@/models/mcp";
 import { workspaceQueryKeys, useWorkspaceMCPServersQuery } from "./workspaceQueries";
 
@@ -35,33 +35,35 @@ export function useWorkspaceMCPSelection({
   const [mcpMutationError, setMCPMutationError] = useState("");
   const mcpServersQuery = useWorkspaceMCPServersQuery();
 
-  const mcps = useMemo(() => mcpServersFromResponse(mcpServersQuery.data ?? null), [mcpServersQuery.data]);
+  const mcpServers = useMemo(() => mcpServersFromCatalogResponse(mcpServersQuery.data ?? null), [mcpServersQuery.data]);
   const selectedMCPServer = useMemo(
-    () => mcps.find((item) => item.name === selectedMCPServerName) || mcps[0] || null,
-    [mcps, selectedMCPServerName],
+    () => mcpServers.find((item) => item.name === selectedMCPServerName) || mcpServers[0] || null,
+    [mcpServers, selectedMCPServerName],
   );
 
   useEffect(() => {
-    if (!mcps.length) {
+    if (!mcpServers.length) {
       setSelectedMCPServerName("");
       return;
     }
-    setSelectedMCPServerName((current) => (mcps.some((item) => item.name === current) ? current : mcps[0]?.name || ""));
-  }, [mcps, setSelectedMCPServerName]);
+    setSelectedMCPServerName((current) =>
+      mcpServers.some((item) => item.name === current) ? current : mcpServers[0]?.name || "",
+    );
+  }, [mcpServers, setSelectedMCPServerName]);
 
   useEffect(() => {
-    if (selectedHubResourceType === "mcp" && !mcps.length) {
+    if (selectedHubResourceType === "mcp" && !mcpServers.length) {
       setSelectedHubResourceType(skillCount ? "skill" : "template");
       return;
     }
     if (selectedHubResourceType === "skill" && !skillCount) {
-      setSelectedHubResourceType(mcps.length ? "mcp" : "template");
+      setSelectedHubResourceType(mcpServers.length ? "mcp" : "template");
       return;
     }
     if (selectedHubResourceType === "template" && !templateCount) {
-      setSelectedHubResourceType(mcps.length ? "mcp" : skillCount ? "skill" : "template");
+      setSelectedHubResourceType(mcpServers.length ? "mcp" : skillCount ? "skill" : "template");
     }
-  }, [mcps.length, selectedHubResourceType, setSelectedHubResourceType, skillCount, templateCount]);
+  }, [mcpServers.length, selectedHubResourceType, setSelectedHubResourceType, skillCount, templateCount]);
 
   const openCreateMCPDialog = useCallback(() => {
     setSelectedHubResourceType("mcp");
@@ -143,7 +145,7 @@ export function useWorkspaceMCPSelection({
     createMCPServer,
     deleteMCPServer,
     mcpServersFetching: mcpServersQuery.isFetching,
-    mcps,
+    mcpServers,
     mcpCreateDialogOpen,
     mcpMutationBusy,
     mcpMutationError,

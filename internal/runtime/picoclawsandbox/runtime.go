@@ -85,7 +85,7 @@ func (r *Runtime) Provision(_ context.Context, req agentruntime.ProvisionRequest
 	if participantID == "" {
 		participantID = strings.TrimSpace(req.AgentID)
 	}
-	if _, err := EnsureConfigWithMCPConfig(agentHome, participantID, req.AgentID, gateway.Server, configModelFromProfile(profile), req.MCPConfig, fixedBaseURL(gateway.ManagerBaseURL), r.CurrentFeishuProvider()); err != nil {
+	if _, err := EnsureConfigWithMCPServers(agentHome, participantID, req.AgentID, gateway.Server, configModelFromProfile(profile), req.MCPServers, fixedBaseURL(gateway.ManagerBaseURL), r.CurrentFeishuProvider()); err != nil {
 		return err
 	}
 	workspaceRoot := r.Layout(agentHome).WorkspaceRoot

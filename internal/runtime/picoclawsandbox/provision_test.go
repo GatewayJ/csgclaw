@@ -63,7 +63,7 @@ func TestProvisionPreparesGatewayAssets(t *testing.T) {
 	}
 }
 
-func TestReconcileMCPConfigWritesProvisionedGatewayConfig(t *testing.T) {
+func TestReconcileMCPServersWritesProvisionedGatewayConfig(t *testing.T) {
 	agentHome := t.TempDir()
 	projectsRoot := t.TempDir()
 	rt := New(Dependencies{
@@ -80,10 +80,8 @@ func TestReconcileMCPConfigWritesProvisionedGatewayConfig(t *testing.T) {
 		AgentID:   "u-alice",
 		AgentName: "alice",
 		Profile:   agentruntime.Profile{},
-		MCPConfig: map[string]any{
-			"mcpServers": map[string]any{
-				"context7": map[string]any{"command": "uvx", "args": []any{"context7-mcp"}},
-			},
+		MCPServers: map[string]any{
+			"context7": map[string]any{"command": "uvx", "args": []any{"context7-mcp"}},
 		},
 		Gateway: &agentruntime.GatewayProvision{
 			ModelFallback:     "fallback-model",
@@ -97,23 +95,21 @@ func TestReconcileMCPConfigWritesProvisionedGatewayConfig(t *testing.T) {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	if err := rt.ReconcileMCPConfig(context.Background(), agentruntime.Handle{RuntimeID: "rt-1", HandleID: "box-1"}, agentruntime.MCPConfigChange{
-		Current: agentruntime.MCPConfigSnapshot{Config: map[string]any{
-			"mcpServers": map[string]any{
-				"filesystem": map[string]any{"command": "npx", "args": []any{"-y", "@modelcontextprotocol/server-filesystem", "${workspace}"}},
-			},
+	if err := rt.ReconcileMCPServers(context.Background(), agentruntime.Handle{RuntimeID: "rt-1", HandleID: "box-1"}, agentruntime.MCPServersChange{
+		Current: agentruntime.MCPServersSnapshot{Servers: map[string]any{
+			"filesystem": map[string]any{"command": "npx", "args": []any{"-y", "@modelcontextprotocol/server-filesystem", "${workspace}"}},
 		}},
 	}); err != nil {
-		t.Fatalf("ReconcileMCPConfig() error = %v", err)
+		t.Fatalf("ReconcileMCPServers() error = %v", err)
 	}
 
-	snapshot, err := readPicoClawMCPConfig(filepath.Join(Root(agentHome), HostConfig))
+	snapshot, err := readPicoClawMCPServers(filepath.Join(Root(agentHome), HostConfig))
 	if err != nil {
-		t.Fatalf("readPicoClawMCPConfig() error = %v", err)
+		t.Fatalf("readPicoClawMCPServers() error = %v", err)
 	}
-	servers, err := agentruntime.MCPConfigServers(snapshot.Config)
+	servers, err := agentruntime.NormalizeMCPServers(snapshot.Servers)
 	if err != nil {
-		t.Fatalf("MCPConfigServers() error = %v", err)
+		t.Fatalf("NormalizeMCPServers() error = %v", err)
 	}
 	if _, ok := servers["context7"]; ok {
 		t.Fatalf("reconciled picoclaw config kept stale context7 server: %#v", servers)

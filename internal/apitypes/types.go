@@ -16,7 +16,6 @@ type LegacyBot struct {
 	UserID               string         `json:"user_id"`
 	Available            bool           `json:"available"`
 	RuntimeOptions       map[string]any `json:"runtime_options,omitempty"`
-	MCPConfig            map[string]any `json:"mcp_config,omitempty"`
 	RuntimeKind          string         `json:"runtime_kind,omitempty"`
 	Image                string         `json:"image,omitempty"`
 	Avatar               string         `json:"avatar,omitempty"`
