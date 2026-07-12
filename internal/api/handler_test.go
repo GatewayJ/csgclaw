@@ -2427,23 +2427,20 @@ func TestAgentMCPServersDedicatedEndpointsUseDirectRawMaps(t *testing.T) {
 
 func assertDedicatedMCPServersView(t *testing.T, view agent.MCPServersView, wantSecret string) {
 	t.Helper()
-	if _, wrapped := view.Desired["mcpServers"]; wrapped {
-		t.Fatalf("desired = %#v, want direct MCP server map", view.Desired)
+	if _, wrapped := view.Servers["mcpServers"]; wrapped {
+		t.Fatalf("servers = %#v, want direct MCP server map", view.Servers)
 	}
-	context7 := mcpServerForTest(t, mcpServersForTest(t, view.Desired), "context7")
+	context7 := mcpServerForTest(t, mcpServersForTest(t, view.Servers), "context7")
 	env, ok := context7["env"].(map[string]any)
 	if !ok {
-		t.Fatalf("desired context7.env = %#v, want object", context7["env"])
+		t.Fatalf("servers context7.env = %#v, want object", context7["env"])
 	}
 	if got := env["CONTEXT7_API_KEY"]; got != wantSecret {
-		t.Fatalf("desired context7.env[CONTEXT7_API_KEY] = %#v, want raw secret %q", got, wantSecret)
-	}
-	if _, wrapped := view.Actual["mcpServers"]; wrapped {
-		t.Fatalf("actual = %#v, want direct MCP server map", view.Actual)
+		t.Fatalf("servers context7.env[CONTEXT7_API_KEY] = %#v, want raw secret %q", got, wantSecret)
 	}
 }
 
-func TestGetAgentMCPServersReturnsDesiredWhenRuntimeActualIsUnreadable(t *testing.T) {
+func TestGetAgentMCPServersReturnsPersistedServersWhenRuntimeIsUnreadable(t *testing.T) {
 	readErr := errors.New("native MCP config is unreadable")
 	desired := map[string]any{
 		"context7": map[string]any{
@@ -2477,27 +2474,19 @@ func TestGetAgentMCPServersReturnsDesiredWhenRuntimeActualIsUnreadable(t *testin
 		t.Fatalf("GET status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	var response struct {
-		Desired     map[string]any  `json:"desired"`
-		Actual      json.RawMessage `json:"actual"`
-		ActualError string          `json:"actual_error"`
+		Servers map[string]any `json:"servers"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	server := mcpServerForTest(t, response.Desired, "context7")
+	server := mcpServerForTest(t, response.Servers, "context7")
 	env, ok := server["env"].(map[string]any)
 	if !ok || env["CONTEXT7_API_KEY"] != "secret" {
-		t.Fatalf("desired = %#v, want raw persisted secret", response.Desired)
-	}
-	if got := string(response.Actual); got != "null" {
-		t.Fatalf("actual = %s, want null", got)
-	}
-	if !strings.Contains(response.ActualError, readErr.Error()) {
-		t.Fatalf("actual_error = %q, want %q", response.ActualError, readErr)
+		t.Fatalf("servers = %#v, want raw persisted secret", response.Servers)
 	}
 }
 
-func TestPutAgentMCPServersPreservesNullAndExplicitEmptyDesired(t *testing.T) {
+func TestPutAgentMCPServersPreservesNullAndExplicitEmptyServerMaps(t *testing.T) {
 	srv, _, created := newAgentMCPManagementTestServer(t)
 	tests := []struct {
 		name string
@@ -2520,8 +2509,8 @@ func TestPutAgentMCPServersPreservesNullAndExplicitEmptyDesired(t *testing.T) {
 			if err := json.NewDecoder(rec.Body).Decode(&fields); err != nil {
 				t.Fatalf("decode response: %v", err)
 			}
-			if got := string(fields["desired"]); got != test.want {
-				t.Fatalf("desired = %s, want %s", got, test.want)
+			if got := string(fields["servers"]); got != test.want {
+				t.Fatalf("servers = %s, want %s", got, test.want)
 			}
 		})
 	}
@@ -3505,7 +3494,7 @@ func TestHandleBatchAddAgentMCPServersAddsCatalogServersByName(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&view); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	servers := mcpServersForTest(t, view.Desired)
+	servers := mcpServersForTest(t, view.Servers)
 	context7 := mcpServerForTest(t, servers, "context7")
 	if command, _ := context7["command"].(string); command != "uvx" {
 		t.Fatalf("context7.command = %q, want uvx", command)
@@ -3538,6 +3527,45 @@ func TestHandleBatchAddAgentMCPServersReturnsNotFoundWhenCatalogServerMissing(t 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
 	}
+}
+
+func TestHandleBatchDeleteAgentMCPServersUsesBackendManagedState(t *testing.T) {
+	srv, svc, created := newAgentMCPManagementTestServer(t)
+	initial := map[string]any{
+		"context7": map[string]any{"command": "uvx", "args": []any{"context7-mcp"}},
+		"native":   map[string]any{"command": "npx", "args": []any{"native-mcp"}},
+	}
+	if _, err := svc.Update(context.Background(), created.ID, agent.UpdateRequest{
+		MCPServers:    &initial,
+		MCPServersSet: true,
+		FieldMask:     []string{"mcpServers"},
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+created.ID+"/mcp-servers:batchDelete", strings.NewReader(`{"names":["context7"]}`))
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var view agent.MCPServersView
+	if err := json.NewDecoder(rec.Body).Decode(&view); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, exists := view.Servers["context7"]; exists {
+		t.Fatalf("servers = %#v, retained deleted MCP server", view.Servers)
+	}
+	mcpServerForTest(t, view.Servers, "native")
+
+	saved, ok := svc.Agent(created.ID)
+	if !ok {
+		t.Fatalf("Agent(%q) not found", created.ID)
+	}
+	if _, exists := saved.MCPServers["context7"]; exists {
+		t.Fatalf("saved MCPServers = %#v, retained deleted MCP server", saved.MCPServers)
+	}
+	mcpServerForTest(t, saved.MCPServers, "native")
 }
 
 func newAgentMCPManagementTestServer(t *testing.T) (*Handler, *agent.Service, agent.Agent) {

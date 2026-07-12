@@ -40,11 +40,9 @@ export type DeleteBotOptions = {
 };
 
 export type AgentMCPServersView = {
-  actual?: JSONRecord | null;
-  actual_error?: string | null;
   agent_id?: string | null;
-  desired?: JSONRecord | null;
   runtime_kind?: string | null;
+  servers?: JSONRecord | null;
 };
 
 export type AgentUpdatePayload = {
@@ -195,6 +193,13 @@ export function updateAgentMCPServersRequest(
 
 export function batchAddAgentMCPServersRequest(agentID: string, serverNames: string[]): Promise<AgentMCPServersView> {
   return post(`api/v1/agents/${encodeURIComponent(agentID)}/mcp-servers:batchAdd`, { names: serverNames });
+}
+
+export function batchDeleteAgentMCPServersRequest(
+  agentID: string,
+  serverNames: string[],
+): Promise<AgentMCPServersView> {
+  return post(`api/v1/agents/${encodeURIComponent(agentID)}/mcp-servers:batchDelete`, { names: serverNames });
 }
 
 export function batchAddAgentSkillsRequest(agentID: string, skillNames: string[]): Promise<void> {

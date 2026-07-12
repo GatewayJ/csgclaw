@@ -5,6 +5,7 @@ import { errorMessage } from "@/api/client";
 import { loginCLIProxyProviderRequest } from "@/api/cliproxy";
 import {
   batchAddAgentMCPServersRequest,
+  batchDeleteAgentMCPServersRequest,
   batchAddAgentSkillsRequest,
   createBotRequest,
   createManagerAgentRequest,
@@ -23,7 +24,6 @@ import {
   patchNotificationBotRequest,
   runAgentActionRequest,
   startFeishuRegistrationRequest,
-  updateAgentMCPServersRequest,
   updateAgentRequest,
 } from "@/api/agents";
 import type { AgentUpdatePayload, FeishuRegistration, FetchAgentsOptions } from "@/api/agents";
@@ -102,7 +102,7 @@ import type {
   RuntimeKind,
 } from "@/models/agents";
 import { isDirectConversation, localIdentitiesMatch, upsertUserInData } from "@/models/conversations";
-import { mcpServersFromMap, mcpServersMap } from "@/models/mcp";
+import { mcpServersFromMap } from "@/models/mcp";
 import { displayTeam } from "@/models/tasks";
 import type { WorkspaceTeam } from "@/models/tasks";
 import {
@@ -650,15 +650,12 @@ export function useAgentController({
     ? errorMessage(globalSkillsQuery.error, t("agentSkillsLoadFailed"))
     : "";
   const agentMCPServers = useMemo(() => {
-    return mcpServersFromMap(agentMCPServersQuery.data?.actual ?? agentMCPServersQuery.data?.desired ?? {});
-  }, [agentMCPServersQuery.data]);
-  const agentDesiredMCPServers = useMemo(() => {
-    return mcpServersFromMap(agentMCPServersQuery.data?.desired ?? {});
+    return mcpServersFromMap(agentMCPServersQuery.data?.servers);
   }, [agentMCPServersQuery.data]);
   const agentMCPCandidates = useMemo(() => {
-    const currentNames = new Set(agentDesiredMCPServers.map((server) => server.name));
+    const currentNames = new Set(agentMCPServers.map((server) => server.name));
     return catalogMCPServers.filter((server) => server.name && !currentNames.has(server.name));
-  }, [agentDesiredMCPServers, catalogMCPServers]);
+  }, [agentMCPServers, catalogMCPServers]);
   const activeConversation = useMemo(
     () => data?.rooms.find((item) => item.id === activeConversationId) ?? null,
     [data, activeConversationId],
@@ -728,7 +725,7 @@ export function useAgentController({
       const runtimeKind = normalizeRuntimeKind(agent?.runtime_kind || item?.runtime_kind || base.runtime_kind);
       return ensureNotifierPullSubscriptionDraft({
         ...base,
-        mcpServers: cloneMCPServersForDraft(mcpServersView.desired),
+        mcpServers: cloneMCPServersForDraft(mcpServersView.servers),
         runtime_kind: runtimeKind || base.runtime_kind,
         bot_type: BOT_TYPE_NORMAL,
       });
@@ -2107,7 +2104,7 @@ export function useAgentController({
       setAgentMCPDeleteError("");
       try {
         const view = await batchAddAgentMCPServersRequest(agentDetailAgentID, names);
-        const mcpServers = cloneMCPServersForDraft(view.desired);
+        const mcpServers = cloneMCPServersForDraft(view.servers);
         setAgentPageDraft((current) => (current ? { ...current, mcpServers } : current));
         setAgentPageSavedDraft((current) => (current ? { ...current, mcpServers } : current));
         await Promise.all([
@@ -2135,23 +2132,14 @@ export function useAgentController({
       if (!name) {
         return false;
       }
-      const desiredServers = mcpServersMap(agentMCPServersQuery.data?.desired);
-      const actualServers = mcpServersMap(agentMCPServersQuery.data?.actual);
-      const servers = { ...desiredServers };
-      if (!Object.hasOwn(servers, name) && Object.hasOwn(actualServers, name)) {
-        servers[name] = actualServers[name];
-      }
-      if (!Object.hasOwn(servers, name)) {
-        return false;
-      }
-      delete servers[name];
       setAgentMCPDeleteBusy(true);
       setAgentMCPAddError("");
       setAgentMCPDeleteError("");
       try {
-        await updateAgentMCPServersRequest(agentDetailAgentID, servers);
-        setAgentPageDraft((current) => (current ? { ...current, mcpServers: { ...servers } } : current));
-        setAgentPageSavedDraft((current) => (current ? { ...current, mcpServers: { ...servers } } : current));
+        const view = await batchDeleteAgentMCPServersRequest(agentDetailAgentID, [name]);
+        const mcpServers = cloneMCPServersForDraft(view.servers);
+        setAgentPageDraft((current) => (current ? { ...current, mcpServers } : current));
+        setAgentPageSavedDraft((current) => (current ? { ...current, mcpServers } : current));
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPServers(agentDetailAgentID) }),
           queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agents() }),
@@ -2164,7 +2152,7 @@ export function useAgentController({
         setAgentMCPDeleteBusy(false);
       }
     },
-    [agentMCPServersQuery.data?.desired, agentMCPDeleteBusy, queryClient, agentDetailAgentID, t],
+    [agentMCPDeleteBusy, queryClient, agentDetailAgentID, t],
   );
 
   function directConversationForUser(

@@ -1660,7 +1660,7 @@ func TestUpdateCodexLocalWorkspaceDirMarksRunningRuntimeForRestart(t *testing.T)
 	}
 }
 
-func TestAddMCPServersFromHubImportsUnmanagedRuntimeServersOnce(t *testing.T) {
+func TestAddMCPServersFromHubImportsRuntimeServersOnce(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	listCalls := 0
@@ -1671,14 +1671,8 @@ func TestAddMCPServersFromHubImportsUnmanagedRuntimeServersOnce(t *testing.T) {
 		"",
 		WithRuntime(fakeMCPServersListRuntime{
 			fakeAgentRuntime: fakeAgentRuntime{kind: RuntimeKindCodex},
-			list: func(_ context.Context, h agentruntime.Handle, current agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error) {
+			list: func(context.Context, agentruntime.Handle, agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error) {
 				listCalls++
-				if h.RuntimeID != "rt-agent-dev" {
-					t.Fatalf("ListMCPServers() runtime id = %q, want rt-agent-dev", h.RuntimeID)
-				}
-				if current.Servers != nil {
-					t.Fatalf("ListMCPServers() current servers = %#v, want nil unmanaged state", current.Servers)
-				}
 				return agentruntime.MCPServersSnapshot{Servers: map[string]any{
 					"manual": map[string]any{"command": "manual-mcp"},
 				}}, nil
@@ -1710,7 +1704,7 @@ func TestAddMCPServersFromHubImportsUnmanagedRuntimeServersOnce(t *testing.T) {
 		assertMCPServersHasServer(t, updated.MCPServers, name)
 	}
 	if listCalls != 1 {
-		t.Fatalf("ListMCPServers() calls = %d, want 1 for initial unmanaged import", listCalls)
+		t.Fatalf("ListMCPServers() calls = %d, want 1 for initial runtime import", listCalls)
 	}
 
 	updated, err = svc.AddMCPServersFromHub(context.Background(), "u-dev", []string{"remote"}, catalogServers)
@@ -1721,14 +1715,60 @@ func TestAddMCPServersFromHubImportsUnmanagedRuntimeServersOnce(t *testing.T) {
 		assertMCPServersHasServer(t, updated.MCPServers, name)
 	}
 	if listCalls != 1 {
-		t.Fatalf("ListMCPServers() calls = %d, want no native import after entering managed mode", listCalls)
+		t.Fatalf("ListMCPServers() calls = %d, want no second runtime import", listCalls)
 	}
 }
 
-func TestAddMCPServersFromHubDoesNotTakeOverWhenNativeMCPReadFails(t *testing.T) {
+func TestDeleteMCPServersImportsRuntimeServersBeforeDeleting(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	readErr := errors.New("native config is unreadable")
+	listCalls := 0
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeMCPServersListRuntime{
+			fakeAgentRuntime: fakeAgentRuntime{kind: RuntimeKindCodex},
+			list: func(context.Context, agentruntime.Handle, agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error) {
+				listCalls++
+				return agentruntime.MCPServersSnapshot{Servers: map[string]any{
+					"manual": map[string]any{"command": "manual-mcp"},
+					"native": map[string]any{"command": "native-mcp"},
+				}}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-dev"] = Agent{
+		ID:          "u-dev",
+		Name:        "dev",
+		RuntimeID:   "rt-u-dev",
+		RuntimeKind: RuntimeKindCodex,
+		Role:        RoleWorker,
+		Status:      string(agentruntime.StateStopped),
+		CreatedAt:   time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
+	}
+
+	updated, err := svc.DeleteMCPServers(context.Background(), "u-dev", []string{"manual"})
+	if err != nil {
+		t.Fatalf("DeleteMCPServers() error = %v", err)
+	}
+	if _, exists := updated.MCPServers["manual"]; exists {
+		t.Fatalf("DeleteMCPServers() retained deleted server: %#v", updated.MCPServers)
+	}
+	assertMCPServersHasServer(t, updated.MCPServers, "native")
+	if listCalls != 1 {
+		t.Fatalf("ListMCPServers() calls = %d, want 1 for initial runtime import", listCalls)
+	}
+}
+
+func TestAddMCPServersFromHubFailsWhenRuntimeMCPReadFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	readErr := errors.New("runtime config is unreadable")
 	svc, err := NewService(
 		testModelConfig(),
 		config.ServerConfig{},
@@ -1758,10 +1798,10 @@ func TestAddMCPServersFromHubDoesNotTakeOverWhenNativeMCPReadFails(t *testing.T)
 		"context7": map[string]any{"command": "uvx"},
 	})
 	if !errors.Is(err, readErr) {
-		t.Fatalf("AddMCPServersFromHub() error = %v, want native read failure", err)
+		t.Fatalf("AddMCPServersFromHub() error = %v, want runtime read failure", err)
 	}
 	if got, ok := svc.Agent("u-dev"); !ok || got.MCPServers != nil {
-		t.Fatalf("Agent().MCPServers = %#v, want unmanaged state preserved", got.MCPServers)
+		t.Fatalf("Agent().MCPServers = %#v, want no persisted MCP server changes", got.MCPServers)
 	}
 }
 

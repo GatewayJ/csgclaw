@@ -13,6 +13,10 @@ type batchAddAgentMCPServersRequest struct {
 	Names []string `json:"names"`
 }
 
+type batchDeleteAgentMCPServersRequest struct {
+	Names []string `json:"names"`
+}
+
 func (h *Handler) handleAgentMCPServersByID(w http.ResponseWriter, r *http.Request) {
 	h.handleAgentMCPServers(w, r, pathValue(r, "id"))
 }
@@ -57,6 +61,43 @@ func (h *Handler) handleBatchAddAgentMCPServers(w http.ResponseWriter, r *http.R
 		return
 	}
 	updated, err := h.svc.AddMCPServersFromHub(r.Context(), id, req.Names, servers)
+	if err != nil {
+		writeAgentMCPServersMutationError(w, err)
+		return
+	}
+	h.publishUpdatedAgentUser(updated)
+	view, err := h.svc.MCPServersView(r.Context(), updated.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h *Handler) handleBatchDeleteAgentMCPServers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.svc == nil {
+		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id := strings.TrimSpace(pathValue(r, "id"))
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	var req batchDeleteAgentMCPServersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
+		return
+	}
+	if !hasMCPServerName(req.Names) {
+		http.Error(w, "names is required", http.StatusBadRequest)
+		return
+	}
+	updated, err := h.svc.DeleteMCPServers(r.Context(), id, req.Names)
 	if err != nil {
 		writeAgentMCPServersMutationError(w, err)
 		return
@@ -136,6 +177,15 @@ func writeAgentMCPServersMutationError(w http.ResponseWriter, err error) {
 		status = http.StatusBadGateway
 	}
 	http.Error(w, err.Error(), status)
+}
+
+func hasMCPServerName(names []string) bool {
+	for _, name := range names {
+		if strings.TrimSpace(name) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeAgentMCPServersRequest(r *http.Request) (*map[string]any, bool, error) {

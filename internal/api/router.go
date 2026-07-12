@@ -40,6 +40,7 @@ func (h *Handler) registerCoreRoutes(router chi.Router) {
 				r.Get("/mcp-servers", h.handleAgentMCPServersByID)
 				r.Put("/mcp-servers", h.handleAgentMCPServersByID)
 				r.Post("/mcp-servers:batchAdd", h.handleBatchAddAgentMCPServers)
+				r.Post("/mcp-servers:batchDelete", h.handleBatchDeleteAgentMCPServers)
 				r.Route("/profile", func(r chi.Router) {
 					r.Get("/", h.getAgentProfile)
 					r.Put("/", h.updateAgentProfile)

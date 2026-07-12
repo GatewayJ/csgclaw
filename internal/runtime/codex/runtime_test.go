@@ -1945,7 +1945,7 @@ func TestConfigureCodexHomeConfigReplacesExistingMCPServerTablesWhenManaged(t *t
 		`manual-mcp`,
 	} {
 		if strings.Contains(config, unwanted) {
-			t.Fatalf("config should remove stale MCP server %q:\n%s", unwanted, config)
+			t.Fatalf("config should replace imported MCP server %q:\n%s", unwanted, config)
 		}
 	}
 	for _, want := range []string{
@@ -1981,7 +1981,7 @@ func TestConfigureCodexHomeConfigClearsExistingMCPServerTablesWhenManagedEmpty(t
 		`manual-mcp`,
 	} {
 		if strings.Contains(config, unwanted) {
-			t.Fatalf("config should remove stale MCP server %q:\n%s", unwanted, config)
+			t.Fatalf("config should clear imported MCP server %q:\n%s", unwanted, config)
 		}
 	}
 	for _, want := range []string{
