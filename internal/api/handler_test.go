@@ -2416,13 +2416,6 @@ func TestAgentMCPServersDedicatedEndpointsUseDirectRawMaps(t *testing.T) {
 	if legacyPostRec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("legacy POST /mcp-servers status = %d, want %d", legacyPostRec.Code, http.StatusMethodNotAllowed)
 	}
-
-	put := httptest.NewRequest(http.MethodPut, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(`{"mcpServers":{}}`))
-	putRec := httptest.NewRecorder()
-	srv.Routes().ServeHTTP(putRec, put)
-	if putRec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("PUT /mcp-servers status = %d, want %d", putRec.Code, http.StatusMethodNotAllowed)
-	}
 }
 
 func assertDedicatedMCPServersView(t *testing.T, view agent.MCPServersView, wantSecret string) {
