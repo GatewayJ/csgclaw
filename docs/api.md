@@ -377,27 +377,15 @@ Notes:
 
 #### `GET /api/v1/agents/{id}/mcp-servers`
 
-Returns the agent's editable MCP server configuration. Unlike generic Agent
-responses, this configuration-page endpoint returns raw values so a user can
-review and edit existing tokens. `desired` and `actual` are each direct
-server-name-to-server-config maps when non-null; neither is nested under
-another MCP field. `desired` preserves the distinction between `null` (no
-managed set) and `{}` (an explicitly managed empty set). If the native runtime
-configuration cannot be read, the endpoint still returns `desired`, sets
-`actual` to `null`, and includes an optional `actual_error` message.
+Returns the agent's MCP server configuration as a direct raw
+server-name-to-server-config map in `servers`. Unlike generic Agent responses,
+this endpoint does not redact configured token values.
 
 ```json
 {
   "agent_id": "u-alice",
   "runtime_kind": "openclaw_sandbox",
-  "desired": {
-    "context7": {
-      "command": "uvx",
-      "args": ["context7-mcp"],
-      "env": { "CONTEXT7_API_KEY": "secret" }
-    }
-  },
-  "actual": {
+  "servers": {
     "context7": {
       "command": "uvx",
       "args": ["context7-mcp"],
@@ -407,17 +395,17 @@ configuration cannot be read, the endpoint still returns `desired`, sets
 }
 ```
 
-#### `PUT /api/v1/agents/{id}/mcp-servers`
-
-Replaces the agent's `mcpServers` direct map. Sending `null` clears the managed
-set. The response has the same raw `desired`/`actual` shape as the `GET`
-endpoint.
-
 #### `POST /api/v1/agents/{id}/mcp-servers:batchAdd`
 
 Accepts `{ "names": ["..."] }` and merges the named server definitions from
-the MCP catalog into the agent's `mcpServers` map. The response has the same raw
-`desired`/`actual` shape as the `GET` endpoint.
+the MCP catalog into the agent's managed MCP servers. The response has the same
+shape as the `GET` endpoint.
+
+#### `POST /api/v1/agents/{id}/mcp-servers:batchDelete`
+
+Accepts `{ "names": ["..."] }` and removes the named servers from the
+agent's managed MCP servers. The response has the same shape as the `GET`
+endpoint.
 
 ### MCP server catalog
 

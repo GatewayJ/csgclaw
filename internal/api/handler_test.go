@@ -2374,21 +2374,14 @@ func TestAgentMCPServersDedicatedEndpointsUseDirectRawMaps(t *testing.T) {
 		},
 	}
 
-	putBody, err := json.Marshal(map[string]any{"mcpServers": desired})
+	updated, err := svc.Update(context.Background(), created.ID, agent.UpdateRequest{
+		MCPServers:    &desired,
+		MCPServersSet: true,
+		FieldMask:     []string{"mcpServers"},
+	})
 	if err != nil {
-		t.Fatalf("marshal MCP servers request: %v", err)
+		t.Fatalf("set MCP servers: %v", err)
 	}
-	put := httptest.NewRequest(http.MethodPut, "/api/v1/agents/"+created.ID+"/mcp-servers", bytes.NewReader(putBody))
-	putRec := httptest.NewRecorder()
-	srv.Routes().ServeHTTP(putRec, put)
-	if putRec.Code != http.StatusOK {
-		t.Fatalf("PUT status = %d, want %d; body=%s", putRec.Code, http.StatusOK, putRec.Body.String())
-	}
-	var updated agent.MCPServersView
-	if err := json.NewDecoder(putRec.Body).Decode(&updated); err != nil {
-		t.Fatalf("decode PUT response: %v", err)
-	}
-	assertDedicatedMCPServersView(t, updated, "secret-env")
 
 	get := httptest.NewRequest(http.MethodGet, "/api/v1/agents/"+created.ID+"/mcp-servers", nil)
 	getRec := httptest.NewRecorder()
@@ -2402,7 +2395,7 @@ func TestAgentMCPServersDedicatedEndpointsUseDirectRawMaps(t *testing.T) {
 	}
 	assertDedicatedMCPServersView(t, fetched, "secret-env")
 
-	saved, ok := svc.Agent(created.ID)
+	saved, ok := svc.Agent(updated.ID)
 	if !ok {
 		t.Fatalf("Agent(%q) not found", created.ID)
 	}
@@ -2422,6 +2415,13 @@ func TestAgentMCPServersDedicatedEndpointsUseDirectRawMaps(t *testing.T) {
 	srv.Routes().ServeHTTP(legacyPostRec, legacyPost)
 	if legacyPostRec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("legacy POST /mcp-servers status = %d, want %d", legacyPostRec.Code, http.StatusMethodNotAllowed)
+	}
+
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(`{"mcpServers":{}}`))
+	putRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(putRec, put)
+	if putRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("PUT /mcp-servers status = %d, want %d", putRec.Code, http.StatusMethodNotAllowed)
 	}
 }
 
@@ -2483,36 +2483,6 @@ func TestGetAgentMCPServersReturnsPersistedServersWhenRuntimeIsUnreadable(t *tes
 	env, ok := server["env"].(map[string]any)
 	if !ok || env["CONTEXT7_API_KEY"] != "secret" {
 		t.Fatalf("servers = %#v, want raw persisted secret", response.Servers)
-	}
-}
-
-func TestPutAgentMCPServersPreservesNullAndExplicitEmptyServerMaps(t *testing.T) {
-	srv, _, created := newAgentMCPManagementTestServer(t)
-	tests := []struct {
-		name string
-		body string
-		want string
-	}{
-		{name: "clear unmanaged set", body: `{"mcpServers":null}`, want: "null"},
-		{name: "explicitly manage empty set", body: `{"mcpServers":{}}`, want: "{}"},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut, "/api/v1/agents/"+created.ID+"/mcp-servers", strings.NewReader(test.body))
-			rec := httptest.NewRecorder()
-			srv.Routes().ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("PUT status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
-			}
-			var fields map[string]json.RawMessage
-			if err := json.NewDecoder(rec.Body).Decode(&fields); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			if got := string(fields["servers"]); got != test.want {
-				t.Fatalf("servers = %s, want %s", got, test.want)
-			}
-		})
 	}
 }
 

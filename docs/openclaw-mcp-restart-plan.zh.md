@@ -97,8 +97,8 @@ MCP servers 通道。
 配置页面使用下面的专用接口：
 
 - `GET /api/v1/agents/{id}/mcp-servers`
-- `PUT /api/v1/agents/{id}/mcp-servers`
 - `POST /api/v1/agents/{id}/mcp-servers:batchAdd`
+- `POST /api/v1/agents/{id}/mcp-servers:batchDelete`
 
 `GET` 返回：
 
@@ -106,14 +106,7 @@ MCP servers 通道。
 {
   "agent_id": "u-alice",
   "runtime_kind": "openclaw_sandbox",
-  "desired": {
-    "context7": {
-      "command": "uvx",
-      "args": ["context7-mcp"],
-      "env": { "CONTEXT7_API_KEY": "secret" }
-    }
-  },
-  "actual": {
+  "servers": {
     "context7": {
       "command": "uvx",
       "args": ["context7-mcp"],
@@ -123,16 +116,10 @@ MCP servers 通道。
 }
 ```
 
-非空的 `desired` 和 `actual` 都是直接 server 映射，且专用接口不脱敏，供有权限的
-配置页面回显和编辑 token。`desired` 是持久化的声明，保留 `null`（未托管）与
-`{}`（显式托管空集合）的区别；`actual` 是从 runtime 原生配置读回的结果。若 runtime
-展开了 workspace 占位符，二者在路径值上可以不同，删除和保存应以 `desired` 为准。
-如果原生配置暂时无法读取，接口仍会返回 `desired`，并将 `actual` 设为 `null`，同时
-在可选的 `actual_error` 中说明读取失败原因，避免配置页无法修复期望配置。
-
-`PUT` 接收 Agent 的顶层 `mcpServers` 字段并整体替换集合；响应与 `GET`
-相同。`batchAdd` 接收 `{ "names": ["..."] }`，把 MCP catalog 中同名的
-server 定义合并到该 Agent 的集合后返回同一视图。
+`servers` 是直接 server 映射，且专用接口不脱敏，供有权限的配置页面回显和编辑 token。
+`batchAdd` 接收 `{ "names": ["..."] }`，把 MCP catalog 中同名的 server
+定义合并到该 Agent 的集合；`batchDelete` 用相同请求形态移除指定 server。两者都返回
+同一视图。
 
 ### MCP catalog
 

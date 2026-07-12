@@ -367,20 +367,13 @@ OpenClaw、PicoClaw 和 Codex CLI agent 通过顶层 `mcpServers` 字段配置 M
 
 #### `GET /api/v1/agents/{id}/mcp-servers`
 
-返回 Agent 可编辑的 MCP server 配置。与通用 Agent 响应不同，这个配置页面接口会返回原始值，以便用户查看和编辑已配置的 token。非空的 `desired` 与 `actual` 都是从 server 名称到 server 配置的直接映射，不再嵌套在其他 MCP 字段中。`desired` 会保留 `null`（未托管集合）与 `{}`（显式托管空集合）的区别；如果无法读取 runtime 原生配置，接口仍会返回 `desired`，将 `actual` 设为 `null`，并在可选 `actual_error` 中给出失败原因。
+返回 Agent 的 MCP server 配置。`servers` 是从 server 名称到 server 配置的直接原始映射。与通用 Agent 响应不同，这个接口不会脱敏已配置的 token。
 
 ```json
 {
   "agent_id": "u-alice",
   "runtime_kind": "openclaw_sandbox",
-  "desired": {
-    "context7": {
-      "command": "uvx",
-      "args": ["context7-mcp"],
-      "env": { "CONTEXT7_API_KEY": "secret" }
-    }
-  },
-  "actual": {
+  "servers": {
     "context7": {
       "command": "uvx",
       "args": ["context7-mcp"],
@@ -390,13 +383,13 @@ OpenClaw、PicoClaw 和 Codex CLI agent 通过顶层 `mcpServers` 字段配置 M
 }
 ```
 
-#### `PUT /api/v1/agents/{id}/mcp-servers`
-
-替换该 Agent 的 `mcpServers` 直接映射。传入 `null` 会清除托管集合。响应与 `GET` 一样，返回未脱敏的 `desired`/`actual`。
-
 #### `POST /api/v1/agents/{id}/mcp-servers:batchAdd`
 
-接收 `{ "names": ["..."] }`，将 MCP catalog 中同名 server 的定义合并到该 Agent 的 `mcpServers` 映射。响应与 `GET` 一样，返回未脱敏的 `desired`/`actual`。
+接收 `{ "names": ["..."] }`，将 MCP catalog 中同名 server 的定义合并到该 Agent 托管的 MCP server。响应与 `GET` 一样。
+
+#### `POST /api/v1/agents/{id}/mcp-servers:batchDelete`
+
+接收 `{ "names": ["..."] }`，从该 Agent 托管的 MCP server 中移除同名 server。响应与 `GET` 一样。
 
 ### MCP server catalog
 
