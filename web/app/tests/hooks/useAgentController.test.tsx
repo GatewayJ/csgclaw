@@ -865,6 +865,34 @@ describe("useAgentController", () => {
     expect(result.current.agentViewProps.mcpDeleteError).toBe("");
   });
 
+  it("deletes an actual-only MCP server without dropping other desired servers", async () => {
+    vi.mocked(fetchAgentMCPServers).mockResolvedValueOnce({
+      actual: {
+        manual: { command: "uvx", args: ["manual-mcp"] },
+      },
+      agent_id: "u-manager",
+      desired: {
+        catalog: { command: "npx", args: ["catalog-mcp"] },
+      },
+      runtime_kind: "codex",
+    });
+
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
+
+    await waitFor(() =>
+      expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual(["manual"]),
+    );
+
+    await act(async () => {
+      await result.current.agentViewProps.onDeleteMCPServer?.({ name: "manual" });
+    });
+
+    expect(updateAgentMCPServersRequest).toHaveBeenCalledWith("u-manager", {
+      catalog: { command: "npx", args: ["catalog-mcp"] },
+    });
+    expect(result.current.agentViewProps.mcpDeleteError).toBe("");
+  });
+
   it("filters catalog MCP candidates by desired servers while runtime state is stale", async () => {
     vi.mocked(fetchAgentMCPServers).mockResolvedValueOnce({
       actual: {},

@@ -546,7 +546,7 @@ func (s *Service) AddMCPServersFromHub(ctx context.Context, id string, names []s
 	if !ok {
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}
-	currentServers, err := agentruntime.NormalizeMCPServers(current.MCPServers)
+	currentServers, err := s.currentMCPServersForHubInstall(ctx, current)
 	if err != nil {
 		return Agent{}, err
 	}
@@ -562,6 +562,40 @@ func (s *Service) AddMCPServersFromHub(ctx context.Context, id string, names []s
 		MCPServersSet: true,
 		FieldMask:     []string{"mcpServers"},
 	})
+}
+
+// currentMCPServersForHubInstall preserves a runtime's existing native MCP
+// configuration when Hub installation is the first CSGClaw-managed MCP change
+// for an agent. Once MCPServers is non-nil, the agent has explicitly entered
+// CSGClaw-managed mode and its stored map remains the source of truth.
+func (s *Service) currentMCPServersForHubInstall(ctx context.Context, current Agent) (map[string]any, error) {
+	servers, err := agentruntime.NormalizeMCPServers(current.MCPServers)
+	if err != nil || servers != nil {
+		return servers, err
+	}
+
+	runtimeKind := strings.TrimSpace(current.RuntimeKind)
+	if runtimeKind == "" {
+		return nil, nil
+	}
+	rt, err := s.runtimeForKind(runtimeKind)
+	if err != nil {
+		return nil, err
+	}
+	lister, ok := rt.(agentruntime.MCPServersListController)
+	if !ok {
+		return nil, nil
+	}
+
+	listed, err := lister.ListMCPServers(ctx, runtimeHandleForAgent(current), agentruntime.MCPServersSnapshot{})
+	if err != nil {
+		return nil, fmt.Errorf("read unmanaged mcpServers for agent %q: %w", current.ID, err)
+	}
+	servers, err = agentruntime.NormalizeMCPServers(listed.Servers)
+	if err != nil {
+		return nil, fmt.Errorf("normalize unmanaged mcpServers for agent %q: %w", current.ID, err)
+	}
+	return servers, nil
 }
 
 func normalizeMCPServerNames(values []string) []string {

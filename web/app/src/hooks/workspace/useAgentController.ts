@@ -2135,7 +2135,12 @@ export function useAgentController({
       if (!name) {
         return false;
       }
-      const servers = mcpServersMap(agentMCPServersQuery.data?.desired);
+      const desiredServers = mcpServersMap(agentMCPServersQuery.data?.desired);
+      const actualServers = mcpServersMap(agentMCPServersQuery.data?.actual);
+      const servers = { ...desiredServers };
+      if (!Object.hasOwn(servers, name) && Object.hasOwn(actualServers, name)) {
+        servers[name] = actualServers[name];
+      }
       if (!Object.hasOwn(servers, name)) {
         return false;
       }
