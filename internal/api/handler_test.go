@@ -1966,6 +1966,27 @@ func TestHandleAgentStartEnsuresCodexBridge(t *testing.T) {
 	}
 }
 
+func TestHandleAgentApplyBindingsEnsuresCodexBridgeWithoutRuntimeStart(t *testing.T) {
+	manager := completeWorkerAgent(agent.ManagerUserID, agent.ManagerName)
+	manager.Role = agent.RoleManager
+	manager.RuntimeKind = agent.RuntimeKindCodex
+	manager.RuntimeID = "rt-manager"
+	bridge := &fakeCodexBridgeController{}
+	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{manager}, agent.WithLifecycleObserver(bridge))
+	srv := &Handler{svc: agentSvc}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+agent.ManagerUserID+"/bindings:apply", nil)
+	rec := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(bridge.ensureCalls) != 1 || bridge.ensureCalls[0].ID != agent.ManagerUserID {
+		t.Fatalf("EnsureAgent() calls = %+v, want manager once", bridge.ensureCalls)
+	}
+}
+
 func TestHandleAgentStopStopsExistingBox(t *testing.T) {
 	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
 

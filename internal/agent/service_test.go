@@ -6700,6 +6700,88 @@ func TestStartTriggersLifecycleObserver(t *testing.T) {
 	}
 }
 
+func TestApplyExternalBindingReconcilesCodexWithoutStartingRuntime(t *testing.T) {
+	observer := &fakeLifecycleObserver{}
+	runtimeStartCalls := 0
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{}, "manager-image:test", "",
+		WithLifecycleObserver(observer),
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindCodex,
+			start: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+				runtimeStartCalls++
+				return agentruntime.StateRunning, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents[ManagerUserID] = Agent{
+		ID:              ManagerUserID,
+		Name:            ManagerName,
+		Role:            RoleManager,
+		RuntimeID:       "rt-manager",
+		RuntimeKind:     RuntimeKindCodex,
+		Status:          string(agentruntime.StateRunning),
+		AgentProfile:    AgentProfile{Name: ManagerName, Provider: ProviderCodex, ModelID: "gpt-5.4", ProfileComplete: true},
+		ProfileComplete: true,
+	}
+
+	reconciled, activation, err := svc.ApplyExternalBinding(context.Background(), ManagerUserID)
+	if err != nil {
+		t.Fatalf("ApplyExternalBinding() error = %v", err)
+	}
+	if reconciled.ID != ManagerUserID {
+		t.Fatalf("ApplyExternalBinding() agent = %q, want %q", reconciled.ID, ManagerUserID)
+	}
+	if activation != ExternalBindingActivationLifecycleReconciled {
+		t.Fatalf("activation = %q, want %q", activation, ExternalBindingActivationLifecycleReconciled)
+	}
+	if runtimeStartCalls != 0 {
+		t.Fatalf("runtime Start() calls = %d, want 0", runtimeStartCalls)
+	}
+	if len(observer.ensureCalls) != 1 || observer.ensureCalls[0].ID != ManagerUserID {
+		t.Fatalf("EnsureAgent() calls = %+v, want manager once", observer.ensureCalls)
+	}
+}
+
+func TestReconcileLifecycleRejectsStoppedAgent(t *testing.T) {
+	observer := &fakeLifecycleObserver{}
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{}, "manager-image:test", "",
+		WithLifecycleObserver(observer),
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindCodex,
+			info: func(_ context.Context, h agentruntime.Handle) (agentruntime.Info, error) {
+				return agentruntime.Info{HandleID: h.HandleID, State: agentruntime.StateStopped}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents[ManagerUserID] = Agent{
+		ID:              ManagerUserID,
+		Name:            ManagerName,
+		Role:            RoleManager,
+		RuntimeID:       "rt-manager",
+		RuntimeKind:     RuntimeKindCodex,
+		Status:          string(agentruntime.StateStopped),
+		AgentProfile:    AgentProfile{Name: ManagerName, Provider: ProviderCodex, ModelID: "gpt-5.4", ProfileComplete: true},
+		ProfileComplete: true,
+	}
+
+	if _, err := svc.ReconcileLifecycle(context.Background(), ManagerUserID); err == nil {
+		t.Fatal("ReconcileLifecycle() error = nil, want stopped agent rejection")
+	}
+	if len(observer.ensureCalls) != 0 || len(observer.stopCalls) != 0 {
+		t.Fatalf("lifecycle calls = ensure=%+v stop=%+v, want none", observer.ensureCalls, observer.stopCalls)
+	}
+}
+
 func TestStartProvisionsRuntimeBeforeStart(t *testing.T) {
 	var callOrder []string
 	svc, err := NewService(

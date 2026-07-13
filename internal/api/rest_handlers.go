@@ -27,13 +27,16 @@ func (h *Handler) createParticipantMessage(w http.ResponseWriter, r *http.Reques
 func (h *Handler) createParticipantNotification(w http.ResponseWriter, r *http.Request) {
 	h.pushNotificationParticipant(w, r)
 }
-func (h *Handler) listAgents(w http.ResponseWriter, r *http.Request)   { h.handleAgents(w, r) }
-func (h *Handler) createAgent(w http.ResponseWriter, r *http.Request)  { h.handleAgents(w, r) }
-func (h *Handler) getAgent(w http.ResponseWriter, r *http.Request)     { h.handleAgentByID(w, r) }
-func (h *Handler) updateAgent(w http.ResponseWriter, r *http.Request)  { h.handleAgentByID(w, r) }
-func (h *Handler) deleteAgent(w http.ResponseWriter, r *http.Request)  { h.handleAgentByID(w, r) }
-func (h *Handler) startAgent(w http.ResponseWriter, r *http.Request)   { h.handleAgentStartByID(w, r) }
-func (h *Handler) stopAgent(w http.ResponseWriter, r *http.Request)    { h.handleAgentStopByID(w, r) }
+func (h *Handler) listAgents(w http.ResponseWriter, r *http.Request)  { h.handleAgents(w, r) }
+func (h *Handler) createAgent(w http.ResponseWriter, r *http.Request) { h.handleAgents(w, r) }
+func (h *Handler) getAgent(w http.ResponseWriter, r *http.Request)    { h.handleAgentByID(w, r) }
+func (h *Handler) updateAgent(w http.ResponseWriter, r *http.Request) { h.handleAgentByID(w, r) }
+func (h *Handler) deleteAgent(w http.ResponseWriter, r *http.Request) { h.handleAgentByID(w, r) }
+func (h *Handler) startAgent(w http.ResponseWriter, r *http.Request)  { h.handleAgentStartByID(w, r) }
+func (h *Handler) stopAgent(w http.ResponseWriter, r *http.Request)   { h.handleAgentStopByID(w, r) }
+func (h *Handler) applyAgentBindings(w http.ResponseWriter, r *http.Request) {
+	h.handleAgentApplyBindingsByID(w, r)
+}
 func (h *Handler) getAgentLogs(w http.ResponseWriter, r *http.Request) { h.handleAgentLogsByID(w, r) }
 func (h *Handler) getAgentProfile(w http.ResponseWriter, r *http.Request) {
 	h.handleAgentProfileByID(w, r)

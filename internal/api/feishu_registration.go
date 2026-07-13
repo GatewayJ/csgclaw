@@ -193,10 +193,17 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	result, err := feishubind.BindBot(r.Context(), h.svc, h.participant, state.AgentID, appID, appSecret, true)
+	result, err := feishubind.BindBot(r.Context(), h.svc, h.participant, state.AgentID, appID, appSecret, false)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if _, activation, err := h.svc.ApplyExternalBinding(r.Context(), state.AgentID); err != nil {
+		result.Status = "partial"
+		result.ActivationStatus = "activation_failed"
+		result.ActivationError = err.Error()
+	} else {
+		result.ActivationStatus = string(activation)
 	}
 	_ = h.deleteFeishuRegistration(state.RegistrationID)
 	writeJSON(w, http.StatusOK, result)

@@ -30,6 +30,7 @@ func (h *Handler) registerCoreRoutes(router chi.Router) {
 				r.Delete("/", h.deleteAgent)
 				r.Post("/start", h.startAgent)
 				r.Post("/stop", h.stopAgent)
+				r.Post("/bindings:apply", h.applyAgentBindings)
 				r.Get("/logs", h.getAgentLogs)
 				r.Get("/workspace", h.handleAgentWorkspace)
 				r.Get("/workspace/file", h.handleAgentWorkspaceFile)

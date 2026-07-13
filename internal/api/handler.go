@@ -1241,6 +1241,40 @@ func (h *Handler) handleAgentStopByID(w http.ResponseWriter, r *http.Request) {
 	h.handleAgentStop(w, r, id)
 }
 
+func (h *Handler) handleAgentApplyBindings(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.svc == nil {
+		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if err := h.svc.Reload(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	activated, _, err := h.svc.ApplyExternalBinding(r.Context(), id)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	writeJSON(w, http.StatusOK, presentAgent(activated))
+}
+
+func (h *Handler) handleAgentApplyBindingsByID(w http.ResponseWriter, r *http.Request) {
+	id := pathValue(r, "id")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	h.handleAgentApplyBindings(w, r, id)
+}
+
 func (h *Handler) handleAgentLogs(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

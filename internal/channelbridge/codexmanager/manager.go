@@ -246,16 +246,20 @@ func (m *csgclawManager) EnsureAgent(ctx context.Context, a agent.Agent) error {
 	if !m.ensuring.begin(a.ID) {
 		return nil
 	}
-	defer m.ensuring.finish(a.ID)
-	session, err := currentSession(m.runtime, a)
-	if err != nil {
+	for {
+		session, err := currentSession(m.runtime, a)
+		if err == nil {
+			// Force a fresh bot-event subscription even when the binding is unchanged.
+			// This repairs cases where the bridge worker exists but missed its initial
+			// subscription window and would otherwise be treated as a no-op restart.
+			m.stopAgentBridge(a)
+			err = m.bridge.StartBot(ctx, bindingForAgent(a, session.SessionID))
+		}
+		if m.ensuring.finish(a.ID) {
+			continue
+		}
 		return err
 	}
-	// Force a fresh bot-event subscription even when the binding is unchanged.
-	// This repairs cases where the bridge worker exists but missed its initial
-	// subscription window and would otherwise be treated as a no-op restart.
-	m.stopAgentBridge(a)
-	return m.bridge.StartBot(ctx, bindingForAgent(a, session.SessionID))
 }
 
 func (m *csgclawManager) StopAgent(agentID string) {
@@ -349,29 +353,37 @@ func (m *feishuManager) EnsureAgent(ctx context.Context, a agent.Agent) error {
 	if m == nil || m.runtime == nil || m.bridge == nil {
 		return nil
 	}
-	participantID := strings.TrimSpace(m.participantIDForAgent(a))
-	if !shouldStartCodexBridge(a) || participantID == "" {
+	if !shouldStartCodexBridge(a) {
 		m.StopAgent(a.ID)
 		return nil
 	}
 	if !m.ensuring.begin(a.ID) {
 		return nil
 	}
-	defer m.ensuring.finish(a.ID)
-
-	m.stopStaleBridgeForAgent(a.ID, participantID)
-	session, err := currentSession(m.runtime, a)
-	if err != nil {
+	for {
+		participantID := strings.TrimSpace(m.participantIDForAgent(a))
+		var err error
+		if participantID == "" {
+			m.StopAgent(a.ID)
+		} else {
+			m.stopStaleBridgeForAgent(a.ID, participantID)
+			var session *runtimecodex.Session
+			session, err = currentSession(m.runtime, a)
+			if err == nil {
+				m.stopAgentBridgeForAgent(a.ID, participantID, a)
+				binding := bindingForAgent(a, session.SessionID)
+				binding.BotID = participantID
+				err = m.bridge.StartBot(ctx, binding)
+				if err == nil {
+					m.rememberParticipant(a.ID, participantID)
+				}
+			}
+		}
+		if m.ensuring.finish(a.ID) {
+			continue
+		}
 		return err
 	}
-	m.stopAgentBridgeForAgent(a.ID, participantID, a)
-	binding := bindingForAgent(a, session.SessionID)
-	binding.BotID = participantID
-	if err := m.bridge.StartBot(ctx, binding); err != nil {
-		return err
-	}
-	m.rememberParticipant(a.ID, participantID)
-	return nil
 }
 
 func (m *feishuManager) shouldStartForAgent(a agent.Agent) bool {
@@ -530,12 +542,13 @@ func isCodexBridgeRole(role string) bool {
 }
 
 type ensureGate struct {
-	mu     sync.Mutex
-	active map[string]bool
+	mu      sync.Mutex
+	active  map[string]bool
+	pending map[string]bool
 }
 
 func newEnsureGate() ensureGate {
-	return ensureGate{active: make(map[string]bool)}
+	return ensureGate{active: make(map[string]bool), pending: make(map[string]bool)}
 }
 
 func (g *ensureGate) begin(agentID string) bool {
@@ -549,20 +562,29 @@ func (g *ensureGate) begin(agentID string) bool {
 		g.active = make(map[string]bool)
 	}
 	if g.active[agentID] {
+		if g.pending == nil {
+			g.pending = make(map[string]bool)
+		}
+		g.pending[agentID] = true
 		return false
 	}
 	g.active[agentID] = true
 	return true
 }
 
-func (g *ensureGate) finish(agentID string) {
+func (g *ensureGate) finish(agentID string) bool {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return
+		return false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.pending[agentID] {
+		delete(g.pending, agentID)
+		return true
+	}
 	delete(g.active, agentID)
+	return false
 }
 
 func stopBotIDs(bridge *codexbridge.Service, ids ...string) {

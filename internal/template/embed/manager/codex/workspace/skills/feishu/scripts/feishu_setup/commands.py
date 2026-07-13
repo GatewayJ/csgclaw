@@ -156,6 +156,7 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
         *secret_args,
     ]
     config["bot_bind"] = csgclaw_cli_json(args, bot_bind_args, input_text=input_text)
+    config["binding_activation"] = api_json(args, "POST", f"/api/v1/agents/{path_id(agent_id)}/bindings:apply")
     output = {
         "status": "configured",
         "agent_id": agent_id,
@@ -167,6 +168,7 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
         "admin_open_id": open_id,
         "config": public_result(config),
         "bot_ensured": True,
+        "binding_activated": True,
     }
     add_manager_group_permission_info(
         args,
@@ -174,11 +176,6 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
         {"app_id": app_id, "domain": args.domain, "open_id": open_id},
         output,
     )
-    setup_status = output["status"]
-    recreated = manager_recreate_action_card(agent_id)
-    output.update(recreated)
-    output["setup_status"] = setup_status
-    output["recreate"] = public_result(recreated)
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
 
@@ -270,9 +267,6 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     role = resolve_role(args, state)
     worker_existed_before_ensure = None
     ensured = (configured or {}).get("bot_bind") if isinstance(configured, dict) else None
-    recreated = None
-    if role == "manager" and configured is not None and args.recreate != "none":
-        recreated = manager_recreate_action_card(state["agent_id"])
     if not args.keep_state:
         delete_state(args, state["registration_id"])
     if configured is not None:
@@ -302,14 +296,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "bot_ensured": ensured is not None,
         "worker_existed_before_ensure": worker_existed_before_ensure,
         "worker_recreate_policy": worker_recreate_policy,
-        "recreate": public_result(recreated or {}),
+        "activation": public_result((configured or {}).get("binding_activation") or {}),
     }
     add_manager_group_permission_info(args, state, result, output)
-    if isinstance(recreated, dict) and recreated.get("type") == "csgclaw.action_card":
-        setup_status = output["status"]
-        output.update(recreated)
-        output["setup_status"] = setup_status
-        output["recreate"] = public_result(recreated)
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
 

@@ -107,8 +107,8 @@ func TestFinalizeFeishuRegistrationBindsWorkerParticipant(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if result["participant_id"] != "pt-dev" || result["config_saved"] != true || result["restart_status"] != "worker_recreated" {
-		t.Fatalf("finalize result = %#v, want saved dev config and worker recreate", result)
+	if result["participant_id"] != "pt-dev" || result["config_saved"] != true || result["restart_status"] != "restart_skipped" || result["activation_status"] != "runtime_recreated" {
+		t.Fatalf("finalize result = %#v, want saved dev config and activated worker runtime", result)
 	}
 	stored, ok := participantSvc.Get(participant.ChannelFeishu, "pt-dev")
 	if !ok {
@@ -351,8 +351,10 @@ func TestFinalizeFeishuRegistrationBindsManagerAdminHuman(t *testing.T) {
 
 	manager := completeWorkerAgent(agent.ManagerUserID, "manager")
 	manager.Role = agent.RoleManager
+	manager.RuntimeKind = agent.RuntimeKindCodex
+	bridge := &fakeCodexBridgeController{}
 	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{manager},
-		agent.WithRuntime(fakeCompatRuntime{kind: agent.RuntimeKindPicoClawSandbox}),
+		agent.WithLifecycleObserver(bridge),
 	)
 	participantSvc := participant.NewService(participant.NewMemoryStore(nil), participant.WithAgentService(agentSvc))
 	srv := &Handler{
@@ -373,8 +375,11 @@ func TestFinalizeFeishuRegistrationBindsManagerAdminHuman(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if result["restart_status"] != "manager_recreated" || result["participant_id"] != "pt-manager" {
-		t.Fatalf("finalize result = %#v, want manager recreated for manager participant", result)
+	if result["restart_status"] != "restart_skipped" || result["activation_status"] != "lifecycle_reconciled" || result["participant_id"] != "pt-manager" {
+		t.Fatalf("finalize result = %#v, want manager lifecycle reconciliation", result)
+	}
+	if len(bridge.ensureCalls) != 1 || bridge.ensureCalls[0].ID != agent.ManagerUserID {
+		t.Fatalf("EnsureAgent() calls = %+v, want manager once", bridge.ensureCalls)
 	}
 	admin, ok := participantSvc.Get(participant.ChannelFeishu, "admin")
 	if !ok {

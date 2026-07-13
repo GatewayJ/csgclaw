@@ -137,6 +137,8 @@ def configure_csgclaw(args, state: dict, result: dict) -> dict:
     if role == "worker" and args.recreate in ("auto", "worker"):
         bot_bind_args.append("--restart")
     response["bot_bind"] = csgclaw_cli_json(args, bot_bind_args, input_text=result["app_secret"])
+    if role == "manager":
+        response["binding_activation"] = api_json(args, "POST", f"/api/v1/agents/{path_id(agent_id)}/bindings:apply")
     if role == "manager" and candidate_admin_open_id:
         response["admin_open_id"] = candidate_admin_open_id
         response["admin_open_id_source"] = "registration"

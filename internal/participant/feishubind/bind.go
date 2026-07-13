@@ -10,15 +10,17 @@ import (
 )
 
 type Result struct {
-	Status          string   `json:"status"`
-	Channel         string   `json:"channel"`
-	ParticipantType string   `json:"participant_type"`
-	ParticipantID   string   `json:"participant_id"`
-	AgentID         string   `json:"agent_id,omitempty"`
-	ConfigSaved     bool     `json:"config_saved"`
-	RestartStatus   string   `json:"restart_status,omitempty"`
-	RestartError    string   `json:"restart_error,omitempty"`
-	Warnings        []string `json:"warnings,omitempty"`
+	Status           string   `json:"status"`
+	Channel          string   `json:"channel"`
+	ParticipantType  string   `json:"participant_type"`
+	ParticipantID    string   `json:"participant_id"`
+	AgentID          string   `json:"agent_id,omitempty"`
+	ConfigSaved      bool     `json:"config_saved"`
+	RestartStatus    string   `json:"restart_status,omitempty"`
+	RestartError     string   `json:"restart_error,omitempty"`
+	ActivationStatus string   `json:"activation_status,omitempty"`
+	ActivationError  string   `json:"activation_error,omitempty"`
+	Warnings         []string `json:"warnings,omitempty"`
 }
 
 func BindAdminHuman(ctx context.Context, participantSvc *participant.Service, openID, name string) (Result, error) {

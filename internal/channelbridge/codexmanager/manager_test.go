@@ -81,6 +81,28 @@ func TestShouldStartCodexBridge(t *testing.T) {
 	}
 }
 
+func TestEnsureGateCoalescesOverlappingEnsures(t *testing.T) {
+	gate := newEnsureGate()
+	if !gate.begin("u-manager") {
+		t.Fatal("first begin() = false, want true")
+	}
+	if gate.begin("u-manager") {
+		t.Fatal("overlapping begin() = true, want false")
+	}
+	if !gate.finish("u-manager") {
+		t.Fatal("first finish() = false, want a coalesced rerun")
+	}
+	if gate.finish("u-manager") {
+		t.Fatal("second finish() = true, want no further rerun")
+	}
+	if !gate.begin("u-manager") {
+		t.Fatal("begin() after finish = false, want true")
+	}
+	if gate.finish("u-manager") {
+		t.Fatal("finish() without overlap = true, want false")
+	}
+}
+
 func TestShouldRestoreCodexBridgeOnStartup(t *testing.T) {
 	cases := []struct {
 		name  string

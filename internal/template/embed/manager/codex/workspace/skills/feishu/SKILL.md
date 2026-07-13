@@ -234,7 +234,7 @@ printf '%s' '[REDACTED]' | csgclaw-cli participant bind \
   --restart
 ```
 
-For manager setup, use the wrapper so the final chat response is a browser action card:
+For manager setup, use the wrapper so the binding and Feishu bridge activation complete automatically:
 
 ```bash
 printf '%s' '[REDACTED]' | python "$CODEX_HOME/skills/feishu/scripts/feishu_register.py" bind-manager \
@@ -249,7 +249,7 @@ Return the printed JSON object exactly as the chat response. Do not summarize it
 
 The script writes Feishu config through `csgclaw-cli participant bind` because skills should not edit host files directly.
 
-For `u-manager`, `bind-manager` binds `feishu:admin` when `--open-id` is provided, binds `feishu:manager` without direct restart from inside the manager runtime, then prints a top-level action card:
+For `u-manager`, `bind-manager` binds `feishu:admin` when `--open-id` is provided, binds `feishu:manager` without restarting the Codex runtime, then calls the Agent binding activation API to refresh the Feishu bridge against the existing Codex session:
 
 ```bash
 printf '%s' '[REDACTED]' | python "$CODEX_HOME/skills/feishu/scripts/feishu_register.py" bind-manager --open-id ou_xxx --app-id cli_xxx --app-secret-stdin
@@ -259,23 +259,20 @@ Expected wrapper response shape:
 
 ```json
 {
-  "type": "csgclaw.action_card",
-  "status": "manager_recreate_pending",
+  "status": "configured",
   "agent_id": "u-manager",
   "bot_id": "u-manager",
-  "setup_status": "configured",
+  "binding_activated": true,
   "config": {
     "bot_bind": {
       "participant_id": "manager",
       "restart_status": "restart_skipped"
+    },
+    "binding_activation": {
+      "id": "u-manager",
+      "status": "running"
     }
-  },
-  "actions": [
-    {
-      "id": "rebuild-manager",
-      "method": "manager-bootstrap-replace"
-    }
-  ]
+  }
 }
 ```
 
@@ -287,7 +284,7 @@ printf '%s' '[REDACTED]' | csgclaw-cli participant bind --channel feishu --feish
 
 ## CLI Workflow for Manual Control
 
-Use `participant bind` for channel config. Use the helper script for manager rebuild because the manager must not recreate itself from the same manager-hosted run.
+Use `participant bind` for channel config. The manager wrapper automatically activates its Feishu bridge without recreating the manager runtime.
 
 ```bash
 printf '%s' '[REDACTED]' | csgclaw-cli participant bind --channel feishu --feishu-kind bot --agent u-dev --app-id cli_xxx --app-secret-stdin --restart
@@ -330,11 +327,11 @@ python "$CODEX_HOME/skills/feishu/scripts/feishu_register.py" start --agent u-ma
 python "$CODEX_HOME/skills/feishu/scripts/feishu_register.py" finalize --registration-id <id>
 ```
 
-4. Return the `finalize` JSON object exactly as the chat response. Do not summarize it, translate it, add a Markdown table, or wrap it in a code fence. The object contains `type: csgclaw.action_card` and action metadata so the Web frontend can render the button.
+4. Return the `finalize` JSON object exactly as the chat response. Do not summarize it, translate it, add a Markdown table, or wrap it in a code fence. The object reports the completed binding activation.
 
-5. Do not call a manager recreate API or host command from this skill. The Manager rebuild must be completed by the rendered Web action-card button.
+5. Do not call a manager recreate API or host command from this skill. The script activates the updated Feishu binding through CSGClaw without rebuilding the Manager.
 
-Do not use the generic manager recreate endpoint or any terminal/host-side manager rebuild fallback. The Web action card uses `POST /api/v1/agents` with `{"id":"u-manager","replace":true}` from the browser after the user clicks the window button.
+Do not use the generic manager recreate endpoint or any terminal/host-side manager rebuild fallback.
 
 ## Common Pitfalls
 
@@ -342,9 +339,9 @@ Do not use the generic manager recreate endpoint or any terminal/host-side manag
 2. Running host-only commands from inside manager: manager usually only has `csgclaw-cli`; use this script/API from manager, and ask the host operator to clean stale runtime state if needed.
 3. If you see older workflow docs mentioning alternate Feishu config commands, ignore them and use `csgclaw-cli participant bind ...` to write config.
 4. Binding the wrong target: pass the CSGClaw agent ID such as `u-dev` or `u-manager`; the bind command writes the canonical Feishu participant ID.
-5. Expecting bind alone to update an already-running worker: worker recreate or manager rebuild is still required.
-6. Calling manager recreate from inside this manager-hosted skill: return the action card so the current window renders the rebuild button.
-7. Checking host runtime status after manager recreate and treating transient status as failure: the browser-owned manager bootstrap replace is the success boundary for this skill.
+5. Expecting bind alone to update an already-running worker: worker recreate is still required; the manager wrapper activates its binding automatically.
+6. Calling manager recreate from inside this manager-hosted skill: use the binding activation result instead; it preserves the current Codex session.
+7. Treating a binding activation API failure as configured: the participant may be saved, but the activation must succeed before the Skill reports completion.
 8. Printing secrets in summaries or logs: always mask as `[REDACTED]` or `present`.
 9. Calling CSGClaw SSE endpoint a Feishu webhook: it is an internal CSGClaw-to-runtime bridge.
 10. If Feishu changes the accounts registration endpoint or tenant policy blocks PersonalAgent creation, fall back to manual App ID/App Secret setup.
@@ -358,6 +355,6 @@ Do not use the generic manager recreate endpoint or any terminal/host-side manag
 - [ ] CSGClaw participant exists with `channel=feishu`.
 - [ ] Worker bind reported `restart_status` such as `worker_recreated` or `restart_skipped`.
 - [ ] New worker finalize was run with a tool timeout of at least 600 seconds.
-- [ ] Manager finalize returned a raw `csgclaw.action_card` JSON object with `rebuild-manager` action metadata for the web button.
+- [ ] Manager finalize reports a successful `config.binding_activation` result and no `rebuild-manager` action.
 - [ ] No manager-hosted command called the generic manager recreate endpoint or any host-side manager rebuild command.
 - [ ] No public Feishu webhook endpoint was added or required.

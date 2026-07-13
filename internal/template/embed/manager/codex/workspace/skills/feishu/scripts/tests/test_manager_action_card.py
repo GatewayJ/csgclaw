@@ -25,9 +25,11 @@ class ManagerActionCardTest(unittest.TestCase):
         self.assertNotIn("fallback", result)
         self.assertNotIn("non_web_instruction", result)
 
-    def test_bind_manager_wraps_bind_result_as_action_card(self):
+    def test_bind_manager_reconciles_bridge_without_action_card(self):
         calls = []
+        api_calls = []
         original_csgclaw_cli_json = commands.csgclaw_cli_json
+        original_api_json = commands.api_json
 
         def fake_csgclaw_cli_json(args, cli_args, input_text=None):
             calls.append((cli_args, input_text))
@@ -39,7 +41,12 @@ class ManagerActionCardTest(unittest.TestCase):
                 "restart_status": "restart_skipped",
             }
 
+        def fake_api_json(args, method, path, body=None):
+            api_calls.append((method, path, body))
+            return {"id": "u-manager", "status": "running"}
+
         commands.csgclaw_cli_json = fake_csgclaw_cli_json
+        commands.api_json = fake_api_json
         try:
             args = Namespace(
                 agent="u-manager",
@@ -56,20 +63,23 @@ class ManagerActionCardTest(unittest.TestCase):
                 exit_code = commands.cmd_bind_manager(args)
         finally:
             commands.csgclaw_cli_json = original_csgclaw_cli_json
+            commands.api_json = original_api_json
 
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["type"], "csgclaw.action_card")
-        self.assertEqual(payload["status"], "manager_recreate_pending")
-        self.assertEqual(payload["setup_status"], "configured")
+        self.assertEqual(payload["status"], "configured")
         self.assertEqual(payload["agent_id"], "u-manager")
         self.assertEqual(payload["bot_id"], "u-manager")
         self.assertEqual(payload["config"]["bot_bind"]["restart_status"], "restart_skipped")
-        self.assertEqual(payload["actions"][0]["id"], "rebuild-manager")
+        self.assertEqual(payload["config"]["binding_activation"]["status"], "running")
+        self.assertTrue(payload["binding_activated"])
+        self.assertNotIn("type", payload)
+        self.assertNotIn("actions", payload)
         self.assertEqual(payload["manager_group_permission_app_id"], "cli_example")
         self.assertIn("/app/cli_example/auth", payload["manager_group_permission_url"])
         self.assertIn("im:chat.members:write_only", payload["manager_group_permission_url"])
         self.assertFalse(any("--restart" in call[0] for call in calls))
+        self.assertEqual(api_calls, [("POST", "/api/v1/agents/u-manager/bindings:apply", None)])
         self.assertTrue(any("--app-secret-env" in call[0] for call in calls))
 
     def test_configure_worker_skips_admin_from_registration_open_id(self):
@@ -102,7 +112,9 @@ class ManagerActionCardTest(unittest.TestCase):
 
     def test_configure_manager_passes_admin_name_from_registration(self):
         calls = []
+        api_calls = []
         original_csgclaw_cli_json = csgclaw.csgclaw_cli_json
+        original_api_json = csgclaw.api_json
 
         def fake_csgclaw_cli_json(args, cli_args, input_text=None):
             calls.append((cli_args, input_text))
@@ -114,7 +126,12 @@ class ManagerActionCardTest(unittest.TestCase):
                 "restart_status": "restart_skipped",
             }
 
+        def fake_api_json(args, method, path, body=None):
+            api_calls.append((method, path, body))
+            return {"id": "u-manager", "status": "running"}
+
         csgclaw.csgclaw_cli_json = fake_csgclaw_cli_json
+        csgclaw.api_json = fake_api_json
         try:
             response = csgclaw.configure_csgclaw(
                 Namespace(role="manager", recreate="auto"),
@@ -123,15 +140,18 @@ class ManagerActionCardTest(unittest.TestCase):
             )
         finally:
             csgclaw.csgclaw_cli_json = original_csgclaw_cli_json
+            csgclaw.api_json = original_api_json
 
         admin_bind = next(call[0] for call in calls if "--feishu-kind" in call[0] and "human" in call[0])
         self.assertIn("--name", admin_bind)
         self.assertEqual(admin_bind[admin_bind.index("--name") + 1], "龙韵")
         self.assertEqual(response["admin_bind"]["participant_id"], "admin")
+        self.assertEqual(response["binding_activation"]["status"], "running")
+        self.assertEqual(api_calls, [("POST", "/api/v1/agents/u-manager/bindings:apply", None)])
         self.assertEqual(response["admin_open_id"], "ou_admin")
         self.assertEqual(response["admin_open_id_source"], "registration")
 
-    def test_manager_finalize_promotes_action_card_to_top_level(self):
+    def test_manager_finalize_returns_reconciled_binding_without_action_card(self):
         originals = {
             "load_state": commands.load_state,
             "poll_until_success": commands.poll_until_success,
@@ -157,6 +177,7 @@ class ManagerActionCardTest(unittest.TestCase):
                 "agent_id": "u-manager",
                 "restart_status": "restart_skipped",
             },
+            "binding_activation": {"id": "u-manager", "status": "running"},
         }
         commands.delete_state = lambda args, registration_id: None
         try:
@@ -179,11 +200,12 @@ class ManagerActionCardTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["type"], "csgclaw.action_card")
-        self.assertEqual(payload["status"], "manager_recreate_pending")
-        self.assertEqual(payload["setup_status"], "configured")
-        self.assertEqual(payload["bot_id"], "u-manager")
-        self.assertEqual(payload["actions"][0]["id"], "rebuild-manager")
+        self.assertEqual(payload["status"], "configured")
+        self.assertEqual(payload["agent_id"], "u-manager")
+        self.assertEqual(payload["config"]["bot_bind"]["participant_id"], "manager")
+        self.assertEqual(payload["activation"]["status"], "running")
+        self.assertNotIn("type", payload)
+        self.assertNotIn("actions", payload)
         self.assertEqual(payload["app_secret"], "present")
         self.assertEqual(payload["manager_group_permission_app_id"], "cli_example")
         self.assertIn("/app/cli_example/auth", payload["manager_group_permission_url"])
