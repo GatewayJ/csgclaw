@@ -10,9 +10,10 @@ csgclaw serve
 └─ Codex worker app-server(s)
 ```
 
-实现改动集中在 `sandbox-runtime` 的四个发布相关文件：Dockerfile、默认 worker
-模板配置、构建默认基座版本和镜像发布 tag。**不修改 CSGClaw Go 代码、CSGBot、
-entrypoint、hub 模板或 `csgclaw-agent` 镜像。**
+实现先要完成两项**必需的镜像改动**：在 `csgclaw-server` 最终镜像中安装可执行的
+Codex CLI，以及把未指定模板的新 worker 默认切到内建 Codex。然后才是选择 base image
+和发布 server wrapper tag。CSGClaw Go 代码和 CSGBot 不需要重写，是因为上述镜像和默认
+模板就能接入已有 runtime；它们不是本方案的改动主体。
 
 理由是 CSGClaw 的 `codex` 已是本地 runtime：它在 CSGClaw 所在环境直接执行
 `codex app-server --listen stdio://`。因此 CSGHub server sandbox 只要具备相同二进制
@@ -26,28 +27,42 @@ manager/worker 路径。
 
 ### 1. `csgclaw-server/Dockerfile`
 
-只做三项：
+这是本方案的核心改动。最终 server 镜像必须在**构建期**得到 Codex 原生二进制，不能把
+安装留到容器启动后。
 
 1. 将 `CSGCLAW_BASE_IMAGE` 更新为
    `opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/csgclaw:v0.3.18`。
-2. 在镜像构建期用多阶段构建安装**固定版本**的 Linux Codex CLI：
-   - 写入 `/usr/local/bin/codex`；
-   - 固定 npm 包 `@openai/codex@0.144.1`，按 `TARGETARCH` 复制其 musl 原生
-     二进制；
-   - 设置 `CSGCLAW_CODEX_PATH=/usr/local/bin/codex`（或确保该路径在 `PATH`）；
-   - 构建期运行 `codex --version`。
-3. 将基座中直接位于 `/usr/local/bin` 的 `csgclaw` / `csgclaw-cli` 规范化为
+2. 在 Dockerfile 顶部固定下载根地址：
+
+   ```dockerfile
+   ARG CSGCLAW_CODEX_DOWNLOAD_BASE_URL=https://csgclaw.opencsg.com/codex-cli/latest
+   ```
+
+   在 `FROM ${CSGCLAW_BASE_IMAGE}` 后为当前 stage 重新声明该 `ARG`（Docker 的作用域
+   要求），安装 `curl`，并按 `TARGETARCH` 下载：
+
+   ```text
+   https://csgclaw.opencsg.com/codex-cli/latest/linux/<amd64|arm64>?package=codex-cli
+   ```
+
+   下载的是包含 musl 原生二进制的 tar.gz。构建脚本必须：映射 `amd64`/`arm64` 到 archive
+   中的对应文件名、解包、以 `0755` 安装到 `/opt/codex/bin/codex`、软链到
+   `/usr/local/bin/codex`，最后执行 `codex --version`。这一步失败必须让 image build
+   失败。
+
+   该 URL 只作为 Dockerfile build arg 的默认值；**不**通过 Makefile、CI pipeline variable
+   或最终容器的环境变量暴露。每次构建取得当前 `latest`，因此并不承诺固定 Codex 版本。
+3. 设置 `CSGCLAW_CODEX_PATH=/usr/local/bin/codex`，使 CSGClaw 在启动时优先使用镜像内
+   CLI，不触发运行期自动安装。
+4. 将基座中直接位于 `/usr/local/bin` 的 `csgclaw` / `csgclaw-cli` 规范化为
    `/opt/csgclaw/bin/...` 的官方 bundle 布局，并保留原命令路径的软链。
    `v0.3.18` 基座本身没有这个布局，而正式版本的 `csgclaw serve` 会校验它；不做这
    一步会在启动前直接退出，与 Codex 无关。
 
-构建期的 npm 和 Alpine 下载源均是可覆盖的 Docker `ARG`；仅影响构建下载速度，
-不改变容器运行时的软件源或 CSGClaw 行为。
-
 不要依赖 `csgclaw serve` 的运行期自动下载；它失败只会告警，可能造成 HTTP server
 健康而 Codex manager 不可用。
 
-以下 Dockerfile 内容不改：
+这次 Dockerfile 改动不触及以下兼容层：
 
 - UID/GID 1000 和 `/home/picoclaw/.csgclaw` PVC 布局；
 - supervisor、tini、Python sandbox :8888；
@@ -94,7 +109,7 @@ OpenClaw/PicoClaw 若在另一个容器，`127.0.0.1` 是它自己的 loopback�
 server。最小方案沿用 CSGBot 注入的外部可达 Gateway URL；Codex 也通过这个已有地址
 访问 CSGClaw LLM bridge。
 
-### 3. 明确不改 `docker-entrypoint.sh`
+### 3. 保持 `docker-entrypoint.sh` 的启动契约
 
 entrypoint 当前每次启动都会把镜像内的 `config.toml` 和 `hub/` 复制进 PVC，并要求
 现有的模型/CSGHub 环境变量。最小方案不改变这些行为。
@@ -102,18 +117,26 @@ entrypoint 当前每次启动都会把镜像内的 `config.toml` 和 `hub/` 复�
 这也意味着：必须修改并发布镜像内的 `config.toml`；在运行中手改 PVC 的 config 会被
 下一次启动覆盖。
 
-### 4. 构建与发布默认值
+### 4. 构建与发布
 
-`Makefile` 中的 `CSGCLAW_BASE_IMAGE_NAME` 同步为 `v0.3.18`，避免本地 `make`
-仍构建旧基座；`.ci/images/csgclaw-server-sandbox.env` 将待发布镜像标为：
+`Makefile` 的 `CSGCLAW_BASE_IMAGE_NAME` 默认值为 `v0.3.18`，并把它传给 Dockerfile
+的 `CSGCLAW_BASE_IMAGE`。Codex 下载地址不在 Makefile 中配置，始终使用 Dockerfile
+顶部的默认 URL。
+
+GitLab 的 `image:csgclaw-server-sandbox` 是普通 `.ci/images/*.env` 机制的例外：创建
+protected `main` pipeline 时必须传入：
 
 ```text
-opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsg_public/csgclaw-server-sandbox:20260713-dev
+CSGCLAW_BASE_IMAGE_NAME=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/csgclaw:<base-tag>
+CSGCLAW_SERVER_SANDBOX_IMAGE_NAME=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsg_public/csgclaw-server-sandbox:<server-tag>
 ```
 
-这两个文件不改变线上运行时逻辑，只使默认构建和 CI 发布指向本次镜像。
+CI 从已提交的 `csgclaw-agent-sandbox.env` 读取兼容模板使用的 agent image；调用者不需
+传第三个变量。构建成功只会推送 server wrapper image；仍须在目标环境的 CSGBot 配置中
+将 `[sandbox.csgclaw-server].image` 更新为新 tag 并部署，之后新创建的 sandbox 才会采用
+新镜像。
 
-## 不修改的仓库和文件
+## 实施范围外（在上述改动完成后保持不变）
 
 | 路径/仓库 | 原因 |
 | --- | --- |
@@ -125,8 +148,11 @@ opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsg_public/csgclaw-server-sandbo
 
 ## 验收
 
-1. 构建新 server 镜像；以 `--entrypoint /usr/local/bin/codex` 运行
-   `codex --version`，确认 CLI 在最终镜像可执行。
+1. 使用无缓存构建新 server 镜像，确认日志从
+   `https://csgclaw.opencsg.com/codex-cli/latest/linux/<arch>?package=codex-cli` 下载
+   archive、打印 `codex --version`，且不再出现 Node/npm 或 Docker Hub 的 Codex 安装步骤；
+   再以 `--entrypoint /usr/local/bin/codex` 运行 `codex --version`，确认 CLI 在最终镜像
+   可执行。
 2. 使用现有 CSGBot 创建 CSGClaw server sandbox，确认容器用户可写
    `/home/picoclaw/.csgclaw`。
 3. 确认 manager 为 `runtime_kind=codex`；未显式选择模板的新建 worker 也为
