@@ -90,6 +90,80 @@ func TestRunNoRestartInstallsBundle(t *testing.T) {
 	assertFileContent(t, filepath.Join(installRoot, "README.md"), "new")
 }
 
+func TestRunUsesSupervisorParentRestartWhenNoDaemonPIDExists(t *testing.T) {
+	originalVersion := appversion.Version
+	appversion.Version = "v0.2.5"
+	t.Cleanup(func() { appversion.Version = originalVersion })
+
+	originalGOOS := currentGOOS
+	currentGOOS = "darwin"
+	t.Cleanup(func() { currentGOOS = originalGOOS })
+	t.Setenv("HOME", t.TempDir())
+
+	originalRestartSupervisorParent := restartSupervisorParent
+	var restartRequested bool
+	restartSupervisorParent = func() (internalupgrade.RestartResult, bool, error) {
+		restartRequested = true
+		return internalupgrade.RestartResult{DaemonWasRunning: true, Restarted: true}, true, nil
+	}
+	t.Cleanup(func() { restartSupervisorParent = originalRestartSupervisorParent })
+
+	installRoot := writeInstalledBundle(t, t.TempDir(), "old")
+	archive := releaseTarball(t, map[string]string{
+		"csgclaw/bin/csgclaw": "#!/bin/sh\n# new\n",
+		"csgclaw/bin/boxlite": "#!/bin/sh\n# new boxlite\n",
+	})
+	sum := sha256.Sum256(archive)
+
+	originalClientFactory := newUpgradeClient
+	newUpgradeClient = func(run *command.Context) internalupgrade.Client {
+		return internalupgrade.Client{
+			HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				switch req.URL.String() {
+				case "https://example.test/releases/latest":
+					return jsonResponse(http.StatusOK, `{
+						"name":"v0.2.7",
+						"assets":[{"name":"csgclaw_v0.2.7_darwin_arm64.tar.gz","browser_download_url":"https://downloads.example.test/csgclaw.tar.gz","size":`+strconv.Itoa(len(archive))+`,"sha256":"`+hex.EncodeToString(sum[:])+`"}]
+					}`), nil
+				case "https://downloads.example.test/csgclaw.tar.gz":
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Status:     http.StatusText(http.StatusOK),
+						Header:     make(http.Header),
+						Body:       io.NopCloser(bytes.NewReader(archive)),
+					}, nil
+				default:
+					t.Fatalf("unexpected URL %q", req.URL.String())
+					return nil, nil
+				}
+			}),
+			LatestURL: "https://example.test/releases/latest",
+			GOOS:      "darwin",
+			GOARCH:    "arm64",
+			ExecutablePath: func() (string, error) {
+				return filepath.Join(installRoot, "bin", "csgclaw"), nil
+			},
+		}
+	}
+	t.Cleanup(func() { newUpgradeClient = originalClientFactory })
+
+	var stdout bytes.Buffer
+	err := NewCmd().Run(context.Background(), &command.Context{
+		Program: "csgclaw",
+		Stdout:  &stdout,
+		Stderr:  &bytes.Buffer{},
+	}, nil, command.GlobalOptions{Output: "table"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !restartRequested {
+		t.Fatal("supervisor parent restart was not requested")
+	}
+	if !strings.Contains(stdout.String(), "Restarting service") {
+		t.Fatalf("stdout = %q, want restart output", stdout.String())
+	}
+}
+
 func TestRunWindowsNoRestartDoesNotStopDaemon(t *testing.T) {
 	originalVersion := appversion.Version
 	appversion.Version = "v0.2.5"
