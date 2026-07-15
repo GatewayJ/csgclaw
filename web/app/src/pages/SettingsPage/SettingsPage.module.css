@@ -176,6 +176,10 @@
   width: 100%;
 }
 
+.versionValueWithAction {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .settingLine,
 .environmentLine {
   min-height: 40px;

@@ -14,7 +14,7 @@ import {
 } from "@/models/authEnvironment";
 import type { AuthEnvironmentDraft, AuthEnvironmentPresetID } from "@/models/authEnvironment";
 import { githubFeedbackIssueURL } from "@/models/feedback";
-import { formatSidebarVersionLabel } from "@/models/upgradeStatus";
+import { formatSidebarVersionLabel, hasUpgradeAttention, isLocalBuildUpgradeStatus } from "@/models/upgradeStatus";
 import { classNames } from "@/shared/lib/classNames";
 import { readStoredAuthEnvironmentDraft, writeStoredAuthEnvironmentDraft } from "@/shared/storage/authEnvironment";
 import type { ThemeMode } from "@/shared/theme/theme";
@@ -54,7 +54,13 @@ export function SettingsPage() {
     : sidebar.authBusy
       ? sidebar.t("csghubSigningIn")
       : sidebar.t("settingsAccountLogin");
-  const version = formatSidebarVersionLabel(sidebar.upgradeStatus?.current_version || sidebar.appVersion);
+  const currentVersion = sidebar.upgradeStatus?.current_version || sidebar.appVersion;
+  const version = formatSidebarVersionLabel(currentVersion);
+  const showUpgradeAction =
+    sidebar.showUpgradeControls &&
+    !isLocalBuildUpgradeStatus(sidebar.upgradeStatus, currentVersion) &&
+    sidebar.upgradeStatus?.auto_upgrade_supported !== false &&
+    hasUpgradeAttention(sidebar.upgradeStatus, sidebar.upgradePhase, sidebar.upgradeBusy);
   const feedbackURL = githubFeedbackIssueURL(sidebar.appVersion, sidebar.upgradeStatus);
   const activeAuthEnvironmentDraft = signedIn
     ? authEnvironmentDraftFromStatus(sidebar.authStatus, authEnvironmentDraft)
@@ -260,9 +266,14 @@ export function SettingsPage() {
         </SettingsRow>
 
         <SettingsRow title={sidebar.t("versionInfo")} description={sidebar.t("settingsVersionDescription")}>
-          <div className={styles.versionValue}>
+          <div className={classNames(styles.versionValue, showUpgradeAction && styles.versionValueWithAction)}>
             <span>{sidebar.t("settingsCurrentVersion")}</span>
             <strong>{version}</strong>
+            {showUpgradeAction ? (
+              <Button className={styles.designButton} variant="secondaryGray" size="md" onClick={sidebar.onOpenUpgrade}>
+                {sidebar.t("upgradeAction")}
+              </Button>
+            ) : null}
           </div>
         </SettingsRow>
 
