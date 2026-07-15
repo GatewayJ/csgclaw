@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -836,7 +837,7 @@ func TestRemoveRuntimeDirRetriesLockedPluginCloneFetchHead(t *testing.T) {
 				return &os.PathError{
 					Op:   "unlinkat",
 					Path: fetchHeadPath,
-					Err:  errors.New("The process cannot access the file because it is being used by another process."),
+					Err:  syscall.EBUSY,
 				}
 			}
 			return os.RemoveAll(path)

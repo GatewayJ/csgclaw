@@ -1125,6 +1125,9 @@ func (r *Runtime) removeRuntimeDir(ctx context.Context, path string) error {
 }
 
 func isTransientRuntimeDirRemoveError(err error) bool {
+	if errors.Is(err, syscall.EBUSY) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "being used by another process") ||
 		strings.Contains(msg, "the process cannot access the file") ||
@@ -1366,11 +1369,13 @@ func stopProcess(pid int) error {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if !processAlive(pid) {
-			return nil
+			return stopProcessTree(pid)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	_ = stopProcessTree(pid)
+	if err := stopProcessTree(pid); err != nil {
+		return err
+	}
 	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if !processAlive(pid) {

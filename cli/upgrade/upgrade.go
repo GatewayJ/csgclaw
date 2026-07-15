@@ -32,7 +32,7 @@ var (
 	stopDaemonFromExecutable  = upgrade.StopDaemonFromExecutable
 	startDaemonFromExecutable = upgrade.StartDaemonFromExecutable
 	startInstalledDaemon      = upgrade.StartInstalledDaemon
-	restartSupervisorParent   = upgrade.RestartSupervisorParentIfConfigured
+	restartCSGHubServer       = upgrade.RestartCSGHubServerIfConfigured
 )
 
 func NewCmd() command.Command {
@@ -133,12 +133,12 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 			return fail(err)
 		}
 		if !restarted.DaemonWasRunning {
-			supervised, configured, restartErr := restartSupervisorParent()
+			csghubRestart, configured, restartErr := restartCSGHubServer()
 			if restartErr != nil {
 				return fail(restartErr)
 			}
 			if configured {
-				restarted = supervised
+				restarted = csghubRestart
 			}
 		}
 	}

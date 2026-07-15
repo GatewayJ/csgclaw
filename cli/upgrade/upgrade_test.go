@@ -90,7 +90,7 @@ func TestRunNoRestartInstallsBundle(t *testing.T) {
 	assertFileContent(t, filepath.Join(installRoot, "README.md"), "new")
 }
 
-func TestRunUsesSupervisorParentRestartWhenNoDaemonPIDExists(t *testing.T) {
+func TestRunUsesCSGHubServerRestartWhenNoDaemonPIDExists(t *testing.T) {
 	originalVersion := appversion.Version
 	appversion.Version = "v0.2.5"
 	t.Cleanup(func() { appversion.Version = originalVersion })
@@ -100,13 +100,13 @@ func TestRunUsesSupervisorParentRestartWhenNoDaemonPIDExists(t *testing.T) {
 	t.Cleanup(func() { currentGOOS = originalGOOS })
 	t.Setenv("HOME", t.TempDir())
 
-	originalRestartSupervisorParent := restartSupervisorParent
+	originalRestartCSGHubServer := restartCSGHubServer
 	var restartRequested bool
-	restartSupervisorParent = func() (internalupgrade.RestartResult, bool, error) {
+	restartCSGHubServer = func() (internalupgrade.RestartResult, bool, error) {
 		restartRequested = true
 		return internalupgrade.RestartResult{DaemonWasRunning: true, Restarted: true}, true, nil
 	}
-	t.Cleanup(func() { restartSupervisorParent = originalRestartSupervisorParent })
+	t.Cleanup(func() { restartCSGHubServer = originalRestartCSGHubServer })
 
 	installRoot := writeInstalledBundle(t, t.TempDir(), "old")
 	archive := releaseTarball(t, map[string]string{
