@@ -249,6 +249,50 @@ func TestCSGClawManagerStartupOnlyAttachesToLiveSession(t *testing.T) {
 	}
 }
 
+func TestMultiManagerRefreshFeishuChannelDoesNotRefreshCSGClawBridge(t *testing.T) {
+	sessions := &trackingSessionManager{
+		live: &runtimecodex.Session{
+			RuntimeID: "rt-agent-manager",
+			SessionID: "sess-manager",
+		},
+	}
+	runtime := runtimecodex.New(runtimecodex.Dependencies{Manager: sessions})
+	csgclawClient := newRecordingBotClient()
+	feishuClient := newRecordingBotClient()
+	manager := &multiManager{managers: []Manager{
+		newCSGClawManager(managerDeps{
+			runtime: runtime,
+			client:  csgclawClient,
+		}),
+		newFeishuManager(managerDeps{
+			runtime:  runtime,
+			client:   feishuClient,
+			provider: testCredentialProvider{agent.ManagerUserID: agent.ManagerParticipantID},
+		}),
+	}}
+	a := agent.Agent{
+		ID:              agent.ManagerUserID,
+		Name:            agent.ManagerName,
+		Role:            agent.RoleManager,
+		RuntimeKind:     agent.RuntimeKindCodex,
+		RuntimeID:       "rt-agent-manager",
+		Status:          string(agentruntime.StateRunning),
+		ProfileComplete: true,
+	}
+
+	if err := manager.RefreshAgentChannel(context.Background(), a, "feishu"); err != nil {
+		t.Fatalf("RefreshAgentChannel() error = %v", err)
+	}
+
+	feishuClient.waitStarted(t, agent.ManagerParticipantID)
+	if got := csgclawClient.totalStartedSignals(); got != 0 {
+		t.Fatalf("CSGClaw bridge starts = %d, want 0", got)
+	}
+	if got := csgclawClient.totalStoppedSignals(); got != 0 {
+		t.Fatalf("CSGClaw bridge stops = %d, want 0", got)
+	}
+}
+
 func TestFeishuManagerStopAgentStopsRememberedParticipant(t *testing.T) {
 	client := newRecordingBotClient()
 	bridge := codexbridge.NewService(client, noopPrompter{}, runtimecodex.NewEventSink())
@@ -440,6 +484,24 @@ func (c *recordingBotClient) waitStarted(t *testing.T, botID string) {
 func (c *recordingBotClient) waitStopped(t *testing.T, botID string) {
 	t.Helper()
 	c.wait(t, c.stopped, botID, "stop")
+}
+
+func (c *recordingBotClient) totalStartedSignals() int {
+	return c.totalSignals(c.started)
+}
+
+func (c *recordingBotClient) totalStoppedSignals() int {
+	return c.totalSignals(c.stopped)
+}
+
+func (c *recordingBotClient) totalSignals(signals map[string]chan struct{}) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	total := 0
+	for _, ch := range signals {
+		total += len(ch)
+	}
+	return total
 }
 
 func (c *recordingBotClient) wait(t *testing.T, signals map[string]chan struct{}, botID string, action string) {

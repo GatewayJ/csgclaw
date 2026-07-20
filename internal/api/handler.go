@@ -1250,11 +1250,20 @@ func (h *Handler) handleAgentApplyBindings(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
+	channel, err := applyBindingsChannel(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if channel == "" {
+		http.Error(w, "channel is required", http.StatusBadRequest)
+		return
+	}
 	if err := h.svc.Reload(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	activated, _, err := h.svc.ApplyExternalBinding(r.Context(), id)
+	activated, _, err := h.svc.ApplyExternalBinding(r.Context(), id, channel)
 	if err != nil {
 		status := http.StatusBadRequest
 		if strings.Contains(err.Error(), "not found") {
@@ -1264,6 +1273,31 @@ func (h *Handler) handleAgentApplyBindings(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, presentAgent(activated))
+}
+
+type applyAgentBindingsRequest struct {
+	Channel string `json:"channel"`
+}
+
+func applyBindingsChannel(r *http.Request) (string, error) {
+	if r == nil {
+		return "", nil
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel != "" {
+		return channel, nil
+	}
+	if r.Body == nil {
+		return "", nil
+	}
+	var req applyAgentBindingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			return "", nil
+		}
+		return "", fmt.Errorf("decode apply bindings request: %w", err)
+	}
+	return strings.TrimSpace(req.Channel), nil
 }
 
 func (h *Handler) handleAgentApplyBindingsByID(w http.ResponseWriter, r *http.Request) {

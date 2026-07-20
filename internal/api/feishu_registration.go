@@ -198,7 +198,7 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, activation, err := h.svc.ApplyExternalBinding(r.Context(), state.AgentID); err != nil {
+	if _, activation, err := h.svc.ApplyExternalBinding(r.Context(), state.AgentID, participant.ChannelFeishu); err != nil {
 		result.Status = "partial"
 		result.ActivationStatus = "activation_failed"
 		result.ActivationError = err.Error()

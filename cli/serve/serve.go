@@ -567,6 +567,7 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 	}
 	if svc != nil {
 		svc.SetLifecycleObserver(codexBridgeMgr)
+		svc.SetBindingActivator(codexBridgeMgr)
 	}
 	if codexBridgeMgr != nil {
 		defer codexBridgeMgr.Close()

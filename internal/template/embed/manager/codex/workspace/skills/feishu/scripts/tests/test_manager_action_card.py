@@ -79,7 +79,7 @@ class ManagerActionCardTest(unittest.TestCase):
         self.assertIn("/app/cli_example/auth", payload["manager_group_permission_url"])
         self.assertIn("im:chat.members:write_only", payload["manager_group_permission_url"])
         self.assertFalse(any("--restart" in call[0] for call in calls))
-        self.assertEqual(api_calls, [("POST", "/api/v1/agents/u-manager/bindings:apply", None)])
+        self.assertEqual(api_calls, [("POST", "/api/v1/agents/u-manager/bindings:apply?channel=feishu", None)])
         self.assertTrue(any("--app-secret-env" in call[0] for call in calls))
 
     def test_configure_worker_skips_admin_from_registration_open_id(self):
@@ -147,7 +147,7 @@ class ManagerActionCardTest(unittest.TestCase):
         self.assertEqual(admin_bind[admin_bind.index("--name") + 1], "龙韵")
         self.assertEqual(response["admin_bind"]["participant_id"], "admin")
         self.assertEqual(response["binding_activation"]["status"], "running")
-        self.assertEqual(api_calls, [("POST", "/api/v1/agents/u-manager/bindings:apply", None)])
+        self.assertEqual(api_calls, [("POST", "/api/v1/agents/u-manager/bindings:apply?channel=feishu", None)])
         self.assertEqual(response["admin_open_id"], "ou_admin")
         self.assertEqual(response["admin_open_id_source"], "registration")
 

@@ -156,7 +156,7 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
         *secret_args,
     ]
     config["bot_bind"] = csgclaw_cli_json(args, bot_bind_args, input_text=input_text)
-    config["binding_activation"] = api_json(args, "POST", f"/api/v1/agents/{path_id(agent_id)}/bindings:apply")
+    config["binding_activation"] = api_json(args, "POST", f"/api/v1/agents/{path_id(agent_id)}/bindings:apply?channel=feishu")
     output = {
         "status": "configured",
         "agent_id": agent_id,

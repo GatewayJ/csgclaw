@@ -187,6 +187,7 @@ type Service struct {
 	runtimeRecords          map[string]RuntimeRecord
 	runtimeRegistry         map[string]agentruntime.Runtime
 	lifecycle               LifecycleObserver
+	bindingActivation       BindingActivator
 	agentLifecycleMu        sync.Mutex
 	agentLifecycleGates     map[string]*agentLifecycleGate
 	profileDefaults         AgentProfile
@@ -304,6 +305,16 @@ func WithLifecycleObserver(observer LifecycleObserver) ServiceOption {
 			return fmt.Errorf("agent service is required")
 		}
 		s.lifecycle = observer
+		return nil
+	}
+}
+
+func WithBindingActivator(activator BindingActivator) ServiceOption {
+	return func(s *Service) error {
+		if s == nil {
+			return fmt.Errorf("agent service is required")
+		}
+		s.bindingActivation = activator
 		return nil
 	}
 }
@@ -449,6 +460,15 @@ func (s *Service) SetLifecycleObserver(observer LifecycleObserver) {
 	}
 	s.mu.Lock()
 	s.lifecycle = observer
+	s.mu.Unlock()
+}
+
+func (s *Service) SetBindingActivator(activator BindingActivator) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.bindingActivation = activator
 	s.mu.Unlock()
 }
 

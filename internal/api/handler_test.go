@@ -231,14 +231,26 @@ func (apiFakeCodexManager) Prompt(context.Context, codexruntime.SessionHandle, c
 }
 
 type fakeCodexBridgeController struct {
-	ensureCalls []agent.Agent
-	stopCalls   []string
-	ensureErr   error
+	ensureCalls  []agent.Agent
+	refreshCalls []agentBindingRefreshCall
+	stopCalls    []string
+	ensureErr    error
+	refreshErr   error
+}
+
+type agentBindingRefreshCall struct {
+	agent   agent.Agent
+	channel string
 }
 
 func (f *fakeCodexBridgeController) EnsureAgent(_ context.Context, a agent.Agent) error {
 	f.ensureCalls = append(f.ensureCalls, a)
 	return f.ensureErr
+}
+
+func (f *fakeCodexBridgeController) RefreshAgentChannel(_ context.Context, a agent.Agent, channel string) error {
+	f.refreshCalls = append(f.refreshCalls, agentBindingRefreshCall{agent: a, channel: channel})
+	return f.refreshErr
 }
 
 func (f *fakeCodexBridgeController) StopAgent(agentID string) {
@@ -1966,15 +1978,15 @@ func TestHandleAgentStartEnsuresCodexBridge(t *testing.T) {
 	}
 }
 
-func TestHandleAgentApplyBindingsEnsuresCodexBridgeWithoutRuntimeStart(t *testing.T) {
+func TestHandleAgentApplyBindingsRefreshesRequestedChannelWithoutLifecycleEnsure(t *testing.T) {
 	manager := completeWorkerAgent(agent.ManagerUserID, agent.ManagerName)
 	manager.Role = agent.RoleManager
 	manager.RuntimeKind = agent.RuntimeKindCodex
 	manager.RuntimeID = "rt-manager"
 	bridge := &fakeCodexBridgeController{}
-	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{manager}, agent.WithLifecycleObserver(bridge))
+	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{manager}, agent.WithBindingActivator(bridge))
 	srv := &Handler{svc: agentSvc}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+agent.ManagerUserID+"/bindings:apply", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+agent.ManagerUserID+"/bindings:apply?channel=feishu", nil)
 	rec := httptest.NewRecorder()
 
 	srv.Routes().ServeHTTP(rec, req)
@@ -1982,8 +1994,32 @@ func TestHandleAgentApplyBindingsEnsuresCodexBridgeWithoutRuntimeStart(t *testin
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	if len(bridge.ensureCalls) != 1 || bridge.ensureCalls[0].ID != agent.ManagerUserID {
-		t.Fatalf("EnsureAgent() calls = %+v, want manager once", bridge.ensureCalls)
+	if len(bridge.ensureCalls) != 0 {
+		t.Fatalf("EnsureAgent() calls = %+v, want none", bridge.ensureCalls)
+	}
+	if len(bridge.refreshCalls) != 1 || bridge.refreshCalls[0].agent.ID != agent.ManagerUserID || bridge.refreshCalls[0].channel != "feishu" {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want manager feishu once", bridge.refreshCalls)
+	}
+}
+
+func TestHandleAgentApplyBindingsRequiresChannel(t *testing.T) {
+	manager := completeWorkerAgent(agent.ManagerUserID, agent.ManagerName)
+	manager.Role = agent.RoleManager
+	manager.RuntimeKind = agent.RuntimeKindCodex
+	manager.RuntimeID = "rt-manager"
+	bridge := &fakeCodexBridgeController{}
+	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{manager}, agent.WithBindingActivator(bridge))
+	srv := &Handler{svc: agentSvc}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+agent.ManagerUserID+"/bindings:apply", nil)
+	rec := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if len(bridge.refreshCalls) != 0 {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want none", bridge.refreshCalls)
 	}
 }
 

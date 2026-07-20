@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"csgclaw/internal/agent"
+	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/channelbridge/codexbridge"
 	agentruntime "csgclaw/internal/runtime"
@@ -18,6 +19,7 @@ type Manager interface {
 	Start(context.Context) error
 	EnsureAgent(context.Context, agent.Agent) error
 	StopAgent(string)
+	RefreshAgentChannel(context.Context, agent.Agent, string) error
 	Close()
 }
 
@@ -27,6 +29,11 @@ type AgentLister interface {
 
 type RuntimeProvider interface {
 	Runtime(kind string) (agentruntime.Runtime, error)
+}
+
+type channelManager interface {
+	Manager
+	supportsAgentChannel(string) bool
 }
 
 type Options struct {
@@ -138,6 +145,32 @@ func (m *multiManager) EnsureAgent(ctx context.Context, a agent.Agent) error {
 		if err := manager.EnsureAgent(ctx, a); err != nil {
 			outErr = errors.Join(outErr, err)
 		}
+	}
+	return outErr
+}
+
+func (m *multiManager) RefreshAgentChannel(ctx context.Context, a agent.Agent, channel string) error {
+	channel = normalizeAgentChannel(channel)
+	if channel == "" {
+		return fmt.Errorf("channel is required")
+	}
+	if m == nil {
+		return nil
+	}
+	var outErr error
+	handled := false
+	for _, manager := range m.managers {
+		target, ok := manager.(channelManager)
+		if !ok || !target.supportsAgentChannel(channel) {
+			continue
+		}
+		handled = true
+		if err := target.RefreshAgentChannel(ctx, a, channel); err != nil {
+			outErr = errors.Join(outErr, err)
+		}
+	}
+	if !handled {
+		return fmt.Errorf("channel %q bridge manager is not configured", channel)
 	}
 	return outErr
 }
@@ -262,6 +295,18 @@ func (m *csgclawManager) EnsureAgent(ctx context.Context, a agent.Agent) error {
 	}
 }
 
+func (m *csgclawManager) RefreshAgentChannel(ctx context.Context, a agent.Agent, channel string) error {
+	channel = normalizeAgentChannel(channel)
+	if !m.supportsAgentChannel(channel) {
+		return unsupportedAgentChannelError(channel)
+	}
+	return m.EnsureAgent(ctx, a)
+}
+
+func (m *csgclawManager) supportsAgentChannel(channel string) bool {
+	return normalizeAgentChannel(channel) == csgclawchannel.ChannelID
+}
+
 func (m *csgclawManager) StopAgent(agentID string) {
 	if m == nil || m.bridge == nil {
 		return
@@ -384,6 +429,18 @@ func (m *feishuManager) EnsureAgent(ctx context.Context, a agent.Agent) error {
 		}
 		return err
 	}
+}
+
+func (m *feishuManager) RefreshAgentChannel(ctx context.Context, a agent.Agent, channel string) error {
+	channel = normalizeAgentChannel(channel)
+	if !m.supportsAgentChannel(channel) {
+		return unsupportedAgentChannelError(channel)
+	}
+	return m.EnsureAgent(ctx, a)
+}
+
+func (m *feishuManager) supportsAgentChannel(channel string) bool {
+	return normalizeAgentChannel(channel) == feishu.ChannelID
 }
 
 func (m *feishuManager) shouldStartForAgent(a agent.Agent) bool {
@@ -539,6 +596,18 @@ func shouldRestoreCodexBridgeOnStartup(a agent.Agent) bool {
 func isCodexBridgeRole(role string) bool {
 	role = strings.TrimSpace(role)
 	return strings.EqualFold(role, agent.RoleWorker) || strings.EqualFold(role, agent.RoleManager)
+}
+
+func normalizeAgentChannel(channel string) string {
+	return strings.ToLower(strings.TrimSpace(channel))
+}
+
+func unsupportedAgentChannelError(channel string) error {
+	channel = normalizeAgentChannel(channel)
+	if channel == "" {
+		return fmt.Errorf("channel is required")
+	}
+	return fmt.Errorf("channel %q is not supported by this codex bridge manager", channel)
 }
 
 type ensureGate struct {

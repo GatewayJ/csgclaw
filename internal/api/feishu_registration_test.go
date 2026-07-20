@@ -355,6 +355,7 @@ func TestFinalizeFeishuRegistrationBindsManagerAdminHuman(t *testing.T) {
 	bridge := &fakeCodexBridgeController{}
 	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{manager},
 		agent.WithLifecycleObserver(bridge),
+		agent.WithBindingActivator(bridge),
 	)
 	participantSvc := participant.NewService(participant.NewMemoryStore(nil), participant.WithAgentService(agentSvc))
 	srv := &Handler{
@@ -375,11 +376,14 @@ func TestFinalizeFeishuRegistrationBindsManagerAdminHuman(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if result["restart_status"] != "restart_skipped" || result["activation_status"] != "lifecycle_reconciled" || result["participant_id"] != "pt-manager" {
-		t.Fatalf("finalize result = %#v, want manager lifecycle reconciliation", result)
+	if result["restart_status"] != "restart_skipped" || result["activation_status"] != "channel_refreshed" || result["participant_id"] != "pt-manager" {
+		t.Fatalf("finalize result = %#v, want manager Feishu channel refresh", result)
 	}
-	if len(bridge.ensureCalls) != 1 || bridge.ensureCalls[0].ID != agent.ManagerUserID {
-		t.Fatalf("EnsureAgent() calls = %+v, want manager once", bridge.ensureCalls)
+	if len(bridge.ensureCalls) != 0 {
+		t.Fatalf("EnsureAgent() calls = %+v, want none", bridge.ensureCalls)
+	}
+	if len(bridge.refreshCalls) != 1 || bridge.refreshCalls[0].agent.ID != agent.ManagerUserID || bridge.refreshCalls[0].channel != participant.ChannelFeishu {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want manager Feishu once", bridge.refreshCalls)
 	}
 	admin, ok := participantSvc.Get(participant.ChannelFeishu, "admin")
 	if !ok {

@@ -2092,10 +2092,11 @@ func (b *notifyingBuffer) String() string {
 }
 
 type fakeCodexBridgeManager struct {
-	start  func(context.Context) error
-	ensure func(context.Context, agent.Agent) error
-	stop   func(string)
-	close  func()
+	start   func(context.Context) error
+	ensure  func(context.Context, agent.Agent) error
+	stop    func(string)
+	refresh func(context.Context, agent.Agent, string) error
+	close   func()
 }
 
 func (m *fakeCodexBridgeManager) Start(ctx context.Context) error {
@@ -2116,6 +2117,13 @@ func (m *fakeCodexBridgeManager) StopAgent(agentID string) {
 	if m != nil && m.stop != nil {
 		m.stop(agentID)
 	}
+}
+
+func (m *fakeCodexBridgeManager) RefreshAgentChannel(ctx context.Context, a agent.Agent, channel string) error {
+	if m != nil && m.refresh != nil {
+		return m.refresh(ctx, a, channel)
+	}
+	return nil
 }
 
 func (m *fakeCodexBridgeManager) Close() {

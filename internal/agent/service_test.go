@@ -440,6 +440,21 @@ func (f *fakeLifecycleObserver) StopAgent(agentID string) {
 	f.events = append(f.events, "stop:"+agentID)
 }
 
+type fakeBindingActivator struct {
+	refreshCalls []bindingRefreshCall
+	refreshErr   error
+}
+
+type bindingRefreshCall struct {
+	agent   Agent
+	channel string
+}
+
+func (f *fakeBindingActivator) RefreshAgentChannel(_ context.Context, a Agent, channel string) error {
+	f.refreshCalls = append(f.refreshCalls, bindingRefreshCall{agent: a, channel: channel})
+	return f.refreshErr
+}
+
 type cancelOnWrite struct {
 	writer io.Writer
 	cancel context.CancelFunc
@@ -6700,13 +6715,15 @@ func TestStartTriggersLifecycleObserver(t *testing.T) {
 	}
 }
 
-func TestApplyExternalBindingReconcilesCodexWithoutStartingRuntime(t *testing.T) {
+func TestApplyExternalBindingRefreshesCodexChannelWithoutStartingRuntime(t *testing.T) {
 	observer := &fakeLifecycleObserver{}
+	activator := &fakeBindingActivator{}
 	runtimeStartCalls := 0
 	svc, err := NewService(
 		config.ModelConfig{},
 		config.ServerConfig{}, "manager-image:test", "",
 		WithLifecycleObserver(observer),
+		WithBindingActivator(activator),
 		WithRuntime(fakeAgentRuntime{
 			kind: RuntimeKindCodex,
 			start: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
@@ -6729,30 +6746,33 @@ func TestApplyExternalBindingReconcilesCodexWithoutStartingRuntime(t *testing.T)
 		ProfileComplete: true,
 	}
 
-	reconciled, activation, err := svc.ApplyExternalBinding(context.Background(), ManagerUserID)
+	reconciled, activation, err := svc.ApplyExternalBinding(context.Background(), ManagerUserID, "feishu")
 	if err != nil {
 		t.Fatalf("ApplyExternalBinding() error = %v", err)
 	}
 	if reconciled.ID != ManagerUserID {
 		t.Fatalf("ApplyExternalBinding() agent = %q, want %q", reconciled.ID, ManagerUserID)
 	}
-	if activation != ExternalBindingActivationLifecycleReconciled {
-		t.Fatalf("activation = %q, want %q", activation, ExternalBindingActivationLifecycleReconciled)
+	if activation != ExternalBindingActivationChannelRefreshed {
+		t.Fatalf("activation = %q, want %q", activation, ExternalBindingActivationChannelRefreshed)
 	}
 	if runtimeStartCalls != 0 {
 		t.Fatalf("runtime Start() calls = %d, want 0", runtimeStartCalls)
 	}
-	if len(observer.ensureCalls) != 1 || observer.ensureCalls[0].ID != ManagerUserID {
-		t.Fatalf("EnsureAgent() calls = %+v, want manager once", observer.ensureCalls)
+	if len(observer.ensureCalls) != 0 {
+		t.Fatalf("EnsureAgent() calls = %+v, want none", observer.ensureCalls)
+	}
+	if len(activator.refreshCalls) != 1 || activator.refreshCalls[0].agent.ID != ManagerUserID || activator.refreshCalls[0].channel != "feishu" {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want manager feishu once", activator.refreshCalls)
 	}
 }
 
-func TestReconcileLifecycleRejectsStoppedAgent(t *testing.T) {
-	observer := &fakeLifecycleObserver{}
+func TestApplyExternalBindingRejectsStoppedCodexAgent(t *testing.T) {
+	activator := &fakeBindingActivator{}
 	svc, err := NewService(
 		config.ModelConfig{},
 		config.ServerConfig{}, "manager-image:test", "",
-		WithLifecycleObserver(observer),
+		WithBindingActivator(activator),
 		WithRuntime(fakeAgentRuntime{
 			kind: RuntimeKindCodex,
 			info: func(_ context.Context, h agentruntime.Handle) (agentruntime.Info, error) {
@@ -6774,11 +6794,11 @@ func TestReconcileLifecycleRejectsStoppedAgent(t *testing.T) {
 		ProfileComplete: true,
 	}
 
-	if _, err := svc.ReconcileLifecycle(context.Background(), ManagerUserID); err == nil {
-		t.Fatal("ReconcileLifecycle() error = nil, want stopped agent rejection")
+	if _, _, err := svc.ApplyExternalBinding(context.Background(), ManagerUserID, "feishu"); err == nil {
+		t.Fatal("ApplyExternalBinding() error = nil, want stopped agent rejection")
 	}
-	if len(observer.ensureCalls) != 0 || len(observer.stopCalls) != 0 {
-		t.Fatalf("lifecycle calls = ensure=%+v stop=%+v, want none", observer.ensureCalls, observer.stopCalls)
+	if len(activator.refreshCalls) != 0 {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want none", activator.refreshCalls)
 	}
 }
 
