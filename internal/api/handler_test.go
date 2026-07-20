@@ -2002,7 +2002,7 @@ func TestHandleAgentApplyBindingsRefreshesRequestedChannelWithoutLifecycleEnsure
 	}
 }
 
-func TestHandleAgentApplyBindingsRequiresChannel(t *testing.T) {
+func TestHandleAgentApplyBindingsDefaultsLegacyRequestToFeishu(t *testing.T) {
 	manager := completeWorkerAgent(agent.ManagerUserID, agent.ManagerName)
 	manager.Role = agent.RoleManager
 	manager.RuntimeKind = agent.RuntimeKindCodex
@@ -2015,11 +2015,14 @@ func TestHandleAgentApplyBindingsRequiresChannel(t *testing.T) {
 
 	srv.Routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	if len(bridge.refreshCalls) != 0 {
-		t.Fatalf("RefreshAgentChannel() calls = %+v, want none", bridge.refreshCalls)
+	if len(bridge.ensureCalls) != 0 {
+		t.Fatalf("EnsureAgent() calls = %+v, want none", bridge.ensureCalls)
+	}
+	if len(bridge.refreshCalls) != 1 || bridge.refreshCalls[0].agent.ID != agent.ManagerUserID || bridge.refreshCalls[0].channel != feishu.ChannelID {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want manager feishu once", bridge.refreshCalls)
 	}
 }
 

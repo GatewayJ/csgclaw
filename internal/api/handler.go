@@ -1255,10 +1255,6 @@ func (h *Handler) handleAgentApplyBindings(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if channel == "" {
-		http.Error(w, "channel is required", http.StatusBadRequest)
-		return
-	}
 	if err := h.svc.Reload(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1288,16 +1284,21 @@ func applyBindingsChannel(r *http.Request) (string, error) {
 		return channel, nil
 	}
 	if r.Body == nil {
-		return "", nil
+		return feishu.ChannelID, nil
 	}
 	var req applyAgentBindingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if errors.Is(err, io.EOF) {
-			return "", nil
+			return feishu.ChannelID, nil
 		}
 		return "", fmt.Errorf("decode apply bindings request: %w", err)
 	}
-	return strings.TrimSpace(req.Channel), nil
+	channel = strings.TrimSpace(req.Channel)
+	if channel == "" {
+		// Legacy Feishu skills called this endpoint before channel was explicit.
+		return feishu.ChannelID, nil
+	}
+	return channel, nil
 }
 
 func (h *Handler) handleAgentApplyBindingsByID(w http.ResponseWriter, r *http.Request) {
