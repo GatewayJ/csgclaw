@@ -113,7 +113,7 @@ func (h *Handler) handleParticipantByIDPath(w http.ResponseWriter, r *http.Reque
 			http.NotFound(w, r)
 			return
 		}
-		if err := h.recreateFeishuAgentAfterDisconnect(r.Context(), deleted, r.URL.Query().Get("delete_agent")); err != nil {
+		if err := h.deactivateFeishuAgentAfterDisconnect(r.Context(), deleted, r.URL.Query().Get("delete_agent")); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -124,7 +124,7 @@ func (h *Handler) handleParticipantByIDPath(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (h *Handler) recreateFeishuAgentAfterDisconnect(ctx context.Context, deleted apitypes.Participant, deleteAgentMode string) error {
+func (h *Handler) deactivateFeishuAgentAfterDisconnect(ctx context.Context, deleted apitypes.Participant, deleteAgentMode string) error {
 	if !strings.EqualFold(strings.TrimSpace(deleted.Channel), participant.ChannelFeishu) {
 		return nil
 	}
@@ -158,8 +158,8 @@ func (h *Handler) recreateFeishuAgentAfterDisconnect(ctx context.Context, delete
 			}
 		}
 	}
-	if _, err := h.svc.Recreate(ctx, agentID); err != nil {
-		return fmt.Errorf("recreate agent %q after disconnecting feishu participant %q: %w", agentID, deleted.ID, err)
+	if _, _, err := h.svc.DeactivateExternalBinding(ctx, agentID, participant.ChannelFeishu); err != nil {
+		return fmt.Errorf("deactivate feishu binding for agent %q after disconnecting participant %q: %w", agentID, deleted.ID, err)
 	}
 	return nil
 }

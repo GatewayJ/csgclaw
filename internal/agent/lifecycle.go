@@ -86,6 +86,35 @@ func (s *Service) ApplyExternalBinding(ctx context.Context, id, channel string) 
 	return recreated, ExternalBindingActivationRuntimeRecreated, err
 }
 
+// DeactivateExternalBinding refreshes runtime-side channel state after an
+// external participant binding has been removed.
+func (s *Service) DeactivateExternalBinding(ctx context.Context, id, channel string) (Agent, ExternalBindingActivation, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Agent{}, "", fmt.Errorf("agent id is required")
+	}
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if channel == "" {
+		return Agent{}, "", fmt.Errorf("channel is required")
+	}
+	got, ok := s.Agent(id)
+	if !ok {
+		return Agent{}, "", fmt.Errorf("agent %q not found", id)
+	}
+	if strings.EqualFold(strings.TrimSpace(got.RuntimeKind), RuntimeKindCodex) {
+		activator := s.bindingActivator()
+		if activator == nil {
+			return Agent{}, "", fmt.Errorf("agent binding activator is not configured")
+		}
+		if err := activator.RefreshAgentChannel(ctx, got, channel); err != nil {
+			return Agent{}, "", err
+		}
+		return got, ExternalBindingActivationChannelRefreshed, nil
+	}
+	recreated, err := s.Recreate(ctx, got.ID)
+	return recreated, ExternalBindingActivationRuntimeRecreated, err
+}
+
 func (s *Service) stopLifecycleAgent(agentID string) {
 	observer := s.lifecycleObserver()
 	if observer == nil {

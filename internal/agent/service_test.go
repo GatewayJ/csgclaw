@@ -6802,6 +6802,53 @@ func TestApplyExternalBindingRejectsStoppedCodexAgent(t *testing.T) {
 	}
 }
 
+func TestDeactivateExternalBindingRefreshesStoppedCodexChannelWithoutRecreate(t *testing.T) {
+	activator := &fakeBindingActivator{}
+	runtimeCreates := 0
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{}, "manager-image:test", "",
+		WithBindingActivator(activator),
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindCodex,
+			new: func(context.Context, agentruntime.Spec) (agentruntime.Handle, error) {
+				runtimeCreates++
+				return agentruntime.Handle{}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents[ManagerUserID] = Agent{
+		ID:              ManagerUserID,
+		Name:            ManagerName,
+		Role:            RoleManager,
+		RuntimeID:       "rt-manager",
+		RuntimeKind:     RuntimeKindCodex,
+		Status:          string(agentruntime.StateStopped),
+		AgentProfile:    AgentProfile{Name: ManagerName, Provider: ProviderCodex, ModelID: "gpt-5.4", ProfileComplete: true},
+		ProfileComplete: true,
+	}
+
+	reconciled, activation, err := svc.DeactivateExternalBinding(context.Background(), ManagerUserID, "feishu")
+	if err != nil {
+		t.Fatalf("DeactivateExternalBinding() error = %v", err)
+	}
+	if reconciled.ID != ManagerUserID {
+		t.Fatalf("DeactivateExternalBinding() agent = %q, want %q", reconciled.ID, ManagerUserID)
+	}
+	if activation != ExternalBindingActivationChannelRefreshed {
+		t.Fatalf("activation = %q, want %q", activation, ExternalBindingActivationChannelRefreshed)
+	}
+	if runtimeCreates != 0 {
+		t.Fatalf("runtime New() calls = %d, want 0", runtimeCreates)
+	}
+	if len(activator.refreshCalls) != 1 || activator.refreshCalls[0].agent.ID != ManagerUserID || activator.refreshCalls[0].channel != "feishu" {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want manager feishu once", activator.refreshCalls)
+	}
+}
+
 func TestStartProvisionsRuntimeBeforeStart(t *testing.T) {
 	var callOrder []string
 	svc, err := NewService(

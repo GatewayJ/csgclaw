@@ -494,6 +494,91 @@ func TestDeleteFeishuAgentParticipantRemovesSameAgentFeishuBotsBeforeRecreate(t 
 	}
 }
 
+func TestDeleteFeishuCodexAgentParticipantRefreshesBridgeWithoutRecreate(t *testing.T) {
+	var runtimeCreates int
+	target := completeWorkerAgent("u-dev", "dev")
+	target.RuntimeKind = agent.RuntimeKindCodex
+	target.RuntimeID = "rt-dev"
+	target.BoxID = "codex-session-dev"
+	target.AgentProfile = agent.AgentProfile{
+		Name:            "dev",
+		Provider:        agent.ProviderCodex,
+		ModelID:         "gpt-5.4",
+		ProfileComplete: true,
+	}
+	target.ProfileComplete = true
+	bridge := &fakeCodexBridgeController{}
+	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{target},
+		agent.WithBindingActivator(bridge),
+		agent.WithRuntime(fakeCompatRuntime{
+			kind: agent.RuntimeKindCodex,
+			new: func(_ context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
+				runtimeCreates++
+				return agentruntime.Handle{RuntimeID: spec.RuntimeID, HandleID: "codex-session-new"}, nil
+			},
+		}),
+	)
+	participantSvc := participant.NewService(
+		participant.NewMemoryStore([]apitypes.Participant{
+			{
+				ID:              "dev",
+				Channel:         participant.ChannelFeishu,
+				Type:            participant.TypeAgent,
+				Name:            "dev",
+				ChannelUserKind: participant.ChannelUserKindAppID,
+				ChannelAppConfig: map[string]any{
+					"app_id":     "cli_dev",
+					"app_secret": "dev-secret",
+				},
+				AgentID:         "u-dev",
+				LifecycleStatus: participant.LifecycleStatusActive,
+				Mentionable:     true,
+			},
+			{
+				ID:              "legacy-dev",
+				Channel:         participant.ChannelFeishu,
+				Type:            participant.TypeAgent,
+				Name:            "legacy dev",
+				ChannelUserKind: participant.ChannelUserKindAppID,
+				ChannelAppConfig: map[string]any{
+					"app_id":     "cli_legacy_dev",
+					"app_secret": "legacy-dev-secret",
+				},
+				AgentID:         "u-dev",
+				LifecycleStatus: participant.LifecycleStatusActive,
+				Mentionable:     true,
+			},
+		}),
+		participant.WithAgentService(agentSvc),
+	)
+	srv := &Handler{
+		svc:         agentSvc,
+		participant: participantSvc,
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/channels/feishu/participants/dev", nil)
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+	for _, id := range []string{"dev", "legacy-dev"} {
+		if _, ok := participantSvc.Get(participant.ChannelFeishu, id); ok {
+			t.Fatalf("participant feishu:%s still exists after disconnect", id)
+		}
+	}
+	if runtimeCreates != 0 {
+		t.Fatalf("runtime New() calls = %d, want 0", runtimeCreates)
+	}
+	if len(bridge.refreshCalls) != 1 {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want one call", bridge.refreshCalls)
+	}
+	if bridge.refreshCalls[0].agent.ID != "agent-dev" || bridge.refreshCalls[0].channel != participant.ChannelFeishu {
+		t.Fatalf("RefreshAgentChannel() call = %+v, want agent-dev feishu", bridge.refreshCalls[0])
+	}
+}
+
 func TestCreateFeishuHumanParticipantViaAPI(t *testing.T) {
 	participantSvc := participant.NewService(participant.NewMemoryStore(nil))
 	srv := &Handler{participant: participantSvc}
