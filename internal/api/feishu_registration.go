@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"csgclaw/internal/agent"
 	"csgclaw/internal/config"
 	"csgclaw/internal/participant"
 	"csgclaw/internal/participant/feishubind"
@@ -180,8 +181,14 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	target, err := feishubind.ResolveAgent(h.svc, state.AgentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	userInfo := userInfoFromRegistrationResult(poll)
-	if userInfo.OpenID != "" {
+	if userInfo.OpenID != "" && feishuRegistrationBindsAdmin(target) {
 		adminName := userInfo.Name
 		if adminName == "" {
 			if resolvedName, err := feishuOpenAPIUserDisplayName(r.Context(), appID, appSecret, userInfo.OpenID); err == nil {
@@ -207,6 +214,11 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 	}
 	_ = h.deleteFeishuRegistration(state.RegistrationID)
 	writeJSON(w, http.StatusOK, result)
+}
+
+func feishuRegistrationBindsAdmin(target agent.Agent) bool {
+	return strings.EqualFold(strings.TrimSpace(target.ID), agent.ManagerUserID) ||
+		strings.EqualFold(strings.TrimSpace(target.Role), agent.RoleManager)
 }
 
 func (h *Handler) loadFeishuRegistrationHTTP(w http.ResponseWriter, r *http.Request) (feishuRegistrationState, bool) {

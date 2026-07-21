@@ -122,10 +122,10 @@ func TestFinalizeFeishuRegistrationBindsWorkerParticipant(t *testing.T) {
 	}
 	admin, ok := participantSvc.Get(participant.ChannelFeishu, "admin")
 	if !ok {
-		t.Fatal("feishu:admin participant was not stored")
+		t.Fatal("existing feishu:admin participant was removed")
 	}
-	if admin.Type != participant.TypeHuman || admin.ChannelUserKind != participant.ChannelUserKindOpenID || admin.ChannelUserRef != "ou_admin" {
-		t.Fatalf("admin participant = %+v, want idempotent Feishu human binding to registration open_id", admin)
+	if admin.Type != participant.TypeHuman || admin.ChannelUserKind != participant.ChannelUserKindOpenID || admin.ChannelUserRef != "ou_old_admin" {
+		t.Fatalf("admin participant = %+v, want worker finalize to leave existing Feishu admin unchanged", admin)
 	}
 
 	rec = httptest.NewRecorder()
@@ -136,7 +136,7 @@ func TestFinalizeFeishuRegistrationBindsWorkerParticipant(t *testing.T) {
 	}
 }
 
-func TestFinalizeFeishuRegistrationUpdatesCanonicalAdminParticipant(t *testing.T) {
+func TestFinalizeFeishuRegistrationDoesNotUpdateCanonicalAdminForWorker(t *testing.T) {
 	accounts := newFakeFeishuAccountsServer(t, map[string]any{
 		"client_id":     "cli_dev",
 		"client_secret": "dev-secret",
@@ -174,10 +174,10 @@ func TestFinalizeFeishuRegistrationUpdatesCanonicalAdminParticipant(t *testing.T
 	}
 	admin, ok := participantSvc.Get(participant.ChannelFeishu, participant.BootstrapAdminParticipantID)
 	if !ok {
-		t.Fatal("canonical feishu admin participant was not stored")
+		t.Fatal("existing canonical feishu admin participant was removed")
 	}
-	if admin.ChannelUserRef != "ou_admin" {
-		t.Fatalf("admin channel_user_ref = %q, want registration open_id", admin.ChannelUserRef)
+	if admin.ChannelUserRef != "ou_old_admin" {
+		t.Fatalf("admin channel_user_ref = %q, want worker finalize to leave existing admin unchanged", admin.ChannelUserRef)
 	}
 	if _, ok := participantSvc.Get(participant.ChannelFeishu, "pt-dev"); !ok {
 		t.Fatal("feishu:dev participant was not stored")
@@ -210,8 +210,12 @@ func TestFinalizeFeishuRegistrationResolvesAdminNameFromFeishuOpenAPI(t *testing
 	withFeishuRegistrationAccountsBaseURL(t, accounts.URL)
 	withFeishuOpenAPIBaseURL(t, accounts.URL)
 
-	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{completeWorkerAgent("u-dev", "dev")},
-		agent.WithRuntime(fakeCompatRuntime{kind: agent.RuntimeKindPicoClawSandbox}),
+	manager := completeWorkerAgent(agent.ManagerUserID, "manager")
+	manager.Role = agent.RoleManager
+	manager.RuntimeKind = agent.RuntimeKindCodex
+	bridge := &fakeCodexBridgeController{}
+	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{manager},
+		agent.WithBindingActivator(bridge),
 	)
 	participantSvc := participant.NewService(participant.NewMemoryStore(nil), participant.WithAgentService(agentSvc))
 	srv := &Handler{
@@ -219,7 +223,7 @@ func TestFinalizeFeishuRegistrationResolvesAdminNameFromFeishuOpenAPI(t *testing
 		participant:                participantSvc,
 		feishuRegistrationStateDir: filepath.Join(t.TempDir(), "registrations"),
 	}
-	registrationID := startFeishuRegistrationForTest(t, srv, "u-dev")
+	registrationID := startFeishuRegistrationForTest(t, srv, agent.ManagerUserID)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/registrations/"+url.PathEscape(registrationID)+":finalize", nil)
