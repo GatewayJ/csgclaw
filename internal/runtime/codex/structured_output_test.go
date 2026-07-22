@@ -143,7 +143,7 @@ func TestStructuredOutputOnlyPublishesForSuccessfulToolStatus(t *testing.T) {
 func TestEmbeddedInteractiveOutputDemoExercisesEveryPositiveFeature(t *testing.T) {
 	t.Parallel()
 
-	dir := filepath.Join("..", "..", "template", "embed", "manager", "codex", "workspace", "skills", "csgclaw-interactive-output-demo")
+	dir := filepath.Join("..", "..", "template", "embed", "manager", "codex", "skills", "csgclaw-interactive-output-demo")
 	command := exec.Command("python3", filepath.Join(dir, "scripts", "emit_demo.py"))
 	output, err := command.Output()
 	if err != nil {

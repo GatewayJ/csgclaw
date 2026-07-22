@@ -23,6 +23,11 @@ describe("i18n messages", () => {
     }
   });
 
+  it("localizes the installed remote skill action", () => {
+    expect(createTranslator("en")("resourcesSkillRemoteReplaceAction")).toBe("Replace");
+    expect(createTranslator("zh")("resourcesSkillRemoteReplaceAction")).toBe("替换");
+  });
+
   it("localizes personal Hub source tags", () => {
     expect(localizeTemplateSourceTag("personal", "zh")).toBe("个人");
     expect(localizeTemplateSourceTag("personal", "en")).toBe("personal");

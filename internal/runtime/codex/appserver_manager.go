@@ -52,6 +52,15 @@ func newAppServerManager(deps managerDeps) *appServerManager {
 	}
 }
 
+func (m *appServerManager) hasSession(runtimeID string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sessions[strings.TrimSpace(runtimeID)] != nil
+}
+
 func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Session, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
@@ -222,10 +231,11 @@ func (m *appServerManager) stop(ctx context.Context, handle SessionHandle) error
 // Close releases every child owned by this manager without removing persisted
 // runtime files. It is used when the containing runtime is temporary, such as
 // bootstrap state initialization.
-func (m *appServerManager) Close(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
+func (m *appServerManager) Close() error {
+	if m == nil {
+		return nil
 	}
+	ctx := context.Background()
 	m.lifecycleMu.Lock()
 	if m.closed {
 		closeDone := m.closeDone
@@ -1256,25 +1266,33 @@ func (m *appServerManager) waitAppServerSession(runtimeID string, live *liveSess
 	if live.appClient != nil {
 		live.appClient.closeAllPending(fmt.Errorf("codex app-server exited with code %d", exitCode))
 	}
+	isCurrent := m.detachSession(runtimeID, live)
 	if live.session != nil {
 		live.session.ProcessID = 0
-		if m.deps.OnExit != nil {
+		if isCurrent && m.deps.OnExit != nil {
 			m.deps.OnExit(live.session, exitCode)
 		}
 	}
-	if m.deps.Permission != nil {
+	if isCurrent && m.deps.Permission != nil {
 		m.deps.Permission.CancelSession(runtimeID, "")
 	}
-	if m.deps.UserInput != nil {
+	if isCurrent && m.deps.UserInput != nil {
 		m.deps.UserInput.CancelSession(runtimeID, "")
 	}
 	if live.stderr != nil {
 		_ = live.stderr.Close()
 	}
-	m.mu.Lock()
-	delete(m.sessions, runtimeID)
-	m.mu.Unlock()
 	close(live.done)
+}
+
+func (m *appServerManager) detachSession(runtimeID string, live *liveSession) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sessions[runtimeID] != live {
+		return false
+	}
+	delete(m.sessions, runtimeID)
+	return true
 }
 
 func (m *appServerManager) wrapStartupError(spec SessionSpec, action string, err error) error {

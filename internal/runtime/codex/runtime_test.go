@@ -44,6 +44,18 @@ type fakeManager struct {
 	prompt func(context.Context, SessionHandle, PromptRequest) (PromptResponse, error)
 }
 
+type fakeClosableManager struct {
+	fakeManager
+	close func() error
+}
+
+func (f *fakeClosableManager) Close() error {
+	if f.close != nil {
+		return f.close()
+	}
+	return nil
+}
+
 func (f fakeManager) LiveSession(handle SessionHandle) (*Session, error) {
 	if f.live != nil {
 		return f.live(handle)
@@ -252,6 +264,82 @@ func TestRuntimeCreateStartAndInfo(t *testing.T) {
 	}
 	if !strings.Contains(agentsText, "Use concise Go comments.") {
 		t.Fatalf("codex home AGENTS.md missing agent instructions:\n%s", agentsText)
+	}
+}
+
+func TestRuntimeCloseClosesSessionManager(t *testing.T) {
+	closeCalls := 0
+	manager := &fakeClosableManager{
+		fakeManager: fakeManager{
+			start: func(context.Context, SessionSpec) (*Session, error) {
+				return nil, nil
+			},
+		},
+		close: func() error {
+			closeCalls++
+			return nil
+		},
+	}
+	rt := New(Dependencies{Manager: manager})
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("session manager Close() calls = %d, want 1", closeCalls)
+	}
+}
+
+func TestRuntimeNewStopsUntrackedProcessesBeforeStartingSession(t *testing.T) {
+	root := t.TempDir()
+	var steps []string
+	rt := New(Dependencies{
+		BinaryProvider: fakeBinaryProvider{path: "/tmp/codex"},
+		AgentHome: func(string) (string, error) {
+			return filepath.Join(root, "agent-manager"), nil
+		},
+		ResolveAgent: func(h agentruntime.Handle) (AgentRef, error) {
+			return AgentRef{
+				ID:        agent.ManagerUserID,
+				Name:      agent.ManagerName,
+				RuntimeID: h.RuntimeID,
+			}, nil
+		},
+		Manager: fakeManager{
+			start: func(_ context.Context, spec SessionSpec) (*Session, error) {
+				steps = append(steps, "start")
+				return &Session{
+					RuntimeID:    spec.RuntimeID,
+					AgentID:      spec.AgentID,
+					AgentName:    spec.AgentName,
+					SessionID:    "manager-thread",
+					RuntimeDir:   spec.RuntimeDir,
+					WorkspaceDir: spec.WorkspaceDir,
+					HomeDir:      spec.HomeDir,
+					CodexHomeDir: spec.CodexHomeDir,
+					StderrPath:   spec.StderrPath,
+				}, nil
+			},
+		},
+		StopRuntimeProcesses: func(path string) ([]int, error) {
+			steps = append(steps, "stop-untracked")
+			want := filepath.Join(root, "agent-manager", ".codex")
+			if path != want {
+				t.Fatalf("StopRuntimeProcesses() path = %q, want %q", path, want)
+			}
+			return []int{123}, nil
+		},
+	})
+
+	if _, err := rt.New(context.Background(), agentruntime.Spec{
+		RuntimeID: "rt-agent-manager",
+		AgentID:   agent.ManagerUserID,
+		AgentName: agent.ManagerName,
+	}); err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if got, want := steps, []string{"stop-untracked", "start"}; !slices.Equal(got, want) {
+		t.Fatalf("New() steps = %q, want %q", got, want)
 	}
 }
 
@@ -1103,6 +1191,52 @@ func TestDeleteStopsLiveSessionWhenRuntimeMetadataIsMissing(t *testing.T) {
 	}
 }
 
+func TestDeleteStopsUntrackedRuntimeProcessesBeforeRemoval(t *testing.T) {
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, "agent-manager", ".codex")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll(runtime dir) error = %v", err)
+	}
+
+	var steps []string
+	rt := New(Dependencies{
+		AgentHome: func(string) (string, error) {
+			return filepath.Join(root, "agent-manager"), nil
+		},
+		ResolveAgent: func(h agentruntime.Handle) (AgentRef, error) {
+			return AgentRef{
+				ID:        agent.ManagerUserID,
+				Name:      agent.ManagerName,
+				RuntimeID: h.RuntimeID,
+			}, nil
+		},
+		Manager: fakeManager{
+			stop: func(context.Context, SessionHandle) error {
+				steps = append(steps, "stop-session")
+				return os.ErrNotExist
+			},
+		},
+		StopRuntimeProcesses: func(path string) ([]int, error) {
+			steps = append(steps, "stop-untracked")
+			if path != runtimeDir {
+				t.Fatalf("StopRuntimeProcesses() path = %q, want %q", path, runtimeDir)
+			}
+			return []int{123}, nil
+		},
+		RemoveAll: func(path string) error {
+			steps = append(steps, "remove")
+			return os.RemoveAll(path)
+		},
+	})
+
+	if err := rt.Delete(context.Background(), agentruntime.Handle{RuntimeID: "rt-agent-manager"}); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if got, want := steps, []string{"stop-session", "stop-untracked", "remove"}; !slices.Equal(got, want) {
+		t.Fatalf("Delete() steps = %q, want %q", got, want)
+	}
+}
+
 func TestRemoveRuntimeDirRetriesLockedPluginCloneFetchHead(t *testing.T) {
 	root := t.TempDir()
 	runtimeDir := filepath.Join(root, "agent-alice", ".codex")
@@ -1333,6 +1467,13 @@ func TestRuntimeCreateKeepsExistingRuntimeAuth(t *testing.T) {
 		},
 	})
 
+	if err := rt.Provision(context.Background(), agentruntime.ProvisionRequest{
+		RuntimeID: "rt-" + agent.ManagerUserID,
+		AgentID:   agent.ManagerUserID,
+		AgentName: agent.ManagerName,
+	}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
 	if _, err := rt.New(context.Background(), agentruntime.Spec{
 		RuntimeID: "rt-u-alice",
 		AgentID:   "u-alice",
@@ -1939,6 +2080,76 @@ func TestRuntimeCreateInstallsManagerTemplate(t *testing.T) {
 	}
 }
 
+func TestRuntimeProvisionInstallsMissingEmbeddedManagerSkillBeforeSessionStart(t *testing.T) {
+	root := t.TempDir()
+	agentHome := filepath.Join(root, agent.ManagerUserID)
+	skillRoot := filepath.Join(agentHome, hostStateDirName, homeDirName, "skills", "csgclaw-interactive-output-demo")
+
+	rt := New(Dependencies{
+		AgentHome: func(id string) (string, error) {
+			if id != agent.ManagerUserID {
+				t.Fatalf("AgentHome() id = %q, want manager", id)
+			}
+			return agentHome, nil
+		},
+	})
+	if err := rt.Provision(context.Background(), agentruntime.ProvisionRequest{
+		RuntimeID: "rt-" + agent.ManagerUserID,
+		AgentID:   agent.ManagerUserID,
+		AgentName: agent.ManagerName,
+	}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(skillRoot, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read installed demo skill: %v", err)
+	}
+	if !strings.Contains(string(raw), "structured-output acceptance demo") {
+		t.Fatalf("installed SKILL.md does not contain the embedded Manager skill:\n%s", raw)
+	}
+}
+
+func TestRuntimeProvisionPreservesExistingManagerSkill(t *testing.T) {
+	root := t.TempDir()
+	agentHome := filepath.Join(root, agent.ManagerUserID)
+	skillRoot := filepath.Join(agentHome, hostStateDirName, homeDirName, "skills", "csgclaw-interactive-output-demo")
+	if err := os.MkdirAll(filepath.Join(skillRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const existingSkill = "# Existing customized demo\n"
+	if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte(existingSkill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := New(Dependencies{
+		AgentHome: func(id string) (string, error) {
+			if id != agent.ManagerUserID {
+				t.Fatalf("AgentHome() id = %q, want manager", id)
+			}
+			return agentHome, nil
+		},
+	})
+	if err := rt.Provision(context.Background(), agentruntime.ProvisionRequest{
+		RuntimeID: "rt-" + agent.ManagerUserID,
+		AgentID:   agent.ManagerUserID,
+		AgentName: agent.ManagerName,
+	}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(skillRoot, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read existing demo skill: %v", err)
+	}
+	if string(raw) != existingSkill {
+		t.Fatalf("existing SKILL.md = %q, want preserved %q", raw, existingSkill)
+	}
+	if _, err := os.Stat(filepath.Join(skillRoot, ".git")); err != nil {
+		t.Fatalf("existing .git metadata was not preserved: %v", err)
+	}
+}
+
 func TestRuntimeCreateDoesNotInstallManagerTemplateForWorker(t *testing.T) {
 	root := t.TempDir()
 	hostHome := t.TempDir()
@@ -2145,6 +2356,53 @@ func TestRuntimeCreateOverlaysManagerTemplateAfterHostSkills(t *testing.T) {
 	}
 	if !strings.Contains(text, "Mandatory skill for provisioning any new CSGClaw agent-backed participant or worker") {
 		t.Fatalf("agent-creator manager skill missing template content:\n%s", text)
+	}
+}
+
+func TestRuntimeCreatePreservesExistingManagerSkillNotSyncedFromHost(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "shared-codex-home"))
+	skillRoot := filepath.Join(root, agent.ManagerUserID, hostStateDirName, homeDirName, "skills", "csgclaw-interactive-output-demo")
+	if err := os.MkdirAll(filepath.Join(skillRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const existingSkill = "# Existing customized demo\n"
+	if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte(existingSkill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := newTestCodexRuntime(root, func(h agentruntime.Handle) (AgentRef, error) {
+		return AgentRef{
+			ID:        agent.ManagerUserID,
+			Name:      agent.ManagerName,
+			RuntimeID: h.RuntimeID,
+		}, nil
+	})
+
+	if err := rt.Provision(context.Background(), agentruntime.ProvisionRequest{
+		RuntimeID: "rt-" + agent.ManagerUserID,
+		AgentID:   agent.ManagerUserID,
+		AgentName: agent.ManagerName,
+	}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+	if _, err := rt.New(context.Background(), agentruntime.Spec{
+		RuntimeID: "rt-" + agent.ManagerUserID,
+		AgentID:   agent.ManagerUserID,
+		AgentName: agent.ManagerName,
+	}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(skillRoot, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read existing demo skill: %v", err)
+	}
+	if string(raw) != existingSkill {
+		t.Fatalf("existing SKILL.md = %q, want preserved %q", raw, existingSkill)
+	}
+	if _, err := os.Stat(filepath.Join(skillRoot, ".git")); err != nil {
+		t.Fatalf("existing .git metadata was not preserved: %v", err)
 	}
 }
 

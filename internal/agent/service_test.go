@@ -164,6 +164,8 @@ func (r closableAgentRuntime) Close() error {
 	return nil
 }
 
+type fakeClosableAgentRuntime = closableAgentRuntime
+
 type fakeMCPServersListRuntime struct {
 	fakeAgentRuntime
 	list func(context.Context, agentruntime.Handle, agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error)
@@ -10969,6 +10971,32 @@ func TestPicoclawSandboxRuntimeKind(t *testing.T) {
 	}
 	if got, want := rt.Kind(), RuntimeKindPicoClawSandbox; got != want {
 		t.Fatalf("runtime kind = %q, want %q", got, want)
+	}
+}
+
+func TestServiceCloseClosesRegisteredAgentRuntimes(t *testing.T) {
+	svc, err := NewService(testModelConfig(), config.ServerConfig{}, "manager-image:test", "")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	closeCalls := 0
+	rt := &fakeClosableAgentRuntime{
+		fakeAgentRuntime: fakeAgentRuntime{kind: RuntimeKindCodex},
+		close: func() error {
+			closeCalls++
+			return nil
+		},
+	}
+	if err := WithRuntime(rt)(svc); err != nil {
+		t.Fatalf("WithRuntime() error = %v", err)
+	}
+
+	if err := svc.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("registered runtime Close() calls = %d, want 1", closeCalls)
 	}
 }
 

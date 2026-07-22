@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -147,6 +148,8 @@ type Dependencies struct {
 	Stat      func(string) (os.FileInfo, error)
 	RemoveAll func(string) error
 	OpenFile  func(string, int, os.FileMode) (*os.File, error)
+
+	StopRuntimeProcesses func(string) ([]int, error)
 }
 
 type Runtime struct {
@@ -167,6 +170,7 @@ var (
 	_ agentruntime.MCPServersController        = (*Runtime)(nil)
 	_ agentruntime.MCPServersReconciler        = (*Runtime)(nil)
 	_ agentruntime.MCPServersListController    = (*Runtime)(nil)
+	_ io.Closer                                = (*Runtime)(nil)
 )
 
 func New(deps Dependencies) *Runtime {
@@ -283,6 +287,13 @@ func (r *Runtime) Provision(_ context.Context, req agentruntime.ProvisionRequest
 			return fmt.Errorf("overlay codex workspace for agent %q: %w", req.AgentName, err)
 		}
 	}
+	codexHomeDir, err := r.resolveCodexHomeDir(agentID)
+	if err != nil {
+		return fmt.Errorf("resolve codex home for agent %q: %w", req.AgentName, err)
+	}
+	if err := r.seedMissingManagerSkills(agentID, codexHomeDir); err != nil {
+		return fmt.Errorf("seed missing manager codex skills for agent %q: %w", req.AgentName, err)
+	}
 	return nil
 }
 
@@ -377,6 +388,9 @@ func (r *Runtime) Delete(ctx context.Context, h agentruntime.Handle) error {
 	}
 	dir, err := r.runtimeDirForHandle(h)
 	if err != nil {
+		return err
+	}
+	if err := r.stopUntrackedRuntimeProcesses(ctx, runtimeID, dir); err != nil {
 		return err
 	}
 	if err := r.removeRuntimeDir(ctx, runtimeID, dir); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -569,6 +583,13 @@ func (r *Runtime) ensureSession(ctx context.Context, spec SessionSpec) (*Session
 	spec.HomeDir = r.hostSessionHomeDir(dirs.Home)
 	spec.CodexHomeDir = dirs.CodexHome
 	spec.StderrPath = dirs.StderrLog
+	manager := r.sessionManager()
+	tracker, tracksSessions := manager.(interface{ hasSession(string) bool })
+	if !tracksSessions || !tracker.hasSession(runtimeID) {
+		if err := r.stopUntrackedRuntimeProcesses(ctx, runtimeID, spec.RuntimeDir); err != nil {
+			return nil, err
+		}
+	}
 	if err := r.mkdirAll(spec.WorkspaceDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create codex workspace dir %s: %w", spec.WorkspaceDir, err)
 	}
@@ -581,7 +602,7 @@ func (r *Runtime) ensureSession(ctx context.Context, spec SessionSpec) (*Session
 	if err := r.seedCodexHomeSkills(spec.CodexHomeDir); err != nil {
 		return nil, err
 	}
-	if err := r.seedCodexHomeWorkspaceSkills(spec.WorkspaceDir, spec.CodexHomeDir); err != nil {
+	if err := r.seedCodexHomeWorkspaceSkills(spec.AgentID, spec.WorkspaceDir, spec.CodexHomeDir); err != nil {
 		return nil, err
 	}
 	if err := r.seedManagerTemplate(spec.AgentID, spec.CodexHomeDir); err != nil {
@@ -600,7 +621,7 @@ func (r *Runtime) ensureSession(ctx context.Context, spec SessionSpec) (*Session
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	session, err := r.sessionManager().Start(context.WithoutCancel(ctx), spec)
+	session, err := manager.Start(context.WithoutCancel(ctx), spec)
 	if err != nil {
 		return nil, err
 	}
@@ -675,7 +696,7 @@ func (r *Runtime) hydratePersistedSession(ctx context.Context, manager *appServe
 	if err := r.seedCodexHomeSkills(spec.CodexHomeDir); err != nil {
 		return nil, err
 	}
-	if err := r.seedCodexHomeWorkspaceSkills(spec.WorkspaceDir, spec.CodexHomeDir); err != nil {
+	if err := r.seedCodexHomeWorkspaceSkills(spec.AgentID, spec.WorkspaceDir, spec.CodexHomeDir); err != nil {
 		return nil, err
 	}
 	if err := r.seedManagerTemplate(spec.AgentID, spec.CodexHomeDir); err != nil {
@@ -884,7 +905,7 @@ func safeSkillEntryName(name string) string {
 	return name
 }
 
-func (r *Runtime) seedCodexHomeWorkspaceSkills(workspaceDir, runtimeCodexHome string) error {
+func (r *Runtime) seedCodexHomeWorkspaceSkills(agentID, workspaceDir, runtimeCodexHome string) error {
 	workspaceDir = strings.TrimSpace(workspaceDir)
 	runtimeCodexHome = strings.TrimSpace(runtimeCodexHome)
 	if workspaceDir == "" || runtimeCodexHome == "" {
@@ -898,6 +919,17 @@ func (r *Runtime) seedCodexHomeWorkspaceSkills(workspaceDir, runtimeCodexHome st
 		}
 		return fmt.Errorf("read codex workspace skills %s: %w", sourceRoot, err)
 	}
+	managerSkills := map[string]struct{}{}
+	if canonicalRuntimeAgentID(agentID) == agent.ManagerUserID {
+		names, err := managerTemplateSkillNames()
+		if err != nil {
+			return err
+		}
+		managerSkills = make(map[string]struct{}, len(names))
+		for _, name := range names {
+			managerSkills[name] = struct{}{}
+		}
+	}
 	targetRoot := filepath.Join(runtimeCodexHome, "skills")
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -909,6 +941,13 @@ func (r *Runtime) seedCodexHomeWorkspaceSkills(workspaceDir, runtimeCodexHome st
 		}
 		source := filepath.Join(sourceRoot, name)
 		target := filepath.Join(targetRoot, name)
+		if _, isManagerSkill := managerSkills[name]; isManagerSkill {
+			if _, err := r.stat(target); err == nil {
+				continue
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("inspect manager codex workspace skill %q: %w", name, err)
+			}
+		}
 		if err := r.removeAll(target); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove codex workspace skill %q: %w", name, err)
 		}
@@ -939,17 +978,67 @@ func (r *Runtime) seedManagerTemplate(agentID, runtimeCodexHome string) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range append(skillNames, "basics") {
-		if err := r.removeAll(filepath.Join(runtimeCodexHome, "skills", name)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove manager codex template skill %q: %w", name, err)
-		}
+	hostSkillNames, err := r.readHostSkillsManifest(runtimeCodexHome)
+	if err != nil {
+		return err
+	}
+	hostSkills := make(map[string]struct{}, len(hostSkillNames))
+	for _, name := range hostSkillNames {
+		hostSkills[name] = struct{}{}
+	}
+	if err := r.removeAll(filepath.Join(runtimeCodexHome, "skills", "basics")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove legacy manager codex skill %q: %w", "basics", err)
 	}
 
-	if err := r.copyEmbeddedDir(templateembed.FS(), pathpkg.Join(templateembed.CodexManagerRoot, templateembed.InstructionsDirName), runtimeCodexHome); err != nil {
+	source := templateembed.FS()
+	if err := r.copyEmbeddedDir(source, pathpkg.Join(templateembed.CodexManagerRoot, templateembed.InstructionsDirName), runtimeCodexHome); err != nil {
 		return fmt.Errorf("seed manager codex template %s: %w", runtimeCodexHome, err)
 	}
-	if err := r.copyEmbeddedDir(templateembed.FS(), pathpkg.Join(templateembed.CodexManagerRoot, templateembed.SkillsDirName), filepath.Join(runtimeCodexHome, "skills")); err != nil {
-		return fmt.Errorf("seed manager codex template skills %s: %w", runtimeCodexHome, err)
+
+	sourceSkillsRoot := pathpkg.Join(templateembed.CodexManagerRoot, templateembed.SkillsDirName)
+	targetSkillsRoot := filepath.Join(runtimeCodexHome, "skills")
+	for _, name := range skillNames {
+		target := filepath.Join(targetSkillsRoot, name)
+		_, statErr := r.stat(target)
+		_, hostManaged := hostSkills[name]
+		if statErr == nil && !hostManaged {
+			continue
+		}
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("inspect manager codex template skill %q: %w", name, statErr)
+		}
+		if hostManaged {
+			if err := r.removeAll(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("remove host-managed manager codex skill %q: %w", name, err)
+			}
+		}
+		if err := r.copyEmbeddedDir(source, pathpkg.Join(sourceSkillsRoot, name), target); err != nil {
+			return fmt.Errorf("seed manager codex template skill %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) seedMissingManagerSkills(agentID, runtimeCodexHome string) error {
+	if canonicalRuntimeAgentID(agentID) != agent.ManagerUserID {
+		return nil
+	}
+	runtimeCodexHome = strings.TrimSpace(runtimeCodexHome)
+	if runtimeCodexHome == "" {
+		return fmt.Errorf("codex home dir is required")
+	}
+
+	skillNames, err := managerTemplateSkillNames()
+	if err != nil {
+		return err
+	}
+	source := templateembed.FS()
+	sourceRoot := pathpkg.Join(templateembed.CodexManagerRoot, templateembed.SkillsDirName)
+	targetRoot := filepath.Join(runtimeCodexHome, "skills")
+	for _, name := range skillNames {
+		if err := r.copyEmbeddedPathIfMissing(source, pathpkg.Join(sourceRoot, name), filepath.Join(targetRoot, name)); err != nil {
+			return fmt.Errorf("seed missing manager codex template skill %q: %w", name, err)
+		}
 	}
 	return nil
 }
@@ -975,6 +1064,15 @@ func managerTemplateSkillNames() ([]string, error) {
 		names = append(names, name)
 	}
 	return names, nil
+}
+
+func (r *Runtime) copyEmbeddedPathIfMissing(source fs.FS, sourcePath, targetPath string) error {
+	if _, err := r.stat(targetPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return r.copyEmbeddedDir(source, sourcePath, targetPath)
 }
 
 func (r *Runtime) writeModelCatalog(runtimeCodexHome string, profile agentruntime.Profile) error {
@@ -1275,6 +1373,13 @@ func (r *Runtime) readFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+func (r *Runtime) stat(path string) (os.FileInfo, error) {
+	if r.deps.Stat != nil {
+		return r.deps.Stat(path)
+	}
+	return os.Stat(path)
+}
+
 func (r *Runtime) writeFile(path string, data []byte, mode os.FileMode) error {
 	if r.deps.WriteFile != nil {
 		return r.deps.WriteFile(path, data, mode)
@@ -1287,6 +1392,28 @@ func (r *Runtime) removeAll(path string) error {
 		return r.deps.RemoveAll(path)
 	}
 	return os.RemoveAll(path)
+}
+
+func (r *Runtime) stopUntrackedRuntimeProcesses(ctx context.Context, runtimeID, runtimeDir string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	stop := stopRuntimeProcessesUsingDir
+	if r != nil && r.deps.StopRuntimeProcesses != nil {
+		stop = r.deps.StopRuntimeProcesses
+	}
+	pids, err := stop(runtimeDir)
+	if err != nil {
+		return fmt.Errorf("stop untracked codex processes for runtime %q: %w", runtimeID, err)
+	}
+	if len(pids) > 0 {
+		slog.InfoContext(ctx, "stopped untracked codex runtime processes",
+			"runtime_id", runtimeID,
+			"runtime_dir", runtimeDir,
+			"process_ids", pids,
+		)
+	}
+	return nil
 }
 
 func (r *Runtime) removeRuntimeDir(ctx context.Context, runtimeID, path string) error {
@@ -1711,9 +1838,9 @@ func (r *Runtime) Close() error {
 	r.initMu.Unlock()
 
 	var closeErr error
-	closer, ok := manager.(interface{ Close(context.Context) error })
+	closer, ok := manager.(io.Closer)
 	if ok {
-		closeErr = closer.Close(context.Background())
+		closeErr = closer.Close()
 	}
 
 	r.initMu.Lock()

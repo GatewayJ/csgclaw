@@ -2841,30 +2841,29 @@ func (s *Service) Close() error {
 	s.runtimeOperations.Wait()
 
 	s.mu.Lock()
-	sandboxRuntimes := make([]sandbox.Runtime, 0, len(s.runtimes))
-	for _, rt := range s.runtimes {
-		sandboxRuntimes = append(sandboxRuntimes, rt)
+	sandboxRuntimes := make(map[string]sandbox.Runtime, len(s.runtimes))
+	for name, rt := range s.runtimes {
+		sandboxRuntimes[name] = rt
 	}
 	s.runtimes = make(map[string]sandbox.Runtime)
-	managedRuntimes := make([]agentruntime.Runtime, 0, len(s.runtimeRegistry))
-	for _, rt := range s.runtimeRegistry {
-		managedRuntimes = append(managedRuntimes, rt)
+	registeredRuntimes := make(map[string]io.Closer, len(s.runtimeRegistry))
+	for kind, rt := range s.runtimeRegistry {
+		if closer, ok := rt.(io.Closer); ok {
+			registeredRuntimes[kind] = closer
+		}
 	}
+	s.runtimeRegistry = make(map[string]agentruntime.Runtime)
 	s.mu.Unlock()
 
 	var closeErr error
-	for _, rt := range sandboxRuntimes {
-		if err := rt.Close(); err != nil && closeErr == nil {
-			closeErr = err
+	for name, rt := range sandboxRuntimes {
+		if err := rt.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close sandbox runtime %q: %w", name, err))
 		}
 	}
-	for _, rt := range managedRuntimes {
-		closer, ok := rt.(io.Closer)
-		if !ok {
-			continue
-		}
-		if err := closer.Close(); err != nil && closeErr == nil {
-			closeErr = err
+	for kind, rt := range registeredRuntimes {
+		if err := rt.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close agent runtime %q: %w", kind, err))
 		}
 	}
 	s.mu.Lock()

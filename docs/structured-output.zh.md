@@ -8,8 +8,9 @@ CSGClaw 为需要附加资源链接或打开交互式问答流程的 skill 脚�
 
 ## 规范可执行示例
 
-Manager 内置 skill [`csgclaw-interactive-output-demo`](../internal/template/embed/manager/codex/workspace/skills/csgclaw-interactive-output-demo/) 是完整的参考实现。
-其中的 [`emit_demo.py`](../internal/template/embed/manager/codex/workspace/skills/csgclaw-interactive-output-demo/scripts/emit_demo.py) 会在每个支持字段首次出现时解释其作用，并演示完整和最小资源链接、五个问题以及自动续接响应。
+Manager 内置 skill [`csgclaw-interactive-output-demo`](../internal/template/embed/manager/codex/skills/csgclaw-interactive-output-demo/) 是完整的参考实现。
+其中的 [`emit_demo.py`](../internal/template/embed/manager/codex/skills/csgclaw-interactive-output-demo/scripts/emit_demo.py) 会在每个支持字段首次出现时解释其作用，并演示完整和最小资源链接、五个问题以及自动续接响应。
+Manager provision 会在内置 skill 目录缺失时安装它，并保留已经安装或自定义的副本。
 
 在 Manager 会话中使用以下提示词调用它：
 
