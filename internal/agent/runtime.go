@@ -32,18 +32,21 @@ func (s *Service) ensureRuntimeAtHome(homeDir string) (sandbox.Runtime, error) {
 	if homeDir == "" {
 		return nil, fmt.Errorf("runtime home is required")
 	}
-	if err := os.MkdirAll(homeDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create runtime home: %w", err)
-	}
 	if testEnsureRuntimeAtHomeHook != nil {
 		return testEnsureRuntimeAtHomeHook(s, homeDir)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed && s.runtimeOperationCount == 0 {
+		return nil, ErrServiceClosed
+	}
 
 	if rt := s.runtimes[homeDir]; rt != nil {
 		return rt, nil
+	}
+	if err := os.MkdirAll(homeDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create runtime home: %w", err)
 	}
 
 	rt, err := s.sandbox.Open(context.Background(), homeDir)

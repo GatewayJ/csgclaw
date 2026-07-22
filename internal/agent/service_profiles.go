@@ -1021,6 +1021,11 @@ func (s *Service) ResolvedAgentProfile(agentID string) (AgentProfile, error) {
 }
 
 func (s *Service) Recreate(ctx context.Context, id string) (Agent, error) {
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
+	}
+	defer releaseRuntimeOperation()
 	ctx, release, err := s.acquireAgentLifecycle(ctx, id)
 	if err != nil {
 		return Agent{}, err
@@ -1032,6 +1037,11 @@ func (s *Service) Recreate(ctx context.Context, id string) (Agent, error) {
 }
 
 func (s *Service) Upgrade(ctx context.Context, id string) (Agent, error) {
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
+	}
+	defer releaseRuntimeOperation()
 	ctx, release, err := s.acquireAgentLifecycle(ctx, id)
 	if err != nil {
 		return Agent{}, err
@@ -1056,7 +1066,7 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}
 	if isManagerAgent(got) {
-		return s.EnsureManager(ctx, true)
+		return s.ensureManager(ctx, true, "")
 	}
 	got.ID = canonicalAgentID(got.ID)
 	got.RuntimeID = normalizeRuntimeID(got.RuntimeID, got.ID)

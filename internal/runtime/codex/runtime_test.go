@@ -19,6 +19,7 @@ import (
 
 	"csgclaw/internal/agent"
 	"csgclaw/internal/codexcli"
+	"csgclaw/internal/config"
 	agentruntime "csgclaw/internal/runtime"
 	"csgclaw/internal/sandbox"
 )
@@ -784,6 +785,127 @@ func TestRuntimeCloseStopsOwnedAppServer(t *testing.T) {
 	}
 	if processAlive(session.ProcessID) {
 		t.Fatalf("app-server process %d survived Runtime.Close()", session.ProcessID)
+	}
+}
+
+func TestBootstrapServiceCloseReleasesAppServerBeforeManagerRecreate(t *testing.T) {
+	withAppServerHelperCommand(t, "pending")
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	t.Setenv(codexcli.EnvBinaryPath, testBinary)
+
+	model := config.ModelConfig{
+		Provider: config.ProviderLLMAPI,
+		BaseURL:  "https://api.example.com/v1",
+		APIKey:   "sk-test",
+		ModelID:  "gpt-5",
+	}
+	statePath := filepath.Join(t.TempDir(), "state", "agents.json")
+	newServiceRuntime := func(service **agent.Service) *Runtime {
+		return New(Dependencies{
+			BinaryProvider: fakeBinaryProvider{path: testBinary},
+			ResolveAgent: func(h agentruntime.Handle) (AgentRef, error) {
+				host := (*service).PicoClawRuntimeHost()
+				got, err := host.ResolveAgent(h)
+				if err != nil {
+					return AgentRef{}, err
+				}
+				profile, err := host.ResolveRuntimeProfile(h)
+				if err != nil {
+					return AgentRef{}, err
+				}
+				return AgentRef{
+					ID:             got.ID,
+					Name:           got.Name,
+					RuntimeID:      got.RuntimeID,
+					HandleID:       got.BoxID,
+					Instructions:   got.Instructions,
+					RuntimeOptions: got.RuntimeOptions,
+					MCPServers:     got.MCPServers,
+					Profile:        profile,
+				}, nil
+			},
+			AgentHome: func(agentID string) (string, error) {
+				return (*service).PicoClawRuntimeHost().AgentHome(agentID)
+			},
+		})
+	}
+
+	var bootstrapService *agent.Service
+	bootstrapRuntime := newServiceRuntime(&bootstrapService)
+	bootstrapService, err = agent.NewService(
+		model,
+		config.ServerConfig{},
+		"",
+		statePath,
+		agent.WithRuntime(bootstrapRuntime),
+	)
+	if err != nil {
+		t.Fatalf("NewService(bootstrap) error = %v", err)
+	}
+	if err := bootstrapService.EnsureBootstrapManager(context.Background(), false); err != nil {
+		t.Fatalf("EnsureBootstrapManager() error = %v", err)
+	}
+	manager, ok := bootstrapService.Agent(agent.ManagerUserID)
+	if !ok {
+		t.Fatal("bootstrap manager was not persisted")
+	}
+	oldSession, err := bootstrapRuntime.SessionManager().Session(SessionHandle{RuntimeID: manager.RuntimeID})
+	if err != nil {
+		t.Fatalf("bootstrap Session() error = %v", err)
+	}
+	bootstrapHome, err := bootstrapService.PicoClawRuntimeHost().AgentHome(agent.ManagerUserID)
+	if err != nil {
+		t.Fatalf("bootstrap AgentHome() error = %v", err)
+	}
+	markerPath := filepath.Join(bootstrapHome, hostStateDirName, "bootstrap-marker")
+	if err := os.WriteFile(markerPath, []byte("temporary bootstrap runtime"), 0o600); err != nil {
+		t.Fatalf("write bootstrap marker: %v", err)
+	}
+
+	if err := bootstrapService.Close(); err != nil {
+		t.Fatalf("bootstrap Service.Close() error = %v", err)
+	}
+	if processAlive(oldSession.ProcessID) {
+		t.Fatalf("bootstrap app-server process %d survived Service.Close()", oldSession.ProcessID)
+	}
+
+	var servingService *agent.Service
+	servingRuntime := newServiceRuntime(&servingService)
+	servingService, err = agent.NewService(
+		model,
+		config.ServerConfig{},
+		"",
+		statePath,
+		agent.WithRuntime(servingRuntime),
+	)
+	if err != nil {
+		t.Fatalf("NewService(serving) error = %v", err)
+	}
+	t.Cleanup(func() { _ = servingService.Close() })
+	if err := servingService.EnsureBootstrapManager(context.Background(), true); err != nil {
+		t.Fatalf("EnsureBootstrapManager(forceRecreate) error = %v", err)
+	}
+	if _, err := os.Stat(markerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("bootstrap runtime marker after manager recreate = %v, want removed", err)
+	}
+	recreated, ok := servingService.Agent(agent.ManagerUserID)
+	if !ok {
+		t.Fatal("recreated manager was not persisted")
+	}
+	newSession, err := servingRuntime.SessionManager().Session(SessionHandle{RuntimeID: recreated.RuntimeID})
+	if err != nil {
+		t.Fatalf("recreated Session() error = %v", err)
+	}
+	if !processAlive(newSession.ProcessID) {
+		t.Fatalf("recreated app-server process %d is not running", newSession.ProcessID)
+	}
+	if newSession.ProcessID == oldSession.ProcessID {
+		t.Fatalf("recreated app-server PID = %d, want a new process", newSession.ProcessID)
 	}
 }
 

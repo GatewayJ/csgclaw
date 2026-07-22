@@ -58,6 +58,10 @@ var testDefaultServiceOption ServiceOption
 
 var errDefaultTemplateRuntimeMismatch = errors.New("default template runtime mismatch")
 
+// ErrServiceClosed is returned when an operation would use a Service after it
+// has begun releasing its runtime resources.
+var ErrServiceClosed = errors.New("agent service is closed")
+
 type unconfiguredSandboxProvider struct{}
 
 func (unconfiguredSandboxProvider) Name() string {
@@ -188,6 +192,11 @@ type Service struct {
 	agents                  map[string]Agent
 	runtimeRecords          map[string]RuntimeRecord
 	runtimeRegistry         map[string]agentruntime.Runtime
+	closed                  bool
+	closeDone               chan struct{}
+	closeErr                error
+	runtimeOperations       sync.WaitGroup
+	runtimeOperationCount   int
 	lifecycle               LifecycleObserver
 	bindingActivation       BindingActivator
 	agentLifecycleMu        sync.Mutex
@@ -498,6 +507,11 @@ func (s *Service) logBootstrapManagerBoxProgress(elapsed time.Duration) {
 }
 
 func (s *Service) EnsureManager(ctx context.Context, forceRecreate bool) (Agent, error) {
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
+	}
+	defer releaseRuntimeOperation()
 	return s.ensureManager(ctx, forceRecreate, "")
 }
 
@@ -1004,6 +1018,11 @@ func appendLookupKey(keys []string, key string) []string {
 }
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (Agent, error) {
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
+	}
+	defer releaseRuntimeOperation()
 	if req.Replace && strings.TrimSpace(req.Spec.FromTemplate) != "" {
 		return Agent{}, fmt.Errorf("agent create --replace does not support from_template")
 	}
@@ -1240,11 +1259,11 @@ func templateWorkspaceCleanup(_ string, workspace hub.WorkspaceRef) func() {
 
 func (s *Service) createNew(ctx context.Context, spec CreateAgentSpec) (Agent, error) {
 	if isManagerCreateSpec(spec) {
-		return s.EnsureManager(ctx, false)
+		return s.ensureManager(ctx, false, "")
 	}
 	if shouldCreateWorkerSpec(spec) {
 		spec.Role = RoleWorker
-		return s.CreateWorker(ctx, spec)
+		return s.createWorker(ctx, spec)
 	}
 	return Agent{}, fmt.Errorf("role must be one of %q or %q", RoleManager, RoleWorker)
 }
@@ -1311,13 +1330,13 @@ func (s *Service) replace(ctx context.Context, req CreateRequest) (Agent, error)
 		if err := s.validateReplaceWorkerSpecBeforeDelete(ctx, spec); err != nil {
 			return Agent{}, err
 		}
-		if err := s.Delete(ctx, existing.ID); err != nil {
+		if err := s.delete(ctx, existing.ID); err != nil {
 			return Agent{}, err
 		}
-		return s.CreateWorker(ctx, spec)
+		return s.createWorker(ctx, spec)
 	}
 
-	if err := s.Delete(ctx, existing.ID); err != nil {
+	if err := s.delete(ctx, existing.ID); err != nil {
 		return Agent{}, err
 	}
 	return s.createNew(ctx, spec)
@@ -1617,6 +1636,11 @@ func (s *Service) Start(ctx context.Context, id string) (Agent, error) {
 	if id == "" {
 		return Agent{}, fmt.Errorf("agent id is required")
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
+	}
+	defer releaseRuntimeOperation()
 	ctx, release, err := s.acquireAgentLifecycle(ctx, id)
 	if err != nil {
 		return Agent{}, err
@@ -1628,7 +1652,9 @@ func (s *Service) Start(ctx context.Context, id string) (Agent, error) {
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}
 	if got.AgentProfile.EnvRestartRequired || got.AgentProfile.ImageUpgradeRequired {
-		return s.Recreate(ctx, id)
+		return s.recreate(ctx, id, func(ctx context.Context, got Agent) (string, error) {
+			return s.imageForRecreate(ctx, got), nil
+		})
 	}
 	startProfile := s.hydrateProfileFromCatalog(normalizeProfileForAgentRuntime(got.AgentProfile, got.RuntimeOptions, got.Name, got.Description, got.RuntimeKind, nil))
 	if err := s.validateRuntimeConfig(ctx, strings.TrimSpace(got.RuntimeKind), runtimeConfigSnapshotForAgent(startProfile, got.RuntimeOptions)); err != nil {
@@ -1649,7 +1675,9 @@ func (s *Service) Start(ctx context.Context, id string) (Agent, error) {
 	state, err := runtimeImpl.Start(ctx, handle)
 	if err != nil {
 		if sandbox.IsNotFound(err) {
-			return s.Recreate(ctx, id)
+			return s.recreate(ctx, id, func(ctx context.Context, got Agent) (string, error) {
+				return s.imageForRecreate(ctx, got), nil
+			})
 		}
 		return Agent{}, err
 	}
@@ -1675,6 +1703,11 @@ func (s *Service) Stop(ctx context.Context, id string) (Agent, error) {
 	if id == "" {
 		return Agent{}, fmt.Errorf("agent id is required")
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
+	}
+	defer releaseRuntimeOperation()
 	ctx, release, err := s.acquireAgentLifecycle(ctx, id)
 	if err != nil {
 		return Agent{}, err
@@ -1719,6 +1752,15 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if id == "" {
 		return fmt.Errorf("agent id is required")
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return err
+	}
+	defer releaseRuntimeOperation()
+	return s.delete(ctx, id)
+}
+
+func (s *Service) delete(ctx context.Context, id string) error {
 	ctx, release, err := s.acquireAgentLifecycle(ctx, id)
 	if err != nil {
 		return err
@@ -2031,6 +2073,15 @@ func isRuntimeRunning(a Agent) bool {
 }
 
 func (s *Service) CreateWorker(ctx context.Context, spec CreateAgentSpec) (Agent, error) {
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
+	}
+	defer releaseRuntimeOperation()
+	return s.createWorker(ctx, spec)
+}
+
+func (s *Service) createWorker(ctx context.Context, spec CreateAgentSpec) (Agent, error) {
 	if shouldResolveTemplateCreateSpec(spec) && !isResolvedWorkspacePath(spec.FromTemplate) {
 		var cleanup func()
 		var err error
@@ -2729,6 +2780,28 @@ func (s *Service) Close() error {
 		return nil
 	}
 	s.mu.Lock()
+	if s.closed {
+		closeDone := s.closeDone
+		s.mu.Unlock()
+		if closeDone != nil {
+			<-closeDone
+		}
+		s.mu.RLock()
+		closeErr := s.closeErr
+		s.mu.RUnlock()
+		return closeErr
+	}
+	s.closed = true
+	s.closeDone = make(chan struct{})
+	closeDone := s.closeDone
+	s.mu.Unlock()
+
+	// Do not close the registered runtimes until all operations that were
+	// admitted before Close began have finished. New runtime operations are
+	// rejected once closed is set above.
+	s.runtimeOperations.Wait()
+
+	s.mu.Lock()
 	sandboxRuntimes := make([]sandbox.Runtime, 0, len(s.runtimes))
 	for _, rt := range s.runtimes {
 		sandboxRuntimes = append(sandboxRuntimes, rt)
@@ -2755,7 +2828,34 @@ func (s *Service) Close() error {
 			closeErr = err
 		}
 	}
+	s.mu.Lock()
+	s.closeErr = closeErr
+	close(closeDone)
+	s.mu.Unlock()
 	return closeErr
+}
+
+// acquireRuntimeOperation prevents Close from releasing runtime resources
+// while an admitted operation may still create or start one.
+func (s *Service) acquireRuntimeOperation() (func(), error) {
+	if s == nil {
+		return nil, fmt.Errorf("agent service is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, ErrServiceClosed
+	}
+	s.runtimeOperations.Add(1)
+	s.runtimeOperationCount++
+	return s.releaseRuntimeOperation, nil
+}
+
+func (s *Service) releaseRuntimeOperation() {
+	s.mu.Lock()
+	s.runtimeOperationCount--
+	s.mu.Unlock()
+	s.runtimeOperations.Done()
 }
 
 func (s *Service) hasNameLocked(name string) bool {

@@ -411,6 +411,329 @@ func TestServiceCloseReturnsRegisteredRuntimeCloseError(t *testing.T) {
 	}
 }
 
+func TestServiceCloseWaitsForRuntimeOperationsAndRejectsNewOnes(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	origLocateCodexCLI := locateCodexCLI
+	locateCodexCLI = func() (string, error) { return "/usr/local/bin/codex", nil }
+	t.Cleanup(func() {
+		locateCodexCLI = origLocateCodexCLI
+	})
+
+	started := make(chan struct{})
+	releaseStart := make(chan struct{})
+	var newCalls atomic.Int32
+	var closeCalls atomic.Int32
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"",
+		filepath.Join(homeDir, "agents.json"),
+		WithRuntime(closableAgentRuntime{
+			fakeAgentRuntime: fakeAgentRuntime{
+				kind: RuntimeKindCodex,
+				new: func(_ context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
+					newCalls.Add(1)
+					close(started)
+					<-releaseStart
+					return agentruntime.Handle{RuntimeID: spec.RuntimeID, HandleID: "codex-manager-session"}, nil
+				},
+			},
+			close: func() error {
+				closeCalls.Add(1)
+				return nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	ensureDone := make(chan error, 1)
+	go func() {
+		ensureDone <- svc.EnsureBootstrapManager(context.Background(), false)
+	}()
+	<-started
+
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- svc.Close()
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		svc.mu.RLock()
+		closed := svc.closed
+		svc.mu.RUnlock()
+		if closed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Close() did not begin closing the service")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if err := svc.EnsureBootstrapManager(context.Background(), false); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("EnsureBootstrapManager() after Close() began = %v, want ErrServiceClosed", err)
+	}
+	if got, want := newCalls.Load(), int32(1); got != want {
+		t.Fatalf("runtime New() calls after rejected bootstrap = %d, want %d", got, want)
+	}
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close() returned before its runtime operation completed: %v", err)
+	default:
+	}
+
+	close(releaseStart)
+	if err := <-ensureDone; err != nil {
+		t.Fatalf("EnsureBootstrapManager() error = %v", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got, want := closeCalls.Load(), int32(1); got != want {
+		t.Fatalf("registered runtime Close() calls = %d, want %d", got, want)
+	}
+
+	const callers = 8
+	errs := make(chan error, callers)
+	for range callers {
+		go func() {
+			errs <- svc.Close()
+		}()
+	}
+	for range callers {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent Close() error = %v", err)
+		}
+	}
+	if got, want := closeCalls.Load(), int32(1); got != want {
+		t.Fatalf("registered runtime Close() calls after repeated close = %d, want %d", got, want)
+	}
+}
+
+func TestServiceCloseWaitsForReplace(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	origLocateCodexCLI := locateCodexCLI
+	locateCodexCLI = func() (string, error) { return "/usr/local/bin/codex", nil }
+	t.Cleanup(func() {
+		locateCodexCLI = origLocateCodexCLI
+	})
+
+	deleteStarted := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	var newCalls atomic.Int32
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"",
+		filepath.Join(homeDir, "agents.json"),
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindCodex,
+			new: func(_ context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
+				newCalls.Add(1)
+				return agentruntime.Handle{RuntimeID: spec.RuntimeID, HandleID: "codex-" + spec.AgentName}, nil
+			},
+			del: func(context.Context, agentruntime.Handle) error {
+				close(deleteStarted)
+				<-releaseDelete
+				return nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if _, err := svc.CreateWorker(context.Background(), CreateAgentSpec{
+		ID:          "agent-alice",
+		Name:        "alice",
+		Role:        RoleWorker,
+		RuntimeKind: RuntimeKindCodex,
+	}); err != nil {
+		t.Fatalf("CreateWorker() error = %v", err)
+	}
+
+	replaceDone := make(chan error, 1)
+	go func() {
+		_, err := svc.Create(context.Background(), CreateRequest{
+			Replace: true,
+			Spec: CreateAgentSpec{
+				ID:          "agent-alice",
+				Name:        "alice",
+				Role:        RoleWorker,
+				RuntimeKind: RuntimeKindCodex,
+			},
+		})
+		replaceDone <- err
+	}()
+	<-deleteStarted
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- svc.Close() }()
+	waitForServiceCloseStart(t, svc)
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close() returned while replace was deleting the old runtime: %v", err)
+	default:
+	}
+
+	close(releaseDelete)
+	if err := <-replaceDone; err != nil {
+		t.Fatalf("Create(--replace) error = %v", err)
+	}
+	if _, ok := svc.Agent("agent-alice"); !ok {
+		t.Fatal("Create(--replace) removed the agent instead of replacing it")
+	}
+	if got, want := newCalls.Load(), int32(2); got != want {
+		t.Fatalf("runtime New() calls = %d, want %d", got, want)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := svc.Create(context.Background(), CreateRequest{
+		Replace: true,
+		Spec: CreateAgentSpec{
+			ID:          "agent-alice",
+			Name:        "alice",
+			Role:        RoleWorker,
+			RuntimeKind: RuntimeKindCodex,
+		},
+	}); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("Create(--replace) after Close() = %v, want ErrServiceClosed", err)
+	}
+	if _, ok := svc.Agent("agent-alice"); !ok {
+		t.Fatal("Create(--replace) after Close() removed the existing agent")
+	}
+}
+
+func TestServiceCloseWaitsForDelete(t *testing.T) {
+	deleteStarted := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"",
+		filepath.Join(t.TempDir(), "agents.json"),
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindCodex,
+			del: func(context.Context, agentruntime.Handle) error {
+				close(deleteStarted)
+				<-releaseDelete
+				return nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["agent-alice"] = Agent{
+		ID:          "agent-alice",
+		Name:        "alice",
+		Role:        RoleWorker,
+		RuntimeID:   "runtime-agent-alice",
+		RuntimeKind: RuntimeKindCodex,
+		BoxID:       "codex-alice",
+	}
+
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- svc.Delete(context.Background(), "agent-alice") }()
+	<-deleteStarted
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- svc.Close() }()
+	waitForServiceCloseStart(t, svc)
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close() returned while Delete() was removing the runtime: %v", err)
+	default:
+	}
+
+	close(releaseDelete)
+	if err := <-deleteDone; err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestServiceCloseWaitsForStop(t *testing.T) {
+	stopStarted := make(chan struct{})
+	releaseStop := make(chan struct{})
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"",
+		filepath.Join(t.TempDir(), "agents.json"),
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindCodex,
+			stop: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+				close(stopStarted)
+				<-releaseStop
+				return agentruntime.StateStopped, nil
+			},
+			info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+				return agentruntime.Info{State: agentruntime.StateStopped}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["agent-alice"] = Agent{
+		ID:          "agent-alice",
+		Name:        "alice",
+		Role:        RoleWorker,
+		RuntimeID:   "runtime-agent-alice",
+		RuntimeKind: RuntimeKindCodex,
+		BoxID:       "codex-alice",
+	}
+
+	stopDone := make(chan error, 1)
+	go func() {
+		_, err := svc.Stop(context.Background(), "agent-alice")
+		stopDone <- err
+	}()
+	<-stopStarted
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- svc.Close() }()
+	waitForServiceCloseStart(t, svc)
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close() returned while Stop() was stopping the runtime: %v", err)
+	default:
+	}
+
+	close(releaseStop)
+	if err := <-stopDone; err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func waitForServiceCloseStart(t *testing.T, svc *Service) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		svc.mu.RLock()
+		closed := svc.closed
+		svc.mu.RUnlock()
+		if closed {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Close() did not begin closing the service")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 type fakeAgentRuntimeNoLogs struct {
 	kind string
 	info func(context.Context, agentruntime.Handle) (agentruntime.Info, error)

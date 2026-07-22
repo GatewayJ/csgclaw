@@ -108,6 +108,11 @@ func (s *Service) runtimeForKind(kind string) (agentruntime.Runtime, error) {
 	if resolved := agentruntime.RuntimeConfigForKind(kind).LegacyKind(); resolved != "" {
 		kind = resolved
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed && s.runtimeOperationCount == 0 {
+		return nil, ErrServiceClosed
+	}
 	rt := s.runtimeRegistry[kind]
 	if rt == nil {
 		return nil, fmt.Errorf("runtime kind %q is not registered", kind)
