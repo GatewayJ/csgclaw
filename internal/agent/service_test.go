@@ -176,6 +176,18 @@ func (f fakeMCPServersListRuntime) ListMCPServers(ctx context.Context, h agentru
 	return f.list(ctx, h, current)
 }
 
+type fakeConversationAgentRuntime struct {
+	fakeAgentRuntime
+	newConversation func(context.Context, agentruntime.Handle, agentruntime.ConversationStartRequest) (agentruntime.ConversationStartAction, error)
+}
+
+func (f fakeConversationAgentRuntime) NewConversation(ctx context.Context, h agentruntime.Handle, req agentruntime.ConversationStartRequest) (agentruntime.ConversationStartAction, error) {
+	if f.newConversation == nil {
+		return agentruntime.ConversationStartAction{}, nil
+	}
+	return f.newConversation(ctx, h, req)
+}
+
 type fakeBareAgentRuntime struct {
 	kind string
 }
@@ -511,6 +523,121 @@ func TestServiceCloseWaitsForRuntimeOperationsAndRejectsNewOnes(t *testing.T) {
 	}
 	if got, want := closeCalls.Load(), int32(1); got != want {
 		t.Fatalf("registered runtime Close() calls after repeated close = %d, want %d", got, want)
+	}
+}
+
+func TestServiceCloseRejectsNewRuntimeCallsWhileOperationIsActive(t *testing.T) {
+	startEntered := make(chan struct{})
+	releaseStart := make(chan struct{})
+	var infoCalls atomic.Int32
+	var logCalls atomic.Int32
+	var conversationCalls atomic.Int32
+
+	runtimeImpl := fakeConversationAgentRuntime{
+		fakeAgentRuntime: fakeAgentRuntime{
+			kind: RuntimeKindCodex,
+			start: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+				close(startEntered)
+				<-releaseStart
+				return agentruntime.StateRunning, nil
+			},
+			info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+				infoCalls.Add(1)
+				return agentruntime.Info{State: agentruntime.StateRunning}, nil
+			},
+			streamLogs: func(context.Context, agentruntime.Handle, agentruntime.LogOptions) error {
+				logCalls.Add(1)
+				return nil
+			},
+		},
+		newConversation: func(context.Context, agentruntime.Handle, agentruntime.ConversationStartRequest) (agentruntime.ConversationStartAction, error) {
+			conversationCalls.Add(1)
+			return agentruntime.ConversationStartAction{}, nil
+		},
+	}
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"",
+		filepath.Join(t.TempDir(), "agents.json"),
+		WithRuntime(runtimeImpl),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["agent-alice"] = Agent{
+		ID:          "agent-alice",
+		Name:        "alice",
+		Role:        RoleWorker,
+		RuntimeID:   "runtime-agent-alice",
+		RuntimeKind: RuntimeKindCodex,
+		BoxID:       "codex-alice",
+		Status:      string(agentruntime.StateStopped),
+	}
+
+	startDone := make(chan error, 1)
+	go func() {
+		_, err := svc.Start(context.Background(), "agent-alice")
+		startDone <- err
+	}()
+	<-startEntered
+	infoCallsBeforeClose := infoCalls.Load()
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- svc.Close() }()
+	waitForServiceCloseStart(t, svc)
+
+	if _, err := svc.RuntimeView(context.Background(), "agent-alice"); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("RuntimeView() after Close() began = %v, want ErrServiceClosed", err)
+	}
+	if err := svc.StreamLogs(context.Background(), "agent-alice", false, 20, io.Discard); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("StreamLogs() after Close() began = %v, want ErrServiceClosed", err)
+	}
+	if _, err := svc.NewConversationAction(context.Background(), NewConversationRequest{BotID: "agent-alice"}); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("NewConversationAction() after Close() began = %v, want ErrServiceClosed", err)
+	}
+	if _, err := svc.MCPServersView(context.Background(), "agent-alice"); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("MCPServersView() after Close() began = %v, want ErrServiceClosed", err)
+	}
+	if _, err := svc.Runtime(RuntimeKindCodex); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("Runtime() after Close() began = %v, want ErrServiceClosed", err)
+	}
+	if _, err := svc.Update(context.Background(), "agent-alice", UpdateRequest{}); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("Update() after Close() began = %v, want ErrServiceClosed", err)
+	}
+	if err := svc.StartConfiguredAgents(context.Background()); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("StartConfiguredAgents() after Close() began = %v, want ErrServiceClosed", err)
+	}
+	if got := svc.ListContext(context.Background()); len(got) != 1 || got[0].ID != "agent-alice" {
+		t.Fatalf("ListContext() after Close() began = %+v, want persisted agent", got)
+	}
+	if got, ok := svc.Agent("agent-alice"); !ok || got.ID != "agent-alice" {
+		t.Fatalf("Agent() after Close() began = (%+v, %v), want persisted agent", got, ok)
+	}
+	if got := infoCalls.Load(); got != infoCallsBeforeClose {
+		t.Fatalf("runtime Info() calls after rejected operations = %d, want %d", got, infoCallsBeforeClose)
+	}
+	if got := logCalls.Load(); got != 0 {
+		t.Fatalf("runtime StreamLogs() calls from rejected operation = %d, want 0", got)
+	}
+	if got := conversationCalls.Load(); got != 0 {
+		t.Fatalf("runtime NewConversation() calls from rejected operation = %d, want 0", got)
+	}
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close() returned while Start() was still using the runtime: %v", err)
+	default:
+	}
+
+	close(releaseStart)
+	if err := <-startDone; err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got, want := infoCalls.Load(), infoCallsBeforeClose+1; got != want {
+		t.Fatalf("runtime Info() calls = %d, want %d after admitted Start()", got, want)
 	}
 }
 

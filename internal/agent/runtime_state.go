@@ -108,11 +108,6 @@ func (s *Service) runtimeForKind(kind string) (agentruntime.Runtime, error) {
 	if resolved := agentruntime.RuntimeConfigForKind(kind).LegacyKind(); resolved != "" {
 		kind = resolved
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed && s.runtimeOperationCount == 0 {
-		return nil, ErrServiceClosed
-	}
 	rt := s.runtimeRegistry[kind]
 	if rt == nil {
 		return nil, fmt.Errorf("runtime kind %q is not registered", kind)
@@ -182,6 +177,11 @@ func (s *Service) runtimeProfileForKind(runtimeKind, agentID, fallbackName, fall
 }
 
 func (s *Service) Runtime(kind string) (agentruntime.Runtime, error) {
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return nil, err
+	}
+	defer releaseRuntimeOperation()
 	return s.runtimeForKind(kind)
 }
 
@@ -268,6 +268,11 @@ func (s *Service) RuntimeView(ctx context.Context, id string) (RuntimeView, erro
 	if id == "" {
 		return RuntimeView{}, fmt.Errorf("agent id is required")
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return RuntimeView{}, err
+	}
+	defer releaseRuntimeOperation()
 
 	got, ok := s.agentSnapshot(id)
 	if !ok {

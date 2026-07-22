@@ -52,6 +52,11 @@ func (s *Service) MCPServersView(ctx context.Context, id string) (MCPServersView
 	if id == "" {
 		return MCPServersView{}, fmt.Errorf("agent id is required")
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return MCPServersView{}, err
+	}
+	defer releaseRuntimeOperation()
 	got, ok := s.agentSnapshot(id)
 	if !ok {
 		return MCPServersView{}, fmt.Errorf("agent %q not found", id)

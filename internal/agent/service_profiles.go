@@ -77,9 +77,11 @@ func (s *Service) UpdateAgentProfile(id string, profile AgentProfile) (AgentProf
 	if id == "" {
 		return AgentProfileView{}, fmt.Errorf("agent id is required")
 	}
-	if s == nil {
-		return AgentProfileView{}, fmt.Errorf("agent service is required")
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return AgentProfileView{}, err
 	}
+	defer releaseRuntimeOperation()
 
 	s.mu.Lock()
 	current, key, ok := s.agentByIDLocked(id)
@@ -140,7 +142,7 @@ func (s *Service) UpdateAgentProfile(id string, profile AgentProfile) (AgentProf
 	if err := s.syncGatewayAfterProfileChange(context.Background(), id, previous, normalized, restartRequired); err != nil {
 		return AgentProfileView{}, err
 	}
-	got, ok := s.Agent(id)
+	got, ok := s.agentWithRuntimeStatusByID(context.Background(), id)
 	if !ok {
 		return AgentProfileView{}, fmt.Errorf("agent %q not found", id)
 	}
@@ -175,18 +177,20 @@ func (s *Service) syncGatewayAfterProfileChange(ctx context.Context, id string, 
 		return nil
 	}
 	runtimeNormalized := s.hydrateProfileFromCatalog(normalized)
-	got, ok := s.Agent(id)
+	got, ok := s.agentWithRuntimeStatusByID(ctx, id)
 	if !ok || !isGatewayRuntimeKind(strings.TrimSpace(got.RuntimeKind)) {
 		return nil
 	}
 	profileJustCompleted := !isAgentProfileComplete(previous) && normalized.ProfileComplete
 	boxMissing := strings.TrimSpace(got.BoxID) == ""
 	if isManagerAgent(got) && (profileJustCompleted || boxMissing) {
-		_, err := s.EnsureManager(ctx, false)
+		_, err := s.ensureManager(ctx, false, "")
 		return err
 	}
 	if restartRequired {
-		_, err := s.Recreate(ctx, id)
+		_, err := s.recreateWithAgentLifecycle(ctx, id, func(ctx context.Context, got Agent) (string, error) {
+			return s.imageForRecreate(ctx, got), nil
+		})
 		return err
 	}
 	if gatewayProfileRuntimeRestartRequired(previous, normalized) {
@@ -253,9 +257,11 @@ func (s *Service) currentFeishuProviderForRuntime(runtimeKind string) feishu.Age
 }
 
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Agent, error) {
-	if s == nil {
-		return Agent{}, fmt.Errorf("agent service is required")
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
 	}
+	defer releaseRuntimeOperation()
 	if updateIncludesMCPServers(req) {
 		s.mcpServersMu.Lock()
 		defer s.mcpServersMu.Unlock()
@@ -506,19 +512,21 @@ func (s *Service) update(ctx context.Context, id string, req UpdateRequest) (Age
 		s.stopLifecycleAgent(id)
 	}
 
-	updated, ok := s.Agent(id)
+	updated, ok := s.agentWithRuntimeStatusByID(ctx, id)
 	if !ok {
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}
 	if mcpServersUpdated && restartRequired && runtimeRunning && isManagerAgent(updated) {
-		return s.Recreate(ctx, id)
+		return s.recreateWithAgentLifecycle(ctx, id, func(ctx context.Context, got Agent) (string, error) {
+			return s.imageForRecreate(ctx, got), nil
+		})
 	}
 	if runtimeAffectingUpdate {
 		normalized := normalizeProfileForAgentRuntime(updated.AgentProfile, updated.RuntimeOptions, updated.Name, updated.Description, updated.RuntimeKind, nil)
 		if err := s.syncGatewayAfterProfileChange(ctx, id, previous, normalized, restartRequired); err != nil {
 			return Agent{}, err
 		}
-		updated, ok = s.Agent(id)
+		updated, ok = s.agentWithRuntimeStatusByID(ctx, id)
 		if !ok {
 			return Agent{}, fmt.Errorf("agent %q not found", id)
 		}
@@ -534,6 +542,11 @@ func (s *Service) AddMCPServersFromHub(ctx context.Context, id string, names []s
 	if s == nil {
 		return Agent{}, fmt.Errorf("agent service is required")
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
+	}
+	defer releaseRuntimeOperation()
 	names = normalizeMCPServerNames(names)
 	if len(names) == 0 {
 		return Agent{}, fmt.Errorf("mcp server names are required")
@@ -586,6 +599,11 @@ func (s *Service) DeleteMCPServers(ctx context.Context, id string, names []strin
 	if s == nil {
 		return Agent{}, fmt.Errorf("agent service is required")
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, err
+	}
+	defer releaseRuntimeOperation()
 	names = normalizeMCPServerNames(names)
 	if len(names) == 0 {
 		return Agent{}, fmt.Errorf("mcp server names are required")
@@ -1026,14 +1044,18 @@ func (s *Service) Recreate(ctx context.Context, id string) (Agent, error) {
 		return Agent{}, err
 	}
 	defer releaseRuntimeOperation()
+	return s.recreateWithAgentLifecycle(ctx, id, func(ctx context.Context, got Agent) (string, error) {
+		return s.imageForRecreate(ctx, got), nil
+	})
+}
+
+func (s *Service) recreateWithAgentLifecycle(ctx context.Context, id string, imageFor func(context.Context, Agent) (string, error)) (Agent, error) {
 	ctx, release, err := s.acquireAgentLifecycle(ctx, id)
 	if err != nil {
 		return Agent{}, err
 	}
 	defer release()
-	return s.recreate(ctx, id, func(ctx context.Context, got Agent) (string, error) {
-		return s.imageForRecreate(ctx, got), nil
-	})
+	return s.recreate(ctx, id, imageFor)
 }
 
 func (s *Service) Upgrade(ctx context.Context, id string) (Agent, error) {
@@ -1042,12 +1064,7 @@ func (s *Service) Upgrade(ctx context.Context, id string) (Agent, error) {
 		return Agent{}, err
 	}
 	defer releaseRuntimeOperation()
-	ctx, release, err := s.acquireAgentLifecycle(ctx, id)
-	if err != nil {
-		return Agent{}, err
-	}
-	defer release()
-	return s.recreate(ctx, id, func(ctx context.Context, got Agent) (string, error) {
+	return s.recreateWithAgentLifecycle(ctx, id, func(ctx context.Context, got Agent) (string, error) {
 		latest, ok := s.imageForUpgrade(ctx, got)
 		if !ok || strings.TrimSpace(latest) == "" {
 			return "", fmt.Errorf("agent %q has no default image to upgrade", got.ID)
@@ -1061,7 +1078,7 @@ func (s *Service) recreate(ctx context.Context, id string, imageFor func(context
 	if id == "" {
 		return Agent{}, fmt.Errorf("agent id is required")
 	}
-	got, ok := s.Agent(id)
+	got, ok := s.agentWithRuntimeStatusByID(ctx, id)
 	if !ok {
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}
@@ -1236,7 +1253,7 @@ func (s *Service) persistRecreatedAgent(ctx context.Context, id, image string, i
 	if err != nil {
 		return Agent{}, err
 	}
-	recreated, ok := s.Agent(current.ID)
+	recreated, ok := s.agentWithRuntimeStatusByID(ctx, current.ID)
 	if !ok {
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}

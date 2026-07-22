@@ -38,9 +38,6 @@ func (s *Service) ensureRuntimeAtHome(homeDir string) (sandbox.Runtime, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed && s.runtimeOperationCount == 0 {
-		return nil, ErrServiceClosed
-	}
 
 	if rt := s.runtimes[homeDir]; rt != nil {
 		return rt, nil

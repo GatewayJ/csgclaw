@@ -196,7 +196,6 @@ type Service struct {
 	closeDone               chan struct{}
 	closeErr                error
 	runtimeOperations       sync.WaitGroup
-	runtimeOperationCount   int
 	lifecycle               LifecycleObserver
 	bindingActivation       BindingActivator
 	agentLifecycleMu        sync.Mutex
@@ -568,7 +567,7 @@ func (s *Service) ensureCodexManager(ctx context.Context, forceRecreate bool) (A
 		return s.persistManagerAgent(ctx, manager, false)
 	}
 
-	existing, _ := s.Agent(ManagerUserID)
+	existing, _ := s.agentWithRuntimeStatusByID(ctx, ManagerUserID)
 	if err := s.validateMCPServers(ctx, RuntimeKindCodex, mcpServersSnapshotForAgent(managerMCPServers)); err != nil {
 		return Agent{}, err
 	}
@@ -845,7 +844,7 @@ func (s *Service) persistManagerAgent(ctx context.Context, manager Agent, runtim
 	if err != nil {
 		return Agent{}, err
 	}
-	created, ok := s.Agent(ManagerUserID)
+	created, ok := s.agentWithRuntimeStatusByID(ctx, ManagerUserID)
 	if !ok {
 		return Agent{}, fmt.Errorf("manager agent not found after save")
 	}
@@ -1500,8 +1499,29 @@ func (s *Service) Agent(id string) (Agent, bool) {
 	if !ok {
 		return Agent{}, false
 	}
-	ctx := context.Background()
-	return s.withRuntimeImageMigrationStatus(ctx, s.hydrateAgentStatus(ctx, a)), true
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return a, true
+	}
+	defer releaseRuntimeOperation()
+	return s.agentWithRuntimeStatus(context.Background(), a), true
+}
+
+func (s *Service) agentWithRuntimeStatusByID(ctx context.Context, id string) (Agent, bool) {
+	a, ok := s.agentSnapshot(id)
+	if !ok {
+		return Agent{}, false
+	}
+	return s.agentWithRuntimeStatus(ctx, a), true
+}
+
+// agentWithRuntimeStatus hydrates an already loaded snapshot. Callers must
+// hold a runtime operation admission for the duration of the call.
+func (s *Service) agentWithRuntimeStatus(ctx context.Context, a Agent) Agent {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.withRuntimeImageMigrationStatus(ctx, s.hydrateAgentStatus(ctx, a))
 }
 
 func (s *Service) AgentMetadata(id string) (AgentMetadata, bool) {
@@ -1632,22 +1652,26 @@ func (s *Service) refreshAgentBoxID(id string, got Agent, resolvedKey string, bo
 }
 
 func (s *Service) Start(ctx context.Context, id string) (Agent, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return Agent{}, fmt.Errorf("agent id is required")
-	}
 	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
 	if err != nil {
 		return Agent{}, err
 	}
 	defer releaseRuntimeOperation()
+	return s.start(ctx, id)
+}
+
+func (s *Service) start(ctx context.Context, id string) (Agent, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Agent{}, fmt.Errorf("agent id is required")
+	}
 	ctx, release, err := s.acquireAgentLifecycle(ctx, id)
 	if err != nil {
 		return Agent{}, err
 	}
 	defer release()
 
-	got, ok := s.Agent(id)
+	got, ok := s.agentWithRuntimeStatusByID(ctx, id)
 	if !ok {
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}
@@ -1714,7 +1738,7 @@ func (s *Service) Stop(ctx context.Context, id string) (Agent, error) {
 	}
 	defer release()
 
-	got, ok := s.Agent(id)
+	got, ok := s.agentWithRuntimeStatusByID(ctx, id)
 	if !ok {
 		return Agent{}, fmt.Errorf("agent %q not found", id)
 	}
@@ -2006,6 +2030,11 @@ func (s *Service) ListContext(ctx context.Context) []Agent {
 	s.mu.RLock()
 	agents := sortedAgentsFromMap(s.agents)
 	s.mu.RUnlock()
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return agents
+	}
+	defer releaseRuntimeOperation()
 	for idx := range agents {
 		agents[idx] = s.withRuntimeImageMigrationStatus(ctx, s.hydrateAgentStatus(ctx, agents[idx]))
 	}
@@ -2016,6 +2045,11 @@ func (s *Service) StartConfiguredAgents(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return err
+	}
+	defer releaseRuntimeOperation()
 	agents := s.startupAgentCandidates()
 	var startErr error
 	for _, a := range agents {
@@ -2038,7 +2072,7 @@ func (s *Service) StartConfiguredAgents(ctx context.Context) error {
 		} else if isRuntimeRunning(live) {
 			continue
 		}
-		if _, err := s.Start(ctx, live.ID); err != nil {
+		if _, err := s.start(ctx, live.ID); err != nil {
 			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", live.Name, err))
 		}
 	}
@@ -2508,6 +2542,11 @@ func (s *Service) StreamLogs(ctx context.Context, id string, follow bool, lines 
 	if lines <= 0 {
 		lines = 20
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return err
+	}
+	defer releaseRuntimeOperation()
 
 	got, ok := s.agentSnapshot(id)
 	if !ok {
@@ -2836,7 +2875,7 @@ func (s *Service) Close() error {
 }
 
 // acquireRuntimeOperation prevents Close from releasing runtime resources
-// while an admitted operation may still create or start one.
+// while an admitted operation may still use them.
 func (s *Service) acquireRuntimeOperation() (func(), error) {
 	if s == nil {
 		return nil, fmt.Errorf("agent service is required")
@@ -2847,15 +2886,7 @@ func (s *Service) acquireRuntimeOperation() (func(), error) {
 		return nil, ErrServiceClosed
 	}
 	s.runtimeOperations.Add(1)
-	s.runtimeOperationCount++
-	return s.releaseRuntimeOperation, nil
-}
-
-func (s *Service) releaseRuntimeOperation() {
-	s.mu.Lock()
-	s.runtimeOperationCount--
-	s.mu.Unlock()
-	s.runtimeOperations.Done()
+	return s.runtimeOperations.Done, nil
 }
 
 func (s *Service) hasNameLocked(name string) bool {

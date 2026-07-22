@@ -65,7 +65,12 @@ func (s *Service) ApplyExternalBinding(ctx context.Context, id, channel string) 
 	if channel == "" {
 		return Agent{}, "", fmt.Errorf("channel is required")
 	}
-	got, ok := s.Agent(id)
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, "", err
+	}
+	defer releaseRuntimeOperation()
+	got, ok := s.agentWithRuntimeStatusByID(ctx, id)
 	if !ok {
 		return Agent{}, "", fmt.Errorf("agent %q not found", id)
 	}
@@ -82,7 +87,9 @@ func (s *Service) ApplyExternalBinding(ctx context.Context, id, channel string) 
 		}
 		return got, ExternalBindingActivationChannelRefreshed, nil
 	}
-	recreated, err := s.Recreate(ctx, got.ID)
+	recreated, err := s.recreateWithAgentLifecycle(ctx, got.ID, func(ctx context.Context, got Agent) (string, error) {
+		return s.imageForRecreate(ctx, got), nil
+	})
 	return recreated, ExternalBindingActivationRuntimeRecreated, err
 }
 
@@ -97,7 +104,12 @@ func (s *Service) DeactivateExternalBinding(ctx context.Context, id, channel str
 	if channel == "" {
 		return Agent{}, "", fmt.Errorf("channel is required")
 	}
-	got, ok := s.Agent(id)
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return Agent{}, "", err
+	}
+	defer releaseRuntimeOperation()
+	got, ok := s.agentWithRuntimeStatusByID(ctx, id)
 	if !ok {
 		return Agent{}, "", fmt.Errorf("agent %q not found", id)
 	}
@@ -111,7 +123,9 @@ func (s *Service) DeactivateExternalBinding(ctx context.Context, id, channel str
 		}
 		return got, ExternalBindingActivationChannelRefreshed, nil
 	}
-	recreated, err := s.Recreate(ctx, got.ID)
+	recreated, err := s.recreateWithAgentLifecycle(ctx, got.ID, func(ctx context.Context, got Agent) (string, error) {
+		return s.imageForRecreate(ctx, got), nil
+	})
 	return recreated, ExternalBindingActivationRuntimeRecreated, err
 }
 

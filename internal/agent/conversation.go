@@ -33,6 +33,11 @@ func (s *Service) NewConversationAction(ctx context.Context, req NewConversation
 	if s == nil {
 		return NewConversationAction{}, fmt.Errorf("agent service is required")
 	}
+	releaseRuntimeOperation, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return NewConversationAction{}, err
+	}
+	defer releaseRuntimeOperation()
 	botID := strings.TrimSpace(req.BotID)
 	if botID == "" {
 		return NewConversationAction{}, fmt.Errorf("bot id is required")
