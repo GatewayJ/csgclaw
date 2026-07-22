@@ -2,6 +2,7 @@ package onboard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -144,7 +145,7 @@ func bootstrapPaths() (agentsPath, imStatePath string, err error) {
 	return agentsPath, imStatePath, nil
 }
 
-func createManagerParticipant(ctx context.Context, agentsPath, imStatePath string, cfg config.Config) (participant.Participant, error) {
+func createManagerParticipant(ctx context.Context, agentsPath, imStatePath string, cfg config.Config) (created participant.Participant, err error) {
 	hubSvc, err := hub.NewService(cfg.Hub, hub.DefaultStoreFactory)
 	if err != nil {
 		return participant.Participant{}, err
@@ -176,7 +177,10 @@ func createManagerParticipant(ctx context.Context, agentsPath, imStatePath strin
 		return participant.Participant{}, err
 	}
 	defer func() {
-		_ = agentSvc.Close()
+		if closeErr := agentSvc.Close(); closeErr != nil {
+			created = participant.Participant{}
+			err = errors.Join(err, fmt.Errorf("close bootstrap agent service: %w", closeErr))
+		}
 	}()
 
 	imSvc, err := im.NewServiceFromPath(imStatePath)
@@ -202,11 +206,8 @@ func createManagerParticipant(ctx context.Context, agentsPath, imStatePath strin
 	if _, err := participantSvc.EnsureBootstrapAdmin(ctx); err != nil {
 		return participant.Participant{}, err
 	}
-	created, err := participantSvc.EnsureBootstrapManager(ctx)
-	if err != nil {
-		return participant.Participant{}, err
-	}
-	return created, nil
+	created, err = participantSvc.EnsureBootstrapManager(ctx)
+	return created, err
 }
 
 type noAuthDetectContextKey struct{}

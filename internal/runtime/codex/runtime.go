@@ -11,6 +11,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -145,7 +146,8 @@ type Dependencies struct {
 }
 
 type Runtime struct {
-	deps Dependencies
+	deps   Dependencies
+	initMu sync.Mutex
 }
 
 var (
@@ -431,6 +433,9 @@ func (r *Runtime) NewConversation(ctx context.Context, h agentruntime.Handle, re
 }
 
 func (r *Runtime) sessionManager() Manager {
+	r.initMu.Lock()
+	defer r.initMu.Unlock()
+
 	if r.deps.Manager != nil {
 		return r.deps.Manager
 	}
@@ -1620,6 +1625,23 @@ func normalizeRuntimeState(state agentruntime.State) agentruntime.State {
 	default:
 		return agentruntime.StateUnknown
 	}
+}
+
+// Close releases app-server children owned by this Runtime without removing
+// persisted runtime files. This lets short-lived service instances, such as
+// bootstrap initialization, leave no untracked Codex process behind.
+func (r *Runtime) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.initMu.Lock()
+	manager := r.deps.Manager
+	r.initMu.Unlock()
+	closer, ok := manager.(interface{ Close(context.Context) error })
+	if !ok {
+		return nil
+	}
+	return closer.Close(context.Background())
 }
 
 func processAlive(pid int) bool {

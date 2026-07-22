@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -100,6 +101,34 @@ func newTestCodexRuntime(root string, resolve func(agentruntime.Handle) (AgentRe
 			},
 		},
 	})
+}
+
+func TestRuntimeSessionManagerInitializesOnce(t *testing.T) {
+	runtime := New(Dependencies{})
+
+	const callers = 16
+	managers := make(chan Manager, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			managers <- runtime.SessionManager()
+		}()
+	}
+	wg.Wait()
+	close(managers)
+
+	var first Manager
+	for manager := range managers {
+		if first == nil {
+			first = manager
+			continue
+		}
+		if manager != first {
+			t.Fatal("SessionManager() returned more than one manager instance")
+		}
+	}
 }
 
 func TestRuntimeCreateStartAndInfo(t *testing.T) {
@@ -736,6 +765,25 @@ func TestRuntimeStopAndDelete(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "agent-alice", ".codex")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("runtime dir still exists, stat err = %v", err)
+	}
+}
+
+func TestRuntimeCloseStopsOwnedAppServer(t *testing.T) {
+	withAppServerHelperCommand(t, "pending")
+	manager := newAppServerManager(testAppServerManagerDeps())
+	spec := testAppServerSessionSpec(t.TempDir())
+	session, err := manager.Start(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Stop(context.Background(), SessionHandle{RuntimeID: spec.RuntimeID}) })
+
+	runtime := New(Dependencies{Manager: manager})
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if processAlive(session.ProcessID) {
+		t.Fatalf("app-server process %d survived Runtime.Close()", session.ProcessID)
 	}
 }
 

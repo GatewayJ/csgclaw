@@ -198,6 +198,30 @@ func (m *appServerManager) Stop(ctx context.Context, handle SessionHandle) error
 	}
 }
 
+// Close releases every child owned by this manager without removing persisted
+// runtime files. It is used when the containing runtime is temporary, such as
+// bootstrap state initialization.
+func (m *appServerManager) Close(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	m.mu.RLock()
+	handles := make([]SessionHandle, 0, len(m.sessions))
+	for runtimeID := range m.sessions {
+		handles = append(handles, SessionHandle{RuntimeID: runtimeID})
+	}
+	m.mu.RUnlock()
+
+	var closeErr error
+	for _, handle := range handles {
+		if err := m.Stop(ctx, handle); err != nil && !errors.Is(err, os.ErrNotExist) {
+			closeErr = errors.Join(closeErr, fmt.Errorf("stop codex app-server %s: %w", handle.RuntimeID, err))
+		}
+	}
+	return closeErr
+}
+
 func (m *appServerManager) Session(handle SessionHandle) (*Session, error) {
 	live, err := m.ensureLiveSession(context.Background(), handle)
 	if err != nil {

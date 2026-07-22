@@ -152,6 +152,18 @@ type fakeAgentRuntime struct {
 	streamLogs   func(context.Context, agentruntime.Handle, agentruntime.LogOptions) error
 }
 
+type closableAgentRuntime struct {
+	fakeAgentRuntime
+	close func() error
+}
+
+func (r closableAgentRuntime) Close() error {
+	if r.close != nil {
+		return r.close()
+	}
+	return nil
+}
+
 type fakeMCPServersListRuntime struct {
 	fakeAgentRuntime
 	list func(context.Context, agentruntime.Handle, agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error)
@@ -349,6 +361,54 @@ func (f fakeAgentRuntime) StreamLogs(ctx context.Context, h agentruntime.Handle,
 		return f.streamLogs(ctx, h, opts)
 	}
 	return nil
+}
+
+func TestServiceCloseClosesRegisteredRuntimeResources(t *testing.T) {
+	var closeCalls int
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{},
+		"",
+		filepath.Join(t.TempDir(), "agents.json"),
+		WithRuntime(closableAgentRuntime{
+			fakeAgentRuntime: fakeAgentRuntime{kind: RuntimeKindCodex},
+			close: func() error {
+				closeCalls++
+				return nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := svc.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got, want := closeCalls, 1; got != want {
+		t.Fatalf("runtime Close() calls = %d, want %d", got, want)
+	}
+}
+
+func TestServiceCloseReturnsRegisteredRuntimeCloseError(t *testing.T) {
+	closeErr := errors.New("close codex runtime")
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{},
+		"",
+		filepath.Join(t.TempDir(), "agents.json"),
+		WithRuntime(closableAgentRuntime{
+			fakeAgentRuntime: fakeAgentRuntime{kind: RuntimeKindCodex},
+			close: func() error {
+				return closeErr
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := svc.Close(); !errors.Is(err, closeErr) {
+		t.Fatalf("Close() error = %v, want close error", err)
+	}
 }
 
 type fakeAgentRuntimeNoLogs struct {

@@ -451,10 +451,11 @@ func EnsureBootstrapStateWithLLM(ctx context.Context, statePath string, server c
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = svc.Close()
-	}()
-	return svc.EnsureBootstrapManager(ctx, forceRecreate)
+	ensureErr := svc.EnsureBootstrapManager(ctx, forceRecreate)
+	if closeErr := svc.Close(); closeErr != nil {
+		return errors.Join(ensureErr, fmt.Errorf("close bootstrap agent service: %w", closeErr))
+	}
+	return ensureErr
 }
 
 func (svc *Service) EnsureBootstrapManager(ctx context.Context, forceRecreate bool) error {
@@ -2724,15 +2725,35 @@ func logHydrateUnknownStatus(a Agent, stage string, err error) {
 }
 
 func (s *Service) Close() error {
+	if s == nil {
+		return nil
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	sandboxRuntimes := make([]sandbox.Runtime, 0, len(s.runtimes))
+	for _, rt := range s.runtimes {
+		sandboxRuntimes = append(sandboxRuntimes, rt)
+	}
+	s.runtimes = make(map[string]sandbox.Runtime)
+	managedRuntimes := make([]agentruntime.Runtime, 0, len(s.runtimeRegistry))
+	for _, rt := range s.runtimeRegistry {
+		managedRuntimes = append(managedRuntimes, rt)
+	}
+	s.mu.Unlock()
 
 	var closeErr error
-	for name, rt := range s.runtimes {
+	for _, rt := range sandboxRuntimes {
 		if err := rt.Close(); err != nil && closeErr == nil {
 			closeErr = err
 		}
-		delete(s.runtimes, name)
+	}
+	for _, rt := range managedRuntimes {
+		closer, ok := rt.(io.Closer)
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
 	}
 	return closeErr
 }
