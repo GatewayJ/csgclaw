@@ -283,7 +283,7 @@ enabled = true
 
 `get` / `install` 可用 `--registry opencsg` 或 `--registry clawhub` 指定；省略时先查 opencsg，再查 clawhub。
 
-Web UI 的远端 Skill 列表使用当前登录环境对应的 OpenCSG 公开 Skill catalog：生产环境使用 `https://hub.opencsg.com`，stg 环境使用 `https://opencsg-stg.com`。CLI `csgclaw skill` registry 与此独立，无论生产或 stg 登录环境都使用 `https://claw.opencsg.com`。
+Web UI 通过本地 CSGClaw Server 请求远端 Skill catalog。Server 仍按当前登录环境解析 OpenCSG Hub：生产环境使用 `https://hub.opencsg.com`，stg 环境使用 `https://opencsg-stg.com`；显式配置的 official Hub URL 会保持不变。CLI `csgclaw skill` registry 与此独立，无论生产或 stg 登录环境都使用 `https://claw.opencsg.com`。
 
 当前 registry 支持的 API：
 

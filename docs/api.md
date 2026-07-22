@@ -113,6 +113,54 @@ On success, returns `202 Accepted`:
 
 Returns `503 Service Unavailable` if the upgrade manager is not configured.
 
+## Skill API
+
+### `GET /api/v1/skills/remote`
+
+Lists remote Skills from the effective OpenCSG Hub. The browser only calls CSGClaw; the server resolves the Hub using the current login environment or an explicitly configured official Hub URL.
+
+Optional query parameters:
+
+- `page`: positive page number, default `1`
+- `per`: page size from `1` to `100`, default `16`
+- `search`: remote catalog search text
+
+The server keeps the current Hub catalog ordering and returns normalized Skill summaries:
+
+```json
+{
+  "items": [
+    {
+      "name": "agent-builder",
+      "description": "Build agents",
+      "readonly": true,
+      "source": "official",
+      "remote_path": "AIWizards/agent-builder",
+      "remote_ref": "main",
+      "remote_url": "https://hub.opencsg.com/skills/AIWizards/agent-builder"
+    }
+  ],
+  "page": 1,
+  "per": 16,
+  "total": 78,
+  "next_page": 2
+}
+```
+
+### `POST /api/v1/skills:install`
+
+Installs one remote Skill from the same effective OpenCSG Hub. Set `replace` to overwrite an existing local Skill with the same name.
+
+```json
+{
+  "remote_path": "AIWizards/agent-builder",
+  "ref": "main",
+  "replace": false
+}
+```
+
+Returns `201 Created` with the installed local Skill summary. A duplicate without `replace` returns `409 Conflict`.
+
 ## Participant API
 
 Participants are channel-scoped identities used by rooms, messages, mentions,

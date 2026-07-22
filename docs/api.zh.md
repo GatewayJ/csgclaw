@@ -113,6 +113,54 @@ ok
 
 若升级管理器未配置，返回 `503 Service Unavailable`。
 
+## Skill API
+
+### `GET /api/v1/skills/remote`
+
+从有效的 OpenCSG Hub 列出远端 Skill。浏览器只请求 CSGClaw；Server 按当前登录环境或显式配置的 official Hub URL 解析 Hub 地址。
+
+可选查询参数：
+
+- `page`：正整数页码，默认 `1`
+- `per`：每页数量，范围 `1` 到 `100`，默认 `16`
+- `search`：远端 catalog 搜索文本
+
+Server 保持当前 Hub catalog 的排序，并返回归一化后的 Skill 摘要：
+
+```json
+{
+  "items": [
+    {
+      "name": "agent-builder",
+      "description": "Build agents",
+      "readonly": true,
+      "source": "official",
+      "remote_path": "AIWizards/agent-builder",
+      "remote_ref": "main",
+      "remote_url": "https://hub.opencsg.com/skills/AIWizards/agent-builder"
+    }
+  ],
+  "page": 1,
+  "per": 16,
+  "total": 78,
+  "next_page": 2
+}
+```
+
+### `POST /api/v1/skills:install`
+
+从同一个有效 OpenCSG Hub 安装远端 Skill。设置 `replace` 可覆盖同名本地 Skill。
+
+```json
+{
+  "remote_path": "AIWizards/agent-builder",
+  "ref": "main",
+  "replace": false
+}
+```
+
+成功返回 `201 Created` 和已安装的本地 Skill 摘要；未设置 `replace` 时同名冲突返回 `409 Conflict`。
+
 ## Participant API
 
 Participant 是 channel-scoped identity，用于房间、消息、mention、通知和 runtime bridge。Participant 可以表示 human、agent-backed channel identity 或 notification sender。

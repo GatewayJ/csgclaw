@@ -284,7 +284,7 @@ The old template Hub URL `https://csgclaw.opencsg.com` is no longer rewritten au
 
 Use `--registry opencsg` or `--registry clawhub` on `get` / `install` to target one registry. Omit it to try opencsg first, then clawhub.
 
-The Web UI remote Skill list uses the OpenCSG public Skill catalog from the active login environment: production uses `https://hub.opencsg.com`, and staging uses `https://opencsg-stg.com`. The CLI `csgclaw skill` registry remains separate and uses `https://claw.opencsg.com` for both production and staging logins.
+The Web UI requests the remote Skill catalog through the local CSGClaw Server. The server resolves the OpenCSG Hub from the active login environment: production uses `https://hub.opencsg.com`, and staging uses `https://opencsg-stg.com`; an explicitly configured official Hub URL is preserved. The CLI `csgclaw skill` registry remains separate and uses `https://claw.opencsg.com` for both production and staging logins.
 
 Supported registry APIs:
 
