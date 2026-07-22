@@ -26,7 +26,9 @@ import (
 )
 
 type Options struct {
-	ListenAddr         string
+	ListenAddr string
+	// Service is borrowed for request handling. The caller must close it after
+	// stopping components such as channel bridges that retain runtime handles.
 	Service            *agent.Service
 	Hub                *hub.Service
 	MCP                *mcp.Service
@@ -114,32 +116,35 @@ func Run(opts Options) error {
 		go opts.ScheduledTask.Start(opts.Context)
 	}
 
-	errCh := make(chan error, 1)
-	go func() {
-		<-opts.Context.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = httpServer.Shutdown(shutdownCtx)
-	}()
-
 	listener, err := net.Listen("tcp", opts.ListenAddr)
 	if err != nil {
 		return err
 	}
+	stopShutdownWatch := make(chan struct{})
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		select {
+		case <-opts.Context.Done():
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = httpServer.Shutdown(shutdownCtx)
+		case <-stopShutdownWatch:
+		}
+	}()
 	if opts.OnReady != nil {
-		go opts.OnReady(handler, router)
+		opts.OnReady(handler, router)
 	}
 
-	if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-		errCh <- err
+	serveErr := httpServer.Serve(listener)
+	if opts.Context.Err() != nil {
+		<-shutdownDone
+	} else {
+		close(stopShutdownWatch)
+		<-shutdownDone
 	}
-
-	close(errCh)
-	if err := <-errCh; err != nil {
-		return err
-	}
-	if opts.Service != nil {
-		return opts.Service.Close()
+	if serveErr != nil && serveErr != http.ErrServerClosed {
+		return serveErr
 	}
 	return nil
 }

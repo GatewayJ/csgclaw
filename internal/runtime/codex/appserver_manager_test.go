@@ -1186,6 +1186,98 @@ func TestAppServerEventAdapterProtocolDetectionAndSubagentFilter(t *testing.T) {
 	}
 }
 
+func TestAppServerManagerCloseRejectsSessionCreationWhileClosing(t *testing.T) {
+	manager := newAppServerManager(testAppServerManagerDeps())
+	liveDone := make(chan struct{})
+	manager.sessions["runtime-existing"] = &liveSession{done: liveDone}
+
+	closeResult := make(chan error, 1)
+	go func() {
+		closeResult <- manager.Close(context.Background())
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		manager.lifecycleMu.Lock()
+		closed := manager.closed
+		manager.lifecycleMu.Unlock()
+		if closed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Close() did not enter terminal state")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if _, err := manager.Start(context.Background(), SessionSpec{RuntimeID: "runtime-new"}); !errors.Is(err, ErrRuntimeClosed) {
+		t.Fatalf("Start() while Close() is in progress error = %v, want ErrRuntimeClosed", err)
+	}
+	if _, err := manager.Session(SessionHandle{RuntimeID: "runtime-existing"}); !errors.Is(err, ErrRuntimeClosed) {
+		t.Fatalf("Session() while Close() is in progress error = %v, want ErrRuntimeClosed", err)
+	}
+
+	close(liveDone)
+	if err := <-closeResult; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestAppServerManagerCloseWaitsForAdmittedLaunch(t *testing.T) {
+	originalCommand := appServerCommandContext
+	commandReady := make(chan *exec.Cmd, 1)
+	appServerCommandContext = func(ctx context.Context, _ string) (*exec.Cmd, error) {
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestAppServerManagerHelperProcess", "--", "pending")
+		commandReady <- cmd
+		return cmd, nil
+	}
+	t.Cleanup(func() { appServerCommandContext = originalCommand })
+
+	deps := testAppServerManagerDeps()
+	openFile := deps.OpenFile
+	openStarted := make(chan struct{})
+	releaseOpen := make(chan struct{})
+	deps.OpenFile = func(path string, flag int, perm os.FileMode) (*os.File, error) {
+		close(openStarted)
+		<-releaseOpen
+		return openFile(path, flag, perm)
+	}
+	manager := newAppServerManager(deps)
+	spec := testAppServerSessionSpec(t.TempDir())
+
+	startResult := make(chan error, 1)
+	go func() {
+		_, err := manager.Start(context.Background(), spec)
+		startResult <- err
+	}()
+	<-openStarted
+
+	closeResult := make(chan error, 1)
+	go func() {
+		closeResult <- manager.Close(context.Background())
+	}()
+	select {
+	case err := <-closeResult:
+		t.Fatalf("Close() returned before admitted launch was tracked: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseOpen)
+	cmd := <-commandReady
+	if err := <-closeResult; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := <-startResult; err == nil {
+		t.Fatal("Start() overlapping Close() error = nil, want terminal close error")
+	}
+	if cmd.Process == nil {
+		t.Fatal("admitted Start() did not launch its child process")
+	}
+	if processAlive(cmd.Process.Pid) {
+		t.Fatalf("app-server process %d survived concurrent Close()", cmd.Process.Pid)
+	}
+}
+
 func withAppServerHelperCommand(t *testing.T, mode string) {
 	t.Helper()
 	original := appServerCommandContext

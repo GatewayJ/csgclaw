@@ -47,6 +47,10 @@ var (
 
 const runtimeDirRemovalEntryLimit = 32
 
+// ErrRuntimeClosed is returned when an operation would create or restore a
+// Codex session after its runtime has begun shutting down.
+var ErrRuntimeClosed = errors.New("codex runtime is closed")
+
 type AgentRef struct {
 	ID             string
 	Name           string
@@ -146,8 +150,11 @@ type Dependencies struct {
 }
 
 type Runtime struct {
-	deps   Dependencies
-	initMu sync.Mutex
+	deps      Dependencies
+	initMu    sync.Mutex
+	closed    bool
+	closeDone chan struct{}
+	closeErr  error
 }
 
 var (
@@ -220,6 +227,9 @@ func (r *Runtime) UserInputBroker() UserInputBroker {
 }
 
 func (r *Runtime) New(ctx context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
+	if err := r.ensureOpen(); err != nil {
+		return agentruntime.Handle{}, err
+	}
 	spec.AgentID = canonicalRuntimeAgentID(spec.AgentID)
 	if err := r.ensureRuntimeHome(spec.AgentID); err != nil {
 		return agentruntime.Handle{}, err
@@ -277,6 +287,9 @@ func (r *Runtime) Provision(_ context.Context, req agentruntime.ProvisionRequest
 }
 
 func (r *Runtime) Start(ctx context.Context, h agentruntime.Handle) (agentruntime.State, error) {
+	if err := r.ensureOpen(); err != nil {
+		return agentruntime.StateUnknown, err
+	}
 	var sessionRestoreErr error
 	if current, err := r.Info(ctx, h); err == nil && current.State == agentruntime.StateRunning {
 		if _, restoreErr := r.sessionManager().Session(SessionHandle{RuntimeID: strings.TrimSpace(h.RuntimeID)}); restoreErr == nil {
@@ -436,6 +449,9 @@ func (r *Runtime) sessionManager() Manager {
 	r.initMu.Lock()
 	defer r.initMu.Unlock()
 
+	if r.closed {
+		return closedManager{}
+	}
 	if r.deps.Manager != nil {
 		return r.deps.Manager
 	}
@@ -467,6 +483,48 @@ func (r *Runtime) sessionManager() Manager {
 	}
 	r.deps.Manager = manager
 	return r.deps.Manager
+}
+
+func (r *Runtime) ensureOpen() error {
+	if r == nil {
+		return ErrRuntimeClosed
+	}
+	r.initMu.Lock()
+	defer r.initMu.Unlock()
+	if r.closed {
+		return ErrRuntimeClosed
+	}
+	return nil
+}
+
+type closedManager struct{}
+
+func (closedManager) Start(context.Context, SessionSpec) (*Session, error) {
+	return nil, ErrRuntimeClosed
+}
+
+func (closedManager) Stop(context.Context, SessionHandle) error {
+	return ErrRuntimeClosed
+}
+
+func (closedManager) LiveSession(SessionHandle) (*Session, error) {
+	return nil, ErrRuntimeClosed
+}
+
+func (closedManager) Session(SessionHandle) (*Session, error) {
+	return nil, ErrRuntimeClosed
+}
+
+func (closedManager) Prompt(context.Context, SessionHandle, PromptRequest) (PromptResponse, error) {
+	return PromptResponse{}, ErrRuntimeClosed
+}
+
+func (closedManager) EnsureSession(context.Context, SessionHandle, string) (string, error) {
+	return "", ErrRuntimeClosed
+}
+
+func (closedManager) ResetConversationHistory(context.Context, SessionHandle, string) error {
+	return ErrRuntimeClosed
 }
 
 func (r *Runtime) permissionBroker() PermissionBroker {
@@ -1635,13 +1693,34 @@ func (r *Runtime) Close() error {
 		return nil
 	}
 	r.initMu.Lock()
+	if r.closed {
+		closeDone := r.closeDone
+		r.initMu.Unlock()
+		if closeDone != nil {
+			<-closeDone
+		}
+		r.initMu.Lock()
+		closeErr := r.closeErr
+		r.initMu.Unlock()
+		return closeErr
+	}
+	r.closed = true
+	r.closeDone = make(chan struct{})
+	closeDone := r.closeDone
 	manager := r.deps.Manager
 	r.initMu.Unlock()
+
+	var closeErr error
 	closer, ok := manager.(interface{ Close(context.Context) error })
-	if !ok {
-		return nil
+	if ok {
+		closeErr = closer.Close(context.Background())
 	}
-	return closer.Close(context.Background())
+
+	r.initMu.Lock()
+	r.closeErr = closeErr
+	close(closeDone)
+	r.initMu.Unlock()
+	return closeErr
 }
 
 func processAlive(pid int) bool {

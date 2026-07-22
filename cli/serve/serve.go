@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -537,7 +538,34 @@ func startServer(ctx context.Context, run *command.Context, cfg config.Config, s
 	return startServerWithConfigPath(ctx, run, cfg, svc, imSvc, imBus, feishuSvc, "", output)
 }
 
-func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg config.Config, svc *agent.Service, imSvc *im.Service, imBus *im.Bus, feishuSvc *feishu.Service, configPath, output string, opts ...serveOptions) error {
+func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg config.Config, svc *agent.Service, imSvc *im.Service, imBus *im.Bus, feishuSvc *feishu.Service, configPath, output string, opts ...serveOptions) (runErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var codexBridgeMgr codexBridgeManager
+	var agentManagerSvc *agentmanager.Service
+	var stopStartup context.CancelFunc
+	var startupWG sync.WaitGroup
+	var closeRuntimeDependents sync.Once
+	closeRuntimeResources := func() {
+		closeRuntimeDependents.Do(func() {
+			if stopStartup != nil {
+				stopStartup()
+			}
+			startupWG.Wait()
+			if codexBridgeMgr != nil {
+				codexBridgeMgr.Close()
+			}
+			if agentManagerSvc != nil {
+				runErr = errors.Join(runErr, agentManagerSvc.Close())
+			}
+			if svc != nil {
+				runErr = errors.Join(runErr, svc.Close())
+			}
+		})
+	}
+	defer closeRuntimeResources()
+
 	serveOpts := serveOptions{}
 	if len(opts) > 0 {
 		serveOpts = opts[0]
@@ -571,16 +599,13 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 	janitorCtx, stopJanitor := context.WithCancel(ctx)
 	defer stopJanitor()
 	go workRegistry.Run(janitorCtx)
-	codexBridgeMgr, err := NewCodexBridgeManager(cfg, svc, feishuSvc, workRegistry)
+	codexBridgeMgr, err = NewCodexBridgeManager(cfg, svc, feishuSvc, workRegistry)
 	if err != nil {
 		return err
 	}
 	if svc != nil {
 		svc.SetLifecycleObserver(codexBridgeMgr)
 		svc.SetBindingActivator(codexBridgeMgr)
-	}
-	if codexBridgeMgr != nil {
-		defer codexBridgeMgr.Close()
 	}
 	llmSvc, err := NewLLMService(cfg, svc)
 	if err != nil {
@@ -638,15 +663,46 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 	}
 	ensureBootstrapManager := EnsureBootstrapManager
 	startConfiguredAgents := StartConfiguredAgents
-	agentManagerSvc, err := newAgentManagerService(svc, ensureBootstrapManager)
+	agentManagerSvc, err = newAgentManagerService(svc, ensureBootstrapManager)
 	if err != nil {
 		return err
 	}
-	if agentManagerSvc != nil {
-		defer agentManagerSvc.Close()
-	}
 	agentRuntimeSvc := NewAgentRuntimeService()
-	return RunServer(server.Options{
+	startupCtx, cancelStartup := context.WithCancel(ctx)
+	stopStartup = cancelStartup
+	startupReady := make(chan struct{})
+	var signalStartup sync.Once
+	startupWG.Add(1)
+	go func() {
+		defer startupWG.Done()
+		select {
+		case <-startupReady:
+		case <-startupCtx.Done():
+			return
+		}
+		if !serveOpts.NoCodexAutoInstall && agentRuntimeSvc != nil {
+			if _, err := agentRuntimeSvc.EnsureCodex(startupCtx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Warn("Codex CLI auto-install failed", "error", err)
+			}
+		}
+		if agentManagerSvc != nil {
+			if err := agentManagerSvc.Start(startupCtx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, agent.ErrServiceClosed) {
+				slog.Warn("bootstrap manager failed to start", "error", err)
+			}
+		} else if err := ensureBootstrapManager(startupCtx, svc); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, agent.ErrServiceClosed) {
+			slog.Warn("bootstrap manager failed to start", "error", err)
+		}
+		if err := startConfiguredAgents(startupCtx, svc); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, agent.ErrServiceClosed) {
+			slog.Warn("some configured agents failed to start", "error", err)
+		}
+		if codexBridgeMgr != nil {
+			if err := codexBridgeMgr.Start(startupCtx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Warn("some codex bridges failed to start", "error", err)
+			}
+		}
+	}()
+
+	runErr = RunServer(server.Options{
 		ListenAddr:         cfg.Server.ListenAddr,
 		Service:            svc,
 		Hub:                hubSvc,
@@ -687,30 +743,11 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 					}
 				}()
 			}
-			go func() {
-				if !serveOpts.NoCodexAutoInstall && agentRuntimeSvc != nil {
-					if _, err := agentRuntimeSvc.EnsureCodex(ctx); err != nil {
-						slog.Warn("Codex CLI auto-install failed", "error", err)
-					}
-				}
-				if agentManagerSvc != nil {
-					if err := agentManagerSvc.Start(ctx); err != nil {
-						slog.Warn("bootstrap manager failed to start", "error", err)
-					}
-				} else if err := ensureBootstrapManager(ctx, svc); err != nil {
-					slog.Warn("bootstrap manager failed to start", "error", err)
-				}
-				if err := startConfiguredAgents(ctx, svc); err != nil {
-					slog.Warn("some configured agents failed to start", "error", err)
-				}
-				if codexBridgeMgr != nil {
-					if err := codexBridgeMgr.Start(ctx); err != nil {
-						slog.Warn("some codex bridges failed to start", "error", err)
-					}
-				}
-			}()
+			signalStartup.Do(func() { close(startupReady) })
 		},
 	})
+	closeRuntimeResources()
+	return runErr
 }
 
 func reconcileInterruptedUserInputMessages(imSvc *im.Service) error {

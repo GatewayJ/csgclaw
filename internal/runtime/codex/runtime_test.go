@@ -786,6 +786,28 @@ func TestRuntimeCloseStopsOwnedAppServer(t *testing.T) {
 	if processAlive(session.ProcessID) {
 		t.Fatalf("app-server process %d survived Runtime.Close()", session.ProcessID)
 	}
+	if _, err := manager.Start(context.Background(), spec); !errors.Is(err, ErrRuntimeClosed) {
+		t.Fatalf("manager.Start() after Runtime.Close() error = %v, want ErrRuntimeClosed", err)
+	}
+	if _, err := runtime.SessionManager().Session(SessionHandle{RuntimeID: spec.RuntimeID}); !errors.Is(err, ErrRuntimeClosed) {
+		t.Fatalf("SessionManager().Session() after Runtime.Close() error = %v, want ErrRuntimeClosed", err)
+	}
+}
+
+func TestRuntimeCloseBeforeManagerInitializationIsTerminal(t *testing.T) {
+	runtime := New(Dependencies{})
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if runtime.deps.Manager != nil {
+		t.Fatal("Close() initialized a session manager")
+	}
+	if _, err := runtime.SessionManager().Start(context.Background(), SessionSpec{RuntimeID: "runtime-1"}); !errors.Is(err, ErrRuntimeClosed) {
+		t.Fatalf("SessionManager().Start() after Close() error = %v, want ErrRuntimeClosed", err)
+	}
+	if _, err := runtime.Start(context.Background(), agentruntime.Handle{RuntimeID: "runtime-1"}); !errors.Is(err, ErrRuntimeClosed) {
+		t.Fatalf("Start() after Close() error = %v, want ErrRuntimeClosed", err)
+	}
 }
 
 func TestBootstrapServiceCloseReleasesAppServerBeforeManagerRecreate(t *testing.T) {

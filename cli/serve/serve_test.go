@@ -811,8 +811,8 @@ func TestServeForegroundPassesContextToServer(t *testing.T) {
 	startReturned := make(chan struct{})
 	startErrors := make(chan string, 6)
 	EnsureBootstrapManager = func(gotCtx context.Context, gotSvc *agent.Service) error {
-		if gotCtx != ctx {
-			startErrors <- fmt.Sprintf("EnsureBootstrapManager context = %v, want %v", gotCtx, ctx)
+		if gotCtx.Value(struct{}{}) != "serve-context" {
+			startErrors <- fmt.Sprintf("EnsureBootstrapManager context value = %v, want serve-context", gotCtx.Value(struct{}{}))
 		}
 		if gotSvc != svc {
 			startErrors <- fmt.Sprintf("EnsureBootstrapManager service = %p, want %p", gotSvc, svc)
@@ -821,8 +821,8 @@ func TestServeForegroundPassesContextToServer(t *testing.T) {
 	}
 	StartConfiguredAgents = func(gotCtx context.Context, gotSvc *agent.Service) error {
 		defer close(startReturned)
-		if gotCtx != ctx {
-			startErrors <- fmt.Sprintf("StartConfiguredAgents context = %v, want %v", gotCtx, ctx)
+		if gotCtx.Value(struct{}{}) != "serve-context" {
+			startErrors <- fmt.Sprintf("StartConfiguredAgents context value = %v, want serve-context", gotCtx.Value(struct{}{}))
 		}
 		if gotSvc != svc {
 			startErrors <- fmt.Sprintf("StartConfiguredAgents service = %p, want %p", gotSvc, svc)
@@ -848,15 +848,15 @@ func TestServeForegroundPassesContextToServer(t *testing.T) {
 		if opts.OnReady == nil {
 			return fmt.Errorf("OnReady is nil")
 		}
-		go opts.OnReady(nil, nil)
-		return nil
-	}
-	releasedStart := false
-	releaseConfiguredAgentStart := func() {
-		if !releasedStart {
-			close(releaseStart)
-			releasedStart = true
+		opts.OnReady(nil, nil)
+		select {
+		case <-startCalled:
+		case <-time.After(time.Second):
+			return errors.New("StartConfiguredAgents was not called")
 		}
+		close(releaseStart)
+		<-startReturned
+		return nil
 	}
 
 	run := testContext()
@@ -885,32 +885,8 @@ func TestServeForegroundPassesContextToServer(t *testing.T) {
 		},
 	}
 
-	done := make(chan error, 1)
-	go func() {
-		done <- serveForeground(ctx, run, cfg, "table")
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			releaseConfiguredAgentStart()
-			t.Fatalf("serveForeground() error = %v", err)
-		}
-	case <-time.After(time.Second):
-		releaseConfiguredAgentStart()
-		t.Fatal("serveForeground blocked on StartConfiguredAgents; want async agent startup")
-	}
-	select {
-	case <-startCalled:
-	case <-time.After(time.Second):
-		releaseConfiguredAgentStart()
-		t.Fatal("StartConfiguredAgents was not called")
-	}
-	releaseConfiguredAgentStart()
-	select {
-	case <-startReturned:
-	case <-time.After(time.Second):
-		t.Fatal("StartConfiguredAgents did not return after release")
+	if err := serveForegroundWithConfigPath(ctx, run, cfg, "", "table", serveOptions{NoBrowser: true, NoCodexAutoInstall: true}); err != nil {
+		t.Fatalf("serveForeground() error = %v", err)
 	}
 	close(startErrors)
 	for msg := range startErrors {
@@ -1043,6 +1019,11 @@ func TestServeForegroundStartsConfiguredAgentsOnReady(t *testing.T) {
 			return fmt.Errorf("OnReady is nil")
 		}
 		opts.OnReady(nil, nil)
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			return errors.New("StartConfiguredAgents was not called from OnReady")
+		}
 		return nil
 	}
 
@@ -1074,6 +1055,13 @@ func TestServeForegroundEnsuresBootstrapManagerBeforeConfiguredAgents(t *testing
 			return fmt.Errorf("OnReady is nil")
 		}
 		opts.OnReady(nil, nil)
+		deadline := time.Now().Add(time.Second)
+		for len(calls) < 2 {
+			if time.Now().After(deadline) {
+				return fmt.Errorf("startup calls = %d, want 2", len(calls))
+			}
+			time.Sleep(time.Millisecond)
+		}
 		return nil
 	}
 
@@ -1147,12 +1135,14 @@ func TestServeForegroundAutoInstallsCodexBeforeManager(t *testing.T) {
 			return errors.New("OnReady is nil")
 		}
 		opts.OnReady(nil, nil)
+		<-managerStarted
 		return nil
 	}
 
-	if err := serveForeground(context.Background(), testContext(), config.Config{Server: config.ServerConfig{ListenAddr: "127.0.0.1:18080"}}, "json"); err != nil {
-		t.Fatalf("serveForeground() error = %v", err)
-	}
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- serveForeground(context.Background(), testContext(), config.Config{Server: config.ServerConfig{ListenAddr: "127.0.0.1:18080"}}, "json")
+	}()
 	select {
 	case <-downloadStarted:
 	case <-time.After(time.Second):
@@ -1168,6 +1158,9 @@ func TestServeForegroundAutoInstallsCodexBeforeManager(t *testing.T) {
 	case <-managerStarted:
 	case <-time.After(time.Second):
 		t.Fatal("manager did not start after Codex installation completed")
+	}
+	if err := <-serveDone; err != nil {
+		t.Fatalf("serveForeground() error = %v", err)
 	}
 	data, err := os.ReadFile(target)
 	if err != nil {
@@ -1221,6 +1214,7 @@ func TestServeRunSkipsCodexAutoInstallWhenDisabled(t *testing.T) {
 			return errors.New("OnReady is nil")
 		}
 		opts.OnReady(nil, nil)
+		<-managerStarted
 		return nil
 	}
 
@@ -1298,6 +1292,7 @@ func TestServeForegroundContinuesStartupAfterCodexInstallFailure(t *testing.T) {
 	}
 	RunServer = func(opts server.Options) error {
 		opts.OnReady(nil, nil)
+		<-managerStarted
 		return nil
 	}
 
@@ -1405,6 +1400,11 @@ func TestServeForegroundStartsCodexBridgesAfterConfiguredAgents(t *testing.T) {
 		}
 		opts.OnReady(nil, nil)
 		close(releaseAgents)
+		select {
+		case <-bridgeStarted:
+		case <-time.After(time.Second):
+			return errors.New("codex bridge manager did not start")
+		}
 		if opts.Context == nil {
 			return fmt.Errorf("Context is nil")
 		}
@@ -1426,6 +1426,75 @@ func TestServeForegroundStartsCodexBridgesAfterConfiguredAgents(t *testing.T) {
 	}
 }
 
+func TestServeShutdownWaitsForStartupAndClosesBridgeBeforeRuntime(t *testing.T) {
+	restore := stubServeDependencies(t)
+	defer restore()
+
+	var orderMu sync.Mutex
+	var order []string
+	record := func(stage string) {
+		orderMu.Lock()
+		order = append(order, stage)
+		orderMu.Unlock()
+	}
+	runtime := &closeOrderRuntime{onClose: func() { record("runtime") }}
+	svc, err := agent.NewService(
+		config.ModelConfig{},
+		config.ServerConfig{},
+		"",
+		filepath.Join(t.TempDir(), "agents.json"),
+		agent.WithRuntime(runtime),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	startupStarted := make(chan struct{})
+	StartConfiguredAgents = func(ctx context.Context, _ *agent.Service) error {
+		close(startupStarted)
+		<-ctx.Done()
+		record("startup")
+		return ctx.Err()
+	}
+	NewCodexBridgeManager = func(config.Config, *agent.Service, *feishu.Service, worklease.ParticipantWorkReporter) (codexBridgeManager, error) {
+		return &fakeCodexBridgeManager{close: func() { record("bridge") }}, nil
+	}
+	RunServer = func(opts server.Options) error {
+		if opts.OnReady == nil {
+			return errors.New("OnReady is nil")
+		}
+		opts.OnReady(nil, nil)
+		select {
+		case <-startupStarted:
+			return nil
+		case <-time.After(time.Second):
+			return errors.New("startup did not begin")
+		}
+	}
+
+	err = startServerWithConfigPath(
+		context.Background(),
+		testContext(),
+		config.Config{Server: config.ServerConfig{ListenAddr: "127.0.0.1:18080"}},
+		svc,
+		nil,
+		nil,
+		nil,
+		"",
+		"json",
+		serveOptions{NoBrowser: true, NoCodexAutoInstall: true},
+	)
+	if err != nil {
+		t.Fatalf("startServerWithConfigPath() error = %v", err)
+	}
+	orderMu.Lock()
+	got := append([]string(nil), order...)
+	orderMu.Unlock()
+	if want := []string{"startup", "bridge", "runtime"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("shutdown order = %v, want %v", got, want)
+	}
+}
+
 func TestServeForegroundPreservesBootstrapDefaultTemplates(t *testing.T) {
 	origRunServer := RunServer
 	origNewAgentService := NewAgentService
@@ -1439,7 +1508,7 @@ func TestServeForegroundPreservesBootstrapDefaultTemplates(t *testing.T) {
 	})
 	RunServer = func(opts server.Options) error {
 		if opts.OnReady != nil {
-			go opts.OnReady(nil, nil)
+			opts.OnReady(nil, nil)
 		}
 		return nil
 	}
@@ -1918,7 +1987,7 @@ func stubServeDependencies(t *testing.T) func() {
 	origWaitForHealthy := WaitForHealthy
 	RunServer = func(opts server.Options) error {
 		if opts.OnReady != nil {
-			go opts.OnReady(nil, nil)
+			opts.OnReady(nil, nil)
 		}
 		return nil
 	}
@@ -2100,6 +2169,43 @@ type fakeCodexBridgeManager struct {
 	stop    func(string)
 	refresh func(context.Context, agent.Agent, string) error
 	close   func()
+}
+
+type closeOrderRuntime struct {
+	onClose func()
+}
+
+func (*closeOrderRuntime) Kind() string { return agentruntime.KindCodex }
+
+func (*closeOrderRuntime) Layout(string) agentruntime.Layout { return agentruntime.Layout{} }
+
+func (*closeOrderRuntime) New(context.Context, agentruntime.Spec) (agentruntime.Handle, error) {
+	return agentruntime.Handle{}, nil
+}
+
+func (*closeOrderRuntime) Start(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+	return agentruntime.StateRunning, nil
+}
+
+func (*closeOrderRuntime) Stop(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+	return agentruntime.StateStopped, nil
+}
+
+func (*closeOrderRuntime) Delete(context.Context, agentruntime.Handle) error { return nil }
+
+func (*closeOrderRuntime) State(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+	return agentruntime.StateStopped, nil
+}
+
+func (*closeOrderRuntime) Info(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+	return agentruntime.Info{State: agentruntime.StateStopped}, nil
+}
+
+func (r *closeOrderRuntime) Close() error {
+	if r != nil && r.onClose != nil {
+		r.onClose()
+	}
+	return nil
 }
 
 func (m *fakeCodexBridgeManager) Start(ctx context.Context) error {

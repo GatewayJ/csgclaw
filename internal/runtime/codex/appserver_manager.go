@@ -33,10 +33,16 @@ var (
 var appServerCommandContext = codexcli.AppServerCommandContext
 
 type appServerManager struct {
-	deps      managerDeps
-	hydrateMu sync.Mutex
-	mu        sync.RWMutex
-	sessions  map[string]*liveSession
+	deps        managerDeps
+	hydrateMu   sync.Mutex
+	startMu     sync.Mutex
+	lifecycleMu sync.Mutex
+	launches    sync.WaitGroup
+	closed      bool
+	closeDone   chan struct{}
+	closeErr    error
+	mu          sync.RWMutex
+	sessions    map[string]*liveSession
 }
 
 func newAppServerManager(deps managerDeps) *appServerManager {
@@ -47,6 +53,14 @@ func newAppServerManager(deps managerDeps) *appServerManager {
 }
 
 func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Session, error) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	finishLaunch, err := m.beginLaunch()
+	if err != nil {
+		return nil, err
+	}
+	defer finishLaunch()
+
 	spec.RuntimeID = strings.TrimSpace(spec.RuntimeID)
 	if spec.RuntimeID == "" {
 		return nil, fmt.Errorf("runtime id is required")
@@ -120,6 +134,7 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 
 	go m.readAppServerStdout(spec.RuntimeID, live, stdout)
 	go m.waitAppServerSession(spec.RuntimeID, live)
+	finishLaunch()
 
 	if err := m.initializeHandshake(ctx, live); err != nil {
 		_ = m.Stop(context.Background(), SessionHandle{RuntimeID: spec.RuntimeID})
@@ -135,7 +150,6 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 		_ = m.Stop(context.Background(), SessionHandle{RuntimeID: spec.RuntimeID})
 		return nil, m.wrapStartupError(spec, "initialize codex app-server thread", fmt.Errorf("empty thread id"))
 	}
-
 	now := time.Now().UTC()
 	session := &Session{
 		RuntimeID:    spec.RuntimeID,
@@ -152,15 +166,22 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 		CreatedAt:    now,
 		StartedAt:    now,
 	}
-	live.mu.Lock()
-	live.session = session
-	live.mu.Unlock()
+	if err := m.commitSession(live, session); err != nil {
+		return nil, err
+	}
 
 	cloned := *session
 	return &cloned, nil
 }
 
 func (m *appServerManager) Stop(ctx context.Context, handle SessionHandle) error {
+	if err := m.ensureOpen(); err != nil {
+		return err
+	}
+	return m.stop(ctx, handle)
+}
+
+func (m *appServerManager) stop(ctx context.Context, handle SessionHandle) error {
 	runtimeID := strings.TrimSpace(handle.RuntimeID)
 	m.mu.RLock()
 	live := m.sessions[runtimeID]
@@ -205,6 +226,26 @@ func (m *appServerManager) Close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	m.lifecycleMu.Lock()
+	if m.closed {
+		closeDone := m.closeDone
+		m.lifecycleMu.Unlock()
+		if closeDone != nil {
+			<-closeDone
+		}
+		m.lifecycleMu.Lock()
+		closeErr := m.closeErr
+		m.lifecycleMu.Unlock()
+		return closeErr
+	}
+	m.closed = true
+	m.closeDone = make(chan struct{})
+	closeDone := m.closeDone
+	m.lifecycleMu.Unlock()
+
+	// A launch admitted before Close may already have created a child process.
+	// Wait until it is either tracked in sessions or has failed, then snapshot.
+	m.launches.Wait()
 
 	m.mu.RLock()
 	handles := make([]SessionHandle, 0, len(m.sessions))
@@ -215,10 +256,14 @@ func (m *appServerManager) Close(ctx context.Context) error {
 
 	var closeErr error
 	for _, handle := range handles {
-		if err := m.Stop(ctx, handle); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := m.stop(ctx, handle); err != nil && !errors.Is(err, os.ErrNotExist) {
 			closeErr = errors.Join(closeErr, fmt.Errorf("stop codex app-server %s: %w", handle.RuntimeID, err))
 		}
 	}
+	m.lifecycleMu.Lock()
+	m.closeErr = closeErr
+	close(closeDone)
+	m.lifecycleMu.Unlock()
 	return closeErr
 }
 
@@ -232,6 +277,9 @@ func (m *appServerManager) Session(handle SessionHandle) (*Session, error) {
 }
 
 func (m *appServerManager) LiveSession(handle SessionHandle) (*Session, error) {
+	if err := m.ensureOpen(); err != nil {
+		return nil, err
+	}
 	runtimeID := strings.TrimSpace(handle.RuntimeID)
 	if runtimeID == "" {
 		return nil, fmt.Errorf("runtime id is required")
@@ -393,6 +441,9 @@ func (m *appServerManager) ResetConversationHistory(ctx context.Context, handle 
 }
 
 func (m *appServerManager) ensureLiveSession(ctx context.Context, handle SessionHandle) (*liveSession, error) {
+	if err := m.ensureOpen(); err != nil {
+		return nil, err
+	}
 	runtimeID := strings.TrimSpace(handle.RuntimeID)
 	if runtimeID == "" {
 		return nil, fmt.Errorf("runtime id is required")
@@ -420,6 +471,43 @@ func (m *appServerManager) ensureLiveSession(ctx context.Context, handle Session
 		return live, nil
 	}
 	return nil, os.ErrNotExist
+}
+
+func (m *appServerManager) beginLaunch() (func(), error) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.closed {
+		return nil, ErrRuntimeClosed
+	}
+	m.launches.Add(1)
+	var once sync.Once
+	return func() {
+		once.Do(m.launches.Done)
+	}, nil
+}
+
+func (m *appServerManager) ensureOpen() error {
+	if m == nil {
+		return ErrRuntimeClosed
+	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.closed {
+		return ErrRuntimeClosed
+	}
+	return nil
+}
+
+func (m *appServerManager) commitSession(live *liveSession, session *Session) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.closed {
+		return ErrRuntimeClosed
+	}
+	live.mu.Lock()
+	live.session = session
+	live.mu.Unlock()
+	return nil
 }
 
 func (m *appServerManager) liveSession(runtimeID string) *liveSession {
