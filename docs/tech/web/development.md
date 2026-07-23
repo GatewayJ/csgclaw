@@ -8,7 +8,7 @@ Chinese companion: `development.zh.md`. This English document is the agent-facin
 
 - Read this guide before changing the Vite app's source, tests, package/config files, public assets, or generated web asset pipeline.
 - Common triggers include React pages, components, hooks, shared models, route helpers, API clients, CSS/Tailwind/tokens, i18n text, Vite/Vitest/TypeScript config, dependency changes, public asset URLs, and `web/static-dist` handling.
-- When changing UI primitives, Radix wrappers, form controls, overlays, or component-library exports, also follow `docs/web/ui-components.md`.
+- When changing UI primitives, Radix wrappers, form controls, overlays, or component-library exports, also follow `docs/tech/web/ui-components.md`.
 
 ## Tooling
 
@@ -118,7 +118,7 @@ If a subdirectory later needs its own rules, add a short README in that subdirec
 - A component becomes business UI when it combines UI primitives with business state, labels, actions, or API-backed data.
 - When adding page functionality, first check whether existing `src/components/ui` and `src/components/business` packages can be composed for the need. Do not duplicate base button, form, select, overlay, or tooltip interactions inside pages.
 - If shared components do not fit, prefer a page- or feature-private component near the owner before introducing new shared surface area. Promote it later only after reuse or a stable interaction contract is clear.
-- Follow `docs/web/ui-components.md` when adding or changing UI primitives, Radix wrappers, form controls, overlay layers, or component-library exports. Also read it when deciding whether to use an existing component, wrap a Radix primitive, or extract a new local component.
+- Follow `docs/tech/web/ui-components.md` when adding or changing UI primitives, Radix wrappers, form controls, overlay layers, or component-library exports. Also read it when deciding whether to use an existing component, wrap a Radix primitive, or extract a new local component.
 
 ## Component Naming
 
@@ -164,7 +164,7 @@ src/pages/WorkspacePage/components/
 - Use component CSS or CSS Modules for stable component presentation, complex selectors, generated markup such as rendered Markdown, or states that are awkward to express with utilities. Prefer CSS Modules for newly extracted page-private components.
 - Keep CSS class names tied to component or feature semantics; avoid generic class names that can collide globally.
 - Do not put page-specific styles in `src/shared/styles/`.
-- Cross-component overlay layers must use the z-index tokens in `src/shared/styles/tokens.css`; see `docs/web/ui-components.md` for the modal, popover, portal, and tooltip layering model.
+- Cross-component overlay layers must use the z-index tokens in `src/shared/styles/tokens.css`; see `docs/tech/web/ui-components.md` for the modal, popover, portal, and tooltip layering model.
 - These styling rules are progressive for new files and new component work. Existing files that do not yet follow this order do not need churn-only rewrites; when a single file is already being functionally refactored, it is reasonable to move that file's touched styles toward this order.
 
 ## State And Data

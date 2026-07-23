@@ -19,7 +19,7 @@
 3. `src/components/ui` 封装可复用的展示型基础件，并负责把 Radix primitive 的交互能力包装成 CSGClaw 的本地 API 和视觉规范。
 4. Radix primitive 是组件库的交互底座，不是业务页面的默认直接依赖。
 
-如果一个页面需要新的、强业务定制的 UI，可以先放在页面私有组件里实现。出现跨页面复用、交互契约稳定，或多个页面开始复制同类结构时，再抽取到 `src/components/ui` 或 `src/components/business`。抽取时同步更新本规范或 `docs/web/development.md` 中的样式/组件规则。
+如果一个页面需要新的、强业务定制的 UI，可以先放在页面私有组件里实现。出现跨页面复用、交互契约稳定，或多个页面开始复制同类结构时，再抽取到 `src/components/ui` 或 `src/components/business`。抽取时同步更新本规范或 `docs/tech/web/development.md` 中的样式/组件规则。
 
 ## 组件包结构
 

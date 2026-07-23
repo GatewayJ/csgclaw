@@ -337,8 +337,8 @@ Run `csgclaw stop` and `csgclaw serve --daemon` to apply the new version
 
 包括：
 
-- `docs/cli.md`
-- `docs/cli.zh.md`
+- `docs/tech/cli.md`
+- `docs/tech/cli.zh.md`
 - 命令 help 文案
 - 常见失败场景提示
 

@@ -217,8 +217,8 @@ Remove documentation that implies SDK support still exists.
 
 Files to change:
 
-- `docs/config.zh.md`
-- `docs/config.md` if it mentions SDK build variants
+- `docs/tech/config.zh.md`
+- `docs/tech/config.md` if it mentions SDK build variants
 - `README.zh.md`
 - `README.md` if it mentions vendored SDK or SDK build modes
 - any archived or upgrade note that is still treated as active guidance
@@ -280,8 +280,8 @@ Edit:
 - `Makefile`
 - `go.mod`
 - `go.sum`
-- `docs/config.zh.md`
-- `docs/config.md` if needed
+- `docs/tech/config.zh.md`
+- `docs/tech/config.md` if needed
 - `README.zh.md`
 - `README.md` if needed
 

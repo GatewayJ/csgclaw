@@ -41,6 +41,7 @@ function hasBlockingAgentDetailChangesAfterMetadataCommit(
 function AgentDetailSidePanel({ onClose, onOpenDM, ...props }: AgentDetailSidePanelProps) {
   const [dialogPortalContainer, setDialogPortalContainer] = useState<HTMLDivElement | null>(null);
   const detailPaneRef = useRef<AgentDetailPaneHandle | null>(null);
+  const initialFocusRef = useRef<HTMLButtonElement | null>(null);
   const requestClose = useCallback(
     (restoreFocus = true) => {
       const committedFields = detailPaneRef.current?.commitActiveMetadataEdit() ?? [];
@@ -66,6 +67,10 @@ function AgentDetailSidePanel({ onClose, onOpenDM, ...props }: AgentDetailSidePa
         aria-describedby={undefined}
         aria-modal="true"
         className="agent-detail-side-panel"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          initialFocusRef.current?.focus({ preventScroll: true });
+        }}
         onEscapeKeyDown={(event) => {
           const canceledFields = detailPaneRef.current?.cancelActiveMetadataEdit() ?? [];
           if (canceledFields.length) {
@@ -76,10 +81,10 @@ function AgentDetailSidePanel({ onClose, onOpenDM, ...props }: AgentDetailSidePa
       >
         <div className="agent-detail-side-panel-bar">
           <DialogCloseButton
-            className="agent-detail-side-panel-close"
+            ref={initialFocusRef}
+            className="icon-button agent-detail-side-panel-close"
             label={props.t("close")}
             title=""
-            variant="tertiaryGray"
           />
           <DialogTitle className="agent-detail-side-panel-title">{props.t("agentDetailPanel")}</DialogTitle>
         </div>

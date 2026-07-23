@@ -19,7 +19,7 @@ Business features should prefer the project's existing component library instead
 3. `src/components/ui` wraps reusable presentation primitives and turns Radix primitive behavior into CSGClaw-local APIs and visual conventions.
 4. Radix primitives are the interaction foundation for the component library, not the default direct dependency for business pages.
 
-If a page needs a new highly customized UI, start with a page-private component. Promote it to `src/components/ui` or `src/components/business` when it has cross-page reuse, a stable interaction contract, or repeated copies across pages. Update this guide or the styling/component rules in `docs/web/development.md` when extracting the pattern.
+If a page needs a new highly customized UI, start with a page-private component. Promote it to `src/components/ui` or `src/components/business` when it has cross-page reuse, a stable interaction contract, or repeated copies across pages. Update this guide or the styling/component rules in `docs/tech/web/development.md` when extracting the pattern.
 
 ## Package Shape
 

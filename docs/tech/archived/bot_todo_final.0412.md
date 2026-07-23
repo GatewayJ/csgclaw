@@ -432,8 +432,8 @@ go test ./...
 需要同步更新：
 
 ```text
-docs/api.md
-docs/architecture.md
+docs/tech/api.md
+docs/tech/architecture.md
 README.md 或 README.zh.md 中涉及 worker/bot 的说明
 ```
 

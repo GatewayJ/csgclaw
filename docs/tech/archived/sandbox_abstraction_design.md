@@ -440,7 +440,7 @@ go test ./internal/agent ./internal/bot ./internal/api
 - loader/saver 支持 `[sandbox]`。
 - 默认 provider 为 `boxlite-sdk`。
 - onboard 和 serve 创建 agent service 时传入 provider。
-- 文档更新 `README.md`、`docs/architecture.md`、`docs/README.go.md`。
+- 文档更新 `README.md`、`docs/tech/architecture.md`、`docs/README.go.md`。
 
 验证：
 

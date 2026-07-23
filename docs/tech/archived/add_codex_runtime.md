@@ -627,7 +627,7 @@ type SessionEventSink interface {
 修改目标：
 
 - `cli/agent/agent.go`
-- `docs/api.md`
+- `docs/tech/api.md`
 - `README.md` / `README.zh.md` 相关段落
 
 内容：

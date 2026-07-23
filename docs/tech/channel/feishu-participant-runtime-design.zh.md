@@ -593,7 +593,7 @@ agentID -> FeishuConfigForAgent(agentID) -> 使用返回的 config 注入 env/co
 5. 新增 `csgclaw-cli pt bind`，并让它通过现有 API 串行完成 agent 查询、participant upsert、
    agent recreate；失败不回滚，日志和命令结果标明失败阶段。
 6. 修改 Feishu skill：`finalize` 调用 `pt bind`，清理旧 bot 命名文案。
-7. 更新 `docs/channel/feishu.zh.md`、`docs/channel/feishu.md` 和 CLI 文档，说明新配置位置。
+7. 更新 `docs/tech/channel/feishu.zh.md`、`docs/tech/channel/feishu.md` 和 CLI 文档，说明新配置位置。
 8. 跑针对性测试：
 
 ```bash

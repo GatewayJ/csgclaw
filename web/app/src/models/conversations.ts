@@ -308,7 +308,7 @@ function uniqueStrings(values: string[]): string[] {
 
 export function isToolCallMessage(messageOrContent: IMMessage | unknown): boolean {
   if (isMessageLike(messageOrContent)) {
-    const activity = parseAgentActivity(messageOrContent.content);
+    const activity = parseAgentActivity(messageOrContent);
     if (activity) {
       return activity.content.msgtype !== AgentActivityMsgTypes.question;
     }
@@ -708,6 +708,21 @@ export function formatTime(value: string | number | Date | null | undefined, loc
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** Format a timestamp for sidebar list items:
+ *  today → time only, yesterday → "昨天"/"Yesterday",
+ *  2–7 days ago → weekday, same year → month-day, older → year-month-day. */
+export function formatSidebarTime(
+  value: string | number | Date | null | undefined,
+  locale: LocaleCode,
+  t: TranslateFn,
+  now: Date = new Date(),
+): string {
+  const parts = formatMessageTimestampParts(value, locale, t, now);
+  if (!parts.label) return "";
+  const dayDiff = differenceInCalendarDays(now, value ? new Date(value) : new Date(NaN));
+  return dayDiff === 0 ? parts.label : parts.dividerLabel;
 }
 
 export type MessageTimestampParts = {

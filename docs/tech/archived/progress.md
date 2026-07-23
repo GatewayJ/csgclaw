@@ -1,6 +1,6 @@
 # CSGClaw 架构对齐进展清单
 
-本文对照 `docs/architecture.md` 与当前代码实现，梳理出可逐步推进的细粒度差异点。目标不是一次性大改，而是把后续改造拆成一批批可独立提交、可回归验证、每一步都保持可运行的增量任务。
+本文对照 `docs/tech/architecture.md` 与当前代码实现，梳理出可逐步推进的细粒度差异点。目标不是一次性大改，而是把后续改造拆成一批批可独立提交、可回归验证、每一步都保持可运行的增量任务。
 
 ## 使用原则
 
@@ -11,7 +11,7 @@
 
 ## 当前实现概览
 
-当前项目已经具备一个最小闭环，但与 `docs/architecture.md` 的目标架构相比，仍然更接近“单二进制 + 内嵌服务对象 + 面向当前 IM/PicoClaw 场景的专用 API”：
+当前项目已经具备一个最小闭环，但与 `docs/tech/architecture.md` 的目标架构相比，仍然更接近“单二进制 + 内嵌服务对象 + 面向当前 IM/PicoClaw 场景的专用 API”：
 
 - CLI 入口集中在 `cmd/csgclaw/main.go`，当前对外入口以 `onboard`、`serve`、`stop` 与资源型子命令为主，内部仍保留 `_serve` 作为守护进程子进程入口。
 - HTTP 路由与 handler 已拆到 `internal/api/`，`internal/server/` 主要负责 server lifecycle、mux 装配与 UI 托管。
@@ -23,7 +23,7 @@
 
 下面每个差异点都包含 4 部分：
 
-- `目标`：`docs/architecture.md` 中的目标状态
+- `目标`：`docs/tech/architecture.md` 中的目标状态
 - `现状`：当前代码实际状态
 - `影响`：为什么值得单独拆出来处理
 - `推荐增量步骤`：建议的最小推进单元
@@ -229,18 +229,18 @@
 - `影响`：这不是“实现瑕疵”，而是“当前产品边界已经超出架构文档”。需要先补文档决策，再动代码。
 - `推荐增量步骤`：
   - [ ] A17-1 先明确 PicoClaw bridge 是长期保留的正式能力，还是过渡集成层。
-  - [ ] A17-2 如果长期保留，先更新 `docs/architecture.md` 补充这条集成边界。
+  - [ ] A17-2 如果长期保留，先更新 `docs/tech/architecture.md` 补充这条集成边界。
   - [ ] A17-3 如果只是过渡层，就在 `docs/progress.md` 后续步骤里单独标记其去留策略，避免 API 对齐时误删。
 
 ### A18. 文档之间存在“目标态”和“现状态”混写
 
-- `目标`：`docs/architecture.md` 描述目标架构，`docs/api.md` / `docs/usage.md` 描述当前可用实现，二者边界清楚。
+- `目标`：`docs/tech/architecture.md` 描述目标架构，`docs/tech/api.md` / `docs/usage.md` 描述当前可用实现，二者边界清楚。
 - `现状`：仓库里已经有现状文档，但缺少一份明确的“差异清单 + 迁移顺序”。
 - `影响`：后续如果不维护这份差异清单，代码改到一半时很容易再次失去迁移上下文。
 - `推荐增量步骤`：
   - [x] A18-1 建立本文件，固定“目标 vs 现状 vs 下一步”的表达方式。
   - [ ] A18-2 每完成一个增量步骤，就在本文件对应项下补充完成时间、PR/提交号、兼容策略。
-  - [ ] A18-3 当某个差异已经完全收敛时，再同步回写 `docs/architecture.md` 或 `docs/api.md`。
+  - [ ] A18-3 当某个差异已经完全收敛时，再同步回写 `docs/tech/architecture.md` 或 `docs/tech/api.md`。
 
 ## 推荐实施顺序
 

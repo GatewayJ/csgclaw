@@ -348,10 +348,10 @@ Expected changes:
 Files likely involved:
 
 - `README.md`
-- `docs/config.md`
-- `docs/config.zh.md`
-- `docs/cli.md`
-- `docs/cli.zh.md`
+- `docs/tech/config.md`
+- `docs/tech/config.zh.md`
+- `docs/tech/cli.md`
+- `docs/tech/cli.zh.md`
 
 Expected changes:
 

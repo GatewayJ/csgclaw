@@ -380,8 +380,8 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
             ...(workspaceSupported
               ? [{ id: "skills" as const, label: t("agentProfileSkillsTab"), count: skills.length }]
               : []),
-            ...(!isNotificationBotAgent(item) ? [{ id: "channels" as const, label: t("agentChannelsTitle") }] : []),
             ...(showMCPServers ? [{ id: "mcp" as const, label: t("agentProfileMCPTab") }] : []),
+            ...(!isNotificationBotAgent(item) ? [{ id: "channels" as const, label: t("agentChannelsTitle") }] : []),
           ]
         : [],
     [draft, isNotifierDraft, item, showMCPServers, skills.length, t, workspaceSupported],
@@ -723,7 +723,9 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
         ) : null}
       </div>
       <div
-        className={`agent-profile-scroll-region${isProfileScrolling ? " is-scrolling" : ""}`}
+        className={`agent-profile-scroll-region${
+          visibleActiveProfileTab === "instructions" ? " agent-profile-scroll-region-instructions" : ""
+        }${isProfileScrolling ? " is-scrolling" : ""}`}
         onScroll={onProfileScroll}
       >
         {!draft ? (
@@ -757,7 +759,11 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
           </>
         ) : null}
         {draft ? (
-          <div className="profile-editor-shell agent-page-editor">
+          <div
+            className={`profile-editor-shell agent-page-editor${
+              visibleActiveProfileTab === "instructions" ? " agent-page-editor-instructions" : ""
+            }`}
+          >
             {visibleActiveProfileTab === "profile" ? (
               <div id="agent-profile-profile" className="agent-profile-tab-panel">
                 <AgentRuntimePanel
@@ -1511,7 +1517,7 @@ function AgentInstructionsPanel({ draft, t, updateDraft }: AgentInstructionsPane
         <label className="field span-2">
           <span>{mode === "advanced" ? t("agentInstructionsEffective") : t("agentInstructions")}</span>
           <textarea
-            className="compact-textarea"
+            className="compact-textarea agent-instructions-editor"
             value={mode === "advanced" ? effective : draft.instructions || ""}
             onInput={(event) =>
               mode === "advanced"

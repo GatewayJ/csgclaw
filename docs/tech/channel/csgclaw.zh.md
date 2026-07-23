@@ -2,7 +2,7 @@
 
 [English](csgclaw.md) | 中文
 
-本文档说明前端与 runtime 自动化使用的 CSGClaw Channel 侧交互约定，作为按通道文档（例如 `docs/channel/feishu.md`）的补充说明。
+本文档说明前端与 runtime 自动化使用的 CSGClaw Channel 侧交互约定，作为按通道文档（例如 `docs/tech/channel/feishu.md`）的补充说明。
 
 ## `csgclaw.action_card` 结构
 

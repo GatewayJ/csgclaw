@@ -659,7 +659,7 @@ INSTALL_VARIANT=legacy-sdk
 改动点：
 
 - `README.md`、`README.zh.md`
-- `docs/config.md`、`docs/config.zh.md`
+- `docs/tech/config.md`、`docs/tech/config.zh.md`
 
 验收：
 
@@ -739,6 +739,6 @@ INSTALL_VARIANT=legacy-sdk
 - 修改 [Makefile](/Users/russellluo/Projects/work/opencsg/projects/csgclaw/Makefile)
 - 修改 [scripts/install.sh](/Users/russellluo/Projects/work/opencsg/projects/csgclaw/scripts/install.sh)
 - 修改 [.github/workflows/release.yml](/Users/russellluo/Projects/work/opencsg/projects/csgclaw/.github/workflows/release.yml)，让 bundled 方案成为默认主流程
-- 同步更新 [README.md](/Users/russellluo/Projects/work/opencsg/projects/csgclaw/README.md)、[docs/config.md](/Users/russellluo/Projects/work/opencsg/projects/csgclaw/docs/config.md)、[docs/config.zh.md](/Users/russellluo/Projects/work/opencsg/projects/csgclaw/docs/config.zh.md)
+- 同步更新 [README.md](/Users/russellluo/Projects/work/opencsg/projects/csgclaw/README.md)、[docs/tech/config.md](/Users/russellluo/Projects/work/opencsg/projects/csgclaw/docs/tech/config.md)、[docs/tech/config.zh.md](/Users/russellluo/Projects/work/opencsg/projects/csgclaw/docs/tech/config.zh.md)
 
 这套收敛后的范围，基本对应上文阶段 1 到阶段 4；阶段 5 的 `linux/arm64` 可以作为后续增强，不必阻塞首轮落地。

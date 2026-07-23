@@ -8,7 +8,7 @@
 
 - 修改 Vite 应用源码、测试、包或配置文件、public 资源，或生成式前端资产链路前，先阅读并遵循本规范。
 - 常见触发范围包括 React 页面、组件、hooks、共享 models、路由 helper、API client、CSS/Tailwind/tokens、i18n 文案、Vite/Vitest/TypeScript 配置、依赖变更、public 资源 URL 和 `web/static-dist` 处理。
-- 修改 UI primitives、Radix wrappers、表单控件、浮层或组件库 export 时，还要遵循 `docs/web/ui-components.md` 或 `docs/web/ui-components.zh.md`。
+- 修改 UI primitives、Radix wrappers、表单控件、浮层或组件库 export 时，还要遵循 `docs/tech/web/ui-components.md` 或 `docs/tech/web/ui-components.zh.md`。
 
 ## 工具链
 
@@ -118,7 +118,7 @@ pnpm --dir web/app install
 - 当组件把 UI 基础件与业务状态、文案、动作或 API 数据组合起来时，它就是业务组件。
 - 新增页面功能时，先查已有 `src/components/ui` 和 `src/components/business` 是否能组合实现；不要在页面里重复实现基础按钮、表单、选择器、浮层或 tooltip 交互。
 - 如果共享组件不适合，优先在当前页面或 feature 附近实现页面私有组件，不要过早增加新的共享组件面。只有出现复用需求或交互契约稳定后，再提升为共享组件。
-- 新增或修改 UI 基础件、Radix wrapper、表单控件、浮层层级或组件库 export 时，遵循 `docs/web/ui-components.md` 或 `docs/web/ui-components.zh.md`。当你需要判断“应该用现有组件、直接用 Radix、还是抽一个新的本地组件”时，也先看该组件库规范。
+- 新增或修改 UI 基础件、Radix wrapper、表单控件、浮层层级或组件库 export 时，遵循 `docs/tech/web/ui-components.md` 或 `docs/tech/web/ui-components.zh.md`。当你需要判断“应该用现有组件、直接用 Radix、还是抽一个新的本地组件”时，也先看该组件库规范。
 
 ## 组件命名
 
@@ -164,7 +164,7 @@ src/pages/WorkspacePage/components/
 - 稳定的组件外观、复杂选择器、渲染后内容（例如 Markdown）或 utility 难表达的状态，使用组件 CSS 或 CSS Module。新抽取的页面私有组件优先使用 CSS Module。
 - CSS class 名应绑定组件或 feature 语义，避免容易全局冲突的泛用名称。
 - 不要把页面专属样式放进 `src/shared/styles/`。
-- 跨组件浮层必须使用 `src/shared/styles/tokens.css` 中的 z-index token；modal、popover、portal 和 tooltip 的层级模型见 `docs/web/ui-components.md` 或 `docs/web/ui-components.zh.md`。
+- 跨组件浮层必须使用 `src/shared/styles/tokens.css` 中的 z-index token；modal、popover、portal 和 tooltip 的层级模型见 `docs/tech/web/ui-components.md` 或 `docs/tech/web/ui-components.zh.md`。
 - 这些样式规则作为新增文件和新增组件工作的渐进式规范。已有文件没有遵循时，不需要只为样式规范做无功能改动；如果正在对单个文件做功能重构，可以把本次触及的样式顺手按该顺序优化。
 
 ## 状态与数据

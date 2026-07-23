@@ -2,7 +2,7 @@
 
 English | [中文](csgclaw.zh.md)
 
-This document describes CSGClaw channel-side interaction contracts used by frontend and runtime automation. It supplements the channel-specific documents (for example `docs/channel/feishu.md`).
+This document describes CSGClaw channel-side interaction contracts used by frontend and runtime automation. It supplements the channel-specific documents (for example `docs/tech/channel/feishu.md`).
 
 ## csgclaw.action_card payload
 

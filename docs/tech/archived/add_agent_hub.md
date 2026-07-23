@@ -390,7 +390,7 @@ Code areas:
 
 - `internal/config/config.go`
 - `internal/config/config_test.go`
-- `docs/config.md`
+- `docs/tech/config.md`
 
 Changes:
 
