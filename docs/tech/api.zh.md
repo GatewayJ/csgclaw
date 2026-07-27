@@ -479,6 +479,46 @@ catalog 的列表和变更响应以 `mcpServers` 作为直接 server 映射。�
 catalog 条目时使用 `{ "name": "...", "config": { ... } }`，其中 `config`
 就是该条目的 server 配置。
 
+#### `GET /api/v1/mcp-servers/remote`
+
+通过 CSGClaw 列出可安装的远端 MCP server 摘要。浏览器只请求 CSGClaw；服务端根据
+当前登录环境或显式配置的 official Hub 解析有效 OpenCSG Hub，并转发当前用户的
+Hub 凭据。查询参数与远端 Skill 列表保持一致：`page`（默认 `1`）、`per`（默认
+`12`，最大 `100`）和 `search`。
+
+每个条目只包含 Hub 的 `id`、名称和展示元数据，不包含安装配置或 headers。
+`description` 是 CSGClaw 用于说明 MCP 用途的 catalog 元数据；向 Agent runtime
+添加条目时会移除该字段。
+
+```json
+{
+  "items": [
+    {
+      "id": "builtin:calendar",
+      "name": "calendar",
+      "description": "Calendar tools",
+      "url": "https://mcp.example.test/calendar",
+      "protocol": "streamable-http"
+    }
+  ],
+  "page": 1,
+  "per": 12,
+  "total": 13,
+  "next_page": 2
+}
+```
+
+#### `POST /api/v1/mcp-servers/remote/{id}/install`
+
+安装或刷新一个远端 MCP 条目。CSGClaw 会在服务端请求 Hub 详情接口，将详情中的
+`protocol`、`url` 和 `headers` 转换为 catalog 配置，并使用详情响应的 `name` 作为
+catalog key。新远端条目默认写入 `enabled: true`、`startup_timeout_sec: 30` 和
+`tool_timeout_sec: 60`。响应只返回已安装的名称：
+
+```json
+{ "name": "calendar" }
+```
+
 ### `DELETE /api/v1/agents/{id}`
 
 删除 agent。

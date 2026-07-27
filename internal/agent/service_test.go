@@ -20,6 +20,7 @@ import (
 	"csgclaw/internal/assets"
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/config"
+	"csgclaw/internal/mcpschema"
 	agentruntime "csgclaw/internal/runtime"
 	"csgclaw/internal/runtime/openclawsandbox"
 	"csgclaw/internal/runtime/picoclawsandbox"
@@ -297,7 +298,7 @@ func (f fakeAgentRuntime) ValidateMCPServers(ctx context.Context, current agentr
 	if f.mcpValidate != nil {
 		return f.mcpValidate(ctx, current)
 	}
-	return agentruntime.ValidateMCPServers(current.Servers)
+	return mcpschema.ValidateMCPServers(current.Servers)
 }
 
 func (f fakeAgentRuntime) MCPServersRestartRequired(change agentruntime.MCPServersChange) (bool, error) {
@@ -1764,8 +1765,12 @@ func TestAddMCPServersFromHubImportsRuntimeServersOnce(t *testing.T) {
 		CreatedAt:   time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
 	}
 	catalogServers := map[string]any{
-		"context7": map[string]any{"command": "uvx", "args": []any{"context7-mcp"}},
-		"remote":   map[string]any{"url": "https://mcp.example.com/mcp"},
+		"context7": map[string]any{
+			"command":     "uvx",
+			"args":        []any{"context7-mcp"},
+			"description": "Context7 documentation tools",
+		},
+		"remote": map[string]any{"url": "https://mcp.example.com/mcp"},
 	}
 
 	updated, err := svc.AddMCPServersFromHub(context.Background(), "u-dev", []string{"context7"}, catalogServers)
@@ -1774,6 +1779,13 @@ func TestAddMCPServersFromHubImportsRuntimeServersOnce(t *testing.T) {
 	}
 	for _, name := range []string{"manual", "context7"} {
 		assertMCPServersHasServer(t, updated.MCPServers, name)
+	}
+	context7, ok := updated.MCPServers["context7"].(map[string]any)
+	if !ok {
+		t.Fatalf("context7 MCP server = %#v, want object", updated.MCPServers["context7"])
+	}
+	if _, exists := context7["description"]; exists {
+		t.Fatalf("agent MCP server retained catalog description: %#v", context7)
 	}
 	if listCalls != 1 {
 		t.Fatalf("ListMCPServers() calls = %d, want 1 for initial runtime import", listCalls)
@@ -1835,6 +1847,46 @@ func TestDeleteMCPServersImportsRuntimeServersBeforeDeleting(t *testing.T) {
 	if listCalls != 1 {
 		t.Fatalf("ListMCPServers() calls = %d, want 1 for initial runtime import", listCalls)
 	}
+}
+
+func TestDeleteMCPServersCanRemoveLegacyInvalidHeaderConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindCodex}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-dev"] = Agent{
+		ID:          "u-dev",
+		Name:        "dev",
+		RuntimeID:   "rt-u-dev",
+		RuntimeKind: RuntimeKindCodex,
+		Role:        RoleWorker,
+		Status:      string(agentruntime.StateStopped),
+		CreatedAt:   time.Date(2026, 7, 24, 9, 0, 0, 0, time.UTC),
+		MCPServers: map[string]any{
+			"legacy": map[string]any{
+				"url":     "https://mcp.example.com/mcp",
+				"headers": map[string]any{"invalid header": "value"},
+			},
+			"context7": map[string]any{"command": "context7-mcp"},
+		},
+	}
+
+	updated, err := svc.DeleteMCPServers(context.Background(), "u-dev", []string{"legacy"})
+	if err != nil {
+		t.Fatalf("DeleteMCPServers() error = %v", err)
+	}
+	if _, exists := updated.MCPServers["legacy"]; exists {
+		t.Fatalf("DeleteMCPServers() retained legacy server: %#v", updated.MCPServers)
+	}
+	assertMCPServersHasServer(t, updated.MCPServers, "context7")
 }
 
 func TestAddMCPServersFromHubFailsWhenRuntimeMCPReadFails(t *testing.T) {
@@ -1899,7 +1951,7 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 						return ctx.Err()
 					}
 				}
-				return agentruntime.ValidateMCPServers(current.Servers)
+				return mcpschema.ValidateMCPServers(current.Servers)
 			},
 			mcpRestart: func(agentruntime.MCPServersChange) (bool, error) {
 				return false, nil
@@ -1963,7 +2015,7 @@ func TestAddMCPServersSerializesConcurrentNameMerges(t *testing.T) {
 	if !ok {
 		t.Fatal("Agent(\"u-dev\") not found")
 	}
-	servers, err := agentruntime.NormalizeMCPServers(got.MCPServers)
+	servers, err := mcpschema.NormalizeMCPServers(got.MCPServers)
 	if err != nil {
 		t.Fatalf("NormalizeMCPServers() error = %v", err)
 	}
@@ -1997,7 +2049,7 @@ func TestAddMCPServersSerializesWithDirectMCPServersUpdate(t *testing.T) {
 						return ctx.Err()
 					}
 				}
-				return agentruntime.ValidateMCPServers(current.Servers)
+				return mcpschema.ValidateMCPServers(current.Servers)
 			},
 			mcpRestart: func(agentruntime.MCPServersChange) (bool, error) {
 				return false, nil
