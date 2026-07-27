@@ -63,6 +63,8 @@ func (h *Handler) registerCoreRoutes(router chi.Router) {
 			})
 		})
 		r.Get("/mcp-servers", h.handleMCPServers)
+		r.Get("/mcp-servers/remote", h.handleRemoteMCPServers)
+		r.Post("/mcp-servers/remote/{id}/install", h.handleInstallRemoteMCPServer)
 		r.Post("/mcp-servers", h.handleMCPServers)
 		r.Put("/mcp-servers/{name}", h.handleMCPServerByName)
 		r.Delete("/mcp-servers/{name}", h.handleMCPServerByName)

@@ -29,12 +29,22 @@ function t(key: string, params: Record<string, string | number> = {}) {
     resourcesMCPServerDocumentObjectRequired: "MCP server definition must be a JSON object.",
     resourcesMCPServerDocumentInvalidShape:
       "MCP server definition must be an mcpServers JSON object with exactly one server.",
+    resourcesMCPCreateTitle: "Add MCP Server",
     resourcesMCPDelete: "Delete",
     resourcesMCPDeleteConfirmMessage: 'Delete MCP server "{name}"?',
     resourcesMCPEmpty: "No MCP servers available yet.",
     resourcesMCPLoading: "Loading MCP servers",
     resourcesMCPSave: "Save",
     resourcesMCPSaving: "Saving...",
+    resourcesMCPManualTab: "Manual configuration",
+    resourcesMCPRemoteInstallAction: "Install",
+    resourcesMCPRemoteInstallTab: "Remote install",
+    resourcesMCPRemoteInstalling: "Installing...",
+    resourcesMCPRemoteReplaceAction: "Replace",
+    resourcesMCPRemoteServersEmpty: "No remote MCP servers yet.",
+    resourcesMCPRemoteServersLoading: "Loading remote MCP servers...",
+    resourcesMCPRemoteServersRefresh: "Refresh",
+    resourcesMCPRemoteServersSearchPlaceholder: "Search remote MCP servers",
     resourcesRefresh: "Refresh templates",
     resourcesSkillsEmpty: "No skills",
     resourcesSkillsLabel: "Skills",
@@ -313,6 +323,67 @@ function renderMCPDetailPane({
   return { ...result, onUpdateMCP };
 }
 
+function renderMCPCreateDialog() {
+  const onInstallRemoteMCP = vi.fn().mockResolvedValue(true);
+  const onRemoteMCPVisibleChange = vi.fn();
+  const remoteMCP = {
+    description: "Calendar tools",
+    id: "builtin:calendar",
+    name: "calendar",
+    protocol: "streamable-http",
+    url: "https://mcp.example.test/calendar",
+  };
+  const result = render(
+    <HubDetailPane
+      locale="en"
+      t={t}
+      onCreateFromTemplate={vi.fn()}
+      hub={{
+        detailPaneProps: {
+          detailLoading: false,
+          error: "",
+          loaded: true,
+          mcpCreateDialogOpen: true,
+          mcpServers: [],
+          onInstallRemoteMCP,
+          onMCPCreateDialogOpenChange: vi.fn(),
+          onRemoteMCPVisibleChange,
+          onRetry: vi.fn(),
+          onSelectSkillFile: vi.fn(),
+          onSelectWorkspaceFile: vi.fn(),
+          remoteMCPInstallBusy: "",
+          remoteMCPServers: [remoteMCP],
+          remoteMCPServersError: "",
+          remoteMCPServersHasMore: false,
+          remoteMCPServersLoading: false,
+          remoteMCPServersLoadingMore: false,
+          remoteMCPServersSearch: "",
+          selectedMCPServer: null,
+          selectedMCPServerName: "",
+          selectedResourceType: "mcp",
+          selectedSkill: null,
+          selectedSkillPath: "",
+          selectedTemplate: null,
+          selectedTemplateId: "",
+          selectedWorkspacePath: "",
+          skillFile: null,
+          skillFileError: "",
+          skillFileLoading: false,
+          skills: [],
+          skillTree: null,
+          skillTreeError: "",
+          skillTreeLoading: false,
+          templates: [],
+          workspaceFile: null,
+          workspaceFileError: "",
+          workspaceFileLoading: false,
+        },
+      }}
+    />,
+  );
+  return { ...result, onInstallRemoteMCP, onRemoteMCPVisibleChange };
+}
+
 describe("HubDetailPane", () => {
   it("groups template details into runtime, instructions, skills, and MCP tabs", async () => {
     const user = userEvent.setup();
@@ -418,5 +489,25 @@ describe("HubDetailPane", () => {
 
     expect(screen.getByRole("dialog")).toHaveTextContent("mcp server already exists: filesystem");
     expect(screen.getAllByText("mcp server already exists: filesystem")).toHaveLength(1);
+  });
+
+  it("installs a remote MCP through the Hub install flow", async () => {
+    const user = userEvent.setup();
+    const { onInstallRemoteMCP, onRemoteMCPVisibleChange } = renderMCPCreateDialog();
+
+    await user.click(screen.getByRole("tab", { name: "Remote install" }));
+
+    expect(onRemoteMCPVisibleChange).toHaveBeenCalledWith(true);
+    expect(screen.getByText("calendar")).toBeInTheDocument();
+    expect(screen.getByText("Calendar tools")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Install" }));
+
+    expect(onInstallRemoteMCP).toHaveBeenCalledWith({
+      description: "Calendar tools",
+      id: "builtin:calendar",
+      name: "calendar",
+      protocol: "streamable-http",
+      url: "https://mcp.example.test/calendar",
+    });
   });
 });

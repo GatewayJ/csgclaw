@@ -4,7 +4,8 @@ import { fetchAgentProfileModels, fetchAgentWorkspace, fetchAgentWorkspaceFile, 
 import type { AgentProfileModelRequest } from "@/api/agents";
 import { fetchBootstrap, fetchBootstrapConfig, fetchRuntimeImages, fetchVersion } from "@/api/app";
 import type { FetchVersionOptions } from "@/api/app";
-import { fetchMCPServers } from "@/api/mcp";
+import { fetchMCPServers, fetchRemoteMCPServersPage } from "@/api/mcp";
+import type { RemoteMCPServersPage } from "@/api/mcp";
 import { fetchHubTemplate, fetchHubTemplates, fetchHubWorkspace, fetchHubWorkspaceFile } from "@/api/hub";
 import { fetchModelProviders } from "@/api/modelProviders";
 import { fetchRemoteSkillsPage, fetchSkillFile, fetchSkills, fetchSkillTree } from "@/api/skills";
@@ -47,6 +48,8 @@ export const workspaceQueryKeys = {
   runtimeImages: () => [WORKSPACE_QUERY_SCOPE, "runtime-images"] as const,
   hubTemplates: () => [WORKSPACE_QUERY_SCOPE, "hub-templates"] as const,
   mcpServers: () => [WORKSPACE_QUERY_SCOPE, "mcp-servers"] as const,
+  remoteMCPServers: (search: string | null | undefined = "") =>
+    [WORKSPACE_QUERY_SCOPE, "remote-mcp-servers", String(search || "").trim()] as const,
   hubTemplate: (templateID: string | null | undefined) =>
     [WORKSPACE_QUERY_SCOPE, "hub-template", templateID || ""] as const,
   hubWorkspace: (templateID: string | null | undefined, workspacePath: string | null | undefined) =>
@@ -205,6 +208,19 @@ export function useWorkspaceMCPServersQuery(): UseQueryResult<JSONRecord> {
   return useQuery<JSONRecord>({
     queryKey: workspaceQueryKeys.mcpServers(),
     queryFn: fetchMCPServers,
+  });
+}
+
+export function useWorkspaceRemoteMCPServersQuery(search = "", options: { enabled?: boolean } = {}) {
+  const normalizedSearch = String(search || "").trim();
+  return useInfiniteQuery<RemoteMCPServersPage>({
+    queryKey: workspaceQueryKeys.remoteMCPServers(normalizedSearch),
+    queryFn: ({ pageParam }) =>
+      fetchRemoteMCPServersPage(typeof pageParam === "number" ? pageParam : Number(pageParam) || 1, normalizedSearch),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.nextPage ?? undefined,
+    enabled: Boolean(options.enabled),
+    retry: 0,
   });
 }
 
