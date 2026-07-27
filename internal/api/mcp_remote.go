@@ -79,7 +79,7 @@ func (h *Handler) handleRemoteMCPServers(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, remoteMCPServersListResponse{
 		Items:    items,
-		NextPage: nextRemoteMCPServersPage(page, per, list.Total, len(items)),
+		NextPage: nextRemoteMCPServersPage(page, per, list.Total, list.RecordCount),
 		Page:     page,
 		Per:      per,
 		Total:    list.Total,

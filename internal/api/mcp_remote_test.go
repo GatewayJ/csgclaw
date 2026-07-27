@@ -73,6 +73,53 @@ enabled = true
 	}
 }
 
+func TestHandleRemoteMCPServersKeepsPagingAfterFilteringMalformedSummaries(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.Query().Get("page"), "1"; got != want {
+			t.Fatalf("page = %q, want %q", got, want)
+		}
+		if got, want := r.URL.Query().Get("per"), "2"; got != want {
+			t.Fatalf("per = %q, want %q", got, want)
+		}
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"builtin:calendar","name":"calendar"},{"name":"missing-id"}]}`)
+	}))
+	t.Cleanup(remote.Close)
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	configText := `[server]
+listen_addr = "127.0.0.1:18080"
+
+[[hub.registries]]
+name = "official"
+kind = "remote"
+url = "` + remote.URL + `"
+token = "hub-token"
+enabled = true
+`
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	handler := &Handler{}
+	handler.SetConfigPath(configPath)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/mcp-servers/remote?per=2", nil)
+	handler.Routes().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var response remoteMCPServersListResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := len(response.Items), 1; got != want {
+		t.Fatalf("len(items) = %d, want %d", got, want)
+	}
+	if response.NextPage == nil || *response.NextPage != 2 {
+		t.Fatalf("NextPage = %#v, want 2", response.NextPage)
+	}
+}
+
 func TestHandleInstallRemoteMCPServerResolvesDetailsServerSide(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

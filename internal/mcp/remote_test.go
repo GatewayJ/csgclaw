@@ -54,11 +54,15 @@ func TestListRemoteServersUsesAgentMCPHubEndpoint(t *testing.T) {
 	}
 }
 
-func TestListRemoteServersAcceptsDirectDataList(t *testing.T) {
+func TestListRemoteServersPreservesExactNumericIDs(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprint(w, `{"data":[{"id":7,"name":"events"}],"total":1}`)
+		_, _ = fmt.Fprint(w, `{"data":[
+			{"id":9007199254740993,"name":"events"},
+			{"id":1.5,"name":"fractional"},
+			{"id":18446744073709551616,"name":"out-of-range"}
+		],"total":3}`)
 	}))
 	t.Cleanup(server.Close)
 
@@ -70,8 +74,11 @@ func TestListRemoteServersAcceptsDirectDataList(t *testing.T) {
 		t.Fatalf("len(Items) = %d, want %d", got, want)
 	}
 	item := page.Items[0]
-	if item.ID != "7" || item.Name != "events" {
-		t.Fatalf("item = %#v, want numeric id and name", item)
+	if item.ID != "9007199254740993" || item.Name != "events" {
+		t.Fatalf("item = %#v, want exact numeric id and name", item)
+	}
+	if got, want := page.RecordCount, 3; got != want {
+		t.Fatalf("RecordCount = %d, want %d", got, want)
 	}
 }
 

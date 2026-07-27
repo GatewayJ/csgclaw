@@ -64,8 +64,11 @@ func (s RemoteServer) Config() map[string]any {
 
 // RemoteServerPage is one page of OpenCSG Hub MCP servers.
 type RemoteServerPage struct {
-	Items []RemoteServer
-	Total *int
+	// RecordCount is the number of upstream records before incomplete entries
+	// are discarded from Items.
+	RecordCount int
+	Items       []RemoteServer
+	Total       *int
 }
 
 // ListRemoteServers lists MCP servers published by an OpenCSG Hub. The caller
@@ -252,7 +255,7 @@ func decodeRemoteServerPage(body []byte) (RemoteServerPage, error) {
 			items = append(items, item)
 		}
 	}
-	return RemoteServerPage{Items: items, Total: total}, nil
+	return RemoteServerPage{Items: items, RecordCount: len(records), Total: total}, nil
 }
 
 func decodeRemoteServerDetail(body []byte) (RemoteServer, error) {
@@ -280,7 +283,7 @@ func decodeRemoteServerDetail(body []byte) (RemoteServer, error) {
 type remoteServerRecord struct {
 	Description string            `json:"description"`
 	Headers     map[string]string `json:"headers"`
-	ID          any               `json:"id"`
+	ID          json.RawMessage   `json:"id"`
 	Name        string            `json:"name"`
 	Protocol    string            `json:"protocol"`
 	URL         string            `json:"url"`
@@ -321,15 +324,24 @@ func remoteServerTransport(value string) string {
 	}
 }
 
-func remoteServerID(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case float64:
-		return strconv.FormatInt(int64(typed), 10)
-	default:
+func remoteServerID(value json.RawMessage) string {
+	value = json.RawMessage(strings.TrimSpace(string(value)))
+	if len(value) == 0 || string(value) == "null" {
 		return ""
 	}
+	var stringID string
+	if err := json.Unmarshal(value, &stringID); err == nil {
+		return strings.TrimSpace(stringID)
+	}
+	var number json.Number
+	if err := json.Unmarshal(value, &number); err != nil {
+		return ""
+	}
+	id := number.String()
+	if _, err := strconv.ParseUint(id, 10, 64); err != nil {
+		return ""
+	}
+	return id
 }
 
 func cloneRemoteServerHeaders(headers map[string]string) map[string]string {
