@@ -10757,10 +10757,15 @@ func TestServiceWorkspaceRootUsesRegisteredRuntimeCapability(t *testing.T) {
 	}
 
 	const runtimeKind = "custom_runtime"
+	infoCalls := 0
 	if err := WithRuntime(fakeAgentRuntime{
 		kind: runtimeKind,
 		workspace: func(agentHome string) string {
 			return filepath.Join(agentHome, ".custom", "workspace")
+		},
+		info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+			infoCalls++
+			return agentruntime.Info{}, nil
 		},
 	})(svc); err != nil {
 		t.Fatalf("WithRuntime() error = %v", err)
@@ -10781,6 +10786,17 @@ func TestServiceWorkspaceRootUsesRegisteredRuntimeCapability(t *testing.T) {
 	want := filepath.Join(agentHome, ".custom", "workspace")
 	if got != want {
 		t.Fatalf("WorkspaceRoot() = %q, want %q", got, want)
+	}
+
+	gotByID, err := svc.WorkspaceRootByID("u-alice")
+	if err != nil {
+		t.Fatalf("WorkspaceRootByID() error = %v", err)
+	}
+	if gotByID != want {
+		t.Fatalf("WorkspaceRootByID() = %q, want %q", gotByID, want)
+	}
+	if infoCalls != 0 {
+		t.Fatalf("WorkspaceRootByID() runtime Info() calls = %d, want 0", infoCalls)
 	}
 
 	skillsRoot, err := svc.SkillsRoot("alice")
