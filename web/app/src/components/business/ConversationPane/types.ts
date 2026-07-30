@@ -36,6 +36,8 @@ export const ConversationWorkingActions = {
   waiting: "waiting",
 } as const;
 
+export type ComposerSendStatus = "failed" | "idle" | "sending";
+
 export type ConversationWorkingAction = (typeof ConversationWorkingActions)[keyof typeof ConversationWorkingActions];
 
 export type ConversationWorkingParticipant = {
@@ -82,6 +84,10 @@ export type ConversationPaneProps = {
   draftSegments: ComposerSegment[];
   draftText: string;
   attachmentDrafts?: AttachmentDraft[];
+  removedAttachmentName?: string;
+  sendError?: string;
+  sendProgress?: number;
+  sendStatus?: ComposerSendStatus;
   editorRef: RefObject<HTMLDivElement | null>;
   inviteActionLabel: string;
   locale: LocaleCode;
@@ -129,9 +135,12 @@ export type ConversationPaneProps = {
   onCloseProfilePreview?: () => void;
   onPreviewUser: (user: IMUser, anchor: HTMLElement) => void;
   onProviderLogin: (provider: string) => VoidOrPromise;
+  onRetrySend?: () => VoidOrPromise;
   onSaveConnectorConfig?: (draft: ConnectorConfigDraft) => VoidOrPromise;
   onSaveGitLabConnectorConfig?: (draft: GitLabConnectorConfigDraft) => VoidOrPromise;
   onSendMessage: () => VoidOrPromise;
+  onStopSend?: () => void;
+  onUndoRemoveAttachment?: () => void;
   onStopWorkingTurn?: (participant: ConversationWorkingParticipant) => VoidOrPromise;
   onSendThreadReply: () => VoidOrPromise;
   onSetThreadSlashIndex?: (index: number) => void;
