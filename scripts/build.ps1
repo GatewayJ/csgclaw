@@ -250,6 +250,8 @@ function Resolve-PnpmRunner {
 }
 
 function Assert-WebToolchain {
+    param([Parameter(Mandatory = $true)][string]$PnpmWorkingDirectory)
+
     $node = Get-CommandPathOrNull "node"
     if ($null -eq $node) {
         throw "Node.js >=22.13.0 and <25 is required for the Web UI. Install a supported Node.js version first."
@@ -260,7 +262,13 @@ function Assert-WebToolchain {
         throw "Node.js >=22.13.0 and <25 is required for the Web UI; current node is $nodeVersion."
     }
 
-    $runner = Resolve-PnpmRunner
+    Push-Location $PnpmWorkingDirectory
+    try {
+        $runner = Resolve-PnpmRunner
+    }
+    finally {
+        Pop-Location
+    }
     Write-Host "Web toolchain OK: Node.js $nodeVersion, pnpm $($runner.Version)"
     return $runner
 }
@@ -268,15 +276,23 @@ function Assert-WebToolchain {
 function Invoke-Pnpm {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [hashtable]$Env = @{}
     )
-    $runner = Resolve-PnpmRunner
-    Invoke-Checked -FilePath $runner.FilePath -Arguments ($runner.Prefix + $Arguments) -Env $Env
+
+    Push-Location $WorkingDirectory
+    try {
+        $runner = Resolve-PnpmRunner
+        Invoke-Checked -FilePath $runner.FilePath -Arguments ($runner.Prefix + $Arguments) -Env $Env
+    }
+    finally {
+        Pop-Location
+    }
 }
 
 function Ensure-WebDeps {
     Ensure-WebLayout
-    Assert-WebToolchain | Out-Null
+    Assert-WebToolchain -PnpmWorkingDirectory $script:WebAppDir | Out-Null
 
     $viteUnix = Join-Path $script:WebAppDir "node_modules/.bin/vite"
     $viteWindows = Join-Path $script:WebAppDir "node_modules/.bin/vite.cmd"
@@ -296,9 +312,9 @@ function Ensure-DesktopDeps {
         }
     }
 
-    Assert-WebToolchain | Out-Null
+    Assert-WebToolchain -PnpmWorkingDirectory $script:DesktopDir | Out-Null
     Write-Host "Checking Electron Desktop dependencies..."
-    Invoke-Pnpm -Arguments @("--dir", $script:DesktopDir, "install", "--frozen-lockfile")
+    Invoke-Pnpm -WorkingDirectory $script:DesktopDir -Arguments @("install", "--frozen-lockfile")
 }
 
 function Invoke-TargetHelp {
@@ -349,20 +365,20 @@ function Invoke-TargetTest {
 }
 
 function Invoke-TargetCheckWebToolchain {
-    Assert-WebToolchain | Out-Null
+    Assert-WebToolchain -PnpmWorkingDirectory $script:WebAppDir | Out-Null
 }
 
 function Invoke-TargetWebInstall {
     Ensure-WebLayout
-    Assert-WebToolchain | Out-Null
+    Assert-WebToolchain -PnpmWorkingDirectory $script:WebAppDir | Out-Null
     Write-Host "Installing Web UI dependencies in $script:WebAppDir."
     Write-Host "If this appears stuck on registry downloads, check npm registry network/proxy access."
-    Invoke-Pnpm -Arguments @("--dir", $script:WebAppDir, "install", "--frozen-lockfile")
+    Invoke-Pnpm -WorkingDirectory $script:WebAppDir -Arguments @("install", "--frozen-lockfile")
 }
 
 function Invoke-TargetWebDev {
     Ensure-WebDeps
-    Invoke-Pnpm -Arguments @("--dir", $script:WebAppDir, "dev")
+    Invoke-Pnpm -WorkingDirectory $script:WebAppDir -Arguments @("dev")
 }
 
 function Invoke-TargetBuildWeb {
@@ -376,7 +392,7 @@ function Invoke-TargetBuildWeb {
     }
     Ensure-WebDeps
     Ensure-Directory -Path $script:WebStaticDistDir
-    $arguments = @("--dir", $script:WebAppDir)
+    $arguments = @()
     if ($Summary) {
         $arguments += "--silent"
     }
@@ -384,7 +400,7 @@ function Invoke-TargetBuildWeb {
     if ($Summary) {
         $arguments += @("--logLevel", "warn")
     }
-    Invoke-Pnpm -Arguments $arguments
+    Invoke-Pnpm -WorkingDirectory $script:WebAppDir -Arguments $arguments
     $indexPath = Join-Path $script:WebStaticDistDir "index.html"
     if (-not (Test-Path -LiteralPath $indexPath -PathType Leaf)) {
         throw "Web UI build did not produce $indexPath."
@@ -745,7 +761,7 @@ function Invoke-TargetDesktopPackage {
     if (-not [string]::IsNullOrWhiteSpace($WindowsChannel)) {
         $packageEnvironment["CSGCLAW_DESKTOP_WINDOWS_CHANNEL"] = $WindowsChannel
     }
-    Invoke-Pnpm -Arguments @("--dir", $script:DesktopDir, "--silent", "make", "--platform=win32", "--arch=$desktopArch") -Env $packageEnvironment
+    Invoke-Pnpm -WorkingDirectory $script:DesktopDir -Arguments @("--silent", "make", "--platform=win32", "--arch=$desktopArch") -Env $packageEnvironment
 
     $packages = @(
         Get-ChildItem -LiteralPath $script:DesktopMakeDir -Recurse -File -ErrorAction SilentlyContinue |
