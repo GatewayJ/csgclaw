@@ -1016,6 +1016,261 @@ func TestAppServerEventAdapterStructuredOutputRawAndLegacyRoutes(t *testing.T) {
 	}
 }
 
+func TestAppServerEventAdapterStreamsAgentMessageDeltasWithoutCompletedDuplicate(t *testing.T) {
+	manager, live, sink := testAppServerEventAdapter(t)
+	waiter, err := live.registerAppServerTurnWaiter("main-thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/started",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id": "msg-1", "type": "agentMessage", "phase": "final_answer",
+			},
+		}),
+	})
+	for _, delta := range []string{"hello", " world"} {
+		manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+			Method: "item/agentMessage/delta",
+			Params: mustJSONRaw(t, map[string]any{
+				"threadId": "main-thread",
+				"turnId":   "turn-1",
+				"itemId":   "msg-1",
+				"delta":    delta,
+			}),
+		})
+	}
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/completed",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id":   "msg-1",
+				"type": "agentMessage",
+				"text": "hello world",
+			},
+		}),
+	})
+
+	events := sink.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want only two agent message deltas", events)
+	}
+	if events[0].Text != "hello" || events[1].Text != " world" {
+		t.Fatalf("events = %#v, want ordered text deltas", events)
+	}
+	for _, event := range events {
+		if event.Kind != SessionEventTextDelta ||
+			event.SessionID != "main-thread" ||
+			event.TurnID != "turn-1" ||
+			event.MessageID != "msg-1" ||
+			event.Payload.(map[string]any)["phase"] != "final_answer" {
+			t.Fatalf("event = %#v, want scoped agent message delta", event)
+		}
+	}
+	completed := false
+	for len(waiter.ch) > 0 {
+		result := <-waiter.ch
+		completed = completed || result.success
+	}
+	if !completed {
+		t.Fatal("item/completed without phase did not finish the final-answer turn")
+	}
+	if phase := live.agentMessagePhase("msg-1"); phase != "" || live.hasStreamedAgentMessage("msg-1") {
+		t.Fatalf("completed agent message retained stream state: phase=%q streamed=%v", phase, live.hasStreamedAgentMessage("msg-1"))
+	}
+}
+
+func TestAppServerEventAdapterDoesNotClassifyUnknownAgentDeltaAsFinal(t *testing.T) {
+	manager, live, sink := testAppServerEventAdapter(t)
+
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/agentMessage/delta",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turnId":   "turn-1",
+			"itemId":   "msg-1",
+			"delta":    "unclassified",
+		}),
+	})
+
+	events := sink.snapshot()
+	if len(events) != 1 || events[0].Payload.(map[string]any)["phase"] != "unknown" {
+		t.Fatalf("events = %#v, want unknown phase preserved for downstream filtering", events)
+	}
+}
+
+func TestAppServerEventAdapterFallsBackToCompletedFinalAfterUnknownDelta(t *testing.T) {
+	manager, live, sink := testAppServerEventAdapter(t)
+
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/agentMessage/delta",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread", "turnId": "turn-1", "itemId": "msg-1", "delta": "answer",
+		}),
+	})
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/completed",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id": "msg-1", "type": "agentMessage", "phase": "final_answer", "text": "answer",
+			},
+		}),
+	})
+
+	events := sink.snapshot()
+	if len(events) != 2 ||
+		events[0].Payload.(map[string]any)["phase"] != "unknown" ||
+		events[1].Payload.(map[string]any)["phase"] != "final_answer" {
+		t.Fatalf("events = %#v, want unknown delta followed by completed final fallback", events)
+	}
+}
+
+func TestAppServerEventAdapterDecodesStructuredOutputAfterStreamedDeltas(t *testing.T) {
+	manager, live, sink := testAppServerEventAdapter(t)
+	record := `::csgclaw-output::resource_link {"type":"resource_link","name":"example","uri":"https://example.com"}`
+
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/agentMessage/delta",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread", "turnId": "turn-1", "itemId": "msg-1", "delta": record,
+		}),
+	})
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/completed",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id": "msg-1", "type": "agentMessage", "phase": "final_answer", "text": record,
+			},
+		}),
+	})
+
+	events := sink.snapshot()
+	if len(events) != 1 || events[0].Kind != SessionEventStructuredOutput {
+		t.Fatalf("events = %#v, want decoded structured artifact without raw text delta", events)
+	}
+}
+
+func TestAppServerEventAdapterKeepsLegacyFinalAfterUnclassifiedTypedDeltas(t *testing.T) {
+	manager, live, sink := testAppServerEventAdapter(t)
+
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "codex/event",
+		Params: mustJSONRaw(t, map[string]any{"type": "task_started"}),
+	})
+	for _, delta := range []string{"mixed", " protocol"} {
+		manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+			Method: "item/agentMessage/delta",
+			Params: mustJSONRaw(t, map[string]any{
+				"threadId": "main-thread",
+				"turnId":   "turn-1",
+				"itemId":   "msg-1",
+				"delta":    delta,
+			}),
+		})
+	}
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "codex/event",
+		Params: mustJSONRaw(t, map[string]any{
+			"type":    "agent_message",
+			"message": "mixed protocol",
+			"phase":   "final_answer",
+		}),
+	})
+
+	events := sink.snapshot()
+	if len(events) != 3 ||
+		events[0].Payload.(map[string]any)["phase"] != "unknown" ||
+		events[1].Payload.(map[string]any)["phase"] != "unknown" ||
+		events[2].Payload.(map[string]any)["phase"] != "final_answer" {
+		t.Fatalf("events = %#v, want unclassified typed deltas followed by legacy final", events)
+	}
+	if live.appProtocol != appServerProtocolLegacy {
+		t.Fatalf("protocol = %q, want legacy connection classification", live.appProtocol)
+	}
+}
+
+func TestAppServerEventAdapterSuppressesResponseItemFinalAfterTypedFinalDeltas(t *testing.T) {
+	manager, live, sink := testAppServerEventAdapter(t)
+
+	for _, delta := range []string{"hello", " world"} {
+		manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+			Method: "item/agentMessage/delta",
+			Params: mustJSONRaw(t, map[string]any{
+				"threadId": "main-thread",
+				"turnId":   "turn-1",
+				"itemId":   "msg-1",
+				"phase":    "final_answer",
+				"delta":    delta,
+			}),
+		})
+	}
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "codex/response_item",
+		Params: mustJSONRaw(t, map[string]any{
+			"type":  "message",
+			"id":    "msg-1",
+			"role":  "assistant",
+			"phase": "final_answer",
+			"content": []map[string]any{
+				{"type": "output_text", "text": "hello world"},
+			},
+		}),
+	})
+
+	events := sink.snapshot()
+	if len(events) != 2 || events[0].Text != "hello" || events[1].Text != " world" {
+		t.Fatalf("events = %#v, want typed deltas without response_item duplicate", events)
+	}
+}
+
+func TestAppServerEventAdapterHandlesRawTurnCompletedOnLegacyConnection(t *testing.T) {
+	manager, live, _ := testAppServerEventAdapter(t)
+	waiter, err := live.registerAppServerTurnWaiter("main-thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "codex/event",
+		Params: mustJSONRaw(t, map[string]any{"type": "task_started"}),
+	})
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/agentMessage/delta",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread", "turnId": "turn-1", "itemId": "msg-1", "delta": "answer",
+		}),
+	})
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "turn/completed",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turn":     map[string]any{"id": "turn-1", "status": "completed"},
+		}),
+	})
+
+	completed := false
+	for len(waiter.ch) > 0 {
+		result := <-waiter.ch
+		completed = completed || result.success
+	}
+	if !completed {
+		t.Fatal("raw turn/completed was ignored after legacy protocol classification")
+	}
+	if live.appProtocol != appServerProtocolLegacy {
+		t.Fatalf("protocol = %q, want legacy classification retained", live.appProtocol)
+	}
+}
+
 func TestAppServerEventAdapterAccumulatesCanonicalCommandOutputDeltas(t *testing.T) {
 	t.Parallel()
 
