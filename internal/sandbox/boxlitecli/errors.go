@@ -44,6 +44,14 @@ func wrapRunError(op string, result CommandResult, err error) error {
 			Err:      err,
 		})
 	}
+	if isBusy(stderr) {
+		return fmt.Errorf("%s: %w: %w", op, sandbox.ErrBusy, &ExitError{
+			Op:       op,
+			ExitCode: result.ExitCode,
+			Stderr:   stderr,
+			Err:      err,
+		})
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) || result.ExitCode != 0 {
 		return &ExitError{
@@ -59,4 +67,10 @@ func wrapRunError(op string, result CommandResult, err error) error {
 func isNotFound(stderr string) bool {
 	text := strings.ToLower(stderr)
 	return strings.Contains(text, "no such box") || strings.Contains(text, "not found")
+}
+
+func isBusy(stderr string) bool {
+	text := strings.ToLower(stderr)
+	return strings.Contains(text, "failed to acquire runtime lock") ||
+		strings.Contains(text, "another boxliteruntime is already using directory")
 }

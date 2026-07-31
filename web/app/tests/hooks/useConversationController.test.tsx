@@ -309,6 +309,42 @@ describe("useConversationController", () => {
     expect(result.current.conversationViewProps.threadError).toBe("conversationAgentOffline");
   });
 
+  it("queues a message when a running gateway is temporarily degraded", async () => {
+    apiMocks.sendMessageRequest.mockResolvedValue({
+      id: "msg-user",
+      content: "hi",
+      created_at: "2026-07-30T04:00:00Z",
+      sender_id: "u-admin",
+    });
+    const { result } = renderConversationController({
+      agents: [
+        {
+          id: "u-demo",
+          name: "demo",
+          role: "worker",
+          runtime_kind: "picoclaw_sandbox",
+          status: "running",
+          runtime: {
+            state: "running",
+            availability: { state: "degraded", expires_at: "2099-01-01T00:00:00Z" },
+          },
+        },
+      ],
+    });
+    const editor = document.createElement("div");
+    editor.textContent = "hi";
+    act(() => {
+      result.current.conversationViewProps.editorRef.current = editor;
+      result.current.conversationViewProps.onSyncComposer();
+    });
+
+    await act(async () => {
+      await result.current.conversationViewProps.onSendMessage();
+    });
+
+    expect(apiMocks.sendMessageRequest).toHaveBeenCalledOnce();
+  });
+
   it("shows the specific manager runtime warning when sending is blocked", async () => {
     const { result } = renderConversationController({
       managerRuntimeUnavailable: true,

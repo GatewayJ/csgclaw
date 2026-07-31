@@ -255,6 +255,23 @@ func TestNotFoundErrorsMapToSandboxNotFound(t *testing.T) {
 	}
 }
 
+func TestUnavailableErrorsMapToSandboxUnavailable(t *testing.T) {
+	runner := &fakeRunner{
+		results: []fakeResult{{
+			result: CommandResult{Stderr: []byte("error during connect: open //./pipe/docker_engine: The system cannot find the file specified\n"), ExitCode: 1},
+			err:    &exec.ExitError{},
+		}},
+	}
+	rt, err := NewProvider(WithRunner(runner)).Open(context.Background(), "/tmp/x")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	_, err = rt.Get(context.Background(), "box")
+	if !sandbox.IsUnavailable(err) {
+		t.Fatalf("Get() error = %v, want sandbox unavailable", err)
+	}
+}
+
 func TestNilHandles(t *testing.T) {
 	ctx := context.Background()
 	rt := (*Runtime)(nil)

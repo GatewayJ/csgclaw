@@ -441,6 +441,18 @@ func (r *Runtime) State(ctx context.Context, h agentruntime.Handle) (agentruntim
 }
 
 func (r *Runtime) Info(_ context.Context, h agentruntime.Handle) (agentruntime.Info, error) {
+	// The in-process app-server owns a live session while this Runtime is
+	// running. Prefer it over runtime.json so a concurrent metadata rewrite (or
+	// delayed filesystem visibility) cannot briefly turn a healthy session into
+	// a missing runtime in the agent roster.
+	if session, err := r.sessionManager().LiveSession(SessionHandle{RuntimeID: strings.TrimSpace(h.RuntimeID)}); err == nil && session != nil && processAlive(session.ProcessID) {
+		return agentruntime.Info{
+			HandleID:  strings.TrimSpace(session.SessionID),
+			State:     agentruntime.StateRunning,
+			CreatedAt: session.CreatedAt,
+		}, nil
+	}
+
 	meta, err := r.readRuntimeMetadata(h.RuntimeID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

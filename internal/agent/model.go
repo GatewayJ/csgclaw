@@ -41,6 +41,11 @@ type Agent struct {
 	AgentProfile     AgentProfile             `json:"agent_profile,omitempty"`
 	ProfileComplete  bool                     `json:"profile_complete"`
 	DetectionResults []ProfileDetectionResult `json:"detection_results,omitempty"`
+	// Availability is a transient observation of whether a running runtime can
+	// accept work. It is deliberately excluded from the persisted agent record:
+	// lifecycle state is durable, while readiness may change between probes.
+	Availability   *RuntimeAvailability `json:"-"`
+	StartupPending bool                 `json:"-"`
 }
 
 // AgentMetadata is the persisted identity and capability metadata for an agent.
@@ -636,5 +641,6 @@ func cloneAgent(src *Agent) *Agent {
 	dst.DetectionResults = append([]ProfileDetectionResult(nil), src.DetectionResults...)
 	dst.RuntimeOptions = utils.CloneAnyMap(src.RuntimeOptions)
 	dst.MCPServers = cloneMCPServers(src.MCPServers)
+	dst.Availability = cloneRuntimeAvailability(src.Availability)
 	return &dst
 }

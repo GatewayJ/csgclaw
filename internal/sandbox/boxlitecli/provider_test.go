@@ -393,6 +393,30 @@ func TestNotFoundErrorsMapToSandboxNotFound(t *testing.T) {
 	}
 }
 
+func TestBusyErrorsMapToSandboxBusy(t *testing.T) {
+	for _, stderr := range []string{
+		"Error: internal error: Failed to acquire runtime lock at /tmp/boxlite\n",
+		"Error: internal error: Another BoxliteRuntime is already using directory: /tmp/boxlite\n",
+	} {
+		t.Run(strings.TrimSpace(stderr), func(t *testing.T) {
+			runner := &fakeRunner{
+				results: []fakeResult{{
+					result: CommandResult{Stderr: []byte(stderr), ExitCode: 1},
+					err:    &exec.ExitError{},
+				}},
+			}
+			rt, err := NewProvider(WithRunner(runner)).Open(context.Background(), "/tmp/boxlite-home")
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			_, err = rt.Get(context.Background(), "box")
+			if !sandbox.IsBusy(err) {
+				t.Fatalf("Get() error = %v, want sandbox busy", err)
+			}
+		})
+	}
+}
+
 func TestUnsupportedStopOptions(t *testing.T) {
 	inst := &Instance{runtime: &Runtime{path: "boxlite", homeDir: "/tmp/home", runner: &fakeRunner{}}, idOrName: "box-id"}
 	if err := inst.Stop(context.Background(), sandbox.StopOptions{Force: true}); err == nil || !strings.Contains(err.Error(), "force stop") {

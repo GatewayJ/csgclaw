@@ -100,9 +100,20 @@ export type AgentRuntimeLike = {
   name?: RuntimeName | null;
   sandbox_enabled?: boolean | null;
   state?: string | null;
+  availability?: AgentRuntimeAvailabilityLike | null;
+  startup_pending?: boolean | null;
   sandbox_id?: string | null;
   options?: JSONRecord | null;
   option_schemas?: RuntimeOptionSchema[] | null;
+};
+
+// Availability is an ephemeral application-readiness observation. It is
+// deliberately distinct from runtime.state, which is the durable lifecycle.
+export type AgentRuntimeAvailabilityLike = {
+  state?: string | null;
+  checked_at?: string | null;
+  expires_at?: string | null;
+  reason?: string | null;
 };
 
 export type AgentLike = AgentProfileLike & {
@@ -296,6 +307,37 @@ export function agentSandboxEnabled(item: AgentLike | AgentProfileLike | null | 
 
 export function agentRuntimeState(item: AgentLike | null | undefined): string {
   return String(item?.runtime?.state || item?.status || "").trim();
+}
+
+export function agentRuntimeAvailabilityState(item: AgentLike | null | undefined): string {
+  return String(item?.runtime?.availability?.state || "")
+    .trim()
+    .toLowerCase();
+}
+
+export function agentRuntimeAvailabilityExpiresAt(item: AgentLike | null | undefined): number | null {
+  const value = String(item?.runtime?.availability?.expires_at || "").trim();
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// Startup recovery is owned by the server. It is distinct from lifecycle and
+// readiness, and only exists while persisted worker runtimes are restored.
+export function isAgentRuntimeStartupPending(item: AgentLike | null | undefined): boolean {
+  return item?.runtime?.startup_pending === true;
+}
+
+// A missing expiry preserves backward compatibility with older API responses.
+// New responses always include expires_at for an observed availability state.
+export function isAgentGatewayDegraded(item: AgentLike | null | undefined, now = Date.now()): boolean {
+  if (agentRuntimeAvailabilityState(item) !== "degraded") {
+    return false;
+  }
+  const expiresAt = agentRuntimeAvailabilityExpiresAt(item);
+  return expiresAt == null || now < expiresAt;
 }
 
 export function agentRuntimeSandboxID(item: AgentLike | null | undefined): string {
@@ -897,6 +939,9 @@ export function agentStatusLabel(status: unknown, t: TranslateFn): string {
     .toLowerCase();
   if (normalized === "running" || normalized === "online") {
     return t("online");
+  }
+  if (normalized === "starting") {
+    return t("agentStatusStarting");
   }
   if (normalized === "offline" || normalized === "stopped" || normalized === "exited") {
     return t("offline");
@@ -1766,12 +1811,18 @@ function envRowsToMapForCompare(rows: readonly EnvKeyValueRow[] | null | undefin
   };
 }
 
-export function isAgentRunning(item: AgentLike | null | undefined): boolean {
+export function isAgentLifecycleRunning(item: AgentLike | null | undefined): boolean {
   if (isNotificationBotAgent(item)) {
     return item?.available === true;
   }
   const status = agentRuntimeState(item).toLowerCase();
   return status === "running" || status === "online";
+}
+
+// isAgentRunning is retained for existing lifecycle consumers. New callers
+// should use isAgentLifecycleRunning to make that choice explicit.
+export function isAgentRunning(item: AgentLike | null | undefined): boolean {
+  return isAgentLifecycleRunning(item);
 }
 
 export function isAgentRuntimeUnavailable(item: AgentLike | null | undefined): boolean {

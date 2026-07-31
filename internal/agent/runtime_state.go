@@ -2,17 +2,54 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"csgclaw/internal/config"
 	agentruntime "csgclaw/internal/runtime"
 	"csgclaw/internal/sandbox"
 )
+
+// RuntimeAvailabilityState describes the most recent application-level
+// readiness observation. It is separate from Agent.Status, which remains the
+// durable runtime lifecycle state.
+type RuntimeAvailabilityState string
+
+const (
+	RuntimeAvailabilityUnknown       RuntimeAvailabilityState = "unknown"
+	RuntimeAvailabilityReady         RuntimeAvailabilityState = "ready"
+	RuntimeAvailabilityDegraded      RuntimeAvailabilityState = "degraded"
+	RuntimeAvailabilityNotApplicable RuntimeAvailabilityState = "not_applicable"
+
+	// runtimeAvailabilityMaxAge bounds how long a transient readiness failure
+	// may influence the roster or gateway-warning UI without a new probe.
+	runtimeAvailabilityMaxAge = 30 * time.Second
+)
+
+// RuntimeAvailability is intentionally ephemeral. CheckedAt lets clients
+// distinguish a fresh readiness result from a lifecycle-only listing.
+type RuntimeAvailability struct {
+	State     RuntimeAvailabilityState
+	CheckedAt time.Time
+	ExpiresAt time.Time
+	Reason    string
+	handleID  string
+}
+
+func cloneRuntimeAvailability(src *RuntimeAvailability) *RuntimeAvailability {
+	if src == nil {
+		return nil
+	}
+	out := *src
+	return &out
+}
 
 type RuntimeView struct {
 	AgentID       string
@@ -180,6 +217,22 @@ func (s *Service) Runtime(kind string) (agentruntime.Runtime, error) {
 	return s.runtimeForKind(kind)
 }
 
+// Inspect returns an agent with its durable lifecycle state refreshed and, for
+// runtimes that support it, a fresh readiness observation. It is intentionally
+// separate from Agent and ListContext so identity and registry callers do not
+// accidentally turn a metadata read into a gateway health probe.
+func (s *Service) Inspect(ctx context.Context, id string) (Agent, bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	a, ok := s.agentSnapshot(id)
+	if !ok {
+		return Agent{}, false
+	}
+	a = s.withRuntimeImageMigrationStatus(ctx, s.hydrateAgentStatus(ctx, a))
+	return s.withConfiguredAgentStartupStatus(s.refreshRuntimeAvailability(ctx, a)), true
+}
+
 func (s *Service) WorkspaceRoot(agentName string) (string, error) {
 	got, ok := s.agentSnapshotByName(agentName)
 	if !ok {
@@ -250,6 +303,7 @@ func (s *Service) syncRuntimeHandle(h agentruntime.Handle) error {
 		}
 		current.BoxID = handleID
 		s.agents[agentID] = current
+		s.clearRuntimeAvailabilityLocked(current.ID)
 		s.syncRuntimeRecordLocked(current)
 		changed = true
 	}
@@ -308,6 +362,182 @@ func (s *Service) RuntimeView(ctx context.Context, id string) (RuntimeView, erro
 	return view, nil
 }
 
+func (s *Service) withRuntimeAvailability(a Agent) Agent {
+	if !isGatewayRuntimeKind(strings.TrimSpace(a.RuntimeKind)) ||
+		!strings.EqualFold(strings.TrimSpace(a.Status), string(agentruntime.StateRunning)) {
+		a.Availability = &RuntimeAvailability{State: RuntimeAvailabilityNotApplicable}
+		return a
+	}
+
+	s.mu.RLock()
+	availability, ok := s.availability[canonicalAgentID(a.ID)]
+	s.mu.RUnlock()
+	if !ok {
+		a.Availability = &RuntimeAvailability{State: RuntimeAvailabilityUnknown}
+		return a
+	}
+	if availability.handleID != strings.TrimSpace(a.BoxID) {
+		a.Availability = &RuntimeAvailability{State: RuntimeAvailabilityUnknown}
+		return a
+	}
+	if !availability.ExpiresAt.IsZero() && time.Now().After(availability.ExpiresAt) {
+		a.Availability = &RuntimeAvailability{State: RuntimeAvailabilityUnknown}
+		return a
+	}
+	a.Availability = cloneRuntimeAvailability(&availability)
+	return a
+}
+
+func (s *Service) recordRuntimeAvailability(a Agent, availability RuntimeAvailability) RuntimeAvailability {
+	if s == nil {
+		return availability
+	}
+	agentID := canonicalAgentID(a.ID)
+	if agentID == "" {
+		return availability
+	}
+	availability.State = RuntimeAvailabilityState(strings.TrimSpace(string(availability.State)))
+	availability.Reason = strings.TrimSpace(availability.Reason)
+	availability.handleID = strings.TrimSpace(a.BoxID)
+	if availability.CheckedAt.IsZero() {
+		availability.CheckedAt = time.Now().UTC()
+	} else {
+		availability.CheckedAt = availability.CheckedAt.UTC()
+	}
+	if availability.ExpiresAt.IsZero() {
+		availability.ExpiresAt = availability.CheckedAt.Add(runtimeAvailabilityMaxAge)
+	} else {
+		availability.ExpiresAt = availability.ExpiresAt.UTC()
+	}
+	s.mu.Lock()
+	s.availability[agentID] = availability
+	s.mu.Unlock()
+	return availability
+}
+
+// clearRuntimeAvailabilityLocked drops the observation associated with an
+// agent whose runtime instance is being replaced or removed. The caller must
+// hold s.mu for writing.
+func (s *Service) clearRuntimeAvailabilityLocked(agentID string) {
+	if s == nil {
+		return
+	}
+	delete(s.availability, canonicalAgentID(agentID))
+}
+
+func (s *Service) refreshRuntimeAvailability(ctx context.Context, a Agent) Agent {
+	a = s.withRuntimeAvailability(a)
+	if a.Availability == nil || a.Availability.State == RuntimeAvailabilityNotApplicable {
+		return a
+	}
+
+	runtimeImpl, err := s.runtimeForKind(strings.TrimSpace(a.RuntimeKind))
+	if err != nil {
+		availability := RuntimeAvailability{
+			State:     RuntimeAvailabilityUnknown,
+			CheckedAt: time.Now().UTC(),
+			Reason:    "runtime_unavailable",
+		}
+		availability = s.recordRuntimeAvailability(a, availability)
+		a.Availability = cloneRuntimeAvailability(&availability)
+		return a
+	}
+	checker, ok := runtimeImpl.(agentruntime.ReadinessChecker)
+	if !ok {
+		availability := RuntimeAvailability{
+			State:     RuntimeAvailabilityNotApplicable,
+			CheckedAt: time.Now().UTC(),
+		}
+		availability = s.recordRuntimeAvailability(a, availability)
+		a.Availability = cloneRuntimeAvailability(&availability)
+		return a
+	}
+
+	err = checker.CheckReadiness(ctx, runtimeHandleForAgent(a))
+	availability := runtimeAvailabilityFromReadinessError(err)
+	if err != nil && !errors.Is(err, agentruntime.ErrReadinessNotSupported) {
+		slog.Debug("agent readiness probe failed",
+			"agent_id", strings.TrimSpace(a.ID),
+			"agent_name", strings.TrimSpace(a.Name),
+			"error", err,
+		)
+	}
+	availability = s.recordRuntimeAvailability(a, availability)
+	a.Availability = cloneRuntimeAvailability(&availability)
+	return a
+}
+
+func (s *Service) refreshExpiredDegradedRuntimeAvailability(ctx context.Context, a Agent) Agent {
+	if !s.hasExpiredDegradedRuntimeAvailability(a, time.Now()) {
+		return a
+	}
+	return s.refreshRuntimeAvailability(ctx, a)
+}
+
+func (s *Service) hasExpiredDegradedRuntimeAvailability(a Agent, now time.Time) bool {
+	if s == nil ||
+		!isGatewayRuntimeKind(strings.TrimSpace(a.RuntimeKind)) ||
+		!strings.EqualFold(strings.TrimSpace(a.Status), string(agentruntime.StateRunning)) {
+		return false
+	}
+	s.mu.RLock()
+	availability, ok := s.availability[canonicalAgentID(a.ID)]
+	s.mu.RUnlock()
+	if !ok || availability.State != RuntimeAvailabilityDegraded || availability.handleID != strings.TrimSpace(a.BoxID) {
+		return false
+	}
+	return availability.ExpiresAt.IsZero() || !now.Before(availability.ExpiresAt)
+}
+
+func runtimeAvailabilityFromReadinessError(err error) RuntimeAvailability {
+	availability := RuntimeAvailability{CheckedAt: time.Now().UTC()}
+	switch {
+	case err == nil:
+		availability.State = RuntimeAvailabilityReady
+	case errors.Is(err, agentruntime.ErrReadinessNotSupported):
+		availability.State = RuntimeAvailabilityNotApplicable
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		availability.State = RuntimeAvailabilityUnknown
+		availability.Reason = "probe_timed_out"
+	case sandbox.IsUnavailable(err):
+		availability.State = RuntimeAvailabilityDegraded
+		availability.Reason = "control_plane_unavailable"
+	case sandbox.IsNotFound(err):
+		availability.State = RuntimeAvailabilityUnknown
+		availability.Reason = "runtime_not_found"
+	default:
+		availability.State = RuntimeAvailabilityDegraded
+		availability.Reason = "readiness_failed"
+	}
+	return availability
+}
+
+func (s *Service) recordRuntimeAvailabilityFromLifecycleError(a Agent, err error) {
+	if s == nil || !isGatewayRuntimeKind(strings.TrimSpace(a.RuntimeKind)) || err == nil {
+		return
+	}
+	availability, ok := runtimeAvailabilityFromLifecycleError(err)
+	if !ok {
+		return
+	}
+	_ = s.recordRuntimeAvailability(a, availability)
+}
+
+func runtimeAvailabilityFromLifecycleError(err error) (RuntimeAvailability, bool) {
+	switch {
+	case sandbox.IsUnavailable(err):
+		return RuntimeAvailability{State: RuntimeAvailabilityDegraded, Reason: "control_plane_unavailable"}, true
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return RuntimeAvailability{State: RuntimeAvailabilityUnknown, Reason: "probe_timed_out"}, true
+	case sandbox.IsBusy(err):
+		return RuntimeAvailability{State: RuntimeAvailabilityUnknown, Reason: "runtime_busy"}, true
+	case sandbox.IsNotFound(err):
+		return RuntimeAvailability{State: RuntimeAvailabilityUnknown, Reason: "runtime_not_found"}, true
+	default:
+		return RuntimeAvailability{}, false
+	}
+}
+
 func (s *Service) streamRuntimeHostLogs(ctx context.Context, agentID string, follow bool, lines int, w io.Writer) error {
 	got, ok := s.agentSnapshot(agentID)
 	if !ok {
@@ -343,6 +573,7 @@ func (s *Service) updateRuntimeState(id string, info agentruntime.Info) (Agent, 
 	}
 	delete(s.agents, key)
 	s.agents[current.ID] = current
+	s.clearRuntimeAvailabilityLocked(current.ID)
 	s.syncRuntimeRecordLocked(current)
 	if err := s.saveLocked(); err != nil {
 		return Agent{}, err

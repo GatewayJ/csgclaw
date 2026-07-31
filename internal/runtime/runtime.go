@@ -2,12 +2,18 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"time"
 
 	"csgclaw/internal/config"
 )
+
+// ErrReadinessNotSupported reports that a runtime does not expose a separate
+// application-level readiness signal. Callers must not infer that the runtime
+// is unhealthy from this error; its lifecycle state remains authoritative.
+var ErrReadinessNotSupported = errors.New("runtime readiness check is not supported")
 
 const (
 	KindPicoClawSandbox = "picoclaw_sandbox"
@@ -35,6 +41,14 @@ type Runtime interface {
 
 type LogStreamer interface {
 	StreamLogs(ctx context.Context, h Handle, opts LogOptions) error
+}
+
+// ReadinessChecker is an optional runtime capability for checking whether a
+// running agent can accept work. It is intentionally separate from Info:
+// Info reports lifecycle state, while readiness is an observation that may be
+// transient, slow, or unavailable for a concrete runtime provider.
+type ReadinessChecker interface {
+	CheckReadiness(ctx context.Context, h Handle) error
 }
 
 type ConversationStartActionMode string

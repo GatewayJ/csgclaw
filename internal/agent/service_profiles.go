@@ -1225,6 +1225,7 @@ func (s *Service) persistRecreatedAgent(ctx context.Context, id, image string, i
 	current.ProfileComplete = true
 	delete(s.agents, key)
 	s.agents[current.ID] = current
+	s.clearRuntimeAvailabilityLocked(current.ID)
 	s.syncRuntimeRecordLocked(current)
 	err := s.saveLocked()
 	s.mu.Unlock()

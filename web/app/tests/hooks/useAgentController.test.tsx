@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -227,6 +227,10 @@ function useAgentControllerHarness(
     }
   }, [options.agents]);
 
+  const setAgentsData = useCallback((value: AgentLike[] | ((current: AgentLike[]) => AgentLike[])) => {
+    setAgents((current) => (typeof value === "function" ? value(current) : value));
+  }, []);
+
   const controller = useAgentController({
     activeConversationId: "",
     activePane: options.activePane ?? { type: WorkspacePaneTypes.agent, id: "u-manager" },
@@ -259,9 +263,7 @@ function useAgentControllerHarness(
     selectComputer: vi.fn(),
     selectConversation,
     selectHub: vi.fn(),
-    setAgentsData: (value: AgentLike[] | ((current: AgentLike[]) => AgentLike[])) => {
-      setAgents((current) => (typeof value === "function" ? value(current) : value));
-    },
+    setAgentsData,
     setBootstrapData: (value) => {
       setData((current) => (typeof value === "function" ? value(current) : value));
     },
@@ -448,6 +450,27 @@ describe("useAgentController", () => {
       resolveProfile(profile);
       await Promise.all([pendingAgent, pendingProfile]);
     });
+  });
+
+  it("merges the selected agent readiness observation into the shared agent item", async () => {
+    const inspectedAgent: AgentLike = {
+      ...oldAgent,
+      runtime: {
+        state: "running",
+        availability: {
+          state: "degraded",
+          reason: "control_plane_unavailable",
+          expires_at: "2099-01-01T00:00:00Z",
+        },
+      },
+    };
+    vi.mocked(fetchAgent).mockReset();
+    vi.mocked(fetchAgent).mockResolvedValue(inspectedAgent);
+
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.agentViewProps.item?.runtime?.availability?.state).toBe("degraded"));
+    expect(result.current.agentViewProps.item?.runtime?.availability?.reason).toBe("control_plane_unavailable");
   });
 
   it("refreshes the selected agent detail from a cache-busted agent fetch after upgrade", async () => {

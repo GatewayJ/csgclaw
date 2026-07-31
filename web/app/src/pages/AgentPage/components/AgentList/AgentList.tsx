@@ -1,6 +1,8 @@
 import { SHOW_AGENT_LIFECYCLE_ACTIONS } from "@/shared/constants/agents";
 import {
   agentProfileConfig,
+  isAgentGatewayDegraded,
+  isAgentRuntimeStartupPending,
   agentRuntimeState,
   agentStatusLabel,
   agentModelID,
@@ -131,6 +133,8 @@ export function AgentRow({
   const isManager = item.role === "manager" || item.id === "u-manager";
   const isNotification = isNotificationBotAgent(item);
   const running = isAgentRunning(item);
+  const startupPending = isAgentRuntimeStartupPending(item);
+  const gatewayDegraded = isAgentGatewayDegraded(item);
   const incomplete = isAgentIncomplete(item);
   const restartNeeded = isAgentRestartNeeded(item);
   const upgradeNeeded = isAgentUpgradeNeeded(item);
@@ -146,7 +150,7 @@ export function AgentRow({
         <div className="agent-row-top">
           <span className="agent-name truncate">{item.name}</span>
           <span className={`agent-status ${running ? "running" : ""}`}>
-            {agentStatusLabel(agentRuntimeState(item), t)}
+            {agentStatusLabel(startupPending ? "starting" : agentRuntimeState(item), t)}
           </span>
         </div>
         <div className="agent-meta truncate">
@@ -156,6 +160,7 @@ export function AgentRow({
           <span className={`agent-badge ${incomplete ? "warn" : "ready"}`}>
             {incomplete ? t("profileIncompleteBadge") : t("profileCompleteBadge")}
           </span>
+          {gatewayDegraded ? <span className="agent-badge warn">{t("agentGatewayUnavailable")}</span> : null}
           {upgradeNeeded ? <span className="agent-badge warn">{t("profileUpgradeRequired")}</span> : null}
           {restartNeeded ? <span className="agent-badge warn">{t("profileRestartRequired")}</span> : null}
         </div>

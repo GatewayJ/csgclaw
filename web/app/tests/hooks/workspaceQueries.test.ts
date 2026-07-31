@@ -2,6 +2,8 @@ import {
   WORKSPACE_AGENTS_SETTLE_POLL_INTERVAL_MS,
   WORKSPACE_AGENTS_STARTUP_POLL_INTERVAL_MS,
   WORKSPACE_AGENTS_STARTUP_POLL_WINDOW_MS,
+  workspaceAgentsAvailabilityRefetchInterval,
+  workspaceAgentsRefetchInterval,
   workspaceAgentsStartupRefetchInterval,
 } from "@/hooks/workspace/workspaceQueries";
 import type { AgentLike } from "@/models/agents";
@@ -36,9 +38,55 @@ describe("workspaceAgentsStartupRefetchInterval", () => {
     );
   });
 
+  it("keeps polling while the server reports a configured runtime restore", () => {
+    expect(
+      workspaceAgentsStartupRefetchInterval(
+        [manager("running"), { id: "u-alice", runtime: { startup_pending: true } }],
+        1_000,
+      ),
+    ).toBe(WORKSPACE_AGENTS_STARTUP_POLL_INTERVAL_MS);
+  });
+
   it("stops after the two-minute startup window", () => {
     expect(workspaceAgentsStartupRefetchInterval([manager("stopped")], WORKSPACE_AGENTS_STARTUP_POLL_WINDOW_MS)).toBe(
       false,
+    );
+  });
+});
+
+describe("workspaceAgentsAvailabilityRefetchInterval", () => {
+  const availabilityExpiresAt = "2026-07-30T04:30:00Z";
+  const runningGateway: AgentLike = {
+    ...manager("running"),
+    runtime: { availability: { state: "degraded", expires_at: availabilityExpiresAt } },
+  };
+
+  it("refreshes when the most recent availability observation expires", () => {
+    expect(workspaceAgentsAvailabilityRefetchInterval([runningGateway], Date.parse("2026-07-30T04:29:00Z"))).toBe(
+      60_000,
+    );
+    expect(workspaceAgentsAvailabilityRefetchInterval([runningGateway], Date.parse("2026-07-30T04:30:01Z"))).toBe(
+      1_000,
+    );
+  });
+
+  it("does not add background polling for ready or not-applicable observations", () => {
+    expect(
+      workspaceAgentsAvailabilityRefetchInterval([
+        { ...runningGateway, runtime: { availability: { state: "ready", expires_at: availabilityExpiresAt } } },
+        {
+          ...runningGateway,
+          runtime: { availability: { state: "not_applicable", expires_at: availabilityExpiresAt } },
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("combines availability expiry with startup polling without increasing the poll interval", () => {
+    const startingGateway = { ...runningGateway, status: "stopped" };
+    expect(workspaceAgentsRefetchInterval([startingGateway], 1_000, Date.parse("2026-07-30T04:29:59Z"))).toBe(1_000);
+    expect(workspaceAgentsRefetchInterval([startingGateway], 1_000, Date.parse("2026-07-30T04:29:00Z"))).toBe(
+      WORKSPACE_AGENTS_STARTUP_POLL_INTERVAL_MS,
     );
   });
 });

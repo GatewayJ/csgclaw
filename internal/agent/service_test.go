@@ -163,6 +163,18 @@ type fakeClosableAgentRuntime struct {
 	close func() error
 }
 
+type fakeReadinessAgentRuntime struct {
+	fakeAgentRuntime
+	readiness func(context.Context, agentruntime.Handle) error
+}
+
+func (f fakeReadinessAgentRuntime) CheckReadiness(ctx context.Context, h agentruntime.Handle) error {
+	if f.readiness != nil {
+		return f.readiness(ctx, h)
+	}
+	return agentruntime.ErrReadinessNotSupported
+}
+
 func (f *fakeClosableAgentRuntime) Close() error {
 	if f.close != nil {
 		return f.close()
@@ -5569,7 +5581,7 @@ func TestListKeepsLastKnownStatusWhenHydrationFails(t *testing.T) {
 	}
 }
 
-func TestListContextMarksTimedOutGatewayRuntimeUnavailable(t *testing.T) {
+func TestListContextKeepsRunningWhenGatewayLifecycleReadTimesOut(t *testing.T) {
 	svc, err := NewService(
 		config.ModelConfig{},
 		config.ServerConfig{},
@@ -5606,12 +5618,15 @@ func TestListContextMarksTimedOutGatewayRuntimeUnavailable(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("ListContext() len = %d, want 1", len(got))
 	}
-	if got[0].Status != StatusRuntimeUnavailable {
-		t.Fatalf("ListContext()[0].Status = %q, want %q", got[0].Status, StatusRuntimeUnavailable)
+	if got[0].Status != string(sandbox.StateRunning) {
+		t.Fatalf("ListContext()[0].Status = %q, want running", got[0].Status)
+	}
+	if got[0].Availability == nil || got[0].Availability.State != RuntimeAvailabilityUnknown {
+		t.Fatalf("ListContext()[0].Availability = %#v, want unknown", got[0].Availability)
 	}
 }
 
-func TestListContextMarksDockerDaemonUnavailable(t *testing.T) {
+func TestListContextKeepsRunningWhenDockerDaemonIsUnavailable(t *testing.T) {
 	svc, err := NewService(
 		config.ModelConfig{},
 		config.ServerConfig{},
@@ -5620,7 +5635,7 @@ func TestListContextMarksDockerDaemonUnavailable(t *testing.T) {
 		WithRuntime(fakeAgentRuntime{
 			kind: RuntimeKindPicoClawSandbox,
 			info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
-				return agentruntime.Info{}, fmt.Errorf("inspect sandbox: docker exited with code 1: error during connect: open //./pipe/docker_engine: The system cannot find the file specified")
+				return agentruntime.Info{}, fmt.Errorf("inspect sandbox: %w", sandbox.ErrUnavailable)
 			},
 		}),
 	)
@@ -5641,12 +5656,18 @@ func TestListContextMarksDockerDaemonUnavailable(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("ListContext() len = %d, want 1", len(got))
 	}
-	if got[0].Status != StatusRuntimeUnavailable {
-		t.Fatalf("ListContext()[0].Status = %q, want %q", got[0].Status, StatusRuntimeUnavailable)
+	if got[0].Status != string(sandbox.StateRunning) {
+		t.Fatalf("ListContext()[0].Status = %q, want running", got[0].Status)
+	}
+	if got[0].Availability == nil || got[0].Availability.State != RuntimeAvailabilityDegraded {
+		t.Fatalf("ListContext()[0].Availability = %#v, want degraded", got[0].Availability)
+	}
+	if got[0].Availability.Reason != "control_plane_unavailable" {
+		t.Fatalf("ListContext()[0].Availability.Reason = %q, want control_plane_unavailable", got[0].Availability.Reason)
 	}
 }
 
-func TestListContextMarksDockerGatewayReadinessUnavailable(t *testing.T) {
+func TestListContextKeepsRunningWhenGatewayReadinessCannotBeRead(t *testing.T) {
 	svc, err := NewService(
 		config.ModelConfig{},
 		config.ServerConfig{},
@@ -5676,45 +5697,245 @@ func TestListContextMarksDockerGatewayReadinessUnavailable(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("ListContext() len = %d, want 1", len(got))
 	}
-	if got[0].Status != StatusRuntimeUnavailable {
-		t.Fatalf("ListContext()[0].Status = %q, want %q", got[0].Status, StatusRuntimeUnavailable)
+	if got[0].Status != string(sandbox.StateRunning) {
+		t.Fatalf("ListContext()[0].Status = %q, want running", got[0].Status)
+	}
+	if got[0].Availability == nil || got[0].Availability.State != RuntimeAvailabilityUnknown {
+		t.Fatalf("ListContext()[0].Availability = %#v, want unknown", got[0].Availability)
 	}
 }
 
-func TestIsSandboxRuntimeContentionRecognizesBoxLiteLockErrors(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "failed acquire runtime lock",
-			err:  fmt.Errorf("inspect boxlite cli box: Error: internal error: Failed to acquire runtime lock at /tmp/boxlite"),
-			want: true,
-		},
-		{
-			name: "runtime already using directory",
-			err:  fmt.Errorf("get agent box: internal error: Another BoxliteRuntime is already using directory: /tmp/boxlite"),
-			want: true,
-		},
-		{
-			name: "unrelated error",
-			err:  fmt.Errorf("network down"),
-			want: false,
-		},
-		{
-			name: "nil error",
-			err:  nil,
-			want: false,
-		},
+func TestListContextRefreshesRuntimeStatusWithBoundedConcurrency(t *testing.T) {
+	entered := make(chan struct{}, 3)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseAll := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseAll()
+
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindPicoClawSandbox,
+			info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+				entered <- struct{}{}
+				<-release
+				return agentruntime.Info{State: agentruntime.StateRunning}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	for _, id := range []string{"agent-alice", "agent-bob", "agent-carol"} {
+		svc.agents[id] = Agent{
+			ID:          id,
+			Name:        id,
+			Role:        RoleWorker,
+			RuntimeKind: RuntimeKindPicoClawSandbox,
+			Status:      string(sandbox.StateCreated),
+			CreatedAt:   time.Date(2026, 4, 1, 11, 0, 0, 0, time.UTC),
+		}
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isSandboxRuntimeContention(tc.err); got != tc.want {
-				t.Fatalf("isSandboxRuntimeContention(%v) = %v, want %v", tc.err, got, tc.want)
-			}
-		})
+	result := make(chan []Agent, 1)
+	go func() { result <- svc.ListContext(context.Background()) }()
+	for range 3 {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("ListContext() did not start three independent runtime probes")
+		}
+	}
+	releaseAll()
+	got := <-result
+	for _, item := range got {
+		if item.Status != string(sandbox.StateRunning) {
+			t.Fatalf("ListContext() status for %q = %q, want running", item.ID, item.Status)
+		}
+	}
+}
+
+func TestInspectRecordsGatewayReadinessWithoutChangingLifecycleState(t *testing.T) {
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeReadinessAgentRuntime{
+			fakeAgentRuntime: fakeAgentRuntime{
+				kind: RuntimeKindPicoClawSandbox,
+				info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+					return agentruntime.Info{State: agentruntime.StateRunning}, nil
+				},
+			},
+			readiness: func(context.Context, agentruntime.Handle) error {
+				return fmt.Errorf("gateway connection refused")
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["agent-alice"] = Agent{
+		ID:          "agent-alice",
+		Name:        "alice",
+		Role:        RoleWorker,
+		RuntimeKind: RuntimeKindPicoClawSandbox,
+		Status:      string(sandbox.StateRunning),
+		CreatedAt:   time.Date(2026, 4, 1, 11, 0, 0, 0, time.UTC),
+	}
+
+	got, ok := svc.Inspect(context.Background(), "agent-alice")
+	if !ok {
+		t.Fatal("Inspect() ok = false")
+	}
+	if got.Status != string(sandbox.StateRunning) {
+		t.Fatalf("Inspect().Status = %q, want running", got.Status)
+	}
+	if got.Availability == nil || got.Availability.State != RuntimeAvailabilityDegraded {
+		t.Fatalf("Inspect().Availability = %#v, want degraded", got.Availability)
+	}
+	if got.Availability.CheckedAt.IsZero() {
+		t.Fatal("Inspect().Availability.CheckedAt = zero, want observation time")
+	}
+
+	listed := svc.ListContext(context.Background())
+	if len(listed) != 1 {
+		t.Fatalf("ListContext() len = %d, want 1", len(listed))
+	}
+	if listed[0].Status != string(sandbox.StateRunning) {
+		t.Fatalf("ListContext()[0].Status = %q, want running", listed[0].Status)
+	}
+	if listed[0].Availability == nil || listed[0].Availability.State != RuntimeAvailabilityDegraded {
+		t.Fatalf("ListContext()[0].Availability = %#v, want cached degraded", listed[0].Availability)
+	}
+}
+
+func TestListContextDoesNotReuseGatewayAvailabilityForReplacedBox(t *testing.T) {
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindPicoClawSandbox,
+			info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+				return agentruntime.Info{HandleID: "box-new", State: agentruntime.StateRunning}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["agent-alice"] = Agent{
+		ID:          "agent-alice",
+		Name:        "alice",
+		Role:        RoleWorker,
+		RuntimeKind: RuntimeKindPicoClawSandbox,
+		BoxID:       "box-old",
+		Status:      string(sandbox.StateRunning),
+		CreatedAt:   time.Date(2026, 4, 1, 11, 0, 0, 0, time.UTC),
+	}
+	svc.recordRuntimeAvailability(svc.agents["agent-alice"], RuntimeAvailability{State: RuntimeAvailabilityReady})
+
+	listed := svc.ListContext(context.Background())
+	if len(listed) != 1 {
+		t.Fatalf("ListContext() len = %d, want 1", len(listed))
+	}
+	if listed[0].BoxID != "box-new" {
+		t.Fatalf("ListContext()[0].BoxID = %q, want box-new", listed[0].BoxID)
+	}
+	if listed[0].Availability == nil || listed[0].Availability.State != RuntimeAvailabilityUnknown {
+		t.Fatalf("ListContext()[0].Availability = %#v, want unknown for replaced box", listed[0].Availability)
+	}
+}
+
+func TestRuntimeAvailabilityExpiresToUnknown(t *testing.T) {
+	svc, err := NewService(config.ModelConfig{}, config.ServerConfig{}, "manager-image:test", "")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	agent := Agent{
+		ID:          "agent-alice",
+		Name:        "alice",
+		Role:        RoleWorker,
+		RuntimeKind: RuntimeKindPicoClawSandbox,
+		BoxID:       "box-alice",
+		Status:      string(sandbox.StateRunning),
+	}
+	svc.recordRuntimeAvailability(agent, RuntimeAvailability{
+		State:     RuntimeAvailabilityDegraded,
+		CheckedAt: time.Now().Add(-runtimeAvailabilityMaxAge - time.Second),
+	})
+
+	got := svc.withRuntimeAvailability(agent)
+	if got.Availability == nil || got.Availability.State != RuntimeAvailabilityUnknown {
+		t.Fatalf("withRuntimeAvailability().Availability = %#v, want expired unknown", got.Availability)
+	}
+}
+
+func TestListContextRefreshesExpiredDegradedGatewayAvailability(t *testing.T) {
+	readinessChecks := 0
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeReadinessAgentRuntime{
+			fakeAgentRuntime: fakeAgentRuntime{
+				kind: RuntimeKindPicoClawSandbox,
+				info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+					return agentruntime.Info{HandleID: "box-alice", State: agentruntime.StateRunning}, nil
+				},
+			},
+			readiness: func(context.Context, agentruntime.Handle) error {
+				readinessChecks++
+				return fmt.Errorf("gateway connection refused")
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	agent := Agent{
+		ID:          "agent-alice",
+		Name:        "alice",
+		Role:        RoleWorker,
+		RuntimeKind: RuntimeKindPicoClawSandbox,
+		BoxID:       "box-alice",
+		Status:      string(agentruntime.StateRunning),
+	}
+	svc.agents[agent.ID] = agent
+	svc.recordRuntimeAvailability(agent, RuntimeAvailability{
+		State:     RuntimeAvailabilityDegraded,
+		CheckedAt: time.Now().Add(-runtimeAvailabilityMaxAge - time.Second),
+	})
+
+	got := svc.ListContext(context.Background())
+	if readinessChecks != 1 {
+		t.Fatalf("readiness checks = %d, want 1 for expired degraded availability", readinessChecks)
+	}
+	if len(got) != 1 || got[0].Availability == nil {
+		t.Fatalf("ListContext() = %#v, want one observed agent", got)
+	}
+	if got[0].Availability.State != RuntimeAvailabilityDegraded || got[0].Availability.Reason != "readiness_failed" {
+		t.Fatalf("ListContext().Availability = %#v, want refreshed degraded readiness failure", got[0].Availability)
+	}
+	if !got[0].Availability.ExpiresAt.After(time.Now()) {
+		t.Fatalf("ListContext().Availability.ExpiresAt = %v, want refreshed future expiry", got[0].Availability.ExpiresAt)
+	}
+}
+
+func TestRuntimeAvailabilityFromLifecycleErrorClassifiesSandboxBusy(t *testing.T) {
+	availability, ok := runtimeAvailabilityFromLifecycleError(fmt.Errorf("inspect runtime: %w", sandbox.ErrBusy))
+	if !ok {
+		t.Fatal("runtimeAvailabilityFromLifecycleError() ok = false, want true")
+	}
+	if availability.State != RuntimeAvailabilityUnknown || availability.Reason != "runtime_busy" {
+		t.Fatalf("runtimeAvailabilityFromLifecycleError() = %#v, want unknown/runtime_busy", availability)
 	}
 }
 
@@ -8902,6 +9123,66 @@ func TestStartConfiguredAgentsRestoresRunningCodexWorker(t *testing.T) {
 	}
 	if startCalls != 1 {
 		t.Fatalf("Codex runtime Start() calls = %d, want 1 to restore the in-memory session", startCalls)
+	}
+	if got := svc.withConfiguredAgentStartupStatus(svc.agents["u-alice"]); got.StartupPending {
+		t.Fatal("configured startup marker remained set after the restore pass")
+	}
+}
+
+func TestConfiguredAgentStartupStatusMarksOnlyRestoreCandidates(t *testing.T) {
+	svc, err := NewService(testModelConfig(), config.ServerConfig{}, "manager-image:test", "")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.PrepareConfiguredAgentsStartup()
+
+	tests := []struct {
+		name  string
+		agent Agent
+		want  bool
+	}{
+		{
+			name: "configured codex worker",
+			agent: Agent{
+				ID: "u-alice", Name: "alice", Role: RoleWorker, RuntimeKind: RuntimeKindCodex, ProfileComplete: true,
+			},
+			want: true,
+		},
+		{
+			name: "configured gateway worker",
+			agent: Agent{
+				ID: "u-bob", Name: "bob", Role: RoleWorker, RuntimeKind: RuntimeKindPicoClawSandbox, ProfileComplete: true,
+			},
+			want: true,
+		},
+		{
+			name: "manager",
+			agent: Agent{
+				ID: ManagerUserID, Name: ManagerName, Role: RoleManager, RuntimeKind: RuntimeKindCodex, ProfileComplete: true,
+			},
+			want: false,
+		},
+		{
+			name: "incomplete worker",
+			agent: Agent{
+				ID: "u-carol", Name: "carol", Role: RoleWorker, RuntimeKind: RuntimeKindCodex,
+			},
+			want: false,
+		},
+		{
+			name: "unsupported non-gateway worker",
+			agent: Agent{
+				ID: "u-dave", Name: "dave", Role: RoleWorker, RuntimeKind: "custom", ProfileComplete: true,
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := svc.withConfiguredAgentStartupStatus(tt.agent).StartupPending; got != tt.want {
+				t.Fatalf("StartupPending = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

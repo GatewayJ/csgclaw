@@ -102,8 +102,8 @@ type scopedSessionEventSource interface {
 }
 
 const (
-	createOperationTimeout = 10 * time.Minute
-	agentListStatusTimeout = 2 * time.Second
+	createOperationTimeout    = 10 * time.Minute
+	agentRuntimeStatusTimeout = 2 * time.Second
 )
 
 var sseHeartbeatInterval = 15 * time.Second
@@ -1006,7 +1006,7 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), agentListStatusTimeout)
+		ctx, cancel := context.WithTimeout(r.Context(), agentRuntimeStatusTimeout)
 		defer cancel()
 		writeJSON(w, http.StatusOK, h.presentAgentsForRequest(r, h.svc.ListContext(ctx)))
 	case http.MethodPost:
@@ -1034,7 +1034,12 @@ func (h *Handler) handleAgentByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		a, ok := h.svc.Agent(id)
+		// A detail request is an explicit inspection point. Unlike the roster
+		// path, it may make the bounded optional readiness probe needed to tell
+		// whether a running gateway can accept work.
+		ctx, cancel := context.WithTimeout(r.Context(), agentRuntimeStatusTimeout)
+		defer cancel()
+		a, ok := h.svc.Inspect(ctx, id)
 		if !ok {
 			http.Error(w, "agent not found", http.StatusNotFound)
 			return
@@ -3071,6 +3076,8 @@ func presentAgent(item agent.Agent) agentResponse {
 			Name:           runtimeCfg.Name,
 			SandboxEnabled: runtimeCfg.Sandboxed,
 			State:          item.Status,
+			Availability:   runtimeAvailabilityResponse(item.Availability),
+			StartupPending: item.StartupPending,
 			SandboxID:      item.BoxID,
 			Options:        runtimeOptions,
 		},
@@ -3093,6 +3100,25 @@ func presentAgent(item agent.Agent) agentResponse {
 		ProfileComplete:  item.ProfileComplete,
 		DetectionResults: append([]agent.ProfileDetectionResult(nil), item.DetectionResults...),
 	}
+}
+
+func runtimeAvailabilityResponse(value *agent.RuntimeAvailability) *apitypes.RuntimeAvailability {
+	if value == nil {
+		return nil
+	}
+	out := &apitypes.RuntimeAvailability{
+		State:  string(value.State),
+		Reason: value.Reason,
+	}
+	if !value.CheckedAt.IsZero() {
+		checkedAt := value.CheckedAt.UTC()
+		out.CheckedAt = &checkedAt
+	}
+	if !value.ExpiresAt.IsZero() {
+		expiresAt := value.ExpiresAt.UTC()
+		out.ExpiresAt = &expiresAt
+	}
+	return out
 }
 
 func sanitizeMCPServersResponse(servers map[string]any) map[string]any {

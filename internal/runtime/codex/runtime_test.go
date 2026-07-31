@@ -60,7 +60,7 @@ func (f fakeManager) LiveSession(handle SessionHandle) (*Session, error) {
 	if f.live != nil {
 		return f.live(handle)
 	}
-	return f.Session(handle)
+	return nil, os.ErrNotExist
 }
 
 func (f fakeManager) Start(ctx context.Context, spec SessionSpec) (*Session, error) {
@@ -3281,6 +3281,40 @@ func TestRuntimeCreateDetachesManagerStartContext(t *testing.T) {
 	case <-startCtx.Done():
 		t.Fatal("manager start context was canceled with parent request context")
 	default:
+	}
+}
+
+func TestRuntimeInfoKeepsLiveSessionRunningWhenMetadataIsTemporarilyMissing(t *testing.T) {
+	t.Parallel()
+
+	createdAt := time.Date(2026, 7, 31, 2, 0, 0, 0, time.UTC)
+	rt := New(Dependencies{
+		AgentHome: func(string) (string, error) { return t.TempDir(), nil },
+		Manager: fakeManager{
+			live: func(SessionHandle) (*Session, error) {
+				return &Session{
+					RuntimeID: "rt-u-alice",
+					SessionID: "session-live",
+					ProcessID: os.Getpid(),
+					CreatedAt: createdAt,
+				}, nil
+			},
+		},
+		ReadFile: func(string) ([]byte, error) { return nil, os.ErrNotExist },
+	})
+
+	info, err := rt.Info(context.Background(), agentruntime.Handle{RuntimeID: "rt-u-alice"})
+	if err != nil {
+		t.Fatalf("Info() error = %v", err)
+	}
+	if info.State != agentruntime.StateRunning {
+		t.Fatalf("Info() state = %q, want running", info.State)
+	}
+	if info.HandleID != "session-live" {
+		t.Fatalf("Info() handle id = %q, want session-live", info.HandleID)
+	}
+	if !info.CreatedAt.Equal(createdAt) {
+		t.Fatalf("Info() created at = %s, want %s", info.CreatedAt, createdAt)
 	}
 }
 
