@@ -267,14 +267,16 @@ func (m *appServerManager) handleRawItemNotification(runtimeID string, live *liv
 	switch {
 	case method == "item/started" && itemType == "agentMessage":
 		phase := appServerString(item, "phase")
+		inferred := false
 		if strings.TrimSpace(phase) == "" {
 			// Some OpenAI-compatible providers, including qwen3.6-plus,
 			// omit the Codex-specific phase field. A typed agentMessage item
-			// is still assistant output; treat it as the final answer unless
-			// the provider explicitly labels another phase.
+			// is still streamable assistant output, but the inferred phase must
+			// not complete the turn before a subsequent tool call.
 			phase = "final_answer"
+			inferred = true
 		}
-		live.setAgentMessagePhase(itemID, phase)
+		live.setAgentMessagePhase(itemID, phase, inferred)
 	case method == "item/started" && itemType == "commandExecution":
 		command := appServerString(item, "command")
 		m.publishAppServerEvent(SessionEvent{
@@ -416,7 +418,7 @@ func (m *appServerManager) handleRawItemNotification(runtimeID string, live *liv
 		})
 	case method == "item/completed" && itemType == "agentMessage":
 		defer live.clearAgentMessageState(itemID)
-		live.setAgentMessagePhase(itemID, appServerString(item, "phase"))
+		live.setAgentMessagePhase(itemID, appServerString(item, "phase"), false)
 		text := appServerString(item, "text")
 		cleanedText := m.decodeAndPublishStructuredAssistantOutput(runtimeID, threadID, itemID, text, live)
 		if live.hasStreamedAgentMessage(itemID) {
@@ -470,12 +472,12 @@ func cloneAppServerParams(params map[string]any) map[string]any {
 func appServerAgentMessageCompletesTurn(live *liveSession, itemID string, item map[string]any) bool {
 	phase := strings.TrimSpace(strings.ToLower(appServerString(item, "phase")))
 	if phase == "" && live != nil {
-		phase = live.agentMessagePhase(itemID)
+		phase = live.explicitAgentMessagePhase(itemID)
 	}
 	return phase == "final_answer"
 }
 
-func (s *liveSession) setAgentMessagePhase(itemID, phase string) {
+func (s *liveSession) setAgentMessagePhase(itemID, phase string, inferred bool) {
 	itemID = strings.TrimSpace(itemID)
 	phase = strings.TrimSpace(strings.ToLower(phase))
 	if itemID == "" || phase == "" {
@@ -487,6 +489,14 @@ func (s *liveSession) setAgentMessagePhase(itemID, phase string) {
 		s.agentMessagePhases = make(map[string]string)
 	}
 	s.agentMessagePhases[itemID] = phase
+	if inferred {
+		if s.inferredAgentPhases == nil {
+			s.inferredAgentPhases = make(map[string]struct{})
+		}
+		s.inferredAgentPhases[itemID] = struct{}{}
+	} else {
+		delete(s.inferredAgentPhases, itemID)
+	}
 }
 
 func (s *liveSession) agentMessagePhase(itemID string) string {
@@ -499,6 +509,19 @@ func (s *liveSession) agentMessagePhase(itemID string) string {
 	return s.agentMessagePhases[itemID]
 }
 
+func (s *liveSession) explicitAgentMessagePhase(itemID string) string {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, inferred := s.inferredAgentPhases[itemID]; inferred {
+		return ""
+	}
+	return s.agentMessagePhases[itemID]
+}
+
 func (s *liveSession) clearAgentMessageState(itemID string) {
 	itemID = strings.TrimSpace(itemID)
 	if itemID == "" {
@@ -506,6 +529,7 @@ func (s *liveSession) clearAgentMessageState(itemID string) {
 	}
 	s.mu.Lock()
 	delete(s.agentMessagePhases, itemID)
+	delete(s.inferredAgentPhases, itemID)
 	delete(s.streamedAgentMessages, itemID)
 	delete(s.agentMessageStreams, itemID)
 	s.mu.Unlock()

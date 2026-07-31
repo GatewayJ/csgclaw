@@ -142,6 +142,7 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 		streamedAgentMessages: make(map[string]struct{}),
 		streamedAgentThreads:  make(map[string]struct{}),
 		agentMessagePhases:    make(map[string]string),
+		inferredAgentPhases:   make(map[string]struct{}),
 		agentMessageStreams:   make(map[string]*assistantStructuredOutputStream),
 	}
 	appClient.onNotification = func(note appServerNotification) {

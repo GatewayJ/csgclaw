@@ -27,6 +27,7 @@ type liveSession struct {
 	streamedAgentMessages map[string]struct{}
 	streamedAgentThreads  map[string]struct{}
 	agentMessagePhases    map[string]string
+	inferredAgentPhases   map[string]struct{}
 	agentMessageStreams   map[string]*assistantStructuredOutputStream
 	appProtocol           string
 }

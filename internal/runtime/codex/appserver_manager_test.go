@@ -1086,8 +1086,19 @@ func TestAppServerEventAdapterStreamsAgentMessageDeltasWithoutCompletedDuplicate
 	}
 }
 
-func TestAppServerEventAdapterStreamsAgentMessageWithoutProviderPhase(t *testing.T) {
+func TestAppServerEventAdapterWaitsForTurnCompletionWhenProviderOmitsAgentMessagePhase(t *testing.T) {
 	manager, live, sink := testAppServerEventAdapter(t)
+	waiter, err := live.registerAppServerTurnWaiter("main-thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNotCompleted := func(stage string) {
+		for len(waiter.ch) > 0 {
+			if result := <-waiter.ch; result.success {
+				t.Fatalf("turn completed after %s", stage)
+			}
+		}
+	}
 
 	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
 		Method: "item/started",
@@ -1120,10 +1131,77 @@ func TestAppServerEventAdapterStreamsAgentMessageWithoutProviderPhase(t *testing
 			},
 		}),
 	})
+	assertNotCompleted("the pre-tool agent message")
+
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/started",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id": "call-search", "type": "mcpToolCall", "server": "wiki", "tool": "search",
+			},
+		}),
+	})
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/completed",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id": "call-search", "type": "mcpToolCall", "server": "wiki", "tool": "search", "status": "completed",
+			},
+		}),
+	})
+	assertNotCompleted("the MCP tool call")
+
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/started",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id": "msg-final", "type": "agentMessage",
+			},
+		}),
+	})
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/agentMessage/delta",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread", "turnId": "turn-1", "itemId": "msg-final", "delta": "查询结果",
+		}),
+	})
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "item/completed",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id": "msg-final", "type": "agentMessage", "text": "查询结果",
+			},
+		}),
+	})
+	assertNotCompleted("the final no-phase agent message")
+
+	manager.handleAppServerNotification("runtime-1", live, appServerNotification{
+		Method: "turn/completed",
+		Params: mustJSONRaw(t, map[string]any{
+			"threadId": "main-thread",
+			"turn":     map[string]any{"id": "turn-1", "status": "completed"},
+		}),
+	})
+	select {
+	case result := <-waiter.ch:
+		if !result.success {
+			t.Fatalf("turn/completed result = %#v, want success", result)
+		}
+	default:
+		t.Fatal("turn/completed did not finish the turn")
+	}
 
 	events := sink.snapshot()
-	if len(events) != 2 {
-		t.Fatalf("events = %#v, want only streamed provider deltas", events)
+	if len(events) != 5 {
+		t.Fatalf("events = %#v, want three text deltas and two MCP events", events)
 	}
 	for index, want := range []string{"你好", "，世界"} {
 		event := events[index]
@@ -1132,6 +1210,12 @@ func TestAppServerEventAdapterStreamsAgentMessageWithoutProviderPhase(t *testing
 			event.Payload.(map[string]any)["phase"] != "final_answer" {
 			t.Fatalf("event[%d] = %#v, want final-answer delta %q", index, event, want)
 		}
+	}
+	if events[2].Kind != SessionEventToolCallStart || events[3].Kind != SessionEventToolCallUpdate {
+		t.Fatalf("tool events = %#v, want MCP start and update", events[2:4])
+	}
+	if event := events[4]; event.Kind != SessionEventTextDelta || event.Text != "查询结果" {
+		t.Fatalf("final event = %#v, want final streamed text", event)
 	}
 }
 
