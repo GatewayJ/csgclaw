@@ -46,6 +46,8 @@ const (
 	gatewayBoxPhaseCreating
 )
 
+const agentListRuntimeProbeConcurrency = 4
+
 var localIPv4Resolver = localIPv4
 
 var osRemoveAll = os.RemoveAll
@@ -183,19 +185,25 @@ type Service struct {
 	// first reads the current set before issuing its update, so it must share
 	// the same lock as direct PUT/PATCH-style updates to avoid stale snapshots
 	// overwriting a concurrent edit.
-	mcpServersMu            sync.Mutex
-	runtimes                map[string]sandbox.Runtime
-	agents                  map[string]Agent
-	runtimeRecords          map[string]RuntimeRecord
-	runtimeRegistry         map[string]agentruntime.Runtime
-	lifecycle               LifecycleObserver
-	bindingActivation       BindingActivator
-	agentLifecycleMu        sync.Mutex
-	agentLifecycleGates     map[string]*agentLifecycleGate
-	profileDefaults         AgentProfile
-	detectionResults        []ProfileDetectionResult
-	startupProfileDetectOff bool
-	connectorCapabilityKey  []byte
+	mcpServersMu    sync.Mutex
+	runtimes        map[string]sandbox.Runtime
+	agents          map[string]Agent
+	runtimeRecords  map[string]RuntimeRecord
+	runtimeRegistry map[string]agentruntime.Runtime
+	availability    map[string]RuntimeAvailability
+	// configuredAgentStartupPending is an ephemeral boot orchestration marker.
+	// It is deliberately separate from both persisted lifecycle state and
+	// runtime readiness: callers use it only to keep a roster fresh while the
+	// configured-worker restore pass is still running.
+	configuredAgentStartupPending bool
+	lifecycle                     LifecycleObserver
+	bindingActivation             BindingActivator
+	agentLifecycleMu              sync.Mutex
+	agentLifecycleGates           map[string]*agentLifecycleGate
+	profileDefaults               AgentProfile
+	detectionResults              []ProfileDetectionResult
+	startupProfileDetectOff       bool
+	connectorCapabilityKey        []byte
 
 	// gatewayWorkPhase is set by createGatewayBox for bootstrap progress logs (best-effort if concurrent).
 	gatewayWorkPhase atomic.Uint32
@@ -411,6 +419,7 @@ func NewServiceWithLLM(llmCfg config.LLMConfig, server config.ServerConfig, mana
 		agents:                 make(map[string]Agent),
 		runtimeRecords:         make(map[string]RuntimeRecord),
 		runtimeRegistry:        make(map[string]agentruntime.Runtime),
+		availability:           make(map[string]RuntimeAvailability),
 		profileDefaults:        profileFromConfigModel("", "", model),
 		connectorCapabilityKey: connectorCapabilityKey,
 	}
@@ -1513,7 +1522,7 @@ func (s *Service) Agent(id string) (Agent, bool) {
 		return Agent{}, false
 	}
 	ctx := context.Background()
-	return s.withRuntimeImageMigrationStatus(ctx, s.hydrateAgentStatus(ctx, a)), true
+	return s.withConfiguredAgentStartupStatus(s.withRuntimeImageMigrationStatus(ctx, s.hydrateAgentStatus(ctx, a))), true
 }
 
 // AgentByName resolves the unique case-insensitive display name used by public
@@ -1524,7 +1533,7 @@ func (s *Service) AgentByName(name string) (Agent, bool) {
 		return Agent{}, false
 	}
 	ctx := context.Background()
-	return s.withRuntimeImageMigrationStatus(ctx, s.hydrateAgentStatus(ctx, a)), true
+	return s.withConfiguredAgentStartupStatus(s.withRuntimeImageMigrationStatus(ctx, s.hydrateAgentStatus(ctx, a))), true
 }
 
 func (s *Service) AgentMetadata(id string) (AgentMetadata, bool) {
@@ -1709,7 +1718,7 @@ func (s *Service) Start(ctx context.Context, id string) (Agent, error) {
 	if err := s.syncLifecycleForAgent(ctx, updated); err != nil {
 		return Agent{}, err
 	}
-	return updated, nil
+	return s.refreshRuntimeAvailability(ctx, updated), nil
 }
 
 func (s *Service) Stop(ctx context.Context, id string) (Agent, error) {
@@ -1813,6 +1822,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("agent %q not found", id)
 	}
 	delete(s.agents, key)
+	s.clearRuntimeAvailabilityLocked(current.ID)
 	s.deleteRuntimeRecordLocked(current.RuntimeID)
 	runtimeHome, err := s.sandboxRuntimeHome(current.ID)
 	if err != nil {
@@ -2006,29 +2016,86 @@ func (s *Service) ListContext(ctx context.Context) []Agent {
 	s.mu.RLock()
 	agents := sortedAgentsFromMap(s.agents)
 	s.mu.RUnlock()
+	if len(agents) == 0 {
+		return agents
+	}
+
+	workers := min(agentListRuntimeProbeConcurrency, len(agents))
+	indices := make(chan int)
+	var group sync.WaitGroup
+	group.Add(workers)
+	for range workers {
+		go func() {
+			defer group.Done()
+			for idx := range indices {
+				current := s.hydrateAgentStatus(ctx, agents[idx])
+				// A readiness probe is intentionally not part of the normal
+				// roster path. The only exception is a cached observation that
+				// has reached its TTL: recheck it so the active workspace poll
+				// can discover both failures and recoveries without probing every
+				// running agent on every list request.
+				agents[idx] = s.refreshExpiredRuntimeAvailability(ctx, current)
+			}
+		}()
+	}
 	for idx := range agents {
-		agents[idx] = s.withRuntimeImageMigrationStatus(ctx, s.hydrateAgentStatus(ctx, agents[idx]))
+		indices <- idx
+	}
+	close(indices)
+	group.Wait()
+
+	for idx := range agents {
+		agents[idx] = s.withConfiguredAgentStartupStatus(s.withRuntimeImageMigrationStatus(ctx, agents[idx]))
 	}
 	return agents
+}
+
+// PrepareConfiguredAgentsStartup marks the service as reconciling configured
+// workers during process startup. The marker is transient and lets API clients
+// keep polling while the server is already accepting HTTP requests.
+//
+// StartConfiguredAgents clears it when its restore pass finishes. It is public
+// so a server can cover the small interval between opening its listener and
+// scheduling that restore pass.
+func (s *Service) PrepareConfiguredAgentsStartup() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.configuredAgentStartupPending = true
+	s.mu.Unlock()
+}
+
+func (s *Service) finishConfiguredAgentsStartup() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.configuredAgentStartupPending = false
+	s.mu.Unlock()
 }
 
 func (s *Service) StartConfiguredAgents(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	s.PrepareConfiguredAgentsStartup()
+	defer s.finishConfiguredAgentsStartup()
 	agents := s.startupAgentCandidates()
+	runningGateways := make([]Agent, 0, len(agents))
 	var startErr error
 	for _, a := range agents {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		live := s.hydrateAgentStatus(ctx, a)
-		_, reconciled, err := s.recreateLegacyNamedGatewayAgentBox(ctx, live)
+		reconciledAgent, reconciled, err := s.recreateLegacyNamedGatewayAgentBox(ctx, live)
 		if err != nil {
 			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", live.Name, err))
 			continue
 		}
 		if reconciled {
+			runningGateways = append(runningGateways, reconciledAgent)
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(live.RuntimeKind), RuntimeKindCodex) {
@@ -2036,12 +2103,18 @@ func (s *Service) StartConfiguredAgents(ctx context.Context) error {
 				continue
 			}
 		} else if isRuntimeRunning(live) {
+			runningGateways = append(runningGateways, live)
 			continue
 		}
 		if _, err := s.Start(ctx, live.ID); err != nil {
 			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", live.Name, err))
 		}
 	}
+	// Readiness observations are intentionally not persisted. Prime the running
+	// gateway workers after a process restart so an already-dead gateway does
+	// not look healthy until a user opens its detail endpoint. Each probe has a
+	// deadline while the startup marker keeps the roster fresh.
+	s.primeUnknownGatewayRuntimeAvailability(ctx, runningGateways)
 	return startErr
 }
 
@@ -2084,16 +2157,35 @@ func (s *Service) startupAgentCandidates() []Agent {
 
 	candidates := agents[:0]
 	for _, a := range agents {
-		if isManagerAgent(a) || !isAgentProfileComplete(a) {
-			continue
-		}
-		rk := a.RuntimeKind
-		if strings.EqualFold(normalizeRole(a.Role), RoleWorker) && rk != "" && !isGatewayRuntimeKind(rk) && !strings.EqualFold(rk, RuntimeKindCodex) {
+		if !isConfiguredAgentStartupCandidate(a) {
 			continue
 		}
 		candidates = append(candidates, a)
 	}
 	return candidates
+}
+
+func isConfiguredAgentStartupCandidate(a Agent) bool {
+	if isManagerAgent(a) || !isAgentProfileComplete(a) {
+		return false
+	}
+	runtimeKind := strings.TrimSpace(a.RuntimeKind)
+	return !strings.EqualFold(normalizeRole(a.Role), RoleWorker) ||
+		runtimeKind == "" ||
+		isGatewayRuntimeKind(runtimeKind) ||
+		strings.EqualFold(runtimeKind, RuntimeKindCodex)
+}
+
+func (s *Service) withConfiguredAgentStartupStatus(a Agent) Agent {
+	a.StartupPending = false
+	if s == nil || !isConfiguredAgentStartupCandidate(a) {
+		return a
+	}
+	s.mu.RLock()
+	pending := s.configuredAgentStartupPending
+	s.mu.RUnlock()
+	a.StartupPending = pending
+	return a
 }
 
 func isAgentProfileComplete(a Agent) bool {
@@ -2314,6 +2406,7 @@ func (s *Service) removeStartingWorker(ctx context.Context, id string) error {
 	current, ok := s.agents[id]
 	if ok && strings.TrimSpace(current.BoxID) == "" && strings.EqualFold(strings.TrimSpace(current.Status), string(agentruntime.StateCreated)) {
 		delete(s.agents, id)
+		s.clearRuntimeAvailabilityLocked(current.ID)
 		s.deleteRuntimeRecordLocked(current.RuntimeID)
 	}
 	err := s.saveLocked()
@@ -2334,6 +2427,7 @@ func (s *Service) persistCreatedWorker(ctx context.Context, id, name, descriptio
 	}
 
 	worker := newWorkerAgent(id, name, description, instructions, image, avatar, runtimeKind, runtimeName, sandboxEnabled, profile, createRuntimeExt, mcpServers, info)
+	s.clearRuntimeAvailabilityLocked(worker.ID)
 	s.agents[worker.ID] = worker
 	s.syncRuntimeRecordLocked(worker)
 	if worker.AgentProfile.ProfileComplete {
@@ -2707,8 +2801,11 @@ func followGatewayLogFile(ctx context.Context, file *os.File, offset int64, w io
 	}
 }
 
-func (s *Service) hydrateAgentStatus(ctx context.Context, a Agent) Agent {
+func (s *Service) hydrateAgentStatus(ctx context.Context, a Agent) (out Agent) {
 	a = *cloneAgent(&a)
+	defer func() {
+		out = s.withRuntimeAvailability(out)
+	}()
 	if strings.TrimSpace(a.Name) == "" {
 		logHydrateUnknownStatus(a, "validate_name", fmt.Errorf("agent name is required"))
 		a.Status = string(sandbox.StateUnknown)
@@ -2721,7 +2818,9 @@ func (s *Service) hydrateAgentStatus(ctx context.Context, a Agent) Agent {
 	}
 	info, err := s.runtimeInfo(ctx, runtimeImpl, runtimeHandleForAgent(a))
 	if err != nil {
-		return statusAfterHydrateFailure(a, "read_runtime_info", err)
+		a = statusAfterHydrateFailure(a, "read_runtime_info", err)
+		s.recordRuntimeAvailabilityFromLifecycleError(a, err)
+		return a
 	}
 	if agentruntime.HydrateTrustPersistedStopped(runtimeImpl) && strings.EqualFold(strings.TrimSpace(a.Status), string(sandbox.StateStopped)) {
 		if strings.TrimSpace(info.HandleID) != "" {
@@ -2743,16 +2842,6 @@ func (s *Service) hydrateAgentStatus(ctx context.Context, a Agent) Agent {
 func statusAfterHydrateFailure(a Agent, stage string, err error) Agent {
 	if status := strings.TrimSpace(a.Status); status != "" {
 		if !sandbox.IsNotFound(err) {
-			if errors.Is(err, context.DeadlineExceeded) && isGatewayRuntimeKind(strings.TrimSpace(a.RuntimeKind)) {
-				logHydrateUnknownStatus(a, stage, err)
-				a.Status = StatusRuntimeUnavailable
-				return a
-			}
-			if isSandboxRuntimeUnavailable(err) {
-				logHydrateUnknownStatus(a, stage, err)
-				a.Status = StatusRuntimeUnavailable
-				return a
-			}
 			logHydrateStaleStatus(a, stage, err)
 			return a
 		}
@@ -2777,42 +2866,13 @@ func logHydrateStaleStatus(a Agent, stage string, err error) {
 		"stage", stage,
 		"error", err,
 	}
-	if isSandboxRuntimeContention(err) {
+	if sandbox.IsBusy(err) {
 		slog.Debug("agent status refresh skipped; sandbox runtime is busy", attrs...)
 		return
 	}
 	slog.Warn("agent status refresh failed; keeping last known status",
 		attrs...,
 	)
-}
-
-func isSandboxRuntimeContention(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "failed to acquire runtime lock") ||
-		strings.Contains(msg, "another boxliteruntime is already using directory")
-}
-
-func isSandboxRuntimeUnavailable(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "check ") && strings.Contains(msg, " gateway ready") {
-		return true
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	return strings.Contains(msg, "cannot connect to the docker daemon") ||
-		strings.Contains(msg, "docker daemon is not running") ||
-		strings.Contains(msg, "is the docker daemon running") ||
-		strings.Contains(msg, "error during connect") && strings.Contains(msg, "docker") ||
-		strings.Contains(msg, "docker_engine") && strings.Contains(msg, "cannot find the file") ||
-		strings.Contains(msg, "docker_engine") && strings.Contains(msg, "the system cannot find the file specified") ||
-		strings.Contains(msg, "sandbox provider") && strings.Contains(msg, "not available")
 }
 
 func logHydrateUnknownStatus(a Agent, stage string, err error) {

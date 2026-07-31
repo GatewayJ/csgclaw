@@ -11,6 +11,8 @@ import {
   agentDraftWithRuntimeFieldsFromAgent,
   agentDeleteConfirmationMessage,
   agentRuntimePollSettled,
+  isAgentGatewayDegraded,
+  isAgentRuntimeStartupPending,
   agentStatusLabel,
   agentDraftMissingRequiredEnv,
   agentSandboxEnabled,
@@ -967,6 +969,21 @@ describe("agent model helpers", () => {
     expect(agentStatusLabel("profile_incomplete", t)).toBe("offline");
     expect(agentStatusLabel("exited", t)).toBe("offline");
     expect(agentStatusLabel("running", t)).toBe("online");
+    expect(agentStatusLabel("starting", t)).toBe("agentStatusStarting");
+  });
+
+  it("reads the server-owned configured runtime startup marker", () => {
+    expect(isAgentRuntimeStartupPending({ runtime: { startup_pending: true } })).toBe(true);
+    expect(isAgentRuntimeStartupPending({ runtime: { startup_pending: false } })).toBe(false);
+  });
+
+  it("expires a gateway degradation observation", () => {
+    const degradedGateway = {
+      status: "running",
+      runtime: { state: "running", availability: { state: "degraded", expires_at: "2026-07-30T04:30:00Z" } },
+    };
+    expect(isAgentGatewayDegraded(degradedGateway, Date.parse("2026-07-30T04:29:59Z"))).toBe(true);
+    expect(isAgentGatewayDegraded(degradedGateway, Date.parse("2026-07-30T04:30:00Z"))).toBe(false);
   });
 
   it("waits for manager runtime only when profile save may bootstrap sandbox", () => {

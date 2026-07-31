@@ -58,7 +58,7 @@ import { WorkspacePaneTypes } from "@/models/routing";
 import {
   agentOfflineReasonLabel,
   agentRuntimeState,
-  isAgentRunning,
+  isAgentLifecycleRunning,
   normalizeAuthProviderName,
   providerNeedsAuth,
   type AgentLike,
@@ -405,7 +405,7 @@ export function useConversationController({
   }, [agents, data?.current_user_id, selectedConversation, usersById]);
   const managerRuntimeErrorMessage = managerRuntimeWarning || t("managerCodexMissingWarning");
   function activeConversationAgentOfflineMessage(): string {
-    if (activeConversationAgents.length === 0 || activeConversationAgents.some(isAgentRunning)) {
+    if (activeConversationAgents.length === 0 || activeConversationAgents.some(isAgentLifecycleRunning)) {
       return "";
     }
     const agent = activeConversationAgents[0];

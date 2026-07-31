@@ -271,21 +271,34 @@ func (r *Runtime) State(ctx context.Context, h agentruntime.Handle) (agentruntim
 }
 
 func (r *Runtime) Info(ctx context.Context, h agentruntime.Handle) (agentruntime.Info, error) {
-	box, release, err := r.openBoxForHandle(ctx, h)
+	info, release, err := r.infoForHandle(ctx, h)
 	if err != nil {
 		return agentruntime.Info{}, err
 	}
 	defer release()
+	return info, nil
+}
+
+// CheckReadiness verifies the gateway only for Docker-backed sandboxes. Other
+// providers do not currently expose an equivalent application health endpoint.
+func (r *Runtime) CheckReadiness(ctx context.Context, h agentruntime.Handle) error {
+	if !strings.EqualFold(strings.TrimSpace(r.sandboxProviderName()), "docker") {
+		return agentruntime.ErrReadinessNotSupported
+	}
+	box, release, err := r.openBoxForHandle(ctx, h)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	info, err := r.infoForBox(ctx, h, box)
 	if err != nil {
-		return agentruntime.Info{}, err
+		return err
 	}
-	if info.State == agentruntime.StateRunning {
-		if err := r.checkGatewayReady(ctx, box); err != nil {
-			return agentruntime.Info{}, err
-		}
+	if info.State != agentruntime.StateRunning {
+		return fmt.Errorf("check %s gateway ready: sandbox state is %s", r.Kind(), info.State)
 	}
-	return info, nil
+	return r.checkGatewayReady(ctx, box)
 }
 
 func (r *Runtime) StreamLogs(ctx context.Context, h agentruntime.Handle, opts agentruntime.LogOptions) error {

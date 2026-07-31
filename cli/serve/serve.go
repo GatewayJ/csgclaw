@@ -712,6 +712,12 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 			return StopRunningSandboxAgents(shutdownCtx, svc)
 		}
 	}
+	if svc != nil {
+		// RunServer begins accepting requests before OnReady schedules the
+		// background restore pass. Mark that short interval so the roster UI
+		// does not stop its startup refresh after only the manager is running.
+		svc.PrepareConfiguredAgentsStartup()
+	}
 	return RunServer(server.Options{
 		ListenAddr:         cfg.Server.ListenAddr,
 		Listener:           serveOpts.Listener,

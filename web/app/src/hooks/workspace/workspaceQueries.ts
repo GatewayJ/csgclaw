@@ -13,6 +13,9 @@ import { fetchRemoteSkillsPage, fetchSkillFile, fetchSkills, fetchSkillTree } fr
 import type { RemoteSkillsPage } from "@/api/skills";
 import { fetchManagerProfile } from "@/api/agents";
 import {
+  agentRuntimeAvailabilityExpiresAt,
+  agentRuntimeAvailabilityState,
+  isAgentRuntimeStartupPending,
   isAgentRunning,
   isManagerAgent,
   modelRequestKey,
@@ -43,6 +46,7 @@ export const WORKSPACE_AGENTS_STARTUP_POLL_INTERVAL_MS = 1_500;
 // Keep refreshing the complete roster at a lower rate during the startup window.
 export const WORKSPACE_AGENTS_SETTLE_POLL_INTERVAL_MS = 5_000;
 export const WORKSPACE_AGENTS_STARTUP_POLL_WINDOW_MS = 120_000;
+const WORKSPACE_AGENTS_AVAILABILITY_MIN_REFETCH_MS = 1_000;
 
 export function workspaceAgentsStartupRefetchInterval(
   items: AgentLike[] | undefined,
@@ -52,9 +56,49 @@ export function workspaceAgentsStartupRefetchInterval(
     return false;
   }
   const manager = items?.find(isManagerAgent);
-  return manager && isAgentRunning(manager)
-    ? WORKSPACE_AGENTS_SETTLE_POLL_INTERVAL_MS
-    : WORKSPACE_AGENTS_STARTUP_POLL_INTERVAL_MS;
+  const restorePending = (items ?? []).some(isAgentRuntimeStartupPending);
+  if (!manager || !isAgentRunning(manager) || restorePending) {
+    return WORKSPACE_AGENTS_STARTUP_POLL_INTERVAL_MS;
+  }
+  return WORKSPACE_AGENTS_SETTLE_POLL_INTERVAL_MS;
+}
+
+export function workspaceAgentsAvailabilityRefetchInterval(
+  items: AgentLike[] | undefined,
+  nowMs = Date.now(),
+): number | false {
+  let earliestExpiry: number | null = null;
+  for (const item of items ?? []) {
+    const availabilityState = agentRuntimeAvailabilityState(item);
+    if (!availabilityState || availabilityState === "not_applicable") {
+      continue;
+    }
+    const expiresAt = agentRuntimeAvailabilityExpiresAt(item);
+    if (expiresAt == null || (earliestExpiry != null && expiresAt >= earliestExpiry)) {
+      continue;
+    }
+    earliestExpiry = expiresAt;
+  }
+  if (earliestExpiry == null) {
+    return false;
+  }
+  return Math.max(WORKSPACE_AGENTS_AVAILABILITY_MIN_REFETCH_MS, earliestExpiry - nowMs);
+}
+
+export function workspaceAgentsRefetchInterval(
+  items: AgentLike[] | undefined,
+  startupElapsedMs: number,
+  nowMs = Date.now(),
+): number | false {
+  const startupDelay = workspaceAgentsStartupRefetchInterval(items, startupElapsedMs);
+  const availabilityDelay = workspaceAgentsAvailabilityRefetchInterval(items, nowMs);
+  if (startupDelay === false) {
+    return availabilityDelay;
+  }
+  if (availabilityDelay === false) {
+    return startupDelay;
+  }
+  return Math.min(startupDelay, availabilityDelay);
 }
 
 export const workspaceQueryKeys = {
@@ -198,7 +242,7 @@ export function useWorkspaceAgentsQuery(): UseQueryResult<AgentLike[]> {
     queryKey: workspaceQueryKeys.agents(),
     queryFn: () => fetchAgents(),
     refetchInterval: (query) =>
-      workspaceAgentsStartupRefetchInterval(query.state.data, Date.now() - startupPollStartedAtRef.current),
+      workspaceAgentsRefetchInterval(query.state.data, Date.now() - startupPollStartedAtRef.current),
   });
 }
 

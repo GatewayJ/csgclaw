@@ -138,6 +138,11 @@ type AgentWithProfile = {
   profile?: AgentProfileLike | null;
 };
 
+type AgentPageDraftData = {
+  agent: AgentLike;
+  draft: AgentDraft;
+};
+
 type AgentPageNoticeTone = "info" | "warning" | "success";
 type AgentPageNoticeState = {
   message: string;
@@ -746,16 +751,16 @@ export function useAgentController({
       Promise.resolve(fetchAgent(id)).catch(() => null),
       Promise.resolve(fetchAgentProfile(id)).catch(() => null),
     ]);
-    if (fetchedAgent) {
+    if (fetchedAgent && String(fetchedAgent.id ?? "").trim() === id) {
       agent = { ...agent, ...fetchedAgent };
     }
     const profile = fetchedProfile ?? agent?.agent_profile;
     return { agent, profile };
   }, []);
   const agentDraftFromItem = useCallback(
-    async (item: AgentLike): Promise<AgentDraft> => {
+    async (item: AgentLike): Promise<AgentPageDraftData> => {
       if (isNotificationBotAgent(item)) {
-        return ensureNotifierPullSubscriptionDraft(agentToDraft(item));
+        return { agent: item, draft: ensureNotifierPullSubscriptionDraft(agentToDraft(item)) };
       }
       const [{ agent, profile }, mcpServersView] = await Promise.all([
         fetchAgentWithProfile(item),
@@ -763,12 +768,15 @@ export function useAgentController({
       ]);
       const base = agentToDraft({ ...agent, agent_profile: profile });
       const runtimeKind = normalizeRuntimeKind(agent?.runtime_kind || item?.runtime_kind || base.runtime_kind);
-      return ensureNotifierPullSubscriptionDraft({
-        ...base,
-        mcpServers: cloneMCPServersForDraft(mcpServersView.servers),
-        runtime_kind: runtimeKind || base.runtime_kind,
-        bot_type: BOT_TYPE_NORMAL,
-      });
+      return {
+        agent,
+        draft: ensureNotifierPullSubscriptionDraft({
+          ...base,
+          mcpServers: cloneMCPServersForDraft(mcpServersView.servers),
+          runtime_kind: runtimeKind || base.runtime_kind,
+          bot_type: BOT_TYPE_NORMAL,
+        }),
+      };
     },
     [fetchAgentWithProfile],
   );
@@ -785,10 +793,14 @@ export function useAgentController({
       setAgentPageDraft(fallbackDraft);
       setAgentPageSavedDraft(fallbackDraft);
       try {
-        const draft = await agentDraftFromItem(item);
+        const { agent, draft } = await agentDraftFromItem(item);
         if (agentPageDraftLoadSeqRef.current !== loadSeq || agentPageDraftRequestRef.current !== requestID) {
           return;
         }
+        // The detail endpoint performs the bounded readiness probe. Publish
+        // that result to the shared roster cache as well, so the page and
+        // agent list render the same transient runtime observation.
+        setAgentsData((current) => mergeAgentIntoList(current, agent));
         setAgentPageDraft(draft);
         setAgentPageSavedDraft(draft);
       } catch (err) {
@@ -798,7 +810,7 @@ export function useAgentController({
         setAgentPageError(errorMessage(err, t("agentActionFailed")));
       }
     },
-    [agentDraftFromItem, resetAgentPageModels, t],
+    [agentDraftFromItem, resetAgentPageModels, setAgentsData, t],
   );
   const { cliproxyAuthStatuses, setCLIProxyAuthStatus } = useCLIProxyAuthStatuses(
     [
@@ -1324,7 +1336,7 @@ export function useAgentController({
     setAgentProgress(null);
     resetAgentModels();
     try {
-      const draft = await agentDraftFromItem(item);
+      const { draft } = await agentDraftFromItem(item);
       setEditingAgent({ ...item, mcpServers: draft.mcpServers });
       setAgentDraft(draft);
       setShowAgentModal(true);
@@ -1545,7 +1557,7 @@ export function useAgentController({
           await refreshManagerProfile();
         }
         await refreshAgentSkills(savedMetaOnly.id || selectedAgentForPage.id);
-        const nextDraft = await agentDraftFromItem({ ...savedMetaOnly, avatar: draft.avatar });
+        const { draft: nextDraft } = await agentDraftFromItem({ ...savedMetaOnly, avatar: draft.avatar });
         setAgentPageDraft(nextDraft);
         setAgentPageSavedDraft(nextDraft);
         return;
@@ -1580,7 +1592,7 @@ export function useAgentController({
         await refreshManagerProfile();
       }
       await refreshAgentSkills(saved.id || selectedAgentForPage.id);
-      const savedDraft = await agentDraftFromItem({ ...saved, avatar: draft.avatar });
+      const { draft: savedDraft } = await agentDraftFromItem({ ...saved, avatar: draft.avatar });
       setAgentPageDraft(savedDraft);
       setAgentPageSavedDraft(savedDraft);
       if (

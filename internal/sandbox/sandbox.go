@@ -13,9 +13,30 @@ import (
 // requested instance.
 var ErrNotFound = errors.New("sandbox not found")
 
+// ErrUnavailable is returned when the sandbox provider's control plane cannot
+// be reached. It is distinct from ErrNotFound: an unavailable provider does
+// not establish that a previously known sandbox has stopped or been removed.
+var ErrUnavailable = errors.New("sandbox provider unavailable")
+
+// ErrBusy is returned when a sandbox provider temporarily rejects an operation
+// because its runtime home or control plane is already in use. It is neither a
+// missing instance nor a lifecycle transition.
+var ErrBusy = errors.New("sandbox runtime busy")
+
 // IsNotFound reports whether err represents a missing sandbox instance.
 func IsNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound)
+}
+
+// IsUnavailable reports whether err represents an unreachable sandbox
+// provider or control plane.
+func IsUnavailable(err error) bool {
+	return errors.Is(err, ErrUnavailable)
+}
+
+// IsBusy reports whether err represents temporary sandbox runtime contention.
+func IsBusy(err error) bool {
+	return errors.Is(err, ErrBusy)
 }
 
 // Provider opens sandbox runtimes for a concrete backend.

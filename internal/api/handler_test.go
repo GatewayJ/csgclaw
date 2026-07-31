@@ -48,6 +48,18 @@ type fakeCompatRuntime struct {
 	info    func(context.Context, agentruntime.Handle) (agentruntime.Info, error)
 }
 
+type fakeReadinessCompatRuntime struct {
+	fakeCompatRuntime
+	readiness func(context.Context, agentruntime.Handle) error
+}
+
+func (f fakeReadinessCompatRuntime) CheckReadiness(ctx context.Context, h agentruntime.Handle) error {
+	if f.readiness != nil {
+		return f.readiness(ctx, h)
+	}
+	return agentruntime.ErrReadinessNotSupported
+}
+
 type failingMCPServersListRuntime struct {
 	fakeCompatRuntime
 	err error
@@ -1086,6 +1098,102 @@ func TestHandleAgentsGetByIDReturnsAgent(t *testing.T) {
 	}
 	if got.ID != "agent-alice" || got.Name != "alice" || got.Role != agent.RoleWorker {
 		t.Fatalf("agent = %+v, want agent-alice/alice/worker", got)
+	}
+}
+
+func TestHandleAgentsListReportsConfiguredStartupPending(t *testing.T) {
+	svc := mustNewSeededService(t, []agent.Agent{
+		{
+			ID:              "u-alice",
+			Name:            "alice",
+			Role:            agent.RoleWorker,
+			RuntimeKind:     agent.RuntimeKindCodex,
+			ProfileComplete: true,
+			AgentProfile: agent.AgentProfile{
+				Name:            "alice",
+				Provider:        agent.ProviderCodex,
+				ModelID:         "gpt-5.5",
+				ProfileComplete: true,
+			},
+			CreatedAt: time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC),
+		},
+	})
+	svc.PrepareConfiguredAgentsStartup()
+
+	srv := &Handler{svc: svc}
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var got []struct {
+		Runtime struct {
+			StartupPending bool `json:"startup_pending"`
+		} `json:"runtime"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(agents) = %d, want 1", len(got))
+	}
+	if !got[0].Runtime.StartupPending {
+		t.Fatal("runtime.startup_pending = false, want true during configured-agent restore")
+	}
+}
+
+func TestHandleAgentsGetByIDSeparatesGatewayAvailabilityFromLifecycle(t *testing.T) {
+	var probes int
+	svc := mustNewSeededServiceWithOptions(t, []agent.Agent{
+		{
+			ID:          "u-alice",
+			Name:        "alice",
+			Role:        agent.RoleWorker,
+			RuntimeKind: agent.RuntimeKindPicoClawSandbox,
+			BoxID:       "box-alice",
+			Status:      string(agentruntime.StateRunning),
+			CreatedAt:   time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC),
+		},
+	}, agent.WithRuntime(fakeReadinessCompatRuntime{
+		fakeCompatRuntime: fakeCompatRuntime{kind: agent.RuntimeKindPicoClawSandbox},
+		readiness: func(context.Context, agentruntime.Handle) error {
+			probes++
+			return errors.New("gateway connection refused")
+		},
+	}))
+
+	srv := &Handler{svc: svc}
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/agents/u-alice", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if probes != 1 {
+		t.Fatalf("readiness probes = %d, want 1", probes)
+	}
+	var got struct {
+		Runtime struct {
+			State        string `json:"state"`
+			Availability struct {
+				State     string    `json:"state"`
+				ExpiresAt time.Time `json:"expires_at"`
+				Reason    string    `json:"reason"`
+			} `json:"availability"`
+		} `json:"runtime"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Runtime.State != string(agentruntime.StateRunning) {
+		t.Fatalf("runtime.state = %q, want running", got.Runtime.State)
+	}
+	if got.Runtime.Availability.State != "degraded" || got.Runtime.Availability.Reason != "readiness_failed" {
+		t.Fatalf("runtime.availability = %+v, want degraded readiness_failed", got.Runtime.Availability)
+	}
+	if got.Runtime.Availability.ExpiresAt.IsZero() {
+		t.Fatal("runtime.availability.expires_at = zero, want expiry time")
 	}
 }
 

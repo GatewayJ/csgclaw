@@ -44,6 +44,14 @@ func wrapRunError(op string, result CommandResult, err error) error {
 			Err:      err,
 		})
 	}
+	if isUnavailable(stderr) {
+		return fmt.Errorf("%s: %w: %w", op, sandbox.ErrUnavailable, &ExitError{
+			Op:       op,
+			ExitCode: result.ExitCode,
+			Stderr:   stderr,
+			Err:      err,
+		})
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) || result.ExitCode != 0 {
 		return &ExitError{
@@ -61,4 +69,14 @@ func isNotFound(stderr string) bool {
 	return strings.Contains(text, "no such container") ||
 		strings.Contains(text, "no such object") ||
 		strings.Contains(text, "not found")
+}
+
+func isUnavailable(stderr string) bool {
+	text := strings.ToLower(stderr)
+	return strings.Contains(text, "cannot connect to the docker daemon") ||
+		strings.Contains(text, "docker daemon is not running") ||
+		strings.Contains(text, "is the docker daemon running") ||
+		strings.Contains(text, "error during connect") && strings.Contains(text, "docker") ||
+		strings.Contains(text, "docker_engine") && strings.Contains(text, "cannot find the file") ||
+		strings.Contains(text, "docker_engine") && strings.Contains(text, "the system cannot find the file specified")
 }
