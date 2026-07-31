@@ -78,13 +78,21 @@ func (h *Handler) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	redirectURL, err := appAuthCallback(r, h.authAdvertiseBaseURL())
+	advertiseBaseURL := h.authAdvertiseBaseURL()
+	redirectURL, err := appAuthCallback(r, advertiseBaseURL)
 	if err != nil {
 		status := http.StatusBadRequest
+		reason := "invalid_callback"
 		if !auth.IsCallbackValidationError(err) {
 			status = http.StatusBadGateway
+			reason = "account_sync_failed"
 		}
-		http.Error(w, err.Error(), status)
+		if returnURL := auth.CallbackReturnURL(r.URL.Query(), advertiseBaseURL); returnURL != "" {
+			setNoStoreHeaders(w)
+			http.Redirect(w, r, authCallbackResultRedirectURL(returnURL, "failed", reason), http.StatusFound)
+			return
+		}
+		http.Error(w, "OpenCSG sign-in failed", status)
 		return
 	}
 	if err := h.refreshOpenCSGModelProvider(r.Context()); err != nil {
@@ -92,15 +100,50 @@ func (h *Handler) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	h.syncAgentHubService(r)
 	h.resetEnvironmentSensitiveRuntimes()
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
+	setNoStoreHeaders(w)
 	if h.runtimeDistribution == "electron" {
 		writeOAuthCompletePage(w, "Login complete", "Authentication completed. You can close this tab and return to CSGClaw.")
 		return
 	}
-	w.Header().Set("Location", redirectURL)
+	w.Header().Set("Location", authCallbackResultRedirectURL(redirectURL, "success", ""))
 	w.WriteHeader(http.StatusFound)
+}
+
+func authCallbackResultRedirectURL(rawReturnURL, result, reason string) string {
+	u, err := url.Parse(strings.TrimSpace(rawReturnURL))
+	if err != nil {
+		return rawReturnURL
+	}
+	if u.Fragment != "" {
+		fragment, err := url.Parse(u.Fragment)
+		if err == nil {
+			q := fragment.Query()
+			q.Set("auth_result", result)
+			if reason != "" {
+				q.Set("auth_reason", reason)
+			} else {
+				q.Del("auth_reason")
+			}
+			fragment.RawQuery = q.Encode()
+			u.Fragment = fragment.String()
+			return u.String()
+		}
+	}
+	q := u.Query()
+	q.Set("auth_result", result)
+	if reason != "" {
+		q.Set("auth_reason", reason)
+	} else {
+		q.Del("auth_reason")
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func setNoStoreHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 }
 
 func (h *Handler) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
@@ -118,9 +161,11 @@ func (h *Handler) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	req.AdvertiseBaseURL = h.authAdvertiseBaseURL()
 	if req.CallbackURL == "" {
-		req.CallbackURL = authAdvertisedCallbackURL(req.AdvertiseBaseURL)
-		if req.CallbackURL == "" {
+		if isLocalReturnURL(req.ReturnURL) {
 			req.CallbackURL = authLocalCallbackURL(r)
+		}
+		if req.CallbackURL == "" {
+			req.CallbackURL = authAdvertisedCallbackURL(req.AdvertiseBaseURL)
 		}
 	}
 	resp, err := appAuthLogin(r, req)
@@ -257,6 +302,19 @@ func authLocalCallbackURL(r *http.Request) string {
 		Path:   authCallbackPath,
 	}
 	return u.String()
+}
+
+func isLocalReturnURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.User != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+	default:
+		return false
+	}
+	return isLocalRequestHost(u.Host)
 }
 
 func isLocalRequestHost(hostport string) bool {

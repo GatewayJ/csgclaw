@@ -57,6 +57,7 @@ export type AuthController = {
 
 export function useAuthController(t: TranslateFn): AuthController {
   const queryClient = useQueryClient();
+  const callbackResultHandled = useRef(false);
   const [busyAction, setBusyAction] = useState<"login" | "logout" | "">("");
   const [authError, setAuthError] = useState("");
   const [authNotice, setAuthNotice] = useState<AuthNotice | null>(null);
@@ -79,6 +80,8 @@ export function useAuthController(t: TranslateFn): AuthController {
   const setEnvironment = useCallback((next: AuthEnvironmentDraft) => {
     setSelectedEnvironment(resolveAuthEnvironmentDraft(next));
   }, []);
+
+  const dismissNotice = useCallback(() => setAuthNotice(null), []);
 
   const setStatus = useCallback(
     (next: AuthStatus) => {
@@ -174,6 +177,28 @@ export function useAuthController(t: TranslateFn): AuthController {
   }, [environment]);
 
   useEffect(() => {
+    if (callbackResultHandled.current) {
+      return;
+    }
+    callbackResultHandled.current = true;
+
+    const callbackResult = consumeAuthCallbackResult();
+    if (callbackResult.result === "success") {
+      markPendingAuthLogin();
+      setLoginPending(false);
+      return;
+    }
+    if (callbackResult.result !== "failed") {
+      return;
+    }
+    clearPendingAuthLogin();
+    setLoginPending(false);
+    setAuthError(
+      callbackResult.reason === "invalid_callback" ? t("csghubCallbackInvalid") : t("csghubCallbackUnavailable"),
+    );
+  }, [t]);
+
+  useEffect(() => {
     if (!statusQuery.isFetched) {
       return;
     }
@@ -253,7 +278,7 @@ export function useAuthController(t: TranslateFn): AuthController {
   return {
     environment,
     busy: Boolean(busyAction),
-    dismissNotice: () => setAuthNotice(null),
+    dismissNotice,
     error: authError || (statusQuery.isError ? errorMessage(statusQuery.error, t("csghubStatusFailed")) : ""),
     login,
     logout,
@@ -293,6 +318,43 @@ function consumePendingAuthLogin(): boolean {
     return pending;
   } catch (_) {
     return false;
+  }
+}
+
+function consumeAuthCallbackResult(): { reason: string; result: "failed" | "success" | "" } {
+  try {
+    const current = new URL(window.location.href);
+    let result: "failed" | "success" | "" = "";
+    let reason = "";
+
+    const searchResult = current.searchParams.get("auth_result");
+    if (searchResult === "failed" || searchResult === "success") {
+      result = searchResult;
+      reason = searchResult === "failed" ? current.searchParams.get("auth_reason") || "account_sync_failed" : "";
+      current.searchParams.delete("auth_result");
+      current.searchParams.delete("auth_reason");
+    }
+
+    if (current.hash.includes("?")) {
+      const [path, rawQuery = ""] = current.hash.slice(1).split("?", 2);
+      const query = new URLSearchParams(rawQuery);
+      const hashResult = query.get("auth_result");
+      if (hashResult === "failed" || hashResult === "success") {
+        result = hashResult;
+        reason = hashResult === "failed" ? query.get("auth_reason") || "account_sync_failed" : "";
+        query.delete("auth_result");
+        query.delete("auth_reason");
+        const nextQuery = query.toString();
+        current.hash = nextQuery ? `${path}?${nextQuery}` : path;
+      }
+    }
+
+    if (result) {
+      window.history.replaceState(window.history.state, "", current.toString());
+    }
+    return { reason, result };
+  } catch (_) {
+    return { reason: "", result: "" };
   }
 }
 
