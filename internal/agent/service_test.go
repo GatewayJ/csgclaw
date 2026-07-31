@@ -9016,6 +9016,61 @@ func TestStartConfiguredAgentsStartsStoppedCompleteWorkersAndLeavesRunningWorker
 	}
 }
 
+func TestStartConfiguredAgentsPrimesUnknownRunningGatewayAvailability(t *testing.T) {
+	SetTestHooks(func(_ *Service, _ string) (sandbox.Runtime, error) { return &fakeRuntime{}, nil }, nil)
+	defer ResetTestHooks()
+	testGetBoxHook = func(_ *Service, _ context.Context, _ sandbox.Runtime, _ string) (sandbox.Instance, error) {
+		return nil, fmt.Errorf("%w: missing", sandbox.ErrNotFound)
+	}
+
+	readinessChecks := 0
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeReadinessAgentRuntime{
+			fakeAgentRuntime: fakeAgentRuntime{
+				kind: RuntimeKindPicoClawSandbox,
+				info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+					return agentruntime.Info{HandleID: "box-alice", State: agentruntime.StateRunning}, nil
+				},
+			},
+			readiness: func(context.Context, agentruntime.Handle) error {
+				readinessChecks++
+				return fmt.Errorf("gateway connection refused")
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["agent-alice"] = Agent{
+		ID:              "agent-alice",
+		Name:            "alice",
+		Role:            RoleWorker,
+		RuntimeKind:     RuntimeKindPicoClawSandbox,
+		BoxID:           "box-alice",
+		Status:          string(agentruntime.StateRunning),
+		AgentProfile:    AgentProfile{Name: "alice", ProfileComplete: true},
+		ProfileComplete: true,
+	}
+
+	if err := svc.StartConfiguredAgents(context.Background()); err != nil {
+		t.Fatalf("StartConfiguredAgents() error = %v", err)
+	}
+	if readinessChecks != 1 {
+		t.Fatalf("readiness checks = %d, want 1", readinessChecks)
+	}
+	got, ok := svc.Agent("agent-alice")
+	if !ok {
+		t.Fatal("Agent(agent-alice) ok = false")
+	}
+	if got.Availability == nil || got.Availability.State != RuntimeAvailabilityDegraded || got.Availability.Reason != "readiness_failed" {
+		t.Fatalf("Agent(agent-alice).Availability = %#v, want degraded readiness_failed", got.Availability)
+	}
+}
+
 func TestStopRunningSandboxAgentsStopsOnlyLiveSandboxRuntimes(t *testing.T) {
 	var stopped []string
 	svc, err := NewService(

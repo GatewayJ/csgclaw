@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"csgclaw/internal/config"
@@ -472,6 +473,43 @@ func (s *Service) refreshExpiredDegradedRuntimeAvailability(ctx context.Context,
 		return a
 	}
 	return s.refreshRuntimeAvailability(ctx, a)
+}
+
+// primeUnknownGatewayRuntimeAvailability seeds the ephemeral readiness cache
+// after startup without adding readiness probes to the ordinary roster path.
+func (s *Service) primeUnknownGatewayRuntimeAvailability(ctx context.Context, agents []Agent) {
+	if s == nil || len(agents) == 0 {
+		return
+	}
+
+	candidates := make([]Agent, 0, len(agents))
+	for _, a := range agents {
+		availability := s.withRuntimeAvailability(a).Availability
+		if availability != nil && availability.State == RuntimeAvailabilityUnknown {
+			candidates = append(candidates, a)
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	workers := min(agentListRuntimeProbeConcurrency, len(candidates))
+	indices := make(chan int)
+	var group sync.WaitGroup
+	group.Add(workers)
+	for range workers {
+		go func() {
+			defer group.Done()
+			for idx := range indices {
+				_ = s.refreshRuntimeAvailability(ctx, candidates[idx])
+			}
+		}()
+	}
+	for idx := range candidates {
+		indices <- idx
+	}
+	close(indices)
+	group.Wait()
 }
 
 func (s *Service) hasExpiredDegradedRuntimeAvailability(a Agent, now time.Time) bool {

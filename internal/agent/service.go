@@ -2082,18 +2082,20 @@ func (s *Service) StartConfiguredAgents(ctx context.Context) error {
 	s.PrepareConfiguredAgentsStartup()
 	defer s.finishConfiguredAgentsStartup()
 	agents := s.startupAgentCandidates()
+	runningGateways := make([]Agent, 0, len(agents))
 	var startErr error
 	for _, a := range agents {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		live := s.hydrateAgentStatus(ctx, a)
-		_, reconciled, err := s.recreateLegacyNamedGatewayAgentBox(ctx, live)
+		reconciledAgent, reconciled, err := s.recreateLegacyNamedGatewayAgentBox(ctx, live)
 		if err != nil {
 			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", live.Name, err))
 			continue
 		}
 		if reconciled {
+			runningGateways = append(runningGateways, reconciledAgent)
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(live.RuntimeKind), RuntimeKindCodex) {
@@ -2101,12 +2103,18 @@ func (s *Service) StartConfiguredAgents(ctx context.Context) error {
 				continue
 			}
 		} else if isRuntimeRunning(live) {
+			runningGateways = append(runningGateways, live)
 			continue
 		}
 		if _, err := s.Start(ctx, live.ID); err != nil {
 			startErr = errors.Join(startErr, fmt.Errorf("%s: %w", live.Name, err))
 		}
 	}
+	// Readiness observations are intentionally not persisted. Prime the running
+	// gateway workers after a process restart so an already-dead gateway does
+	// not look healthy until a user opens its detail endpoint. This pass runs
+	// with bounded concurrency while the startup marker keeps the roster fresh.
+	s.primeUnknownGatewayRuntimeAvailability(ctx, runningGateways)
 	return startErr
 }
 
