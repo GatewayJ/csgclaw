@@ -34,6 +34,8 @@ const (
 	runtimeAvailabilityMaxAge = 30 * time.Second
 )
 
+var runtimeAvailabilityProbeTimeout = 2 * time.Second
+
 // RuntimeAvailability is intentionally ephemeral. CheckedAt lets clients
 // distinguish a fresh readiness result from a lifecycle-only listing.
 type RuntimeAvailability struct {
@@ -468,11 +470,20 @@ func (s *Service) refreshRuntimeAvailability(ctx context.Context, a Agent) Agent
 	return a
 }
 
-func (s *Service) refreshExpiredDegradedRuntimeAvailability(ctx context.Context, a Agent) Agent {
-	if !s.hasExpiredDegradedRuntimeAvailability(a, time.Now()) {
+func (s *Service) refreshRuntimeAvailabilityWithTimeout(ctx context.Context, a Agent) Agent {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, runtimeAvailabilityProbeTimeout)
+	defer cancel()
+	return s.refreshRuntimeAvailability(probeCtx, a)
+}
+
+func (s *Service) refreshExpiredRuntimeAvailability(ctx context.Context, a Agent) Agent {
+	if !s.hasExpiredRuntimeAvailability(a, time.Now()) {
 		return a
 	}
-	return s.refreshRuntimeAvailability(ctx, a)
+	return s.refreshRuntimeAvailabilityWithTimeout(ctx, a)
 }
 
 // primeUnknownGatewayRuntimeAvailability seeds the ephemeral readiness cache
@@ -501,7 +512,7 @@ func (s *Service) primeUnknownGatewayRuntimeAvailability(ctx context.Context, ag
 		go func() {
 			defer group.Done()
 			for idx := range indices {
-				_ = s.refreshRuntimeAvailability(ctx, candidates[idx])
+				_ = s.refreshRuntimeAvailabilityWithTimeout(ctx, candidates[idx])
 			}
 		}()
 	}
@@ -512,7 +523,7 @@ func (s *Service) primeUnknownGatewayRuntimeAvailability(ctx context.Context, ag
 	group.Wait()
 }
 
-func (s *Service) hasExpiredDegradedRuntimeAvailability(a Agent, now time.Time) bool {
+func (s *Service) hasExpiredRuntimeAvailability(a Agent, now time.Time) bool {
 	if s == nil ||
 		!isGatewayRuntimeKind(strings.TrimSpace(a.RuntimeKind)) ||
 		!strings.EqualFold(strings.TrimSpace(a.Status), string(agentruntime.StateRunning)) {
@@ -521,7 +532,12 @@ func (s *Service) hasExpiredDegradedRuntimeAvailability(a Agent, now time.Time) 
 	s.mu.RLock()
 	availability, ok := s.availability[canonicalAgentID(a.ID)]
 	s.mu.RUnlock()
-	if !ok || availability.State != RuntimeAvailabilityDegraded || availability.handleID != strings.TrimSpace(a.BoxID) {
+	if !ok || availability.handleID != strings.TrimSpace(a.BoxID) {
+		return false
+	}
+	switch availability.State {
+	case RuntimeAvailabilityReady, RuntimeAvailabilityDegraded, RuntimeAvailabilityUnknown:
+	default:
 		return false
 	}
 	return availability.ExpiresAt.IsZero() || !now.Before(availability.ExpiresAt)

@@ -69,7 +69,8 @@ export function workspaceAgentsAvailabilityRefetchInterval(
 ): number | false {
   let earliestExpiry: number | null = null;
   for (const item of items ?? []) {
-    if (agentRuntimeAvailabilityState(item) !== "degraded") {
+    const availabilityState = agentRuntimeAvailabilityState(item);
+    if (!availabilityState || availabilityState === "not_applicable") {
       continue;
     }
     const expiresAt = agentRuntimeAvailabilityExpiresAt(item);

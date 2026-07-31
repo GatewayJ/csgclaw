@@ -70,15 +70,30 @@ describe("workspaceAgentsAvailabilityRefetchInterval", () => {
     );
   });
 
-  it("does not add background polling for ready or not-applicable observations", () => {
+  it("continues polling ready and unknown observations, but not unsupported runtimes", () => {
     expect(
-      workspaceAgentsAvailabilityRefetchInterval([
-        { ...runningGateway, runtime: { availability: { state: "ready", expires_at: availabilityExpiresAt } } },
-        {
-          ...runningGateway,
-          runtime: { availability: { state: "not_applicable", expires_at: availabilityExpiresAt } },
-        },
-      ]),
+      workspaceAgentsAvailabilityRefetchInterval(
+        [
+          { ...runningGateway, runtime: { availability: { state: "ready", expires_at: availabilityExpiresAt } } },
+          { ...runningGateway, runtime: { availability: { state: "unknown", expires_at: availabilityExpiresAt } } },
+          {
+            ...runningGateway,
+            runtime: { availability: { state: "not_applicable", expires_at: availabilityExpiresAt } },
+          },
+        ],
+        Date.parse("2026-07-30T04:29:00Z"),
+      ),
+    ).toBe(60_000);
+    expect(
+      workspaceAgentsAvailabilityRefetchInterval(
+        [
+          {
+            ...runningGateway,
+            runtime: { availability: { state: "not_applicable", expires_at: availabilityExpiresAt } },
+          },
+        ],
+        Date.parse("2026-07-30T04:29:00Z"),
+      ),
     ).toBe(false);
   });
 

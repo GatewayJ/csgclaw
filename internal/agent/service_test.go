@@ -5877,55 +5877,63 @@ func TestRuntimeAvailabilityExpiresToUnknown(t *testing.T) {
 	}
 }
 
-func TestListContextRefreshesExpiredDegradedGatewayAvailability(t *testing.T) {
-	readinessChecks := 0
-	svc, err := NewService(
-		config.ModelConfig{},
-		config.ServerConfig{},
-		"manager-image:test",
-		"",
-		WithRuntime(fakeReadinessAgentRuntime{
-			fakeAgentRuntime: fakeAgentRuntime{
-				kind: RuntimeKindPicoClawSandbox,
-				info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
-					return agentruntime.Info{HandleID: "box-alice", State: agentruntime.StateRunning}, nil
-				},
-			},
-			readiness: func(context.Context, agentruntime.Handle) error {
-				readinessChecks++
-				return fmt.Errorf("gateway connection refused")
-			},
-		}),
-	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	agent := Agent{
-		ID:          "agent-alice",
-		Name:        "alice",
-		Role:        RoleWorker,
-		RuntimeKind: RuntimeKindPicoClawSandbox,
-		BoxID:       "box-alice",
-		Status:      string(agentruntime.StateRunning),
-	}
-	svc.agents[agent.ID] = agent
-	svc.recordRuntimeAvailability(agent, RuntimeAvailability{
-		State:     RuntimeAvailabilityDegraded,
-		CheckedAt: time.Now().Add(-runtimeAvailabilityMaxAge - time.Second),
-	})
+func TestListContextRefreshesExpiredGatewayAvailability(t *testing.T) {
+	for _, availabilityState := range []RuntimeAvailabilityState{
+		RuntimeAvailabilityReady,
+		RuntimeAvailabilityDegraded,
+		RuntimeAvailabilityUnknown,
+	} {
+		t.Run(string(availabilityState), func(t *testing.T) {
+			readinessChecks := 0
+			svc, err := NewService(
+				config.ModelConfig{},
+				config.ServerConfig{},
+				"manager-image:test",
+				"",
+				WithRuntime(fakeReadinessAgentRuntime{
+					fakeAgentRuntime: fakeAgentRuntime{
+						kind: RuntimeKindPicoClawSandbox,
+						info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+							return agentruntime.Info{HandleID: "box-alice", State: agentruntime.StateRunning}, nil
+						},
+					},
+					readiness: func(context.Context, agentruntime.Handle) error {
+						readinessChecks++
+						return fmt.Errorf("gateway connection refused")
+					},
+				}),
+			)
+			if err != nil {
+				t.Fatalf("NewService() error = %v", err)
+			}
+			agent := Agent{
+				ID:          "agent-alice",
+				Name:        "alice",
+				Role:        RoleWorker,
+				RuntimeKind: RuntimeKindPicoClawSandbox,
+				BoxID:       "box-alice",
+				Status:      string(agentruntime.StateRunning),
+			}
+			svc.agents[agent.ID] = agent
+			svc.recordRuntimeAvailability(agent, RuntimeAvailability{
+				State:     availabilityState,
+				CheckedAt: time.Now().Add(-runtimeAvailabilityMaxAge - time.Second),
+			})
 
-	got := svc.ListContext(context.Background())
-	if readinessChecks != 1 {
-		t.Fatalf("readiness checks = %d, want 1 for expired degraded availability", readinessChecks)
-	}
-	if len(got) != 1 || got[0].Availability == nil {
-		t.Fatalf("ListContext() = %#v, want one observed agent", got)
-	}
-	if got[0].Availability.State != RuntimeAvailabilityDegraded || got[0].Availability.Reason != "readiness_failed" {
-		t.Fatalf("ListContext().Availability = %#v, want refreshed degraded readiness failure", got[0].Availability)
-	}
-	if !got[0].Availability.ExpiresAt.After(time.Now()) {
-		t.Fatalf("ListContext().Availability.ExpiresAt = %v, want refreshed future expiry", got[0].Availability.ExpiresAt)
+			got := svc.ListContext(context.Background())
+			if readinessChecks != 1 {
+				t.Fatalf("readiness checks = %d, want 1 for expired %s availability", readinessChecks, availabilityState)
+			}
+			if len(got) != 1 || got[0].Availability == nil {
+				t.Fatalf("ListContext() = %#v, want one observed agent", got)
+			}
+			if got[0].Availability.State != RuntimeAvailabilityDegraded || got[0].Availability.Reason != "readiness_failed" {
+				t.Fatalf("ListContext().Availability = %#v, want refreshed degraded readiness failure", got[0].Availability)
+			}
+			if !got[0].Availability.ExpiresAt.After(time.Now()) {
+				t.Fatalf("ListContext().Availability.ExpiresAt = %v, want refreshed future expiry", got[0].Availability.ExpiresAt)
+			}
+		})
 	}
 }
 
@@ -9068,6 +9076,68 @@ func TestStartConfiguredAgentsPrimesUnknownRunningGatewayAvailability(t *testing
 	}
 	if got.Availability == nil || got.Availability.State != RuntimeAvailabilityDegraded || got.Availability.Reason != "readiness_failed" {
 		t.Fatalf("Agent(agent-alice).Availability = %#v, want degraded readiness_failed", got.Availability)
+	}
+}
+
+func TestStartConfiguredAgentsBoundsGatewayReadinessProbe(t *testing.T) {
+	originalTimeout := runtimeAvailabilityProbeTimeout
+	runtimeAvailabilityProbeTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { runtimeAvailabilityProbeTimeout = originalTimeout })
+
+	SetTestHooks(func(_ *Service, _ string) (sandbox.Runtime, error) { return &fakeRuntime{}, nil }, nil)
+	defer ResetTestHooks()
+	testGetBoxHook = func(_ *Service, _ context.Context, _ sandbox.Runtime, _ string) (sandbox.Instance, error) {
+		return nil, fmt.Errorf("%w: missing", sandbox.ErrNotFound)
+	}
+
+	probeCanceled := make(chan struct{})
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeReadinessAgentRuntime{
+			fakeAgentRuntime: fakeAgentRuntime{
+				kind: RuntimeKindPicoClawSandbox,
+				info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+					return agentruntime.Info{HandleID: "box-alice", State: agentruntime.StateRunning}, nil
+				},
+			},
+			readiness: func(ctx context.Context, _ agentruntime.Handle) error {
+				<-ctx.Done()
+				close(probeCanceled)
+				return ctx.Err()
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["agent-alice"] = Agent{
+		ID:              "agent-alice",
+		Name:            "alice",
+		Role:            RoleWorker,
+		RuntimeKind:     RuntimeKindPicoClawSandbox,
+		BoxID:           "box-alice",
+		Status:          string(agentruntime.StateRunning),
+		AgentProfile:    AgentProfile{Name: "alice", ProfileComplete: true},
+		ProfileComplete: true,
+	}
+
+	if err := svc.StartConfiguredAgents(context.Background()); err != nil {
+		t.Fatalf("StartConfiguredAgents() error = %v", err)
+	}
+	select {
+	case <-probeCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("readiness probe was not canceled by its timeout")
+	}
+	got, ok := svc.Agent("agent-alice")
+	if !ok {
+		t.Fatal("Agent(agent-alice) ok = false")
+	}
+	if got.Availability == nil || got.Availability.State != RuntimeAvailabilityUnknown || got.Availability.Reason != "probe_timed_out" {
+		t.Fatalf("Agent(agent-alice).Availability = %#v, want unknown probe_timed_out", got.Availability)
 	}
 }
 

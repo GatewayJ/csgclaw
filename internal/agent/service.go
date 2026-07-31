@@ -2030,11 +2030,11 @@ func (s *Service) ListContext(ctx context.Context) []Agent {
 			for idx := range indices {
 				current := s.hydrateAgentStatus(ctx, agents[idx])
 				// A readiness probe is intentionally not part of the normal
-				// roster path. The only exception is an observation that was
-				// already degraded and has reached its TTL: recheck it here so
-				// an ongoing gateway failure remains visible without probing
-				// every running agent on every list request.
-				agents[idx] = s.refreshExpiredDegradedRuntimeAvailability(ctx, current)
+				// roster path. The only exception is a cached observation that
+				// has reached its TTL: recheck it so the active workspace poll
+				// can discover both failures and recoveries without probing every
+				// running agent on every list request.
+				agents[idx] = s.refreshExpiredRuntimeAvailability(ctx, current)
 			}
 		}()
 	}
@@ -2112,8 +2112,8 @@ func (s *Service) StartConfiguredAgents(ctx context.Context) error {
 	}
 	// Readiness observations are intentionally not persisted. Prime the running
 	// gateway workers after a process restart so an already-dead gateway does
-	// not look healthy until a user opens its detail endpoint. This pass runs
-	// with bounded concurrency while the startup marker keeps the roster fresh.
+	// not look healthy until a user opens its detail endpoint. Each probe has a
+	// deadline while the startup marker keeps the roster fresh.
 	s.primeUnknownGatewayRuntimeAvailability(ctx, runningGateways)
 	return startErr
 }
