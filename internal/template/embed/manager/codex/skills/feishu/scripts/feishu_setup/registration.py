@@ -31,6 +31,19 @@ def validate_agent_id(agent_id: str) -> str:
     return agent_id
 
 
+def validate_agent_reference(agent_ref: str) -> str:
+    """Validate an Agent ID or display-name reference accepted by `start`.
+
+    Agent IDs have a restricted syntax, but display names may be Unicode. The
+    caller resolves a display name against the CSGClaw Agent registry before it
+    is used as an API path segment or persisted as an Agent ID.
+    """
+    agent_ref = (agent_ref or "").strip()
+    if not agent_ref:
+        raise RuntimeError("--agent is required")
+    return agent_ref
+
+
 def append_launcher_params(url: str, source: str = "csgclaw") -> str:
     parsed = urlparse(url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))

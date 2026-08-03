@@ -77,6 +77,7 @@ func testBotInfoResolver(t *testing.T, openIDsByAppID map[string]string) func(co
 
 type testFeishuConfigProvider struct {
 	bots           map[string]AppConfig
+	agentBots      map[string]string
 	mentionOpenIDs map[string]string
 	adminOpenID    string
 }
@@ -86,8 +87,10 @@ func (p testFeishuConfigProvider) BotConfig(participantID string) (AppConfig, bo
 	return app, ok
 }
 
-func (p testFeishuConfigProvider) BotConfigForAgent(string) (string, AppConfig, bool) {
-	return "", AppConfig{}, false
+func (p testFeishuConfigProvider) BotConfigForAgent(agentID string) (string, AppConfig, bool) {
+	participantID := strings.TrimSpace(p.agentBots[strings.TrimSpace(agentID)])
+	app, ok := p.bots[participantID]
+	return participantID, app, participantID != "" && ok
 }
 
 func (p testFeishuConfigProvider) DefaultAdminOpenID() (string, bool) {
@@ -332,6 +335,33 @@ func TestFeishuCreateRoomUsesConfiguredAdminOpenID(t *testing.T) {
 	}
 	if len(gotAddReq.MemberAppIDs) != 1 || gotAddReq.MemberAppIDs[0] != "cli_dev" {
 		t.Fatalf("add members app_ids = %+v, want [cli_dev]", gotAddReq.MemberAppIDs)
+	}
+}
+
+func TestFeishuCreateRoomResolvesManagerAppByAgentID(t *testing.T) {
+	var gotApp AppConfig
+	svc := NewServiceWithProvider(testFeishuConfigProvider{
+		bots: map[string]AppConfig{
+			"pt-manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
+		},
+		agentBots: map[string]string{
+			feishuManagerAgentID: "pt-manager",
+		},
+		adminOpenID: "ou_admin",
+	})
+	svc.createChat = func(_ context.Context, app AppConfig, req CreateChatRequest) (CreateChatResponse, error) {
+		gotApp = app
+		if got, want := req.CreatorID, "ou_admin"; got != want {
+			t.Fatalf("create chat creator_id = %q, want %q", got, want)
+		}
+		return CreateChatResponse{ChatID: "oc_agent_manager", Name: req.Title}, nil
+	}
+
+	if _, err := svc.CreateRoom(im.CreateRoomRequest{Title: "alpha", CreatorID: "user-manager"}); err != nil {
+		t.Fatalf("CreateRoom() error = %v", err)
+	}
+	if got, want := gotApp.AppID, "cli_manager"; got != want {
+		t.Fatalf("create chat app_id = %q, want %q", got, want)
 	}
 }
 

@@ -26,6 +26,7 @@ from .registration import (
     poll_until_success,
     render_ascii_qr,
     validate_agent_id,
+    validate_agent_reference,
 )
 from .state import delete_state, load_state, save_state, state_path
 
@@ -100,20 +101,48 @@ def manager_secret_cli_args(args: argparse.Namespace) -> tuple[list[str], Option
     return ["--app-secret-stdin"], sys.stdin.read()
 
 
-def ensure_worker_agent_exists(args: argparse.Namespace, agent_id: str, role: str) -> None:
-    if role != "worker":
-        return
-    try:
-        api_json(args, "GET", f"/api/v1/agents/{path_id(agent_id)}", None)
-    except RuntimeError as exc:
-        if "HTTP 404" not in str(exc):
-            raise
+def worker_agent_identity(agent_ref: str, item: Any) -> tuple[str, str]:
+    if not isinstance(item, dict):
+        raise RuntimeError(f"CSGClaw returned an invalid agent record while resolving {agent_ref!r}")
+    agent_id = validate_agent_id(str(item.get("id") or ""))
+    role = str(item.get("role") or "").strip().lower()
+    if role and role != "worker":
         raise RuntimeError(
-            f"target worker agent {agent_id!r} does not exist yet. "
-            "For a request like 'create dev worker and connect Feishu', run the agent-creator skill first "
-            "to create the worker with `csgclaw-cli participant create --type agent --bind create --from-template ...`, "
-            "then return to the Feishu skill and start registration for this existing agent."
-        ) from None
+            f"target agent {agent_ref!r} resolved to {agent_id!r}, whose role is {role!r}; "
+            "use the manager Feishu flow for a manager agent"
+        )
+    return agent_id, str(item.get("name") or "").strip()
+
+
+def resolve_worker_agent_reference(args: argparse.Namespace, agent_ref: str) -> tuple[str, str]:
+    """Resolve an existing worker from the Agent registry without ID alias ambiguity."""
+    agents = api_json(args, "GET", "/api/v1/agents", None)
+    if not isinstance(agents, list):
+        raise RuntimeError("CSGClaw returned an invalid agent list while resolving the worker")
+    id_matches = [
+        item
+        for item in agents
+        if isinstance(item, dict) and str(item.get("id") or "").strip() == agent_ref
+    ]
+    name_matches = [
+        item
+        for item in agents
+        if isinstance(item, dict) and str(item.get("name") or "").strip().casefold() == agent_ref.casefold()
+    ]
+    matches = {str(item.get("id") or "").strip(): item for item in [*id_matches, *name_matches]}
+    if len(matches) == 1:
+        return worker_agent_identity(agent_ref, next(iter(matches.values())))
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"agent reference {agent_ref!r} matched multiple agents; "
+            "specify the runtime Agent ID shown by GET /api/v1/agents"
+        )
+    raise RuntimeError(
+        f"target worker agent {agent_ref!r} was not found by exact runtime Agent ID or display name. "
+        "For a request like 'create dev worker and connect Feishu', run the agent-creator skill first "
+        "to create the worker with `csgclaw-cli participant create --type agent --bind create --from-template ...`, "
+        "then return to the Feishu skill and start registration for this existing agent."
+    )
 
 
 def cmd_bind_manager(args: argparse.Namespace) -> int:
@@ -181,10 +210,13 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
-    agent_id = validate_agent_id(args.agent)
+    agent_ref = validate_agent_reference(args.agent)
     domain = args.domain
-    role = args.role or ("manager" if agent_id == "u-manager" else "worker")
-    ensure_worker_agent_exists(args, agent_id, role)
+    role = args.role or ("manager" if agent_ref == "u-manager" else "worker")
+    agent_id = agent_ref
+    agent_name = ""
+    if role == "worker":
+        agent_id, agent_name = resolve_worker_agent_reference(args, agent_ref)
     init_registration(domain)
     begin = begin_registration(domain)
     registration_id = str(uuid.uuid4())
@@ -193,7 +225,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "registration_id": registration_id,
         "agent_id": agent_id,
         "role": role,
-        "bot_name": args.bot_name or agent_id.removeprefix("u-") or agent_id,
+        "bot_name": args.bot_name or agent_name or agent_id.removeprefix("u-") or agent_id,
         "description": args.description or "",
         "domain": domain,
         "device_code": begin["device_code"],
@@ -338,8 +370,8 @@ def build_parser() -> argparse.ArgumentParser:
     start = sub.add_parser("start", help="Start QR registration and print URL/QR")
     add_common(start)
     add_api_common(start)
-    start.add_argument("--agent", required=True, help="CSGClaw agent id, e.g. u-dev or u-manager")
-    start.add_argument("--role", choices=["worker", "manager"], default="", help="Agent role; inferred from agent id when omitted")
+    start.add_argument("--agent", required=True, help="CSGClaw runtime Agent ID or exact display name, e.g. agent-dev or dev")
+    start.add_argument("--role", choices=["worker", "manager"], default="", help="Agent role; inferred from u-manager when omitted")
     start.add_argument("--bot-name", default="", help="CSGClaw bot display name")
     start.add_argument("--description", default="", help="CSGClaw bot description")
     start.add_argument("--domain", choices=["feishu", "lark"], default="feishu")

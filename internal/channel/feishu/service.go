@@ -23,6 +23,13 @@ import (
 )
 
 const (
+	// The persisted Manager participant uses a typed ID (for example,
+	// "pt-manager"), so resolve its app through the canonical Agent ID instead
+	// of assuming a participant named "manager".
+	feishuManagerAgentID = "agent-manager"
+
+	// feishuManagerBotID is retained for services constructed with an in-memory
+	// app map, whose historical Manager key is "manager".
 	feishuManagerBotID = "manager"
 )
 
@@ -1943,6 +1950,12 @@ func (s *Service) participantMentionOpenIDLocked(participantID string) (string, 
 }
 
 func (s *Service) managerAppConfigLocked() (AppConfig, error) {
+	if s.configProvider != nil {
+		participantID, app, ok := s.configProvider.BotConfigForAgent(feishuManagerAgentID)
+		if ok {
+			return validateAppConfig(app, participantID)
+		}
+	}
 	app, ok := s.appConfigByIDLocked(feishuManagerBotID)
 	if !ok {
 		return AppConfig{}, fmt.Errorf("feishu app is not configured for %q", feishuManagerBotID)
