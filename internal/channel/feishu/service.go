@@ -538,6 +538,7 @@ func (s *Service) CreateRoom(req im.CreateRoomRequest) (im.Room, error) {
 	if err != nil {
 		return im.Room{}, err
 	}
+	memberBotIDs, memberAppIDs = excludeCallingBot(memberBotIDs, memberAppIDs, app.AppID)
 	description := strings.TrimSpace(req.Description)
 
 	created, err := s.createChat(context.Background(), app, CreateChatRequest{
@@ -2042,6 +2043,29 @@ func (s *Service) appIDsForMembers(memberIDs []string) ([]string, error) {
 		appIDs = append(appIDs, appID)
 	}
 	return appIDs, nil
+}
+
+// excludeCallingBot keeps the CSGClaw membership record intact while avoiding
+// a duplicate Feishu invitation for the bot app that created the chat. Feishu
+// adds that app's bot to the chat automatically.
+func excludeCallingBot(memberBotIDs, memberAppIDs []string, callingAppID string) ([]string, []string) {
+	callingAppID = strings.TrimSpace(callingAppID)
+	if callingAppID == "" || len(memberAppIDs) == 0 {
+		return memberBotIDs, memberAppIDs
+	}
+
+	filteredBotIDs := make([]string, 0, len(memberBotIDs))
+	filteredAppIDs := make([]string, 0, len(memberAppIDs))
+	for index, appID := range memberAppIDs {
+		if strings.EqualFold(strings.TrimSpace(appID), callingAppID) {
+			continue
+		}
+		filteredAppIDs = append(filteredAppIDs, appID)
+		if index < len(memberBotIDs) {
+			filteredBotIDs = append(filteredBotIDs, memberBotIDs[index])
+		}
+	}
+	return filteredBotIDs, filteredAppIDs
 }
 
 func normalizeNonEmptyStrings(values []string) []string {

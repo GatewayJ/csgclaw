@@ -14,6 +14,11 @@ from .config import API_REQUEST_TIMEOUT
 
 ACTION_CARD_TYPE = "csgclaw.action_card"
 MANAGER_REBUILD_ACTION_ID = "rebuild-manager"
+MANAGER_AGENT_REFERENCES = frozenset({"manager", "u-manager", "agent-manager"})
+
+
+def is_manager_agent_reference(agent_ref: str) -> bool:
+    return (agent_ref or "").strip().casefold() in MANAGER_AGENT_REFERENCES
 
 
 def api_base(args) -> str:
@@ -149,7 +154,7 @@ def configure_csgclaw(args, state: dict, result: dict) -> dict:
 
 def resolve_role(args, state: dict) -> str:
     agent_id = state["agent_id"]
-    return args.role or state.get("role") or ("manager" if agent_id == "u-manager" else "worker")
+    return args.role or state.get("role") or ("manager" if is_manager_agent_reference(agent_id) else "worker")
 
 
 def public_result(data: dict) -> dict:

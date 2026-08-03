@@ -317,7 +317,8 @@ func TestFeishuCreateRoomUsesConfiguredAdminOpenID(t *testing.T) {
 		},
 	)
 
-	if _, err := svc.CreateRoom(im.CreateRoomRequest{Title: "alpha", CreatorID: "u-manager", MemberIDs: []string{"u-dev"}}); err != nil {
+	room, err := svc.CreateRoom(im.CreateRoomRequest{Title: "alpha", CreatorID: "admin", MemberIDs: []string{"manager", "u-dev"}})
+	if err != nil {
 		t.Fatalf("CreateRoom() error = %v", err)
 	}
 
@@ -336,13 +337,18 @@ func TestFeishuCreateRoomUsesConfiguredAdminOpenID(t *testing.T) {
 	if len(gotAddReq.MemberAppIDs) != 1 || gotAddReq.MemberAppIDs[0] != "cli_dev" {
 		t.Fatalf("add members app_ids = %+v, want [cli_dev]", gotAddReq.MemberAppIDs)
 	}
+	if got, want := strings.Join(room.Members, ","), "admin,manager,u-dev"; got != want {
+		t.Fatalf("room members = %+v, want manager recorded without invitation", room.Members)
+	}
 }
 
 func TestFeishuCreateRoomResolvesManagerAppByAgentID(t *testing.T) {
 	var gotApp AppConfig
+	var gotAddReq AddChatMembersRequest
 	svc := NewServiceWithProvider(testFeishuConfigProvider{
 		bots: map[string]AppConfig{
 			"pt-manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
+			"pt-worker":  {AppID: "cli_worker", AppSecret: "worker-secret"},
 		},
 		agentBots: map[string]string{
 			feishuManagerAgentID: "pt-manager",
@@ -356,12 +362,26 @@ func TestFeishuCreateRoomResolvesManagerAppByAgentID(t *testing.T) {
 		}
 		return CreateChatResponse{ChatID: "oc_agent_manager", Name: req.Title}, nil
 	}
+	svc.addChatMembers = func(_ context.Context, _ AppConfig, req AddChatMembersRequest) error {
+		gotAddReq = req
+		return nil
+	}
 
-	if _, err := svc.CreateRoom(im.CreateRoomRequest{Title: "alpha", CreatorID: "user-manager"}); err != nil {
+	if _, err := svc.CreateRoom(im.CreateRoomRequest{
+		Title:     "alpha",
+		CreatorID: "user-manager",
+		MemberIDs: []string{"pt-manager", "pt-worker"},
+	}); err != nil {
 		t.Fatalf("CreateRoom() error = %v", err)
 	}
 	if got, want := gotApp.AppID, "cli_manager"; got != want {
 		t.Fatalf("create chat app_id = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(gotAddReq.MemberBotIDs, ","), "pt-worker"; got != want {
+		t.Fatalf("add member bot ids = %+v, want %q", gotAddReq.MemberBotIDs, want)
+	}
+	if got, want := strings.Join(gotAddReq.MemberAppIDs, ","), "cli_worker"; got != want {
+		t.Fatalf("add member app ids = %+v, want %q", gotAddReq.MemberAppIDs, want)
 	}
 }
 

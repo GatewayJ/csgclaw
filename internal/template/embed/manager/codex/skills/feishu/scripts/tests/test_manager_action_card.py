@@ -82,6 +82,54 @@ class ManagerActionCardTest(unittest.TestCase):
         self.assertEqual(api_calls, [("POST", "/api/v1/agents/u-manager/bindings:apply?channel=feishu", None)])
         self.assertTrue(any("--app-secret-env" in call[0] for call in calls))
 
+    def test_start_recognizes_all_manager_references_without_registry_lookup(self):
+        saved_states = []
+        original_api_json = commands.api_json
+        original_init_registration = commands.init_registration
+        original_begin_registration = commands.begin_registration
+        original_save_state = commands.save_state
+        original_state_path = commands.state_path
+
+        commands.api_json = lambda *args: self.fail(f"manager start must not query the worker registry: {args}")
+        commands.init_registration = lambda domain: None
+        commands.begin_registration = lambda domain: {
+            "device_code": "device-code",
+            "qr_url": "https://example.test/qr",
+            "interval": 5,
+            "expire_in": 600,
+        }
+        commands.save_state = lambda args, state: saved_states.append(state.copy())
+        commands.state_path = lambda args, registration_id: Path("/tmp") / f"{registration_id}.json"
+        try:
+            for agent_ref in ("manager", "u-manager", "agent-manager"):
+                with self.subTest(agent_ref=agent_ref):
+                    args = Namespace(
+                        agent=agent_ref,
+                        domain="feishu",
+                        role="",
+                        bot_name="",
+                        description="",
+                        timeout=600,
+                        json=True,
+                        qr=False,
+                        state_dir="",
+                    )
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = commands.cmd_start(args)
+                    self.assertEqual(exit_code, 0)
+                    payload = json.loads(stdout.getvalue())
+                    self.assertEqual(payload["agent_id"], agent_ref)
+                    self.assertEqual(payload["role"], "manager")
+                    self.assertEqual(saved_states[-1]["agent_id"], agent_ref)
+                    self.assertEqual(saved_states[-1]["role"], "manager")
+        finally:
+            commands.api_json = original_api_json
+            commands.init_registration = original_init_registration
+            commands.begin_registration = original_begin_registration
+            commands.save_state = original_save_state
+            commands.state_path = original_state_path
+
     def test_start_resolves_existing_worker_by_display_name_with_one_registry_request(self):
         api_calls = []
         saved_states = []

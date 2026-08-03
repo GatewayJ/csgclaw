@@ -15,6 +15,7 @@ from .csgclaw import (
     api_json,
     configure_csgclaw,
     csgclaw_cli_json,
+    is_manager_agent_reference,
     manager_recreate_action_card,
     path_id,
     public_result,
@@ -47,7 +48,7 @@ def script_command() -> str:
 
 
 def resolve_manager_app_id(args: argparse.Namespace, state: dict, result: dict) -> str:
-    if state.get("agent_id") == "u-manager":
+    if is_manager_agent_reference(str(state.get("agent_id") or "")):
         return str(result.get("app_id") or "").strip()
     try:
         participants = csgclaw_cli_json(args, ["participant", "list", "--channel", "feishu"])
@@ -58,8 +59,8 @@ def resolve_manager_app_id(args: argparse.Namespace, state: dict, result: dict) 
     for participant in participants:
         if not isinstance(participant, dict):
             continue
-        is_manager_participant = str(participant.get("id") or "").strip() == "manager"
-        is_manager_agent = str(participant.get("agent_id") or "").strip() == "u-manager"
+        is_manager_participant = str(participant.get("id") or "").strip() in {"manager", "pt-manager"}
+        is_manager_agent = is_manager_agent_reference(str(participant.get("agent_id") or ""))
         if not (is_manager_participant or is_manager_agent):
             continue
         config = participant.get("channel_app_config")
@@ -147,8 +148,8 @@ def resolve_worker_agent_reference(args: argparse.Namespace, agent_ref: str) -> 
 
 def cmd_bind_manager(args: argparse.Namespace) -> int:
     agent_id = validate_agent_id(args.agent)
-    if agent_id != "u-manager":
-        raise RuntimeError("bind-manager currently supports only u-manager")
+    if not is_manager_agent_reference(agent_id):
+        raise RuntimeError("bind-manager supports only manager, u-manager, or agent-manager")
     app_id = str(args.app_id or "").strip()
     if not app_id:
         raise RuntimeError("--app-id is required")
@@ -212,7 +213,7 @@ def cmd_bind_manager(args: argparse.Namespace) -> int:
 def cmd_start(args: argparse.Namespace) -> int:
     agent_ref = validate_agent_reference(args.agent)
     domain = args.domain
-    role = args.role or ("manager" if agent_ref == "u-manager" else "worker")
+    role = args.role or ("manager" if is_manager_agent_reference(agent_ref) else "worker")
     agent_id = agent_ref
     agent_name = ""
     if role == "worker":
@@ -302,9 +303,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     if not args.keep_state:
         delete_state(args, state["registration_id"])
     if configured is not None:
-        admin_open_id = str((configured or {}).get("admin_open_id") or "").strip() if state["agent_id"] == "u-manager" else ""
+        admin_open_id = str((configured or {}).get("admin_open_id") or "").strip() if role == "manager" else ""
     else:
-        admin_open_id = str(result.get("open_id") or "").strip() if state["agent_id"] == "u-manager" else ""
+        admin_open_id = str(result.get("open_id") or "").strip() if role == "manager" else ""
     worker_recreate_policy = None
     if role == "worker":
         restart_status = str((ensured or {}).get("restart_status") or "") if isinstance(ensured, dict) else ""
@@ -345,7 +346,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_recreate_agent(args: argparse.Namespace) -> int:
     agent_id = validate_agent_id(args.agent)
-    if agent_id == "u-manager":
+    if is_manager_agent_reference(agent_id):
         output = manager_recreate_action_card(agent_id)
     else:
         result = api_json(args, "POST", f"/api/v1/agents/{path_id(agent_id)}/recreate", None)
@@ -371,7 +372,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(start)
     add_api_common(start)
     start.add_argument("--agent", required=True, help="CSGClaw runtime Agent ID or exact display name, e.g. agent-dev or dev")
-    start.add_argument("--role", choices=["worker", "manager"], default="", help="Agent role; inferred from u-manager when omitted")
+    start.add_argument("--role", choices=["worker", "manager"], default="", help="Agent role; inferred for manager, u-manager, or agent-manager when omitted")
     start.add_argument("--bot-name", default="", help="CSGClaw bot display name")
     start.add_argument("--description", default="", help="CSGClaw bot description")
     start.add_argument("--domain", choices=["feishu", "lark"], default="feishu")
@@ -412,7 +413,7 @@ def build_parser() -> argparse.ArgumentParser:
     bind_manager = sub.add_parser("bind-manager", help="Bind manager Feishu credentials and print a browser action card")
     add_common(bind_manager)
     add_api_common(bind_manager)
-    bind_manager.add_argument("--agent", default="u-manager", help="Manager agent id; only u-manager is supported")
+    bind_manager.add_argument("--agent", default="agent-manager", help="Manager reference: manager, u-manager, or agent-manager")
     bind_manager.add_argument("--app-id", required=True, help="Feishu app id for the manager bot app")
     bind_manager.add_argument("--open-id", default="", help="Optional Feishu admin open_id to bind before the bot app")
     bind_manager.add_argument("--name", default="", help="Optional admin participant display name")
