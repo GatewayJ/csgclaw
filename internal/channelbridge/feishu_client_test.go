@@ -16,7 +16,7 @@ func TestFeishuClientFormatsToolActivityMessages(t *testing.T) {
 	var gotReq feishu.SendMessageRequest
 	svc := feishu.NewServiceWithSendMessage(
 		map[string]feishu.AppConfig{
-			"manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
+			"agent-manager": {AppID: "cli_manager", AppSecret: "manager-secret"},
 		},
 		func(_ context.Context, _ feishu.AppConfig, req feishu.SendMessageRequest) (feishu.SendMessageResponse, error) {
 			gotReq = req

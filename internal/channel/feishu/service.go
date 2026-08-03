@@ -27,10 +27,6 @@ const (
 	// "pt-manager"), so resolve its app through the canonical Agent ID instead
 	// of assuming a participant named "manager".
 	feishuManagerAgentID = "agent-manager"
-
-	// feishuManagerBotID is retained for services constructed with an in-memory
-	// app map, whose historical Manager key is "manager".
-	feishuManagerBotID = "manager"
 )
 
 type CreateUserRequest struct {
@@ -1957,11 +1953,11 @@ func (s *Service) managerAppConfigLocked() (AppConfig, error) {
 			return validateAppConfig(app, participantID)
 		}
 	}
-	app, ok := s.appConfigByIDLocked(feishuManagerBotID)
+	app, ok := s.appConfigByIDLocked(feishuManagerAgentID)
 	if !ok {
-		return AppConfig{}, fmt.Errorf("feishu app is not configured for %q", feishuManagerBotID)
+		return AppConfig{}, fmt.Errorf("feishu app is not configured for %q", feishuManagerAgentID)
 	}
-	return validateAppConfig(app, feishuManagerBotID)
+	return validateAppConfig(app, feishuManagerAgentID)
 }
 
 func (s *Service) appConfigByIDLocked(participantID string) (AppConfig, bool) {
