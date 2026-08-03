@@ -59,16 +59,17 @@ type AgentRef struct {
 }
 
 type SessionSpec struct {
-	RuntimeID    string
-	AgentID      string
-	AgentName    string
-	BinaryPath   string
-	RuntimeDir   string
-	WorkspaceDir string
-	HomeDir      string
-	CodexHomeDir string
-	StderrPath   string
-	Profile      agentruntime.Profile
+	RuntimeID            string
+	AgentID              string
+	AgentName            string
+	BinaryPath           string
+	RuntimeDir           string
+	WorkspaceDir         string
+	HomeDir              string
+	CodexHomeDir         string
+	StderrPath           string
+	Profile              agentruntime.Profile
+	ConversationSessions map[string]string
 }
 
 type SessionHandle struct {
@@ -76,20 +77,21 @@ type SessionHandle struct {
 }
 
 type Session struct {
-	RuntimeID         string
-	AgentID           string
-	AgentName         string
-	SessionID         string
-	BinaryPath        string
-	RuntimeDir        string
-	WorkspaceDir      string
-	HomeDir           string
-	CodexHomeDir      string
-	StderrPath        string
-	ProcessID         int
-	CreatedAt         time.Time
-	StartedAt         time.Time
-	AgentCapabilities any
+	RuntimeID            string
+	AgentID              string
+	AgentName            string
+	SessionID            string
+	BinaryPath           string
+	RuntimeDir           string
+	WorkspaceDir         string
+	HomeDir              string
+	CodexHomeDir         string
+	StderrPath           string
+	ProcessID            int
+	CreatedAt            time.Time
+	StartedAt            time.Time
+	AgentCapabilities    any
+	ConversationSessions map[string]string
 }
 
 type Manager interface {
@@ -355,11 +357,18 @@ func (r *Runtime) Start(ctx context.Context, h agentruntime.Handle) (agentruntim
 		return agentruntime.StateUnknown, err
 	}
 	agentRef.Profile = agentRef.Profile.Normalized()
+	var conversationSessions map[string]string
+	if sessionMeta, readErr := r.readSessionMetadata(strings.TrimSpace(h.RuntimeID)); readErr == nil {
+		conversationSessions = cloneConversationSessions(sessionMeta.ConversationSessions)
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return agentruntime.StateUnknown, fmt.Errorf("read persisted codex conversations: %w", readErr)
+	}
 	session, err := r.ensureSession(ctx, SessionSpec{
-		RuntimeID: strings.TrimSpace(h.RuntimeID),
-		AgentID:   strings.TrimSpace(agentRef.ID),
-		AgentName: strings.TrimSpace(agentRef.Name),
-		Profile:   agentRef.Profile,
+		RuntimeID:            strings.TrimSpace(h.RuntimeID),
+		AgentID:              strings.TrimSpace(agentRef.ID),
+		AgentName:            strings.TrimSpace(agentRef.Name),
+		Profile:              agentRef.Profile,
+		ConversationSessions: conversationSessions,
 	})
 	if err != nil {
 		if sessionRestoreErr != nil {
@@ -530,6 +539,14 @@ func (r *Runtime) sessionManager() Manager {
 			}
 			_ = writeJSONFile(r.writeFile, filepath.Join(session.RuntimeDir, runtimeFileName), meta)
 		},
+		OnConversationSessionsChange: func(session *Session, conversations map[string]string) error {
+			if session == nil {
+				return nil
+			}
+			meta := sessionToSessionMetadata(session)
+			meta.ConversationSessions = cloneConversationSessions(conversations)
+			return writeJSONFile(r.writeFile, filepath.Join(session.RuntimeDir, sessionFileName), meta)
+		},
 	})
 	manager.deps.HydrateSession = func(ctx context.Context, handle SessionHandle) (*Session, error) {
 		return r.hydratePersistedSession(ctx, manager, handle)
@@ -643,7 +660,8 @@ func (r *Runtime) hydratePersistedSession(ctx context.Context, manager *appServe
 	if err != nil {
 		return nil, err
 	}
-	if _, err := r.readSessionMetadata(runtimeID); err != nil {
+	sessionMeta, err := r.readSessionMetadata(runtimeID)
+	if err != nil {
 		return nil, err
 	}
 	agentRef, err := r.resolveAgent(agentruntime.Handle{RuntimeID: runtimeID})
@@ -669,16 +687,17 @@ func (r *Runtime) hydratePersistedSession(ctx context.Context, manager *appServe
 		return nil, fmt.Errorf("resolve codex binary: %w", err)
 	}
 	spec := SessionSpec{
-		RuntimeID:    runtimeID,
-		AgentID:      agentID,
-		AgentName:    firstNonEmpty(agentRef.Name, meta.AgentName),
-		BinaryPath:   binaryPath,
-		RuntimeDir:   dirs.Root,
-		WorkspaceDir: workspaceDir,
-		HomeDir:      r.hostSessionHomeDir(dirs.Home),
-		CodexHomeDir: dirs.CodexHome,
-		StderrPath:   dirs.StderrLog,
-		Profile:      agentRef.Profile.Normalized(),
+		RuntimeID:            runtimeID,
+		AgentID:              agentID,
+		AgentName:            firstNonEmpty(agentRef.Name, meta.AgentName),
+		BinaryPath:           binaryPath,
+		RuntimeDir:           dirs.Root,
+		WorkspaceDir:         workspaceDir,
+		HomeDir:              r.hostSessionHomeDir(dirs.Home),
+		CodexHomeDir:         dirs.CodexHome,
+		StderrPath:           dirs.StderrLog,
+		Profile:              agentRef.Profile.Normalized(),
+		ConversationSessions: cloneConversationSessions(sessionMeta.ConversationSessions),
 	}
 	if err := r.mkdirAll(spec.WorkspaceDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create codex workspace dir %s: %w", spec.WorkspaceDir, err)
@@ -1699,12 +1718,13 @@ type runtimeMetadata struct {
 }
 
 type sessionMetadata struct {
-	RuntimeID    string    `json:"runtime_id"`
-	SessionID    string    `json:"session_id"`
-	WorkspaceDir string    `json:"workspace_dir"`
-	HomeDir      string    `json:"home_dir"`
-	CodexHomeDir string    `json:"codex_home_dir"`
-	StartedAt    time.Time `json:"started_at,omitempty"`
+	RuntimeID            string            `json:"runtime_id"`
+	SessionID            string            `json:"session_id"`
+	WorkspaceDir         string            `json:"workspace_dir"`
+	HomeDir              string            `json:"home_dir"`
+	CodexHomeDir         string            `json:"codex_home_dir"`
+	StartedAt            time.Time         `json:"started_at,omitempty"`
+	ConversationSessions map[string]string `json:"conversation_sessions,omitempty"`
 }
 
 func sessionToRuntimeMetadata(session *Session) runtimeMetadata {
@@ -1723,13 +1743,32 @@ func sessionToRuntimeMetadata(session *Session) runtimeMetadata {
 
 func sessionToSessionMetadata(session *Session) sessionMetadata {
 	return normalizeSessionMetadata(sessionMetadata{
-		RuntimeID:    session.RuntimeID,
-		SessionID:    session.SessionID,
-		WorkspaceDir: session.WorkspaceDir,
-		HomeDir:      session.HomeDir,
-		CodexHomeDir: session.CodexHomeDir,
-		StartedAt:    session.StartedAt,
+		RuntimeID:            session.RuntimeID,
+		SessionID:            session.SessionID,
+		WorkspaceDir:         session.WorkspaceDir,
+		HomeDir:              session.HomeDir,
+		CodexHomeDir:         session.CodexHomeDir,
+		StartedAt:            session.StartedAt,
+		ConversationSessions: cloneConversationSessions(session.ConversationSessions),
 	})
+}
+
+func cloneConversationSessions(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizeRuntimeMetadata(meta runtimeMetadata) runtimeMetadata {
@@ -1757,6 +1796,7 @@ func normalizeSessionMetadata(meta sessionMetadata) sessionMetadata {
 	meta.WorkspaceDir = strings.TrimSpace(meta.WorkspaceDir)
 	meta.HomeDir = strings.TrimSpace(meta.HomeDir)
 	meta.CodexHomeDir = strings.TrimSpace(meta.CodexHomeDir)
+	meta.ConversationSessions = cloneConversationSessions(meta.ConversationSessions)
 	if !meta.StartedAt.IsZero() {
 		meta.StartedAt = meta.StartedAt.UTC()
 	}
@@ -1833,12 +1873,13 @@ func writeJSONFile(writeFile func(string, []byte, os.FileMode) error, path strin
 }
 
 type managerDeps struct {
-	EventSink      SessionEventSink
-	Permission     PermissionBroker
-	UserInput      UserInputBroker
-	OpenFile       func(string, int, os.FileMode) (*os.File, error)
-	WriteFile      func(string, []byte, os.FileMode) error
-	ReadFile       func(string) ([]byte, error)
-	OnExit         func(*Session, int)
-	HydrateSession func(context.Context, SessionHandle) (*Session, error)
+	EventSink                    SessionEventSink
+	Permission                   PermissionBroker
+	UserInput                    UserInputBroker
+	OpenFile                     func(string, int, os.FileMode) (*os.File, error)
+	WriteFile                    func(string, []byte, os.FileMode) error
+	ReadFile                     func(string) ([]byte, error)
+	OnExit                       func(*Session, int)
+	HydrateSession               func(context.Context, SessionHandle) (*Session, error)
+	OnConversationSessionsChange func(*Session, map[string]string) error
 }

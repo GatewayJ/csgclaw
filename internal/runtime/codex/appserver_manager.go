@@ -126,6 +126,10 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 
 	logger := slog.New(slog.NewTextHandler(stderrFile, &slog.HandlerOptions{}))
 	appClient := newAppServerClient(stdin, logger)
+	conversationSessions := cloneConversationSessions(spec.ConversationSessions)
+	if conversationSessions == nil {
+		conversationSessions = make(map[string]string)
+	}
 	live := &liveSession{
 		cmd:                   cmd,
 		stdin:                 stdin,
@@ -133,7 +137,8 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 		done:                  make(chan struct{}),
 		spec:                  spec,
 		appClient:             appClient,
-		conversationSessions:  make(map[string]string),
+		conversationSessions:  conversationSessions,
+		loadedConversations:   make(map[string]bool),
 		turnWaiters:           make(map[string]*appServerTurnWaiter),
 		turnThreads:           make(map[string]string),
 		commandOutputs:        make(map[string]*appServerCommandOutputState),
@@ -176,19 +181,20 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 
 	now := time.Now().UTC()
 	session := &Session{
-		RuntimeID:    spec.RuntimeID,
-		AgentID:      spec.AgentID,
-		AgentName:    spec.AgentName,
-		SessionID:    threadID,
-		BinaryPath:   spec.BinaryPath,
-		RuntimeDir:   spec.RuntimeDir,
-		WorkspaceDir: spec.WorkspaceDir,
-		HomeDir:      spec.HomeDir,
-		CodexHomeDir: spec.CodexHomeDir,
-		StderrPath:   spec.StderrPath,
-		ProcessID:    cmd.Process.Pid,
-		CreatedAt:    now,
-		StartedAt:    now,
+		RuntimeID:            spec.RuntimeID,
+		AgentID:              spec.AgentID,
+		AgentName:            spec.AgentName,
+		SessionID:            threadID,
+		BinaryPath:           spec.BinaryPath,
+		RuntimeDir:           spec.RuntimeDir,
+		WorkspaceDir:         spec.WorkspaceDir,
+		HomeDir:              spec.HomeDir,
+		CodexHomeDir:         spec.CodexHomeDir,
+		StderrPath:           spec.StderrPath,
+		ProcessID:            cmd.Process.Pid,
+		CreatedAt:            now,
+		StartedAt:            now,
+		ConversationSessions: cloneConversationSessions(spec.ConversationSessions),
 	}
 	live.mu.Lock()
 	live.session = session
@@ -365,23 +371,71 @@ func (m *appServerManager) EnsureSession(ctx context.Context, handle SessionHand
 	}
 
 	live.mu.Lock()
-	if threadID := strings.TrimSpace(live.conversationSessions[conversationKey]); threadID != "" {
+	if threadID := strings.TrimSpace(live.conversationSessions[conversationKey]); threadID != "" && live.loadedConversations[conversationKey] {
 		live.mu.Unlock()
 		return threadID, nil
 	}
+	restoredThreadID := strings.TrimSpace(live.conversationSessions[conversationKey])
 	live.mu.Unlock()
+	if restoredThreadID != "" {
+		live.conversationResumeMu.Lock()
+		defer live.conversationResumeMu.Unlock()
+		live.conversationPersistMu.Lock()
+		defer live.conversationPersistMu.Unlock()
+
+		live.mu.Lock()
+		if threadID := strings.TrimSpace(live.conversationSessions[conversationKey]); threadID != "" && live.loadedConversations[conversationKey] {
+			live.mu.Unlock()
+			return threadID, nil
+		}
+		restoredThreadID = strings.TrimSpace(live.conversationSessions[conversationKey])
+		live.mu.Unlock()
+
+		threadID, err := m.startOrResumeThread(ctx, live, restoredThreadID)
+		if err != nil {
+			return "", err
+		}
+		live.mu.Lock()
+		previous := live.conversationSessions[conversationKey]
+		live.conversationSessions[conversationKey] = threadID
+		live.loadedConversations[conversationKey] = true
+		conversations := cloneConversationSessions(live.conversationSessions)
+		live.mu.Unlock()
+		if err := m.persistConversationSessions(live, conversations); err != nil {
+			live.mu.Lock()
+			live.conversationSessions[conversationKey] = previous
+			delete(live.loadedConversations, conversationKey)
+			live.mu.Unlock()
+			return "", err
+		}
+		return threadID, nil
+	}
 
 	threadID, err := m.startThread(ctx, live)
 	if err != nil {
 		return "", err
 	}
 
+	live.conversationPersistMu.Lock()
+	defer live.conversationPersistMu.Unlock()
 	live.mu.Lock()
-	defer live.mu.Unlock()
 	if existing := strings.TrimSpace(live.conversationSessions[conversationKey]); existing != "" {
+		live.mu.Unlock()
 		return existing, nil
 	}
 	live.conversationSessions[conversationKey] = threadID
+	live.loadedConversations[conversationKey] = true
+	conversations := cloneConversationSessions(live.conversationSessions)
+	live.mu.Unlock()
+	if err := m.persistConversationSessions(live, conversations); err != nil {
+		live.mu.Lock()
+		if live.conversationSessions[conversationKey] == threadID {
+			delete(live.conversationSessions, conversationKey)
+			delete(live.loadedConversations, conversationKey)
+		}
+		live.mu.Unlock()
+		return "", err
+	}
 	return threadID, nil
 }
 
@@ -400,10 +454,24 @@ func (m *appServerManager) ResetConversationHistory(ctx context.Context, handle 
 		return err
 	}
 
+	live.conversationPersistMu.Lock()
+	defer live.conversationPersistMu.Unlock()
 	live.mu.Lock()
 	sessionID := strings.TrimSpace(live.conversationSessions[conversationKey])
 	delete(live.conversationSessions, conversationKey)
+	wasLoaded := live.loadedConversations[conversationKey]
+	delete(live.loadedConversations, conversationKey)
+	conversations := cloneConversationSessions(live.conversationSessions)
 	live.mu.Unlock()
+	if err := m.persistConversationSessions(live, conversations); err != nil {
+		live.mu.Lock()
+		if sessionID != "" {
+			live.conversationSessions[conversationKey] = sessionID
+			live.loadedConversations[conversationKey] = wasLoaded
+		}
+		live.mu.Unlock()
+		return err
+	}
 
 	if m.deps.Permission != nil && sessionID != "" {
 		m.deps.Permission.CancelSession(runtimeID, sessionID)
@@ -412,6 +480,13 @@ func (m *appServerManager) ResetConversationHistory(ctx context.Context, handle 
 		m.deps.UserInput.CancelSession(runtimeID, sessionID)
 	}
 	return nil
+}
+
+func (m *appServerManager) persistConversationSessions(live *liveSession, conversations map[string]string) error {
+	if m == nil || live == nil || live.session == nil || m.deps.OnConversationSessionsChange == nil {
+		return nil
+	}
+	return m.deps.OnConversationSessionsChange(live.session, conversations)
 }
 
 func (m *appServerManager) ensureLiveSession(ctx context.Context, handle SessionHandle) (*liveSession, error) {

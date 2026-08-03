@@ -1239,12 +1239,19 @@ func TestUpdateCodexAgentProfilePatchRestartsActiveBridge(t *testing.T) {
 				if current.Profile.ModelID != "deepseek-v4-pro" {
 					t.Fatalf("responses probe modelID = %q, want deepseek-v4-pro", current.Profile.ModelID)
 				}
+				if current.Profile.ReasoningEffort != "high" {
+					t.Fatalf("responses probe reasoning effort = %q, want high", current.Profile.ReasoningEffort)
+				}
 				return nil
 			},
 			restart: func(change agentruntime.RuntimeConfigChange) (bool, error) {
 				return change.Previous.Profile.BaseURL != change.Current.Profile.BaseURL ||
 					change.Previous.Profile.APIKey != change.Current.Profile.APIKey ||
 					change.Previous.Profile.ModelID != change.Current.Profile.ModelID, nil
+			},
+			del: func(context.Context, agentruntime.Handle) error {
+				t.Fatal("automatic Codex restart deleted the runtime and its history")
+				return nil
 			},
 		}),
 	)
@@ -1273,10 +1280,11 @@ func TestUpdateCodexAgentProfilePatchRestartsActiveBridge(t *testing.T) {
 		CreatedAt:       time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC),
 	}
 	nextProfile := AgentProfile{
-		Provider: ProviderAPI,
-		BaseURL:  "https://api.deepseek.com",
-		APIKey:   "deepseek-key",
-		ModelID:  "deepseek-v4-pro",
+		Provider:        ProviderAPI,
+		BaseURL:         "https://api.deepseek.com",
+		APIKey:          "deepseek-key",
+		ModelID:         "deepseek-v4-pro",
+		ReasoningEffort: "high",
 	}
 
 	updated, err := svc.Update(context.Background(), "u-dev", UpdateRequest{AgentProfile: &nextProfile})
@@ -1286,11 +1294,14 @@ func TestUpdateCodexAgentProfilePatchRestartsActiveBridge(t *testing.T) {
 	if probeCalls != 1 {
 		t.Fatalf("responses probe calls = %d, want 1", probeCalls)
 	}
-	if !updated.AgentProfile.EnvRestartRequired {
-		t.Fatal("Update().AgentProfile.EnvRestartRequired = false, want true so running Codex bridge is refreshed")
+	if updated.AgentProfile.EnvRestartRequired {
+		t.Fatal("Update().AgentProfile.EnvRestartRequired = true, want false after automatic Codex restart")
 	}
 	if len(observer.stopCalls) != 1 || observer.stopCalls[0] != "u-dev" {
 		t.Fatalf("StopAgent() calls = %+v, want [u-dev]", observer.stopCalls)
+	}
+	if len(observer.ensureCalls) != 1 || observer.ensureCalls[0].ID != "u-dev" {
+		t.Fatalf("EnsureAgent() calls = %+v, want one restart for u-dev", observer.ensureCalls)
 	}
 }
 
@@ -1366,19 +1377,76 @@ func TestUpdateAgentProfileCodexRuntimeFallbackRestartsActiveBridge(t *testing.T
 	if err != nil {
 		t.Fatalf("UpdateAgentProfile() error = %v", err)
 	}
-	if !view.EnvRestartRequired {
-		t.Fatal("UpdateAgentProfile().EnvRestartRequired = false, want true so running Codex bridge is refreshed")
+	if view.EnvRestartRequired {
+		t.Fatal("UpdateAgentProfile().EnvRestartRequired = true, want false after automatic Codex restart")
 	}
 	if len(observer.stopCalls) != 1 || observer.stopCalls[0] != "u-dev" {
 		t.Fatalf("StopAgent() calls = %+v, want [u-dev]", observer.stopCalls)
 	}
 
-	started, err := svc.Start(context.Background(), "u-dev")
-	if err != nil {
-		t.Fatalf("Start() error = %v", err)
+	if len(observer.ensureCalls) != 1 || observer.ensureCalls[0].ID != "u-dev" {
+		t.Fatalf("EnsureAgent() calls = %+v, want one automatic restart for u-dev", observer.ensureCalls)
 	}
-	if started.AgentProfile.EnvRestartRequired {
-		t.Fatal("Start().AgentProfile.EnvRestartRequired = true, want false after recreate")
+}
+
+func TestCodexAutomaticRestartFailurePersistsStoppedAndRetriesWithoutDelete(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	startErr := errors.New("start failed")
+	deleteCalls := 0
+	svc, err := NewService(
+		testModelConfig(),
+		config.ServerConfig{},
+		"manager-image:test",
+		filepath.Join(t.TempDir(), "agents.json"),
+		WithRuntime(fakeAgentRuntime{
+			kind:    RuntimeKindCodex,
+			restart: func(agentruntime.RuntimeConfigChange) (bool, error) { return true, nil },
+			start: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+				if startErr != nil {
+					return agentruntime.StateStopped, startErr
+				}
+				return agentruntime.StateRunning, nil
+			},
+			info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
+				return agentruntime.Info{State: agentruntime.StateRunning}, nil
+			},
+			del: func(context.Context, agentruntime.Handle) error {
+				deleteCalls++
+				return nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	profile := AgentProfile{Name: "dev", Provider: ProviderAPI, BaseURL: "https://old.example/v1", APIKey: "key", ModelID: "old", ProfileComplete: true}
+	svc.agents["u-dev"] = Agent{ID: "u-dev", Name: "dev", RuntimeID: "rt-u-dev", RuntimeKind: RuntimeKindCodex, Role: RoleWorker, Status: string(agentruntime.StateRunning), AgentProfile: profile, ProfileComplete: true}
+
+	_, err = svc.Update(context.Background(), "u-dev", UpdateRequest{AgentProfile: &AgentProfile{Provider: ProviderAPI, BaseURL: "https://new.example/v1", APIKey: "key", ModelID: "new"}})
+	if !errors.Is(err, startErr) {
+		t.Fatalf("Update() error = %v, want %v", err, startErr)
+	}
+	failed, ok := svc.agentSnapshot("u-dev")
+	if !ok {
+		t.Fatal("Agent() ok = false")
+	}
+	if got, want := failed.Status, string(agentruntime.StateStopped); got != want {
+		t.Fatalf("failed restart status = %q, want %q", got, want)
+	}
+	if !failed.AgentProfile.EnvRestartRequired {
+		t.Fatal("failed restart cleared EnvRestartRequired")
+	}
+
+	startErr = nil
+	restarted, err := svc.Start(context.Background(), "u-dev")
+	if err != nil {
+		t.Fatalf("Start() retry error = %v", err)
+	}
+	if restarted.AgentProfile.EnvRestartRequired || restarted.Status != string(agentruntime.StateRunning) {
+		t.Fatalf("Start() retry agent = %+v, want running without restart flag", restarted)
+	}
+	if deleteCalls != 0 {
+		t.Fatalf("Delete() calls = %d, want 0 to preserve history", deleteCalls)
 	}
 }
 
@@ -1742,11 +1810,14 @@ func TestUpdateCodexLocalWorkspaceDirMarksRunningRuntimeForRestart(t *testing.T)
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
-	if !updated.AgentProfile.EnvRestartRequired {
-		t.Fatal("Update().AgentProfile.EnvRestartRequired = false, want true after codex local_workspace_dir change")
+	if updated.AgentProfile.EnvRestartRequired {
+		t.Fatal("Update().AgentProfile.EnvRestartRequired = true, want false after automatic Codex restart")
 	}
 	if len(observer.stopCalls) != 1 || observer.stopCalls[0] != "u-dev" {
 		t.Fatalf("StopAgent() calls = %+v, want [u-dev]", observer.stopCalls)
+	}
+	if len(observer.ensureCalls) != 1 || observer.ensureCalls[0].ID != "u-dev" {
+		t.Fatalf("EnsureAgent() calls = %+v, want one automatic restart for u-dev", observer.ensureCalls)
 	}
 }
 
@@ -2139,7 +2210,7 @@ func TestAddMCPServersSerializesWithDirectMCPServersUpdate(t *testing.T) {
 	}
 }
 
-func TestAddMCPServersFromHubRecreatesRunningCodexManager(t *testing.T) {
+func TestAddMCPServersFromHubRestartsRunningCodexManagerWithoutDeletingHistory(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	origLocateCodexCLI := locateCodexCLI
 	locateCodexCLI = func() (string, error) { return "/usr/local/bin/codex", nil }
@@ -2204,15 +2275,15 @@ func TestAddMCPServersFromHubRecreatesRunningCodexManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddMCPServersFromHub() error = %v", err)
 	}
-	if deleteCalls != 1 || newCalls != 1 {
-		t.Fatalf("manager recreate calls = delete %d/new %d, want 1/1", deleteCalls, newCalls)
+	if deleteCalls != 0 || newCalls != 0 {
+		t.Fatalf("manager restart calls = delete %d/new %d, want 0/0 to preserve history", deleteCalls, newCalls)
 	}
 	assertMCPServersHasServer(t, provisionedMCPServers, "context7")
 	assertMCPServersHasServer(t, updated.MCPServers, "context7")
 	if updated.AgentProfile.EnvRestartRequired {
-		t.Fatal("AddMCPServersFromHub().AgentProfile.EnvRestartRequired = true, want false after successful manager recreate")
+		t.Fatal("AddMCPServersFromHub().AgentProfile.EnvRestartRequired = true, want false after successful manager restart")
 	}
-	if got, want := updated.BoxID, "codex-manager-session-new"; got != want {
+	if got, want := updated.BoxID, "codex-manager-session-old"; got != want {
 		t.Fatalf("AddMCPServersFromHub().BoxID = %q, want %q", got, want)
 	}
 }
