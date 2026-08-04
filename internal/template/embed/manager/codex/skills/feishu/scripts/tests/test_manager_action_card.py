@@ -82,6 +82,158 @@ class ManagerActionCardTest(unittest.TestCase):
         self.assertEqual(api_calls, [("POST", "/api/v1/agents/u-manager/bindings:apply?channel=feishu", None)])
         self.assertTrue(any("--app-secret-env" in call[0] for call in calls))
 
+    def test_start_recognizes_all_manager_references_without_registry_lookup(self):
+        saved_states = []
+        original_api_json = commands.api_json
+        original_init_registration = commands.init_registration
+        original_begin_registration = commands.begin_registration
+        original_save_state = commands.save_state
+        original_state_path = commands.state_path
+
+        commands.api_json = lambda *args: self.fail(f"manager start must not query the worker registry: {args}")
+        commands.init_registration = lambda domain: None
+        commands.begin_registration = lambda domain: {
+            "device_code": "device-code",
+            "qr_url": "https://example.test/qr",
+            "interval": 5,
+            "expire_in": 600,
+        }
+        commands.save_state = lambda args, state: saved_states.append(state.copy())
+        commands.state_path = lambda args, registration_id: Path("/tmp") / f"{registration_id}.json"
+        try:
+            for agent_ref in ("manager", "u-manager", "agent-manager"):
+                with self.subTest(agent_ref=agent_ref):
+                    args = Namespace(
+                        agent=agent_ref,
+                        domain="feishu",
+                        role="",
+                        bot_name="",
+                        description="",
+                        timeout=600,
+                        json=True,
+                        qr=False,
+                        state_dir="",
+                    )
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = commands.cmd_start(args)
+                    self.assertEqual(exit_code, 0)
+                    payload = json.loads(stdout.getvalue())
+                    self.assertEqual(payload["agent_id"], agent_ref)
+                    self.assertEqual(payload["role"], "manager")
+                    self.assertEqual(saved_states[-1]["agent_id"], agent_ref)
+                    self.assertEqual(saved_states[-1]["role"], "manager")
+        finally:
+            commands.api_json = original_api_json
+            commands.init_registration = original_init_registration
+            commands.begin_registration = original_begin_registration
+            commands.save_state = original_save_state
+            commands.state_path = original_state_path
+
+    def test_start_resolves_existing_worker_by_display_name_with_one_registry_request(self):
+        api_calls = []
+        saved_states = []
+        originals = {
+            "api_json": commands.api_json,
+            "init_registration": commands.init_registration,
+            "begin_registration": commands.begin_registration,
+            "save_state": commands.save_state,
+            "state_path": commands.state_path,
+        }
+
+        def fake_api_json(args, method, path, body=None):
+            api_calls.append((method, path, body))
+            if path == "/api/v1/agents":
+                return [
+                    {"id": "agent-meds2g", "name": "generic-assistant-codex", "role": "worker"},
+                    {"id": "agent-otep2a", "name": "generic-assistant-codex-2", "role": "worker"},
+                ]
+            self.fail(f"unexpected API request: {method} {path}")
+
+        commands.api_json = fake_api_json
+        commands.init_registration = lambda domain: None
+        commands.begin_registration = lambda domain: {
+            "device_code": "device-code",
+            "qr_url": "https://example.test/qr",
+            "interval": 5,
+            "expire_in": 600,
+        }
+        commands.save_state = lambda args, state: saved_states.append(state.copy())
+        commands.state_path = lambda args, registration_id: Path("/tmp") / f"{registration_id}.json"
+        try:
+            args = Namespace(
+                agent="generic-assistant-codex",
+                domain="feishu",
+                role="worker",
+                bot_name="",
+                description="",
+                timeout=600,
+                json=True,
+                qr=False,
+                state_dir="",
+            )
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                exit_code = commands.cmd_start(args)
+        finally:
+            for name, value in originals.items():
+                setattr(commands, name, value)
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["agent_id"], "agent-meds2g")
+        self.assertEqual(saved_states[0]["agent_id"], "agent-meds2g")
+        self.assertEqual(saved_states[0]["bot_name"], "generic-assistant-codex")
+        self.assertEqual(
+            api_calls,
+            [
+                ("GET", "/api/v1/agents", None),
+            ],
+        )
+
+    def test_resolve_worker_reference_matches_exact_runtime_id(self):
+        api_calls = []
+        original_api_json = commands.api_json
+
+        def fake_api_json(args, method, path, body=None):
+            api_calls.append((method, path, body))
+            self.assertEqual(path, "/api/v1/agents")
+            return [{"id": "agent-meds2g", "name": "generic-assistant-codex", "role": "worker"}]
+
+        commands.api_json = fake_api_json
+        try:
+            resolved = commands.resolve_worker_agent_reference(Namespace(), "agent-meds2g")
+        finally:
+            commands.api_json = original_api_json
+
+        self.assertEqual(resolved, ("agent-meds2g", "generic-assistant-codex"))
+        self.assertEqual(api_calls, [("GET", "/api/v1/agents", None)])
+
+    def test_start_rejects_ambiguous_worker_reference_before_registration(self):
+        initialization = []
+        original_api_json = commands.api_json
+        original_init_registration = commands.init_registration
+
+        def fake_api_json(args, method, path, body=None):
+            if path == "/api/v1/agents":
+                return [
+                    {"id": "agent-dev", "name": "backend", "role": "worker"},
+                    {"id": "agent-other", "name": "agent-dev", "role": "worker"},
+                ]
+            self.fail(f"unexpected API request: {method} {path}")
+
+        commands.api_json = fake_api_json
+        commands.init_registration = lambda domain: initialization.append(domain)
+        try:
+            args = Namespace(agent="agent-dev", domain="feishu", role="worker")
+            with self.assertRaisesRegex(RuntimeError, "reference .* matched multiple agents"):
+                commands.cmd_start(args)
+        finally:
+            commands.api_json = original_api_json
+            commands.init_registration = original_init_registration
+
+        self.assertEqual(initialization, [])
+
     def test_configure_worker_skips_admin_from_registration_open_id(self):
         calls = []
         original_csgclaw_cli_json = csgclaw.csgclaw_cli_json

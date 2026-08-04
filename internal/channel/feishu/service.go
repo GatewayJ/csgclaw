@@ -23,6 +23,13 @@ import (
 )
 
 const (
+	// The persisted Manager participant uses a typed ID (for example,
+	// "pt-manager"), so resolve its app through the canonical Agent ID instead
+	// of assuming a participant named "manager".
+	feishuManagerAgentID = "agent-manager"
+
+	// feishuManagerBotID is retained for services constructed with an in-memory
+	// app map, whose historical Manager key is "manager".
 	feishuManagerBotID = "manager"
 )
 
@@ -531,6 +538,7 @@ func (s *Service) CreateRoom(req im.CreateRoomRequest) (im.Room, error) {
 	if err != nil {
 		return im.Room{}, err
 	}
+	memberBotIDs, memberAppIDs = excludeCallingBot(memberBotIDs, memberAppIDs, app.AppID)
 	description := strings.TrimSpace(req.Description)
 
 	created, err := s.createChat(context.Background(), app, CreateChatRequest{
@@ -1943,6 +1951,12 @@ func (s *Service) participantMentionOpenIDLocked(participantID string) (string, 
 }
 
 func (s *Service) managerAppConfigLocked() (AppConfig, error) {
+	if s.configProvider != nil {
+		participantID, app, ok := s.configProvider.BotConfigForAgent(feishuManagerAgentID)
+		if ok {
+			return validateAppConfig(app, participantID)
+		}
+	}
 	app, ok := s.appConfigByIDLocked(feishuManagerBotID)
 	if !ok {
 		return AppConfig{}, fmt.Errorf("feishu app is not configured for %q", feishuManagerBotID)
@@ -2029,6 +2043,29 @@ func (s *Service) appIDsForMembers(memberIDs []string) ([]string, error) {
 		appIDs = append(appIDs, appID)
 	}
 	return appIDs, nil
+}
+
+// excludeCallingBot keeps the CSGClaw membership record intact while avoiding
+// a duplicate Feishu invitation for the bot app that created the chat. Feishu
+// adds that app's bot to the chat automatically.
+func excludeCallingBot(memberBotIDs, memberAppIDs []string, callingAppID string) ([]string, []string) {
+	callingAppID = strings.TrimSpace(callingAppID)
+	if callingAppID == "" || len(memberAppIDs) == 0 {
+		return memberBotIDs, memberAppIDs
+	}
+
+	filteredBotIDs := make([]string, 0, len(memberBotIDs))
+	filteredAppIDs := make([]string, 0, len(memberAppIDs))
+	for index, appID := range memberAppIDs {
+		if strings.EqualFold(strings.TrimSpace(appID), callingAppID) {
+			continue
+		}
+		filteredAppIDs = append(filteredAppIDs, appID)
+		if index < len(memberBotIDs) {
+			filteredBotIDs = append(filteredBotIDs, memberBotIDs[index])
+		}
+	}
+	return filteredBotIDs, filteredAppIDs
 }
 
 func normalizeNonEmptyStrings(values []string) []string {
