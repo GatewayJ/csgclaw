@@ -498,6 +498,7 @@ function Invoke-DesktopBackendBundle {
         GOOS        = "linux"
         GOARCH      = $Goarch
     } -Quiet
+    Fetch-CodexCli -Goos $Goos -Goarch $Goarch -OutputDir $binDir
 
     Write-Host "Desktop backend ready: $bundleRoot"
 }
@@ -596,6 +597,69 @@ function Fetch-BoxLiteCli {
     }
 }
 
+function Resolve-CodexCliDownloadTarget {
+    param(
+        [Parameter(Mandatory = $true)][string]$Goos,
+        [Parameter(Mandatory = $true)][string]$Goarch
+    )
+
+    switch ("$Goos/$Goarch") {
+        "linux/amd64" { return @{ Os = "linux"; Arch = "amd64"; Binary = "codex-x86_64-unknown-linux-musl" } }
+        "linux/arm64" { return @{ Os = "linux"; Arch = "arm64"; Binary = "codex-aarch64-unknown-linux-musl" } }
+        "darwin/amd64" { return @{ Os = "macos"; Arch = "x64"; Binary = "codex-x86_64-apple-darwin" } }
+        "darwin/arm64" { return @{ Os = "macos"; Arch = "arm64"; Binary = "codex-aarch64-apple-darwin" } }
+        "windows/amd64" { return @{ Os = "windows"; Arch = "amd64"; Binary = "codex.exe" } }
+        "windows/arm64" { return @{ Os = "windows"; Arch = "arm64"; Binary = "codex.exe" } }
+        default { throw "unsupported bundled Codex CLI target: $Goos/$Goarch" }
+    }
+}
+
+function Fetch-CodexCli {
+    param(
+        [Parameter(Mandatory = $true)][string]$Goos,
+        [Parameter(Mandatory = $true)][string]$Goarch,
+        [Parameter(Mandatory = $true)][string]$OutputDir
+    )
+
+    $target = Resolve-CodexCliDownloadTarget -Goos $Goos -Goarch $Goarch
+    $downloadUrl = "$($script:CodexCliDownloadBaseUrl.TrimEnd('/'))/$($target.Os)/$($target.Arch)?package=codex-cli"
+    $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("csgclaw-codex-" + [guid]::NewGuid().ToString("N"))
+    Ensure-Directory -Path $tmpDir
+    Ensure-Directory -Path $OutputDir
+
+    try {
+        Write-Host "fetching bundled Codex CLI $downloadUrl"
+        if ($Goos -eq "windows") {
+            $targetPath = Join-Path $OutputDir "codex.exe"
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
+            if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf) -or (Get-Item -LiteralPath $targetPath).Length -eq 0) {
+                throw "downloaded Codex executable is empty"
+            }
+            return
+        }
+
+        $archivePath = Join-Path $tmpDir "codex.tar.gz"
+        $extractDir = Join-Path $tmpDir "extract"
+        Ensure-Directory -Path $extractDir
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
+        $tar = Get-CommandPathOrNull "tar"
+        if ($null -eq $tar) {
+            throw "missing required command: tar"
+        }
+        Invoke-Checked -FilePath $tar -Arguments @("-xzf", $archivePath, "-C", $extractDir)
+        $binaryPath = Join-Path $extractDir $target.Binary
+        if (-not (Test-Path -LiteralPath $binaryPath -PathType Leaf)) {
+            throw "Codex archive did not contain expected binary: $($target.Binary)"
+        }
+        Copy-Item -LiteralPath $binaryPath -Destination (Join-Path $OutputDir "codex") -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $tmpDir) {
+            Remove-Item -LiteralPath $tmpDir -Recurse -Force
+        }
+    }
+}
+
 function Require-WebAssets {
     param([Parameter(Mandatory = $true)][string]$AppName)
 
@@ -681,6 +745,10 @@ function Invoke-PackageRelease {
 
         if ($AppName -eq "csgclaw" -and $includeBoxlite -eq "1") {
             Fetch-BoxLiteCli -Goos $Goos -Goarch $Goarch -OutputDir (Split-Path -Parent $binaryOutput)
+        }
+
+        if ($AppName -eq "csgclaw") {
+            Fetch-CodexCli -Goos $Goos -Goarch $Goarch -OutputDir (Split-Path -Parent $binaryOutput)
         }
 
         $archiveBase = "${AppName}_$($script:Version)_${Goos}_${Goarch}"
@@ -847,6 +915,7 @@ $script:PackageMode = Get-EnvOrDefault -Name "PACKAGE_MODE" -Default ""
 $script:IncludeBoxlite = Get-EnvOrDefault -Name "INCLUDE_BOXLITE" -Default ""
 $script:BoxliteCliVersion = Get-EnvOrDefault -Name "BOXLITE_CLI_VERSION" -Default "v0.9.0"
 $script:BoxliteCliBaseUrl = Get-EnvOrDefault -Name "BOXLITE_CLI_BASE_URL" -Default "https://github.com/boxlite-ai/boxlite/releases/download"
+$script:CodexCliDownloadBaseUrl = Get-EnvOrDefault -Name "CODEX_CLI_DOWNLOAD_BASE_URL" -Default "https://csgclaw.opencsg.com/codex-cli/latest"
 $script:SandboxCliCmdPath = Get-EnvOrDefault -Name "SANDBOX_CLI_CMD_PATH" -Default "./cmd/csgclaw-cli"
 
 Push-Location $RootDir

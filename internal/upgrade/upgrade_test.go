@@ -271,6 +271,7 @@ func TestClientPrepareReleaseDownloadsVerifiesAndExtracts(t *testing.T) {
 	}
 	for _, path := range []string{
 		filepath.Join(prepared.BundleDir, "bin", "csgclaw"),
+		filepath.Join(prepared.BundleDir, "bin", "codex"),
 		filepath.Join(prepared.BundleDir, "bin", "boxlite"),
 	} {
 		if _, err := os.Stat(path); err != nil {
@@ -310,8 +311,40 @@ func TestClientPrepareReleaseAllowsBundleWithoutBoxLite(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(prepared.BundleDir, "bin", "csgclaw")); err != nil {
 		t.Fatalf("Stat(csgclaw) error = %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(prepared.BundleDir, "bin", "codex")); err != nil {
+		t.Fatalf("Stat(codex) error = %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(prepared.BundleDir, "bin", "boxlite")); !os.IsNotExist(err) {
 		t.Fatalf("Stat(boxlite) error = %v, want not exist", err)
+	}
+}
+
+func TestClientPrepareReleaseRejectsMissingCodex(t *testing.T) {
+	archive := releaseTarballWithoutMarker(t, map[string]string{
+		filepath.Join("csgclaw", bundleMarkerFileName): `{"app":"csgclaw","layout":"official-bundle"}`,
+		"csgclaw/bin/csgclaw":                          "#!/bin/sh\n",
+	})
+	sum := sha256.Sum256(archive)
+
+	client := Client{
+		HTTPClient: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     http.StatusText(http.StatusOK),
+				Header:     make(http.Header),
+				Body:       io.NopCloser(bytes.NewReader(archive)),
+			}, nil
+		}),
+	}
+
+	_, err := client.PrepareRelease(context.Background(), ReleaseAsset{
+		Name:        "csgclaw_v0.2.7_linux_amd64.tar.gz",
+		DownloadURL: "https://downloads.example.test/csgclaw.tar.gz",
+		Size:        int64(len(archive)),
+		SHA256:      hex.EncodeToString(sum[:]),
+	}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "release bundle is missing bin/codex") {
+		t.Fatalf("PrepareRelease() error = %v, want missing bundled Codex error", err)
 	}
 }
 
@@ -345,6 +378,9 @@ func TestClientPrepareReleaseExtractsWindowsZipBundle(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(prepared.BundleDir, "bin", "csgclaw.exe")); err != nil {
 		t.Fatalf("Stat(csgclaw.exe) error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(prepared.BundleDir, "bin", "codex.exe")); err != nil {
+		t.Fatalf("Stat(codex.exe) error = %v", err)
 	}
 }
 
@@ -1084,7 +1120,7 @@ func jsonResponse(status int, body string) *http.Response {
 func releaseTarball(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 
-	files = withBundleMarker(files)
+	files = withOfficialBundleFiles(files)
 	return releaseTarballWithoutMarker(t, files)
 }
 
@@ -1129,7 +1165,7 @@ func writeBundleDir(t *testing.T, parentDir, marker string) string {
 func releaseZipArchive(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 
-	files = withBundleMarker(files)
+	files = withOfficialBundleFiles(files)
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for name, content := range files {
@@ -1150,7 +1186,7 @@ func releaseZipArchive(t *testing.T, files map[string]string) []byte {
 func writeBundleFiles(t *testing.T, parentDir string, files map[string]string) string {
 	t.Helper()
 
-	files = withBundleMarker(files)
+	files = withOfficialBundleFiles(files)
 	return writeBundleFilesWithoutMarker(t, parentDir, files)
 }
 
@@ -1168,6 +1204,19 @@ func writeBundleFilesWithoutMarker(t *testing.T, parentDir string, files map[str
 		}
 	}
 	return root
+}
+
+func withOfficialBundleFiles(files map[string]string) map[string]string {
+	out := withBundleMarker(files)
+	codexName := "codex"
+	if _, ok := out[filepath.Join("csgclaw", "bin", "csgclaw.exe")]; ok {
+		codexName += ".exe"
+	}
+	codexPath := filepath.Join("csgclaw", "bin", codexName)
+	if _, ok := out[codexPath]; !ok {
+		out[codexPath] = "bundled codex"
+	}
+	return out
 }
 
 func withBundleMarker(files map[string]string) map[string]string {

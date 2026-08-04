@@ -25,7 +25,7 @@ WORKDIR /src
 ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
 
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates curl tar gzip
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -39,6 +39,7 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 ARG VERSION_PKG=csgclaw/internal/version
+ARG CODEX_CLI_DOWNLOAD_BASE_URL=https://csgclaw.opencsg.com/codex-cli/latest
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath \
@@ -49,18 +50,36 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
       -ldflags="-s -w -X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.Commit=${COMMIT} -X ${VERSION_PKG}.BuildTime=${BUILD_TIME}" \
       -o /out/csgclaw-cli ./cmd/csgclaw-cli
 
+RUN set -eux; \
+    case "${TARGETOS}/${TARGETARCH}" in \
+      linux/amd64) codex_os=linux; codex_arch=amd64; codex_binary=codex-x86_64-unknown-linux-musl ;; \
+      linux/arm64) codex_os=linux; codex_arch=arm64; codex_binary=codex-aarch64-unknown-linux-musl ;; \
+      *) echo "unsupported bundled Codex CLI target: ${TARGETOS}/${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /tmp/codex; \
+    curl -fsSL "${CODEX_CLI_DOWNLOAD_BASE_URL}/${codex_os}/${codex_arch}?package=codex-cli" -o /tmp/codex/codex.tar.gz; \
+    tar -xzf /tmp/codex/codex.tar.gz -C /tmp/codex; \
+    test -f "/tmp/codex/${codex_binary}"; \
+    install -m 0755 "/tmp/codex/${codex_binary}" /out/codex; \
+    /out/codex --version
+
 FROM ${RUNTIME_IMAGE}
 
 USER root
 
 RUN apk add --no-cache ca-certificates tzdata
 
-COPY --from=build /out/csgclaw /usr/local/bin/csgclaw
-COPY --from=build /out/csgclaw-cli /usr/local/bin/csgclaw-cli
+COPY --from=build /out/csgclaw /opt/csgclaw/bin/csgclaw
+COPY --from=build /out/csgclaw-cli /opt/csgclaw/bin/csgclaw-cli
+COPY --from=build /out/codex /opt/csgclaw/bin/codex
 
-RUN chmod 755 /usr/local/bin/csgclaw /usr/local/bin/csgclaw-cli
+RUN chmod 755 /opt/csgclaw/bin/csgclaw /opt/csgclaw/bin/csgclaw-cli /opt/csgclaw/bin/codex && \
+    printf '%s\n' '{"app":"csgclaw","layout":"official-bundle"}' > /opt/csgclaw/.csgclaw-bundle.json && \
+    ln -s /opt/csgclaw/bin/csgclaw /usr/local/bin/csgclaw && \
+    ln -s /opt/csgclaw/bin/csgclaw-cli /usr/local/bin/csgclaw-cli && \
+    ln -s /opt/csgclaw/bin/codex /usr/local/bin/codex
 
 WORKDIR /opt/csgclaw
 
-ENTRYPOINT ["/usr/local/bin/csgclaw"]
+ENTRYPOINT ["/opt/csgclaw/bin/csgclaw"]
 CMD ["--help"]

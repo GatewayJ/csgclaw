@@ -25,11 +25,12 @@ type PreparedBundle struct {
 //	csgclaw/
 //	  bin/
 //	    csgclaw[.exe]
+//	    codex[.exe]
 //	    boxlite[.exe]   (optional)
 //
-// The main csgclaw binary is always required. Bundled boxlite is optional so
-// release artifacts can support platforms where only the Docker-backed runtime
-// is shipped.
+// The main CSGClaw and Codex binaries are always required. Bundled BoxLite is
+// optional so release artifacts can support platforms where only the
+// Docker-backed runtime is shipped.
 type BundleLayout struct {
 	RootDir     string
 	CSGClawPath string
@@ -293,6 +294,9 @@ func inspectBundleDir(bundleDir string) (BundleLayout, error) {
 	}
 	csgclawPath, err := requiredBundleExecutable(bundleDir, "csgclaw")
 	if err != nil {
+		return BundleLayout{}, err
+	}
+	if _, err := requiredBundleExecutable(bundleDir, "codex"); err != nil {
 		return BundleLayout{}, err
 	}
 	boxlitePath, err := optionalBundleExecutable(bundleDir, "boxlite")

@@ -57,4 +57,9 @@ else
 fi
 
 test -f "$BACKEND_ROOT/csgclaw/.csgclaw-bundle.json"
+if [ "$GOOS_TARGET" = "windows" ]; then
+  test -f "$BACKEND_ROOT/csgclaw/bin/codex.exe"
+else
+  test -f "$BACKEND_ROOT/csgclaw/bin/codex"
+fi
 printf 'Desktop backend ready: %s\n' "$BACKEND_ROOT/csgclaw"
