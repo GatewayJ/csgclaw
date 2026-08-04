@@ -26,6 +26,8 @@ func TestBundleLocatorLocateFollowsCSGClawLauncherSymlink(t *testing.T) {
 	launcher := filepath.Join(root, "launcher", "csgclaw")
 	realExecutable := writeBundledExecutable(t, filepath.Join(root, "bundle", "bin", "csgclaw"))
 	codex := writeBundledExecutable(t, filepath.Join(root, "bundle", "bin", "codex"))
+	// A host Codex beside the launcher must not override the bundled binary.
+	writeBundledExecutable(t, filepath.Join(root, "launcher", "codex"))
 	if err := os.MkdirAll(filepath.Dir(launcher), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}

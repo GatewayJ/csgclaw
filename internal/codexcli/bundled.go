@@ -42,11 +42,9 @@ func (l BundleLocator) Locate() (string, error) {
 		return "", fmt.Errorf("resolve CSGClaw executable for bundled Codex CLI: %w", err)
 	}
 
-	for _, executablePath := range l.executablePathCandidates(executable) {
-		candidate := filepath.Join(filepath.Dir(executablePath), l.binaryName())
-		if l.isBundledBinary(candidate) {
-			return candidate, nil
-		}
+	candidate := filepath.Join(filepath.Dir(l.executablePathCandidate(executable)), l.binaryName())
+	if l.isBundledBinary(candidate) {
+		return candidate, nil
 	}
 	return "", fmt.Errorf("bundled Codex CLI not found next to CSGClaw executable: %w", os.ErrNotExist)
 }
@@ -59,21 +57,20 @@ func (l BundleLocator) executablePath() (string, error) {
 	return os.Executable()
 }
 
-func (l BundleLocator) executablePathCandidates(executable string) []string {
+func (l BundleLocator) executablePathCandidate(executable string) string {
 	executable = strings.TrimSpace(executable)
 	if executable == "" {
-		return nil
+		return ""
 	}
-	candidates := []string{executable}
 	if evaluate := l.evalSymlinks(); evaluate != nil {
 		if resolved, err := evaluate(executable); err == nil {
 			resolved = strings.TrimSpace(resolved)
-			if resolved != "" && resolved != executable {
-				candidates = append(candidates, resolved)
+			if resolved != "" {
+				return resolved
 			}
 		}
 	}
-	return candidates
+	return executable
 }
 
 func (l BundleLocator) isBundledBinary(path string) bool {

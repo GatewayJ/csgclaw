@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -345,6 +346,25 @@ func TestClientPrepareReleaseRejectsMissingCodex(t *testing.T) {
 	}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "release bundle is missing bin/codex") {
 		t.Fatalf("PrepareRelease() error = %v, want missing bundled Codex error", err)
+	}
+}
+
+func TestInspectBundleDirRejectsNonExecutableCodex(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not use POSIX executable mode bits")
+	}
+
+	bundleDir := writeBundleFiles(t, t.TempDir(), map[string]string{
+		"csgclaw/bin/csgclaw": "#!/bin/sh\n",
+	})
+	codexPath := filepath.Join(bundleDir, "bin", "codex")
+	if err := os.Chmod(codexPath, 0o644); err != nil {
+		t.Fatalf("Chmod(%q) error = %v", codexPath, err)
+	}
+
+	_, err := inspectBundleDir(bundleDir)
+	if err == nil || !strings.Contains(err.Error(), "release bundle entry bin/codex is not executable") {
+		t.Fatalf("inspectBundleDir() error = %v, want non-executable bundled Codex error", err)
 	}
 }
 
