@@ -54,6 +54,7 @@ const adHocEntitlements = path.resolve(
 const updateConfig = path.resolve(__dirname, ".forge-generated", "desktop-update.json");
 const desktopVersion = normalizeDesktopReleaseVersion(process.env.CSGCLAW_DESKTOP_VERSION);
 const desktopAppVersion = numericDesktopAppVersion(desktopVersion);
+const packagedDesktopVersion = isWindowsTarget ? desktopAppVersion : desktopVersion;
 const updateBaseURL = normalizeHTTPSBaseURL(process.env.CSGCLAW_DESKTOP_UPDATE_BASE_URL);
 fs.mkdirSync(path.dirname(updateConfig), { recursive: true });
 fs.writeFileSync(updateConfig, `${JSON.stringify({ base_url: updateBaseURL || "" }, null, 2)}\n`, { mode: 0o600 });
@@ -221,7 +222,7 @@ const config: ForgeConfig = {
   hooks: {
     readPackageJson: async (_forgeConfig, packageJSON) => ({
       ...packageJSON,
-      version: desktopVersion,
+      version: packagedDesktopVersion,
     }),
   },
 };

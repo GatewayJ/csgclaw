@@ -12,6 +12,11 @@ test("drops build metadata that packaging formats do not need", () => {
   assert.equal(normalizeDesktopReleaseVersion("v0.4.5-beta.1+local"), "0.4.5-beta.1");
 });
 
+test("uses a numeric app version for local git describe packages", () => {
+  const releaseVersion = normalizeDesktopReleaseVersion("v0.4.5-12-g27f214c7+local");
+  assert.equal(numericDesktopAppVersion(releaseVersion), "0.4.5");
+});
+
 test("uses the development version for invalid input", () => {
   assert.equal(normalizeDesktopReleaseVersion("not-a-version"), "0.0.0-development");
   assert.equal(normalizeDesktopReleaseVersion(undefined), "0.0.0-development");
