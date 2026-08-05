@@ -643,6 +643,32 @@ func TestClientInstallPreparedAllowsLegacyOfficialBundleWithoutMarker(t *testing
 	assertFileContent(t, filepath.Join(installRoot, bundleMarkerFileName), `{"app":"csgclaw","layout":"official-bundle","version":"test"}`)
 }
 
+func TestClientInstallPreparedMigratesMarkedOfficialBundleWithoutCodex(t *testing.T) {
+	installRoot := writeBundleFilesWithoutMarker(t, t.TempDir(), map[string]string{
+		filepath.Join("csgclaw", "bin", "csgclaw"):     "#!/bin/sh\n# old\n",
+		filepath.Join("csgclaw", "README.md"):          "old",
+		filepath.Join("csgclaw", bundleMarkerFileName): `{"app":"csgclaw","layout":"official-bundle","version":"v0.4.5"}`,
+	})
+	preparedRoot := writeBundleDir(t, t.TempDir(), "new")
+	client := Client{
+		ExecutablePath: func() (string, error) {
+			return filepath.Join(installRoot, "bin", "csgclaw"), nil
+		},
+	}
+
+	installed, err := client.InstallPrepared(PreparedBundle{BundleDir: preparedRoot})
+	if err != nil {
+		t.Fatalf("InstallPrepared() error = %v", err)
+	}
+	if got, want := installed.InstallRoot, installRoot; got != want {
+		t.Fatalf("InstallRoot = %q, want %q", got, want)
+	}
+	assertFileContent(t, filepath.Join(installRoot, "README.md"), "new")
+	if _, err := os.Stat(filepath.Join(installRoot, "bin", "codex")); err != nil {
+		t.Fatalf("Stat(upgraded bundled Codex) error = %v", err)
+	}
+}
+
 func TestClientInstallPreparedRejectsLegacyOfficialPathWithSourceMarker(t *testing.T) {
 	installRoot := writeBundleFilesWithoutMarker(t, legacyOfficialInstallParent(t), map[string]string{
 		filepath.Join("csgclaw", "bin", "csgclaw"): "#!/bin/sh\n",
@@ -912,6 +938,26 @@ func TestClientAutoUpgradeSupportReportsOfficialBundle(t *testing.T) {
 	}
 
 	got := client.AutoUpgradeSupport("v0.3.11")
+	if !got.Supported {
+		t.Fatalf("AutoUpgradeSupport().Supported = false, reason=%q", got.Reason)
+	}
+	if got.InstallRoot != installRoot {
+		t.Fatalf("InstallRoot = %q, want %q", got.InstallRoot, installRoot)
+	}
+}
+
+func TestClientAutoUpgradeSupportReportsMarkedBundleWithoutCodex(t *testing.T) {
+	installRoot := writeBundleFilesWithoutMarker(t, t.TempDir(), map[string]string{
+		filepath.Join("csgclaw", "bin", "csgclaw"):     "#!/bin/sh\n",
+		filepath.Join("csgclaw", bundleMarkerFileName): `{"app":"csgclaw","layout":"official-bundle","version":"v0.4.5"}`,
+	})
+	client := Client{
+		ExecutablePath: func() (string, error) {
+			return filepath.Join(installRoot, "bin", "csgclaw"), nil
+		},
+	}
+
+	got := client.AutoUpgradeSupport("v0.4.5")
 	if !got.Supported {
 		t.Fatalf("AutoUpgradeSupport().Supported = false, reason=%q", got.Reason)
 	}

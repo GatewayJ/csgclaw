@@ -37,7 +37,7 @@ SANDBOX_CLI_BIN ?= $(SANDBOX_BUNDLE_TOOLS_DIR)/csgclaw-cli
 
 .DEFAULT_GOAL := build
 
-.PHONY: help fmt test check-web-toolchain check-web-layout ensure-web-deps web-install web-dev web-typecheck web-build-assets build-web check-desktop-layout ensure-desktop-deps desktop-dev desktop-backend-bundle desktop-package build build-all build-server build-server-bin build-sandbox-cli install-sandbox-cli run clean package package-all release
+.PHONY: help fmt test check-web-toolchain check-web-layout ensure-web-deps web-install web-dev web-typecheck web-build-assets build-web check-desktop-layout ensure-desktop-deps desktop-dev desktop-backend-bundle desktop-package build build-all build-server build-server-bin build-codex-cli build-sandbox-cli install-sandbox-cli run clean package package-all release
 
 help:
 	@printf '%s\n' \
@@ -51,7 +51,7 @@ help:
 		'make build-web  - build Web UI app into web/static-dist' \
 		'make desktop-dev - install dependencies when needed, build the local backend, and start Electron Forge' \
 		'make desktop-package - create platform Electron installers/archives (set CSGCLAW_DESKTOP_WINDOWS_CHANNEL=store for MSIX)' \
-		'make build-server-bin - build bin/csgclaw and the host-platform bin/csgclaw-cli' \
+		'make build-server-bin - build bin/csgclaw, bin/csgclaw-cli, and bundled Codex' \
 		'make build-sandbox-cli - build Linux csgclaw-cli into bin/sandbox-tools' \
 		'make run        - build (no docker images), then run the server' \
 		'make clean      - remove local build outputs'
@@ -219,7 +219,7 @@ build: build-web build-server-bin build-sandbox-cli
 
 build-all: build
 
-build-server-bin:
+build-server-bin: build-codex-cli
 	mkdir -p $(BIN_DIR)
 	@if [ "$(TARGET_OS)" = "windows" ]; then \
 		rm -f "$(BIN_DIR)/csgclaw" "$(BIN_DIR)/csgclaw-cli"; \
@@ -230,6 +230,10 @@ build-server-bin:
 		$(GO) build -ldflags "$(LDFLAGS)" -o "$(SERVER_BIN)" ./cmd/csgclaw
 	env GOCACHE=$(GOCACHE) CGO_ENABLED=$(CGO_ENABLED) GOOS=$(TARGET_OS) GOARCH=$(TARGET_ARCH) \
 		$(GO) build -ldflags "$(CLI_LDFLAGS)" -o "$(HOST_CLI_BIN)" ./cmd/csgclaw-cli
+
+build-codex-cli:
+	mkdir -p "$(BIN_DIR)"
+	"$(CURDIR)/scripts/fetch-codex-cli.sh" "$(TARGET_OS)" "$(TARGET_ARCH)" "$(BIN_DIR)"
 
 build-server: build-server-bin build-sandbox-cli
 

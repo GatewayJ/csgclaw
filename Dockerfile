@@ -25,7 +25,7 @@ WORKDIR /src
 ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
 
-RUN apk add --no-cache ca-certificates curl tar gzip
+RUN apk add --no-cache bash ca-certificates curl tar gzip
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -51,16 +51,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
       -o /out/csgclaw-cli ./cmd/csgclaw-cli
 
 RUN set -eux; \
-    case "${TARGETOS}/${TARGETARCH}" in \
-      linux/amd64) codex_os=linux; codex_arch=amd64; codex_binary=codex-x86_64-unknown-linux-musl ;; \
-      linux/arm64) codex_os=linux; codex_arch=arm64; codex_binary=codex-aarch64-unknown-linux-musl ;; \
-      *) echo "unsupported bundled Codex CLI target: ${TARGETOS}/${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    mkdir -p /tmp/codex; \
-    curl -fsSL "${CODEX_CLI_DOWNLOAD_BASE_URL}/${codex_os}/${codex_arch}?package=codex-cli" -o /tmp/codex/codex.tar.gz; \
-    tar -xzf /tmp/codex/codex.tar.gz -C /tmp/codex; \
-    test -f "/tmp/codex/${codex_binary}"; \
-    install -m 0755 "/tmp/codex/${codex_binary}" /out/codex; \
+    test "${TARGETOS}" = linux || { echo "unsupported bundled Codex CLI target: ${TARGETOS}/${TARGETARCH}" >&2; exit 1; }; \
+    CODEX_CLI_DOWNLOAD_BASE_URL="${CODEX_CLI_DOWNLOAD_BASE_URL}" \
+      ./scripts/fetch-codex-cli.sh "${TARGETOS}" "${TARGETARCH}" /out; \
     /out/codex --version
 
 FROM ${RUNTIME_IMAGE}

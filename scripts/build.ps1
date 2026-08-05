@@ -329,7 +329,7 @@ function Invoke-TargetHelp {
         "powershell -File scripts/build.ps1 build-web    - build Web UI app into web/static-dist"
         "scripts\build.cmd desktop-package               - build the Windows website package"
         "scripts\build.cmd desktop-msix                  - build the Windows Microsoft Store MSIX package"
-        "powershell -File scripts/build.ps1 build-server-bin - build bin/csgclaw and the host-platform bin/csgclaw-cli"
+        "powershell -File scripts/build.ps1 build-server-bin - build bin/csgclaw, bin/csgclaw-cli, and bundled Codex"
         "powershell -File scripts/build.ps1 build-sandbox-cli - build Linux csgclaw-cli into bin/sandbox-tools"
         "powershell -File scripts/build.ps1 run          - build, then run the server"
         "powershell -File scripts/build.ps1 package      - package the current platform"
@@ -458,6 +458,7 @@ function Invoke-TargetBuildServerBin {
         GOOS        = $script:TargetOs
         GOARCH      = $script:TargetArch
     }
+    Fetch-CodexCli -Goos $script:TargetOs -Goarch $script:TargetArch -OutputDir $script:BinDir
 }
 
 function Invoke-TargetBuildSandboxCli {
@@ -603,15 +604,25 @@ function Resolve-CodexCliDownloadTarget {
         [Parameter(Mandatory = $true)][string]$Goarch
     )
 
-    switch ("$Goos/$Goarch") {
-        "linux/amd64" { return @{ Os = "linux"; Arch = "amd64"; Binary = "codex-x86_64-unknown-linux-musl" } }
-        "linux/arm64" { return @{ Os = "linux"; Arch = "arm64"; Binary = "codex-aarch64-unknown-linux-musl" } }
-        "darwin/amd64" { return @{ Os = "macos"; Arch = "x64"; Binary = "codex-x86_64-apple-darwin" } }
-        "darwin/arm64" { return @{ Os = "macos"; Arch = "arm64"; Binary = "codex-aarch64-apple-darwin" } }
-        "windows/amd64" { return @{ Os = "windows"; Arch = "amd64"; Binary = "codex.exe" } }
-        "windows/arm64" { return @{ Os = "windows"; Arch = "arm64"; Binary = "codex.exe" } }
-        default { throw "unsupported bundled Codex CLI target: $Goos/$Goarch" }
+    if (-not (Test-Path -LiteralPath $script:CodexCliPlatformsPath -PathType Leaf)) {
+        throw "Codex CLI platform map is missing: $script:CodexCliPlatformsPath"
     }
+
+    foreach ($rawLine in Get-Content -LiteralPath $script:CodexCliPlatformsPath) {
+        $line = $rawLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith("#")) {
+            continue
+        }
+        $fields = $line -split "\s+"
+        if ($fields.Count -ne 5) {
+            throw "invalid Codex CLI platform map entry: $rawLine"
+        }
+        if ($fields[0] -eq $Goos -and $fields[1] -eq $Goarch) {
+            return @{ Os = $fields[2]; Arch = $fields[3]; Binary = $fields[4] }
+        }
+    }
+
+    throw "unsupported bundled Codex CLI target: $Goos/$Goarch"
 }
 
 function Fetch-CodexCli {
@@ -916,6 +927,7 @@ $script:IncludeBoxlite = Get-EnvOrDefault -Name "INCLUDE_BOXLITE" -Default ""
 $script:BoxliteCliVersion = Get-EnvOrDefault -Name "BOXLITE_CLI_VERSION" -Default "v0.9.0"
 $script:BoxliteCliBaseUrl = Get-EnvOrDefault -Name "BOXLITE_CLI_BASE_URL" -Default "https://github.com/boxlite-ai/boxlite/releases/download"
 $script:CodexCliDownloadBaseUrl = Get-EnvOrDefault -Name "CODEX_CLI_DOWNLOAD_BASE_URL" -Default "https://csgclaw.opencsg.com/codex-cli/latest"
+$script:CodexCliPlatformsPath = Join-Path $RootDir "scripts/codex-cli-platforms.txt"
 $script:SandboxCliCmdPath = Get-EnvOrDefault -Name "SANDBOX_CLI_CMD_PATH" -Default "./cmd/csgclaw-cli"
 
 Push-Location $RootDir

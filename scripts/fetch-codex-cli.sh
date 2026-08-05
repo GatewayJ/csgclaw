@@ -10,20 +10,20 @@ GOOS_TARGET="$1"
 GOARCH_TARGET="$2"
 OUTPUT_DIR="$3"
 CODEX_CLI_DOWNLOAD_BASE_URL="${CODEX_CLI_DOWNLOAD_BASE_URL:-https://csgclaw.opencsg.com/codex-cli/latest}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLATFORM_MAP_FILE="${SCRIPT_DIR}/codex-cli-platforms.txt"
+
+if [ ! -f "$PLATFORM_MAP_FILE" ]; then
+  echo "Codex CLI platform map is missing: ${PLATFORM_MAP_FILE}" >&2
+  exit 1
+fi
 
 resolve_platform() {
-  case "$1/$2" in
-    linux/amd64) printf '%s\n' 'linux amd64 codex-x86_64-unknown-linux-musl' ;;
-    linux/arm64) printf '%s\n' 'linux arm64 codex-aarch64-unknown-linux-musl' ;;
-    darwin/amd64) printf '%s\n' 'macos x64 codex-x86_64-apple-darwin' ;;
-    darwin/arm64) printf '%s\n' 'macos arm64 codex-aarch64-apple-darwin' ;;
-    windows/amd64) printf '%s\n' 'windows amd64 codex.exe' ;;
-    windows/arm64) printf '%s\n' 'windows arm64 codex.exe' ;;
-    *)
-      echo "unsupported bundled Codex CLI target: $1/$2" >&2
-      exit 1
-      ;;
-  esac
+  awk -v goos="$1" -v goarch="$2" '
+    /^[[:space:]]*#/ || NF == 0 { next }
+    $1 == goos && $2 == goarch { print $3, $4, $5; found = 1; exit }
+    END { exit !found }
+  ' "$PLATFORM_MAP_FILE"
 }
 
 need_cmd() {
@@ -33,7 +33,12 @@ need_cmd() {
   }
 }
 
-read -r download_os download_arch archive_binary <<<"$(resolve_platform "$GOOS_TARGET" "$GOARCH_TARGET")"
+need_cmd awk
+if ! platform="$(resolve_platform "$GOOS_TARGET" "$GOARCH_TARGET")"; then
+  echo "unsupported bundled Codex CLI target: ${GOOS_TARGET}/${GOARCH_TARGET}" >&2
+  exit 1
+fi
+read -r download_os download_arch archive_binary <<<"$platform"
 download_url="${CODEX_CLI_DOWNLOAD_BASE_URL%/}/${download_os}/${download_arch}?package=codex-cli"
 
 need_cmd curl

@@ -16,9 +16,7 @@ func TestBundleLocatorLocateUsesCodexBesideExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Locate() error = %v", err)
 	}
-	if got != codex {
-		t.Fatalf("Locate() = %q, want %q", got, codex)
-	}
+	assertSameFile(t, got, codex)
 }
 
 func TestBundleLocatorLocateFollowsCSGClawLauncherSymlink(t *testing.T) {
@@ -39,9 +37,7 @@ func TestBundleLocatorLocateFollowsCSGClawLauncherSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Locate() error = %v", err)
 	}
-	if got != codex {
-		t.Fatalf("Locate() = %q, want %q", got, codex)
-	}
+	assertSameFile(t, got, codex)
 }
 
 func TestBundleLocatorLocateIgnoresLocalCodexEnvironment(t *testing.T) {
@@ -57,9 +53,7 @@ func TestBundleLocatorLocateIgnoresLocalCodexEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Locate() error = %v", err)
 	}
-	if got != bundled {
-		t.Fatalf("Locate() = %q, want bundled %q", got, bundled)
-	}
+	assertSameFile(t, got, bundled)
 }
 
 func TestBundleLocatorLocateRequiresBundledBinary(t *testing.T) {
@@ -84,9 +78,7 @@ func TestBundleLocatorLocateUsesWindowsExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Locate() error = %v", err)
 	}
-	if got != codex {
-		t.Fatalf("Locate() = %q, want %q", got, codex)
-	}
+	assertSameFile(t, got, codex)
 }
 
 func writeBundledExecutable(t *testing.T, path string) string {
@@ -98,4 +90,20 @@ func writeBundledExecutable(t *testing.T, path string) string {
 		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
 	return path
+}
+
+func assertSameFile(t *testing.T, got, want string) {
+	t.Helper()
+
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("Stat(Locate() result %q) error = %v", got, err)
+	}
+	wantInfo, err := os.Stat(want)
+	if err != nil {
+		t.Fatalf("Stat(want %q) error = %v", want, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("Locate() = %q, want file %q", got, want)
+	}
 }

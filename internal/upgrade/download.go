@@ -289,14 +289,26 @@ func archiveTargetPath(rootDir, name string) (string, error) {
 }
 
 func inspectBundleDir(bundleDir string) (BundleLayout, error) {
+	layout, err := inspectInstalledBundleDir(bundleDir)
+	if err != nil {
+		return BundleLayout{}, err
+	}
+	if _, err := requiredBundleExecutable(bundleDir, "codex"); err != nil {
+		return BundleLayout{}, err
+	}
+	return layout, nil
+}
+
+// inspectInstalledBundleDir validates an installed official bundle. Older
+// marker-bearing releases did not ship Codex, so this intentionally does not
+// require it; the next successful upgrade replaces that layout with one that
+// does.
+func inspectInstalledBundleDir(bundleDir string) (BundleLayout, error) {
 	if err := validateBundleMarker(bundleDir); err != nil {
 		return BundleLayout{}, err
 	}
 	csgclawPath, err := requiredBundleExecutable(bundleDir, "csgclaw")
 	if err != nil {
-		return BundleLayout{}, err
-	}
-	if _, err := requiredBundleExecutable(bundleDir, "codex"); err != nil {
 		return BundleLayout{}, err
 	}
 	boxlitePath, err := optionalBundleExecutable(bundleDir, "boxlite")
@@ -312,6 +324,11 @@ func inspectBundleDir(bundleDir string) (BundleLayout, error) {
 
 func validateBundleDir(bundleDir string) error {
 	_, err := inspectBundleDir(bundleDir)
+	return err
+}
+
+func validateInstalledBundleDir(bundleDir string) error {
+	_, err := inspectInstalledBundleDir(bundleDir)
 	return err
 }
 
