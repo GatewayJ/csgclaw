@@ -15,7 +15,11 @@ test("drops build metadata that packaging formats do not need", () => {
 test("normalizes local git describe versions for Squirrel", () => {
   assert.equal(
     normalizeDesktopReleaseVersion("v0.4.5-12-g27f214c7+local"),
-    "0.4.5-12g27f214c7",
+    "0.4.5-dev12g27f214c7",
+  );
+  assert.equal(
+    normalizeDesktopReleaseVersion("v0.4.5-test6-12-g27f214c7+local"),
+    "0.4.5-test6dev12g27f214c7",
   );
 });
 
