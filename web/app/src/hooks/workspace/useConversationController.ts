@@ -97,6 +97,7 @@ type ComposerMentionState = {
 type DraftsByConversationId = Record<string, ComposerSegment[]>;
 type DraftsByThreadKey = Record<string, ComposerSegment[]>;
 type AttachmentDraftsByKey = Record<string, AttachmentDraft[]>;
+type ComposerErrorsByKey = Record<string, string>;
 type ComposerSendState = {
   error: string;
   progress: number;
@@ -106,9 +107,12 @@ type ComposerSendStatesByKey = Record<string, ComposerSendState>;
 type RemovedAttachment = {
   draft: AttachmentDraft;
   index: number;
+};
+type RemovedAttachmentBatch = {
+  attachments: RemovedAttachment[];
   removedAt: number;
 };
-type RemovedAttachmentsByKey = Record<string, RemovedAttachment>;
+type RemovedAttachmentsByKey = Record<string, RemovedAttachmentBatch>;
 
 const idleComposerSendState: ComposerSendState = {
   error: "",
@@ -299,7 +303,8 @@ export function useConversationController({
   const [memberActionError, setMemberActionError] = useState("");
   const [notifyAllAgentsBusy, setNotifyAllAgentsBusy] = useState(false);
   const [notifyAllAgentsError, setNotifyAllAgentsError] = useState("");
-  const [composerError, setComposerError] = useState("");
+  const [composerErrorsByConversationId, setComposerErrorsByConversationId] = useState<ComposerErrorsByKey>({});
+  const [attachmentErrorsByConversationId, setAttachmentErrorsByConversationId] = useState<ComposerErrorsByKey>({});
   const editorRef = useRef<HTMLDivElement | null>(null);
   const sendAbortControllersRef = useRef<Record<string, AbortController>>({});
   const composerIsComposingRef = useRef(false);
@@ -309,6 +314,45 @@ export function useConversationController({
   const channelToolsRef = useRef<HTMLDivElement | null>(null);
   const activeThreadKeyRef = useRef("");
   const notifyAllAgentsRequestRef = useRef(0);
+  const managerProfileIncompleteRef = useRef(managerProfileIncomplete);
+
+  const setComposerError = useCallback(
+    (error: string, conversationID = activeConversationId) => {
+      if (!conversationID) {
+        return;
+      }
+      setComposerErrorsByConversationId((current) => {
+        if (current[conversationID] === error) {
+          return current;
+        }
+        if (!error) {
+          const { [conversationID]: _cleared, ...rest } = current;
+          return rest;
+        }
+        return { ...current, [conversationID]: error };
+      });
+    },
+    [activeConversationId],
+  );
+  const setAttachmentError = useCallback((error: string, conversationID: string) => {
+    if (!conversationID) {
+      return;
+    }
+    setAttachmentErrorsByConversationId((current) => {
+      if (current[conversationID] === error) {
+        return current;
+      }
+      if (!error) {
+        const { [conversationID]: _cleared, ...rest } = current;
+        return rest;
+      }
+      return { ...current, [conversationID]: error };
+    });
+  }, []);
+  const composerError =
+    composerErrorsByConversationId[activeConversationId] ??
+    attachmentErrorsByConversationId[activeConversationId] ??
+    "";
 
   const usersById = useMemo(() => buildUsersById(data?.users), [data]);
   const activeConversation = useMemo(
@@ -577,6 +621,10 @@ export function useConversationController({
   }, [activeConversationId]);
 
   useEffect(() => {
+    setAttachmentErrorsByConversationId({});
+  }, [activeConversationId]);
+
+  useEffect(() => {
     setThreadSlashIndex(0);
     setThreadSlashPickerDismissed(false);
     setThreadSlashQuery(null);
@@ -678,10 +726,12 @@ export function useConversationController({
   }, [activeConversationAgentId, isAnySlashPickerNeeded]);
 
   useEffect(() => {
-    if (!managerProfileIncomplete) {
+    const wasIncomplete = managerProfileIncompleteRef.current;
+    managerProfileIncompleteRef.current = managerProfileIncomplete;
+    if (wasIncomplete && !managerProfileIncomplete) {
       setComposerError("");
     }
-  }, [managerProfileIncomplete]);
+  }, [managerProfileIncomplete, setComposerError]);
 
   useEffect(() => {
     if (!showCreateRoom) {
@@ -863,7 +913,7 @@ export function useConversationController({
     const roomID = activeConversation.id;
     const senderID = data.current_user_id;
     const attachments = attachmentDrafts.map((draft) => draft.file);
-    setComposerError("");
+    setComposerError("", roomID);
     const serializedDraft = serializeComposerSegments(draftSegments);
     const content = normalizeSlashShorthandForPayload(serializedDraft);
     const abortController = new AbortController();
@@ -903,7 +953,7 @@ export function useConversationController({
       }));
     } catch (err) {
       const message = isAbortError(err) ? t("sendStopped") : errorMessage(err, t("sendFailed"));
-      setComposerError(message);
+      setComposerError(message, roomID);
       setComposerSendStatesByConversationId((current) => ({
         ...current,
         [roomID]: { error: message, progress: current[roomID]?.progress ?? 0, status: "failed" },
@@ -1181,7 +1231,7 @@ export function useConversationController({
     try {
       await deleteRoomRequest(roomID);
     } catch (err) {
-      setComposerError(localizeError(errorMessage(err, ""), t));
+      setComposerError(localizeError(errorMessage(err, ""), t), roomID);
       return;
     }
 
@@ -1197,7 +1247,7 @@ export function useConversationController({
     });
     setAttachmentDraftsByConversationId((current) => clearAttachmentDraftsForConversation(current, roomID));
     setThreadAttachmentDraftsByKey((current) => clearAttachmentDraftsForConversation(current, roomID));
-    setComposerError("");
+    setComposerError("", roomID);
     setSubmitError("");
     if (activeConversationId === roomID) {
       const nextID = remainingRooms[0]?.id ?? "";
@@ -1219,14 +1269,14 @@ export function useConversationController({
     try {
       clearedRoom = await clearRoomMessagesRequest(roomID);
     } catch (err) {
-      setComposerError(localizeError(errorMessage(err, ""), t));
+      setComposerError(localizeError(errorMessage(err, ""), t), roomID);
       return;
     }
 
     setBootstrapData((current) => upsertConversationInData(current, clearedRoom));
     setThreadDraftsByKey((current) => clearThreadDraftsForConversation(current, roomID));
     setThreadAttachmentDraftsByKey((current) => clearAttachmentDraftsForConversation(current, roomID));
-    setComposerError("");
+    setComposerError("", roomID);
     setSubmitError("");
     if (activeConversationId === roomID) {
       resetThread();
@@ -1434,7 +1484,7 @@ export function useConversationController({
       return;
     }
     const selection = selectAttachmentFiles(files, attachmentDrafts);
-    setComposerError(attachmentSelectionError(selection, t));
+    setAttachmentError(attachmentSelectionError(selection, t), activeConversationId);
     if (selection.files.length === 0) {
       return;
     }
@@ -1457,10 +1507,17 @@ export function useConversationController({
     if (index < 0) {
       return;
     }
-    setRemovedAttachmentsByConversationId((current) => ({
-      ...current,
-      [activeConversationId]: { draft: attachmentDrafts[index], index, removedAt: Date.now() },
-    }));
+    setAttachmentError("", activeConversationId);
+    setRemovedAttachmentsByConversationId((current) => {
+      const existing = current[activeConversationId]?.attachments ?? [];
+      return {
+        ...current,
+        [activeConversationId]: {
+          attachments: [...existing, { draft: attachmentDrafts[index], index }],
+          removedAt: Date.now(),
+        },
+      };
+    });
     setAttachmentDraftsByConversationId((current) =>
       updateAttachmentDrafts(
         current,
@@ -1479,17 +1536,16 @@ export function useConversationController({
       return;
     }
     const removed = removedAttachmentsByConversationId[activeConversationId];
-    if (!removed) {
+    if (!removed || removed.attachments.length === 0) {
       return;
     }
     setAttachmentDraftsByConversationId((current) => {
-      const existing = current[activeConversationId] ?? [];
-      const insertAt = Math.max(0, Math.min(removed.index, existing.length));
-      return updateAttachmentDrafts(current, activeConversationId, [
-        ...existing.slice(0, insertAt),
-        removed.draft,
-        ...existing.slice(insertAt),
-      ]);
+      let restored = current[activeConversationId] ?? [];
+      for (const attachment of [...removed.attachments].reverse()) {
+        const insertAt = Math.max(0, Math.min(attachment.index, restored.length));
+        restored = [...restored.slice(0, insertAt), attachment.draft, ...restored.slice(insertAt)];
+      }
+      return updateAttachmentDrafts(current, activeConversationId, restored);
     });
     setRemovedAttachmentsByConversationId((current) => {
       const { [activeConversationId]: _removed, ...rest } = current;
@@ -1528,6 +1584,7 @@ export function useConversationController({
 
   function clearComposerError() {
     setComposerError("");
+    setAttachmentError("", activeConversationId);
   }
 
   function clearMemberActionError() {
@@ -1618,7 +1675,9 @@ export function useConversationController({
       draftSegments,
       draftText,
       attachmentDrafts,
-      removedAttachmentName: removedAttachment?.draft.name ?? "",
+      removedAttachmentCount: removedAttachment?.attachments.length ?? 0,
+      removedAttachmentName:
+        removedAttachment?.attachments.length === 1 ? (removedAttachment.attachments[0]?.draft.name ?? "") : "",
       sendError: composerSendState.error,
       sendProgress: composerSendState.progress,
       sendStatus: composerSendState.status,

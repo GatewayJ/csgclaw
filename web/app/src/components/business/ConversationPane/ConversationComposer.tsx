@@ -51,6 +51,7 @@ export type ConversationComposerProps = {
   draftSegments: ComposerSegment[];
   draftText: string;
   attachmentDrafts?: AttachmentDraft[];
+  removedAttachmentCount?: number;
   removedAttachmentName?: string;
   sendError?: string;
   sendProgress?: number;
@@ -105,6 +106,7 @@ export const ConversationComposer = memo(function ConversationComposer({
   draftSegments,
   draftText,
   attachmentDrafts = [],
+  removedAttachmentCount = 0,
   removedAttachmentName = "",
   sendError = "",
   sendProgress = 0,
@@ -354,10 +356,14 @@ export const ConversationComposer = memo(function ConversationComposer({
           </div>
         </div>
       </div>
-      {removedAttachmentName && onUndoRemoveAttachment ? (
+      {removedAttachmentCount > 0 && onUndoRemoveAttachment ? (
         <div className="composer-feedback-row" role="status">
-          <span>{t("attachmentRemoved", { name: removedAttachmentName })}</span>
-          <Button size="sm" variant="tertiaryGray" onClick={onUndoRemoveAttachment}>
+          <span>
+            {removedAttachmentCount === 1
+              ? t("attachmentRemoved", { name: removedAttachmentName })
+              : t("attachmentsRemoved", { count: removedAttachmentCount })}
+          </span>
+          <Button size="sm" variant="secondaryGray" onClick={onUndoRemoveAttachment}>
             <Undo2 aria-hidden="true" size={14} />
             {t("undo")}
           </Button>

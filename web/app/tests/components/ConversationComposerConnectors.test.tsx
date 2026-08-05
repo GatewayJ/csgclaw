@@ -34,11 +34,18 @@ const t: TranslateFn = (key, params) => {
     addAttachment: "Add attachment",
     attachments: "Attachments",
     previewAttachmentNamed: `Preview attachment: ${params?.name ?? ""}`,
+    attachmentPreviewDescription: "Preview without leaving the app",
+    attachmentPreviewFailed: "Preview failed",
+    attachmentPreviewLoading: "Loading preview",
+    attachmentPreviewUnavailable: "Preview unavailable",
+    downloadAttachment: "download",
+    close: "Close",
     attachmentsScrollPrevious: "View previous attachments",
     attachmentsScrollNext: "View more attachments",
     removeAttachment: "Remove attachment",
     removeAttachmentNamed: `Remove attachment: ${params?.name ?? ""}`,
     attachmentRemoved: `Removed attachment "${params?.name ?? ""}"`,
+    attachmentsRemoved: `Removed ${params?.count ?? 0} attachments`,
     attachmentUploadingProgress: `Uploading ${params?.progress ?? 0}%`,
     attachmentUploadingNamed: `Uploading attachment: ${params?.name ?? ""}`,
     attachmentUploadFailed: "Upload failed",
@@ -198,10 +205,14 @@ describe("ConversationComposer connectors", () => {
     expect(sendButton).not.toBeDisabled();
 
     expect(screen.getByTitle("note.txt")).toHaveAttribute("title", "note.txt");
-    expect(screen.getByRole("link", { name: "Preview attachment: note.txt" })).toHaveAttribute(
-      "href",
+    await user.click(screen.getByRole("button", { name: "Preview attachment: note.txt" }));
+    const previewDialog = screen.getByRole("dialog", { name: "note.txt" });
+    expect(previewDialog).toBeInTheDocument();
+    expect(within(previewDialog).getByTitle("Preview attachment: note.txt")).toHaveAttribute(
+      "src",
       expect.stringMatching(/^blob:/),
     );
+    await user.click(screen.getByRole("button", { name: "Close" }));
     await user.click(screen.getByRole("button", { name: "Remove attachment: note.txt" }));
     expect(onRemoveAttachment).toHaveBeenCalledWith(attachmentDrafts[0].id);
     await user.click(sendButton);
@@ -313,6 +324,7 @@ describe("ConversationComposer connectors", () => {
     const onRetrySend = vi.fn();
     const onUndoRemoveAttachment = vi.fn();
     renderComposer({
+      removedAttachmentCount: 1,
       removedAttachmentName: "report.pdf",
       sendError: "Network unavailable",
       sendStatus: "failed",
@@ -325,6 +337,16 @@ describe("ConversationComposer connectors", () => {
     await user.click(screen.getByRole("button", { name: "Undo" }));
     expect(onRetrySend).toHaveBeenCalledTimes(1);
     expect(onUndoRemoveAttachment).toHaveBeenCalledTimes(1);
+  });
+
+  it("summarizes a batch of removed attachments behind one undo action", () => {
+    renderComposer({
+      removedAttachmentCount: 3,
+      onUndoRemoveAttachment: vi.fn(),
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Removed 3 attachments");
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
   });
 
   it("suggests natural-language actions without running them automatically", async () => {

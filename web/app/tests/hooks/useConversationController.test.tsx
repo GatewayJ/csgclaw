@@ -93,6 +93,7 @@ function dataWithMessages(messages: IMMessage[]): IMData {
 
 function renderConversationController(
   options: {
+    activeConversationId?: string;
     agents?: AgentLike[];
     data?: IMData;
     managerRuntimeUnavailable?: boolean;
@@ -114,10 +115,10 @@ function renderConversationController(
   const defaultData = dataWithMessages([]);
 
   return renderHook(
-    ({ data = defaultData, messageListActive = true }) =>
+    ({ activeConversationId = directConversation.id, data = defaultData, messageListActive = true }) =>
       useConversationController({
-        activeConversationId: directConversation.id,
-        activePane: { type: WorkspacePaneTypes.conversation, id: directConversation.id },
+        activeConversationId,
+        activePane: { type: WorkspacePaneTypes.conversation, id: activeConversationId },
         agents,
         authBusyProvider: "",
         authStatuses: {},
@@ -145,7 +146,13 @@ function renderConversationController(
         theme: "light",
         workingParticipantsForRoom: options.workingParticipantsForRoom ?? (() => []),
       }),
-    { initialProps: { data: options.data, messageListActive: options.messageListActive } },
+    {
+      initialProps: {
+        activeConversationId: options.activeConversationId,
+        data: options.data,
+        messageListActive: options.messageListActive,
+      },
+    },
   );
 }
 
@@ -496,13 +503,77 @@ describe("useConversationController", () => {
       result.current.conversationViewProps.onRemoveAttachment?.(draftID || "");
     });
     expect(result.current.conversationViewProps.attachmentDrafts).toHaveLength(0);
+    expect(result.current.conversationViewProps.removedAttachmentCount).toBe(1);
     expect(result.current.conversationViewProps.removedAttachmentName).toBe("report.pdf");
 
     act(() => {
       result.current.conversationViewProps.onUndoRemoveAttachment?.();
     });
     expect(result.current.conversationViewProps.attachmentDrafts).toHaveLength(1);
+    expect(result.current.conversationViewProps.removedAttachmentCount).toBe(0);
     expect(result.current.conversationViewProps.removedAttachmentName).toBe("");
+  });
+
+  it("restores a batch of quickly removed attachments in their original order", () => {
+    const { result } = renderConversationController();
+    const files = [
+      new File(["a"], "a.txt", { type: "text/plain" }),
+      new File(["b"], "b.txt", { type: "text/plain" }),
+      new File(["c"], "c.txt", { type: "text/plain" }),
+    ];
+
+    act(() => {
+      result.current.conversationViewProps.onAddAttachments?.(files);
+    });
+    const attachmentIDs = result.current.conversationViewProps.attachmentDrafts?.map((draft) => draft.id) ?? [];
+    for (const attachmentID of attachmentIDs) {
+      act(() => {
+        result.current.conversationViewProps.onRemoveAttachment?.(attachmentID);
+      });
+    }
+
+    expect(result.current.conversationViewProps.attachmentDrafts).toHaveLength(0);
+    expect(result.current.conversationViewProps.removedAttachmentCount).toBe(3);
+    expect(result.current.conversationViewProps.removedAttachmentName).toBe("");
+
+    act(() => {
+      result.current.conversationViewProps.onUndoRemoveAttachment?.();
+    });
+
+    expect(result.current.conversationViewProps.attachmentDrafts?.map((draft) => draft.name)).toEqual([
+      "a.txt",
+      "b.txt",
+      "c.txt",
+    ]);
+    expect(result.current.conversationViewProps.removedAttachmentCount).toBe(0);
+  });
+
+  it("clears duplicate attachment errors when switching conversations", () => {
+    const otherConversation: IMConversation = {
+      ...directConversation,
+      id: "room-2",
+      title: "other agent",
+    };
+    const data: IMData = {
+      ...dataWithMessages([]),
+      rooms: [directConversation, otherConversation],
+    };
+    const { result, rerender } = renderConversationController({ data });
+    const file = new File(["same"], "report.pdf", { type: "application/pdf" });
+
+    act(() => {
+      result.current.conversationViewProps.onAddAttachments?.([file]);
+    });
+    act(() => {
+      result.current.conversationViewProps.onAddAttachments?.([file]);
+    });
+    expect(result.current.conversationViewProps.composerError).toBe("attachmentDuplicate");
+
+    rerender({ activeConversationId: "room-2", data, messageListActive: true });
+    expect(result.current.conversationViewProps.composerError).toBe("");
+
+    rerender({ activeConversationId: directConversation.id, data, messageListActive: true });
+    expect(result.current.conversationViewProps.composerError).toBe("");
   });
 
   it("does not derive working participants from recent message history", () => {
