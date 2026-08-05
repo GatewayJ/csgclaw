@@ -625,6 +625,49 @@ function Resolve-CodexCliDownloadTarget {
     throw "unsupported bundled Codex CLI target: $Goos/$Goarch"
 }
 
+function Invoke-CodexCliDownload {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$OutputPath
+    )
+
+    $maxAttempts = 3
+    $partialPath = "$OutputPath.download"
+    $previousProgressPreference = $ProgressPreference
+    try {
+        # Windows PowerShell renders Invoke-WebRequest progress updates slowly
+        # for large release binaries. Keep the setting local to this download.
+        $ProgressPreference = "SilentlyContinue"
+
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            if (Test-Path -LiteralPath $partialPath) {
+                Remove-Item -LiteralPath $partialPath -Force
+            }
+            try {
+                Invoke-WebRequest -Uri $Uri -OutFile $partialPath -UseBasicParsing -ErrorAction Stop
+                if (-not (Test-Path -LiteralPath $partialPath -PathType Leaf) -or (Get-Item -LiteralPath $partialPath).Length -eq 0) {
+                    throw "downloaded Codex CLI file is empty"
+                }
+                Move-Item -LiteralPath $partialPath -Destination $OutputPath -Force
+                return
+            }
+            catch {
+                if ($attempt -eq $maxAttempts) {
+                    throw "download bundled Codex CLI after $maxAttempts attempts: $($_.Exception.Message)"
+                }
+                Write-Warning "Codex CLI download attempt $attempt of $maxAttempts failed: $($_.Exception.Message); retrying"
+                Start-Sleep -Seconds (2 * $attempt)
+            }
+        }
+    }
+    finally {
+        $ProgressPreference = $previousProgressPreference
+        if (Test-Path -LiteralPath $partialPath) {
+            Remove-Item -LiteralPath $partialPath -Force
+        }
+    }
+}
+
 function Fetch-CodexCli {
     param(
         [Parameter(Mandatory = $true)][string]$Goos,
@@ -642,17 +685,14 @@ function Fetch-CodexCli {
         Write-Host "fetching bundled Codex CLI $downloadUrl"
         if ($Goos -eq "windows") {
             $targetPath = Join-Path $OutputDir "codex.exe"
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
-            if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf) -or (Get-Item -LiteralPath $targetPath).Length -eq 0) {
-                throw "downloaded Codex executable is empty"
-            }
+            Invoke-CodexCliDownload -Uri $downloadUrl -OutputPath $targetPath
             return
         }
 
         $archivePath = Join-Path $tmpDir "codex.tar.gz"
         $extractDir = Join-Path $tmpDir "extract"
         Ensure-Directory -Path $extractDir
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
+        Invoke-CodexCliDownload -Uri $downloadUrl -OutputPath $archivePath
         $tar = Get-CommandPathOrNull "tar"
         if ($null -eq $tar) {
             throw "missing required command: tar"
