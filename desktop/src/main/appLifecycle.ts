@@ -1,7 +1,20 @@
 import path from "node:path";
-import { app, dialog, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
-import { DesktopIPC, type DesktopUpdateStatus } from "../shared/desktopBridge.types";
+import {
+  app,
+  dialog,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  shell,
+  Tray,
+} from "electron";
+import {
+  DesktopIPC,
+  type DesktopThemeSource,
+  type DesktopUpdateStatus,
+} from "../shared/desktopBridge.types";
 import { DesktopPlatform } from "../shared/desktopEnvironment";
+import { shouldUseDarkDockIcon } from "../shared/desktopTheme";
 import { logDesktopError, logDesktopInfo } from "./desktopLogger";
 import { registerIPCHandlers } from "./ipcHandlers";
 import { desktopIconResourcePath, isMacOSDesktop, windowsAppIconPath } from "./platform";
@@ -12,6 +25,7 @@ import { WindowManager } from "./windowManager";
 export class AppLifecycle {
   private cleanupIPC: (() => void) | null = null;
   private cleanupDockThemeIcon: (() => void) | null = null;
+  private desktopThemeSource: DesktopThemeSource = "system";
   private quitting = false;
   private recoveryActive = false;
   private rendererOrigin = "";
@@ -61,6 +75,7 @@ export class AppLifecycle {
       this.supervisor,
       this.updater,
       () => this.restartSidecar(),
+      (theme) => this.setThemeSource(theme),
     );
 
     this.configureDockThemeIcon();
@@ -272,21 +287,40 @@ export class AppLifecycle {
     if (!isMacOSDesktop || !app.dock) {
       return;
     }
+    nativeTheme.on("updated", this.handleNativeThemeUpdated);
+    this.cleanupDockThemeIcon = () =>
+      nativeTheme.removeListener("updated", this.handleNativeThemeUpdated);
+    this.updateDockThemeIcon();
+  }
+
+  private readonly handleNativeThemeUpdated = (): void => {
+    this.updateDockThemeIcon();
+  };
+
+  private updateDockThemeIcon(): void {
+    if (!isMacOSDesktop || !app.dock) {
+      return;
+    }
+    const useDarkColors = shouldUseDarkDockIcon(
+      this.desktopThemeSource,
+      nativeTheme.shouldUseDarkColors,
+    );
     const iconDirectory = app.isPackaged
       ? process.resourcesPath
       : path.resolve(__dirname, "..", "..", "resources", "icons");
-    const updateDockIcon = (): void => {
-      const iconName = nativeTheme.shouldUseDarkColors
-        ? "csgclaw-dock-dark.png"
-        : "csgclaw-dock-light.png";
-      const icon = nativeImage.createFromPath(path.join(iconDirectory, iconName));
-      if (!icon.isEmpty()) {
-        app.dock?.setIcon(icon);
-      }
-    };
-    nativeTheme.on("updated", updateDockIcon);
-    this.cleanupDockThemeIcon = () => nativeTheme.removeListener("updated", updateDockIcon);
-    updateDockIcon();
+    const iconName = useDarkColors
+      ? "csgclaw-dock-dark.png"
+      : "csgclaw-dock-light.png";
+    const icon = nativeImage.createFromPath(path.join(iconDirectory, iconName));
+    if (!icon.isEmpty()) {
+      app.dock.setIcon(icon);
+    }
+  }
+
+  private setThemeSource(theme: DesktopThemeSource): void {
+    this.desktopThemeSource = theme;
+    nativeTheme.themeSource = theme;
+    this.updateDockThemeIcon();
   }
 
   private loadMacOSTrayIcon(): Electron.NativeImage {
