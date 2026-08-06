@@ -337,42 +337,43 @@ export function MessageAttachments({
         <div className="message-file-list">
           {files.map((attachment) => {
             const downloadURL = resolveRequestPath(attachment.download_url);
+            const inlinePreviewable = isInlinePreviewableMediaType(attachment.media_type);
+            const filename = splitAttachmentFilename(attachment.name || t("attachment"));
             const content = (
               <>
                 <span className="attachment-file-icon" aria-hidden="true">
                   <FileText size={18} />
                 </span>
                 <span className="attachment-draft-meta">
-                  <span className="attachment-name truncate">{attachment.name || t("attachment")}</span>
+                  <span className="attachment-name" title={attachment.name || t("attachment")}>
+                    <span className="attachment-name-stem">{filename.stem}</span>
+                    {filename.extension ? (
+                      <span className="attachment-name-extension">{filename.extension}</span>
+                    ) : null}
+                  </span>
                   <span className="attachment-size">{formatAttachmentSize(attachment.size_bytes)}</span>
                 </span>
               </>
             );
             return (
               <Tooltip key={attachment.id} content={attachment.name}>
-                {isInlinePreviewableMediaType(attachment.media_type) ? (
-                  <button
-                    type="button"
-                    className="message-file-attachment"
-                    aria-label={t("previewAttachmentNamed", { name: attachment.name })}
-                    onClick={() =>
-                      setPreview({
-                        downloadURL,
-                        id: attachment.id,
-                        mediaType: attachment.media_type,
-                        name: attachment.name,
-                        previewURL: resolveRequestPath(attachment.preview_url || attachment.download_url),
-                        requiresFetch: true,
-                      })
-                    }
-                  >
-                    {content}
-                  </button>
-                ) : (
-                  <a className="message-file-attachment" href={downloadURL} download referrerPolicy="no-referrer">
-                    {content}
-                  </a>
-                )}
+                <button
+                  type="button"
+                  className="message-file-attachment"
+                  aria-label={t("previewAttachmentNamed", { name: attachment.name })}
+                  onClick={() =>
+                    setPreview({
+                      downloadURL,
+                      id: attachment.id,
+                      mediaType: attachment.media_type,
+                      name: attachment.name,
+                      previewURL: resolveRequestPath(attachment.preview_url || attachment.download_url),
+                      requiresFetch: inlinePreviewable,
+                    })
+                  }
+                >
+                  {content}
+                </button>
               </Tooltip>
             );
           })}
