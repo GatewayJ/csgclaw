@@ -181,6 +181,7 @@ export type AgentDetailPaneProps = {
   skillsLoading?: boolean;
   t: TranslateFn;
   workspaceSupported?: boolean;
+  directoryPickerAvailable?: boolean;
   onAddSkills?: (skillNames: string[]) => Promise<boolean> | boolean;
   onDeleteSkill?: (skill: SlashSkillOption | string) => Promise<boolean> | boolean;
   onInstallMCPServers?: (serverNames: string[]) => Promise<boolean> | boolean;
@@ -241,6 +242,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     mcpDeleteBusy = false,
     mcpDeleteError = "",
     workspaceSupported = false,
+    directoryPickerAvailable = true,
     onDraftChange,
     onSave,
     onPublish,
@@ -830,6 +832,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
               <div id="agent-profile-profile" className="agent-profile-tab-panel">
                 <AgentRuntimePanel
                   draft={draft}
+                  directoryPickerAvailable={directoryPickerAvailable}
                   item={item}
                   locale={locale}
                   runtimeKind={runtimeKind}
@@ -1279,6 +1282,7 @@ function isAgentProfileTabID(value: unknown): value is AgentProfileTabID {
 
 type AgentRuntimePanelProps = {
   draft: AgentDraft;
+  directoryPickerAvailable: boolean;
   item: AgentLike;
   locale: LocaleCode;
   onDraftChange?: (draft: AgentDraft) => void;
@@ -1289,6 +1293,7 @@ type AgentRuntimePanelProps = {
 
 function AgentRuntimePanel({
   draft,
+  directoryPickerAvailable,
   item,
   locale,
   onDraftChange,
@@ -1337,6 +1342,7 @@ function AgentRuntimePanel({
               locale={locale}
               schemas={runtimeOptionSchemas}
               onDraftChange={onDraftChange || (() => {})}
+              directoryPickerAvailable={directoryPickerAvailable}
               embedded
             />
           ) : null}

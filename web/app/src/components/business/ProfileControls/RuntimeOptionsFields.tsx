@@ -8,7 +8,7 @@ import {
 } from "@/models/agents";
 import { Button } from "@/components/ui/Button/Button";
 import type { LocaleCode } from "@/models/conversations";
-import { pickLocalDirectoryPath } from "./runtimeOptionDirectoryPicker";
+import { pickLocalDirectoryPath, rendererDirectoryPickerAvailable } from "./runtimeOptionDirectoryPicker";
 
 export type RuntimeOptionsFieldsProps = {
   draft: AgentDraft;
@@ -16,6 +16,7 @@ export type RuntimeOptionsFieldsProps = {
   schemas?: RuntimeOptionSchema[] | null;
   onDraftChange: (draft: AgentDraft) => void;
   embedded?: boolean;
+  directoryPickerAvailable?: boolean;
 };
 
 function directoryPickerLabel(locale: LocaleCode): string {
@@ -32,10 +33,12 @@ export function RuntimeOptionsFields({
   schemas = [],
   onDraftChange,
   embedded = false,
+  directoryPickerAvailable = true,
 }: RuntimeOptionsFieldsProps) {
   if (!Array.isArray(schemas) || schemas.length === 0) {
     return null;
   }
+  const showDirectoryPicker = directoryPickerAvailable || rendererDirectoryPickerAvailable();
 
   const fields = schemas.map((schema) => {
     const path = String(schema.path ?? "").trim();
@@ -65,23 +68,25 @@ export function RuntimeOptionsFields({
           />
           {isDirectory ? (
             <>
-              <Button
-                variant="secondaryGray"
-                size="md"
-                className="runtime-option-action"
-                onClick={async () => {
-                  const pickedPath = await pickLocalDirectoryPath();
-                  if (!pickedPath) {
-                    return;
-                  }
-                  onDraftChange({
-                    ...draft,
-                    runtime_options: setRuntimeOptionValue(draft.runtime_options, path, pickedPath),
-                  });
-                }}
-              >
-                {directoryPickerLabel(locale)}
-              </Button>
+              {showDirectoryPicker ? (
+                <Button
+                  variant="secondaryGray"
+                  size="md"
+                  className="runtime-option-action"
+                  onClick={async () => {
+                    const pickedPath = await pickLocalDirectoryPath();
+                    if (!pickedPath) {
+                      return;
+                    }
+                    onDraftChange({
+                      ...draft,
+                      runtime_options: setRuntimeOptionValue(draft.runtime_options, path, pickedPath),
+                    });
+                  }}
+                >
+                  {directoryPickerLabel(locale)}
+                </Button>
+              ) : null}
               <Button
                 variant="secondaryGray"
                 size="md"
