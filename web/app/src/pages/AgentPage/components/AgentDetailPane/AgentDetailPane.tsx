@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   Check,
   CheckCircle2,
   CircleDashed,
@@ -135,6 +136,7 @@ export type AgentDetailPaneProps = {
   onDraftChange?: (draft: AgentDraft) => void;
   onInvite: AgentActionHandler;
   onOpenDM: AgentActionHandler;
+  onRetryModels?: () => void | Promise<unknown>;
   onProviderLogin?: (provider: string) => VoidOrPromise;
   onPublish?: (target: AgentTemplatePublishTarget, name: string, description: string) => boolean | Promise<boolean>;
   onRecreate: AgentActionHandler;
@@ -205,6 +207,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     noticeTone = "warning",
     modelBusy = false,
     modelError = null,
+    onRetryModels,
     saving = false,
     publishBusy = false,
     publishDisabled = false,
@@ -834,6 +837,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                     draft={draft}
                     modelBusy={modelBusy}
                     modelError={modelError}
+                    onRetryModels={onRetryModels}
                     providerOptions={providerOptions}
                     selectedModelValue={selectedModelValue}
                     selectedProviderID={selectedProviderID}
@@ -1440,6 +1444,7 @@ type AgentModelPanelProps = {
   draft: AgentDraft;
   modelBusy: boolean;
   modelError: unknown;
+  onRetryModels?: () => void | Promise<unknown>;
   providerOptions: readonly ModelProviderSelectOption[];
   selectedModelValue: string;
   selectedProviderID: string;
@@ -1452,6 +1457,7 @@ function AgentModelPanel({
   draft,
   modelBusy,
   modelError,
+  onRetryModels,
   providerOptions,
   selectedModelValue,
   selectedProviderID,
@@ -1548,9 +1554,6 @@ function AgentModelPanel({
                     : []),
                 ]}
               />
-              {modelError ? (
-                <span className="field-hint error">{errorMessage(modelError, t("modelLoadFailed"))}</span>
-              ) : null}
             </label>
             <ReasoningControls
               value={draft.reasoning_effort}
@@ -1569,6 +1572,35 @@ function AgentModelPanel({
                 <small className="agent-fast-mode-help">{t("profileFastModeHelp")}</small>
               </label>
             </div>
+            {modelError ? (
+              <div className="agent-model-load-error" role="alert">
+                <AlertCircle className="agent-model-load-error-icon" aria-hidden="true" size={20} strokeWidth={2} />
+                <div className="agent-model-load-error-content">
+                  <strong>{t("modelLoadFailed")}</strong>
+                  <p>{t("profileModelLoadErrorHelp")}</p>
+                  {selectedModelValue ? <small>{t("profileModelCurrentSelectionRetained")}</small> : null}
+                  <details className="agent-model-load-error-details">
+                    <summary>{t("profileModelErrorDetails")}</summary>
+                    <div className="agent-model-load-error-technical">
+                      <pre>{errorMessage(modelError, t("modelLoadFailed"))}</pre>
+                    </div>
+                  </details>
+                </div>
+                {onRetryModels ? (
+                  <Button
+                    className="agent-model-load-error-retry"
+                    loading={modelBusy}
+                    loadingLabel={t("profileLoadingModels")}
+                    size="sm"
+                    variant="secondaryGray"
+                    onClick={() => void onRetryModels()}
+                  >
+                    <RefreshCw aria-hidden="true" size={15} strokeWidth={2} />
+                    {t("retry")}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
