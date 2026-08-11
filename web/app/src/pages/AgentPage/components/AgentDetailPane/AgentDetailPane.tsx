@@ -8,11 +8,16 @@ import {
   FileCode2,
   Link2,
   MoreHorizontal,
+  Play,
   Plus,
   RefreshCw,
+  Save,
   Server,
+  Square,
   Trash2,
   Unlink2,
+  UploadCloud,
+  UserPlus,
 } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/api/client";
@@ -2047,21 +2052,29 @@ function AgentActionsMenu({
       <DropdownMenuContent className="agent-actions-menu" aria-label={t("agentMoreActions")}>
         {SHOW_AGENT_LIFECYCLE_ACTIONS ? (
           <DropdownMenuItem disabled={busy || incomplete} onSelect={() => (running ? onStop(item) : onStart(item))}>
-            {running ? t("agentStop") : t("agentStart")}
+            {running ? (
+              <Square aria-hidden="true" size={15} strokeWidth={2} />
+            ) : (
+              <Play aria-hidden="true" size={15} strokeWidth={2} />
+            )}
+            <span>{running ? t("agentStop") : t("agentStart")}</span>
           </DropdownMenuItem>
         ) : null}
-        <DropdownMenuItem danger disabled={busy || incomplete} onSelect={() => onRecreate(item)}>
-          {t("agentRecreate")}
+        <DropdownMenuItem disabled={busy || incomplete} onSelect={() => onRecreate(item)}>
+          <RefreshCw aria-hidden="true" size={15} strokeWidth={2} />
+          <span>{t("agentRecreate")}</span>
         </DropdownMenuItem>
         {SHOW_AGENT_LIFECYCLE_ACTIONS && activeRoom && !isManager ? (
           <DropdownMenuItem disabled={busy} onSelect={() => onInvite(item)}>
-            {t("inviteToRoom")}
+            <UserPlus aria-hidden="true" size={15} strokeWidth={2} />
+            <span>{t("inviteToRoom")}</span>
           </DropdownMenuItem>
         ) : null}
         {canPublishLocal ? (
           <>
             <DropdownMenuItem disabled={publishBusy} onSelect={() => onPublish?.("local")}>
-              {publishBusy ? t("agentPublishing") : t("agentSaveLocalTemplate")}
+              <Save aria-hidden="true" size={15} strokeWidth={2} />
+              <span>{publishBusy ? t("agentPublishing") : t("agentSaveLocalTemplate")}</span>
             </DropdownMenuItem>
             {canPublishCommunity ? (
               <DropdownMenuItem
@@ -2069,7 +2082,8 @@ function AgentActionsMenu({
                 title={publishDisabled ? t("agentPublishLoginRequired") : undefined}
                 onSelect={() => onPublish?.("official")}
               >
-                {publishBusy ? t("agentPublishing") : t("agentPublishCommunity")}
+                <UploadCloud aria-hidden="true" size={15} strokeWidth={2} />
+                <span>{publishBusy ? t("agentPublishing") : t("agentPublishCommunity")}</span>
               </DropdownMenuItem>
             ) : null}
           </>
@@ -2078,7 +2092,8 @@ function AgentActionsMenu({
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem danger disabled={busy} onSelect={() => onDelete(item)}>
-              {t("agentDelete")}
+              <Trash2 aria-hidden="true" size={15} strokeWidth={2} />
+              <span>{t("agentDelete")}</span>
             </DropdownMenuItem>
           </>
         ) : null}
