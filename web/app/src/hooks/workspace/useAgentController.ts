@@ -2450,7 +2450,6 @@ export function useAgentController({
       saveError: agentPageError,
       notice: selectedAgentPageNotice?.message || "",
       noticeTone: selectedAgentPageNotice?.tone || "warning",
-      rooms,
       feishuConnectBusy: selectedAgentActionBusy.includes(`:${FEISHU_CHANNEL_ACTION}:`) ? selectedAgentActionBusy : "",
       feishuPendingRegistration: selectedFeishuPendingRegistration,
       authStatuses: cliproxyAuthStatuses,
