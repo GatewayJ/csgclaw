@@ -30,7 +30,7 @@ import {
 import { createUserRequest } from "@/api/im";
 import { patchCsgclawUserRequest } from "@/api/participants";
 import { fetchSkills } from "@/api/skills";
-import { createTeamRequest, deleteTeamRequest, fetchTeams } from "@/api/tasks";
+import { createTeamRequest, deleteTeamRequest, fetchTeams, updateTeamRequest } from "@/api/tasks";
 import { useAgentController } from "@/hooks/workspace/useAgentController";
 import { WorkspacePaneTypes } from "@/models/routing";
 import type { WorkspacePane } from "@/models/routing";
@@ -67,6 +67,7 @@ vi.mock("@/api/tasks", async () => {
     createTeamRequest: vi.fn(),
     deleteTeamRequest: vi.fn(),
     fetchTeams: vi.fn(async () => []),
+    updateTeamRequest: vi.fn(),
   };
 });
 
@@ -316,6 +317,7 @@ describe("useAgentController", () => {
     vi.mocked(createTeamRequest).mockReset();
     vi.mocked(deleteTeamRequest).mockReset();
     vi.mocked(fetchTeams).mockReset();
+    vi.mocked(updateTeamRequest).mockReset();
     vi.mocked(runAgentActionRequest).mockReset();
     vi.mocked(startFeishuRegistrationRequest).mockReset();
     vi.mocked(updateAgentRequest).mockReset();
@@ -393,6 +395,15 @@ describe("useAgentController", () => {
     });
     vi.mocked(deleteTeamRequest).mockResolvedValue(undefined);
     vi.mocked(fetchTeams).mockResolvedValue([]);
+    vi.mocked(updateTeamRequest).mockResolvedValue({
+      created_at: "2026-06-10T00:00:00Z",
+      id: "team-1",
+      lead_agent_id: "agent-manager",
+      member_agent_ids: ["agent-worker"],
+      status: "active",
+      title: "Team",
+      updated_at: "2026-06-10T00:00:00Z",
+    });
     vi.mocked(runAgentActionRequest).mockResolvedValue({
       ...oldAgent,
       image: actionImage,
@@ -1766,6 +1777,45 @@ describe("useAgentController", () => {
       lead_agent_id: "u-manager",
       member_agent_ids: ["u-manager"],
       title: "teamNewFallbackTitle",
+    });
+  });
+
+  it("locks the team lead and restores existing members across compatible agent ids", async () => {
+    const manager = { ...oldAgent, id: "agent-manager" };
+    const worker: AgentLike = {
+      ...oldAgent,
+      id: "agent-worker",
+      name: "worker",
+      role: "worker",
+    };
+    const team: WorkspaceTeam = {
+      id: "team-1",
+      title: "Team",
+      lead_agent_id: "u-manager",
+      member_agent_ids: ["u-worker"],
+      status: "active",
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-01T00:00:00Z",
+    };
+    const { result } = renderHook(() => useAgentControllerHarness({ agents: [manager, worker] }), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.controller.openManageTeamMembers(team);
+    });
+
+    await waitFor(() => {
+      expect(result.current.controller.createTeamModalProps?.teamMemberIDs).toEqual(["agent-worker", "agent-manager"]);
+      expect(result.current.controller.createTeamModalProps?.lockedTeamMemberIDs).toEqual(["agent-manager"]);
+    });
+
+    await act(async () => {
+      await result.current.controller.createTeamModalProps?.onCreate();
+    });
+
+    expect(updateTeamRequest).toHaveBeenCalledWith("team-1", {
+      member_agent_ids: ["agent-worker"],
     });
   });
 

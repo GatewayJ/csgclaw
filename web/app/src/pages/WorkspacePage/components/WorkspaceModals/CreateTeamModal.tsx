@@ -10,6 +10,7 @@ type CreateTeamModalProps = {
   t: TranslateFn;
   candidates: AgentLike[];
   mode?: "create" | "edit";
+  lockedTeamMemberIDs?: string[];
   teamTitle: string;
   onTeamTitleChange: (value: string) => void;
   teamMemberIDs: string[];
@@ -24,6 +25,7 @@ export function CreateTeamModal({
   t,
   candidates,
   mode = "create",
+  lockedTeamMemberIDs = [],
   teamTitle,
   onTeamTitleChange,
   teamMemberIDs,
@@ -35,8 +37,10 @@ export function CreateTeamModal({
 }: CreateTeamModalProps) {
   const editing = mode === "edit";
   const candidateIDs = candidates.map((item) => item.id).filter((id): id is string => Boolean(id));
-  const allCandidatesSelected = candidateIDs.length > 0 && candidateIDs.every((id) => teamMemberIDs.includes(id));
-  const selectedMemberCount = candidateIDs.filter((id) => teamMemberIDs.includes(id)).length;
+  const selectableCandidateIDs = candidateIDs.filter((id) => !lockedTeamMemberIDs.includes(id));
+  const isMemberSelected = (id: string) => lockedTeamMemberIDs.includes(id) || teamMemberIDs.includes(id);
+  const allCandidatesSelected = candidateIDs.length > 0 && candidateIDs.every(isMemberSelected);
+  const selectedMemberCount = candidateIDs.filter(isMemberSelected).length;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -70,13 +74,17 @@ export function CreateTeamModal({
                   <input
                     type="checkbox"
                     checked={allCandidatesSelected}
-                    onChange={() =>
-                      onTeamMemberIDsChange((current) =>
-                        allCandidatesSelected
-                          ? current.filter((id) => !candidateIDs.includes(id))
-                          : Array.from(new Set([...current, ...candidateIDs])),
-                      )
-                    }
+                    disabled={selectableCandidateIDs.length === 0}
+                    onChange={() => {
+                      onTeamMemberIDsChange((current) => {
+                        const allSelected = candidateIDs.every(
+                          (id) => lockedTeamMemberIDs.includes(id) || current.includes(id),
+                        );
+                        return allSelected
+                          ? current.filter((id) => !selectableCandidateIDs.includes(id))
+                          : Array.from(new Set([...current, ...selectableCandidateIDs]));
+                      });
+                    }}
                   />
                   <span>{t("allMembers")}</span>
                   <small>
@@ -85,12 +93,13 @@ export function CreateTeamModal({
                 </label>
                 {candidates.map((item) => {
                   const itemID = item.id || "";
+                  const memberLocked = itemID ? lockedTeamMemberIDs.includes(itemID) : false;
                   return (
                     <label key={itemID || item.name} className="selection-item">
                       <input
                         type="checkbox"
-                        checked={itemID ? teamMemberIDs.includes(itemID) : false}
-                        disabled={!itemID}
+                        checked={itemID ? memberLocked || teamMemberIDs.includes(itemID) : false}
+                        disabled={!itemID || memberLocked}
                         onChange={() =>
                           itemID ? onTeamMemberIDsChange((current) => toggleSelection(current, itemID)) : undefined
                         }
