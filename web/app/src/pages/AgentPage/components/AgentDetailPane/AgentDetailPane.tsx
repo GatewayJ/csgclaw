@@ -95,13 +95,11 @@ import {
   Select,
   Tooltip,
 } from "@/components/ui";
-import { AgentActivityPanel } from "./AgentActivityPanel";
-
 type VoidOrPromise = void | Promise<void>;
 type AgentActionHandler = (item: AgentLike) => VoidOrPromise;
 type AgentMetadataSavePatch = Pick<Partial<AgentDraft>, "description" | "name">;
 type AgentNoticeTone = "info" | "warning" | "success";
-const AGENT_PROFILE_TAB_IDS = ["profile", "activity", "channels", "instructions", "skills", "mcp"] as const;
+const AGENT_PROFILE_TAB_IDS = ["profile", "channels", "instructions", "skills", "mcp"] as const;
 type AgentProfileTabID = (typeof AGENT_PROFILE_TAB_IDS)[number];
 type UpdateAgentDraft = (patch: Partial<AgentDraft>) => void;
 type RuntimeOptionSchemaList = ReturnType<typeof runtimeOptionSchemasForAgent>;
@@ -157,7 +155,6 @@ export type AgentDetailPaneProps = {
   publishDisabled?: boolean;
   publishError?: string;
   locale?: LocaleCode;
-  rooms?: IMConversation[];
   saveError?: string;
   savedDraft?: AgentDraft | null;
   saving?: boolean;
@@ -221,7 +218,6 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     modelProviders = null,
     saveError = "",
     locale = "en",
-    rooms = [],
     notifierWebhookPublicOrigin = "",
     skills = [],
     skillsLoading = false,
@@ -434,7 +430,6 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
       draft
         ? [
             { id: "profile" as const, label: t("agentProfileTab") },
-            { id: "activity" as const, label: t("agentActivityTab") },
             ...(!isNotifierDraft ? [{ id: "instructions" as const, label: t("agentInstructions") }] : []),
             ...(workspaceSupported
               ? [{ id: "skills" as const, label: t("agentProfileSkillsTab"), count: skills.length }]
@@ -864,9 +859,6 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 )}
                 <AgentAdvancedPanel draft={draft} item={item} t={t} updateDraft={updateDraft} />
               </div>
-            ) : null}
-            {visibleActiveProfileTab === "activity" ? (
-              <AgentActivityPanel item={item} locale={locale} rooms={rooms} t={t} />
             ) : null}
             {visibleActiveProfileTab === "channels" && !isNotificationBotAgent(item) ? (
               <AgentChannelsSection

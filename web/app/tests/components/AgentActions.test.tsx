@@ -1202,7 +1202,7 @@ describe("agent action visibility", () => {
       within(navigation)
         .getAllByRole("button")
         .map((button) => button.textContent),
-    ).toEqual(["Profile", "Activity", "Instructions", "Skills0", "MCP", "Channels"]);
+    ).toEqual(["Profile", "Instructions", "Skills0", "MCP", "Channels"]);
 
     await user.click(within(navigation).getByRole("button", { name: "MCP" }));
 
@@ -1603,9 +1603,10 @@ describe("agent action visibility", () => {
     expect(within(advancedSection as HTMLElement).getByText("Request options")).toBeInTheDocument();
   });
 
-  it("navigates to profile sections from the horizontal tabs", async () => {
+  it("omits activity and navigates to profile sections from the horizontal tabs", async () => {
     const user = userEvent.setup();
     const draft = agentToDraft(worker);
+    window.localStorage.setItem(AGENT_PROFILE_ACTIVE_TAB_STORAGE_KEY, "activity");
     render(
       <AgentDetailPane
         item={worker}
@@ -1628,14 +1629,7 @@ describe("agent action visibility", () => {
 
     const navigation = screen.getByRole("navigation", { name: "Profile sections" });
     const tabs = within(navigation).getAllByRole("button");
-    expect(tabs.map((tab) => tab.textContent)).toEqual([
-      "Profile",
-      "Activity",
-      "Instructions",
-      "Skills0",
-      "MCP",
-      "Channels",
-    ]);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Profile", "Instructions", "Skills0", "MCP", "Channels"]);
     expect(tabs[0]).toHaveAttribute("aria-current", "location");
     expect(screen.getByText("Request options")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Channels" })).not.toBeInTheDocument();
