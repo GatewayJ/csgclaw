@@ -103,7 +103,7 @@ import type {
 } from "@/models/agents";
 import { isDirectConversation, localIdentitiesMatch, upsertUserInData } from "@/models/conversations";
 import { mcpServersFromMap } from "@/models/mcp";
-import { displayTeam } from "@/models/tasks";
+import { displayTeam, teamMemberIDs } from "@/models/tasks";
 import type { WorkspaceTeam } from "@/models/tasks";
 import {
   modelProviderCatalogForAgentAvailability,
@@ -612,6 +612,11 @@ export function useAgentController({
   const createTeamCandidateIDs = useMemo(
     () => createTeamCandidates.map((item) => String(item.id)),
     [createTeamCandidates],
+  );
+  const managerTeamMemberID = matchingTeamCandidateID(managerAgent?.id || MANAGER_AGENT_ID, createTeamCandidateIDs);
+  const lockedTeamMemberID = matchingTeamCandidateID(
+    editingTeam?.lead_agent_id || managerTeamMemberID,
+    createTeamCandidateIDs,
   );
   const runningAgentCount = agentItems.filter(isAgentRunning).length;
   const notifierWebhookPublicOrigin = useMemo(() => resolvedNotifierWebhookOrigin(bootstrapConfig), [bootstrapConfig]);
@@ -1334,10 +1339,9 @@ export function useAgentController({
   }
 
   function openCreateTeamModal(): void {
-    const firstAgentID = createTeamCandidateIDs[0] || "";
     setEditingTeam(null);
     setCreateTeamTitle("");
-    setCreateTeamMemberIDs(firstAgentID ? [firstAgentID] : []);
+    setCreateTeamMemberIDs(managerTeamMemberID ? [managerTeamMemberID] : []);
     setTeamActionError("");
     setShowCreateTeamModal(true);
   }
@@ -1354,7 +1358,7 @@ export function useAgentController({
     }
     setEditingTeam(item);
     setCreateTeamTitle(displayTeam(item));
-    setCreateTeamMemberIDs([...(item.member_agent_ids ?? [])]);
+    setCreateTeamMemberIDs(teamSelectionMemberIDs(item, createTeamCandidateIDs));
     setTeamActionError("");
     setShowCreateTeamModal(true);
   }
@@ -2184,7 +2188,9 @@ export function useAgentController({
     setTeamActionError("");
     try {
       await updateTeamRequest(editingTeam.id, {
-        member_agent_ids: createTeamMemberIDs,
+        member_agent_ids: createTeamMemberIDs.filter(
+          (memberID) => !localIdentitiesMatch(memberID, editingTeam.lead_agent_id),
+        ),
       });
       await teamsQuery.refetch();
       await refreshWorkspaceBootstrap();
@@ -2544,6 +2550,7 @@ export function useAgentController({
           t,
           mode: editingTeam ? ("edit" as const) : ("create" as const),
           candidates: createTeamCandidates,
+          lockedTeamMemberIDs: lockedTeamMemberID ? [lockedTeamMemberID] : [],
           teamTitle: createTeamTitle,
           onTeamTitleChange: setCreateTeamTitle,
           teamMemberIDs: createTeamMemberIDs,
@@ -2555,6 +2562,26 @@ export function useAgentController({
         }
       : null,
   };
+}
+
+function matchingTeamCandidateID(identity: string | null | undefined, candidateIDs: readonly string[]): string {
+  const normalizedIdentity = String(identity || "").trim();
+  if (!normalizedIdentity) {
+    return "";
+  }
+  return (
+    candidateIDs.find((candidateID) => localIdentitiesMatch(candidateID, normalizedIdentity)) || normalizedIdentity
+  );
+}
+
+function teamSelectionMemberIDs(team: WorkspaceTeam, candidateIDs: readonly string[]): string[] {
+  return Array.from(
+    new Set(
+      teamMemberIDs(team)
+        .map((memberID) => matchingTeamCandidateID(memberID, candidateIDs))
+        .filter(Boolean),
+    ),
+  );
 }
 
 function csgclawParticipantIDForAgent(item: AgentLike): string {
