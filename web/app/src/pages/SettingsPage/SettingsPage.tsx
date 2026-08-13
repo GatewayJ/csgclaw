@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
-import { Button, Tooltip } from "@/components/ui";
+import { Button, Select, Tooltip } from "@/components/ui";
 import { useWorkspaceControllerContext } from "@/hooks/workspace";
 import { isAuthenticated } from "@/models/auth";
 import {
@@ -12,7 +12,13 @@ import {
 import type { AuthEnvironmentDraft } from "@/models/authEnvironment";
 import { githubFeedbackIssueURL } from "@/models/feedback";
 import { formatSidebarVersionLabel, hasUpgradeAttention, isLocalBuildUpgradeStatus } from "@/models/upgradeStatus";
+import { nextSimulatedUpgradeProgress } from "@/models/upgradeProgress";
 import { classNames } from "@/shared/lib/classNames";
+import {
+  DEFAULT_TURN_NOTIFICATION_MODE,
+  normalizeTurnNotificationMode,
+  TurnNotificationModes,
+} from "@/models/turnNotifications";
 import { readStoredAuthEnvironmentDraft, writeStoredAuthEnvironmentDraft } from "@/shared/storage/authEnvironment";
 import type { ThemeMode } from "@/shared/theme/theme";
 import { OpenCSGConnectionDialog, OpenCSGSwitchDialog } from "./components/OpenCSGConnectionDialog";
@@ -26,6 +32,10 @@ export function SettingsPage() {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
   const sidebar = controller.sidebarProps;
+  const progressActive = Boolean(
+    sidebar && (sidebar.upgradeChannelBusy || sidebar.upgradeStatus?.checking || sidebar.upgradeStatus?.upgrading),
+  );
+  const upgradeProgress = useSimulatedUpgradeProgress(progressActive, Boolean(sidebar?.upgradeStatus?.downloaded));
 
   if (!controller.ready || !sidebar) {
     return null;
@@ -40,13 +50,24 @@ export function SettingsPage() {
     sidebar.t("csghubSignedIn");
   const currentVersion = sidebar.upgradeStatus?.current_version || sidebar.appVersion;
   const version = formatSidebarVersionLabel(currentVersion);
+  const localBuild = isLocalBuildUpgradeStatus(sidebar.upgradeStatus, currentVersion);
   const mockUpgradeAvailable = import.meta.env.DEV && isMockUpgradePreviewEnabled();
   const showUpgradeAction =
     sidebar.showUpgradeControls &&
     (mockUpgradeAvailable ||
-      (!isLocalBuildUpgradeStatus(sidebar.upgradeStatus, currentVersion) &&
+      (!localBuild &&
         sidebar.upgradeStatus?.auto_upgrade_supported !== false &&
         hasUpgradeAttention(sidebar.upgradeStatus, sidebar.upgradePhase, sidebar.upgradeBusy)));
+  const showUpgradeChannel = sidebar.showUpgradeControls;
+  const upgradeChannel = sidebar.upgradeStatus?.channel ?? "release";
+  const upgradeChannelDisabled = Boolean(
+    sidebar.upgradeChannelBusy ||
+    sidebar.upgradeChannelLocked ||
+    sidebar.upgradeBusy ||
+    sidebar.upgradeStatus?.checking ||
+    sidebar.upgradeStatus?.upgrading,
+  );
+  const showUpgradeProgress = upgradeProgress.visible;
   const showNewVersionBadge = Boolean(
     sidebar.showUpgradeControls &&
     (mockUpgradeAvailable ||
@@ -61,6 +82,16 @@ export function SettingsPage() {
   const onLogin = sidebar.onLogin;
   const onLogout = sidebar.onLogout;
   const onAuthEnvironmentChange = sidebar.onAuthEnvironmentChange;
+  const turnNotificationMode = sidebar.turnNotificationMode ?? DEFAULT_TURN_NOTIFICATION_MODE;
+  const turnNotificationPermission = sidebar.turnNotificationPermission ?? "unsupported";
+  const turnNotificationOptions = [
+    { label: sidebar.t("turnNotificationModeOff"), value: TurnNotificationModes.off },
+    { label: sidebar.t("turnNotificationModeAlways"), value: TurnNotificationModes.always },
+    { label: sidebar.t("turnNotificationModeWhenUnfocused"), value: TurnNotificationModes.whenUnfocused },
+  ];
+  const selectedTurnNotificationLabel =
+    turnNotificationOptions.find((option) => option.value === turnNotificationMode)?.label ??
+    sidebar.t("turnNotificationModeWhenUnfocused");
 
   function updateAuthEnvironment(next: AuthEnvironmentDraft) {
     setUncontrolledAuthEnvironmentDraft(next);
@@ -196,6 +227,56 @@ export function SettingsPage() {
         </SettingsRow>
 
         <SettingsRow
+          title={sidebar.t("notificationSettings")}
+          description={sidebar.t("settingsNotificationDescription")}
+        >
+          <div className={styles.stack}>
+            <div className={styles.settingLine}>
+              <span className={styles.controlLabel}>{sidebar.t("turnCompletionNotifications")}</span>
+              <Select
+                contentClassName={styles.notificationSelectContent}
+                options={turnNotificationOptions}
+                selectedLabel={selectedTurnNotificationLabel}
+                triggerClassName={styles.notificationSelectTrigger}
+                triggerProps={{ "aria-label": sidebar.t("turnCompletionNotifications") }}
+                value={turnNotificationMode}
+                onValueChange={(value) =>
+                  void sidebar.onTurnNotificationModeChange?.(normalizeTurnNotificationMode(value))
+                }
+              />
+            </div>
+            <div className={styles.settingLine}>
+              <span className={styles.controlLabel}>{sidebar.t("notificationPermission")}</span>
+              <div className={styles.notificationPermissionControls}>
+                <span
+                  className={classNames(
+                    styles.permissionStatus,
+                    turnNotificationPermission === "granted" && styles.permissionGranted,
+                    turnNotificationPermission === "denied" && styles.permissionDenied,
+                  )}
+                >
+                  <span aria-hidden="true" />
+                  {sidebar.t(`notificationPermission${permissionLabelSuffix(turnNotificationPermission)}`)}
+                </span>
+                {turnNotificationPermission === "default" ? (
+                  <Button
+                    className={styles.designButton}
+                    variant="secondaryGray"
+                    size="md"
+                    onClick={() => void sidebar.onRequestTurnNotificationPermission?.()}
+                  >
+                    {sidebar.t("notificationPermissionEnable")}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+            {turnNotificationPermission === "denied" ? (
+              <p className={styles.notificationPermissionHint}>{sidebar.t("notificationPermissionDeniedHint")}</p>
+            ) : null}
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
           title={
             <span className={styles.versionTitle}>
               <span>{sidebar.t("versionInfo")}</span>
@@ -209,13 +290,63 @@ export function SettingsPage() {
           }
           description={sidebar.t("settingsVersionDescription")}
         >
-          <div className={classNames(styles.versionValue, showUpgradeAction && styles.versionValueWithAction)}>
-            <span className={styles.versionLabel}>{sidebar.t("settingsCurrentVersion")}</span>
-            <strong>{version}</strong>
-            {showUpgradeAction ? (
-              <Button className={styles.designButton} variant="primary" size="md" onClick={sidebar.onOpenUpgrade}>
-                {sidebar.t("upgradeAction")}
-              </Button>
+          <div className={styles.stack}>
+            <div className={classNames(styles.versionValue, showUpgradeAction && styles.versionValueWithAction)}>
+              <span className={styles.versionLabel}>{sidebar.t("settingsCurrentVersion")}</span>
+              <strong>{version}</strong>
+              {showUpgradeAction ? (
+                <Button
+                  className={styles.designButton}
+                  variant="primary"
+                  size="md"
+                  disabled={sidebar.upgradeBusy || sidebar.upgradeStatus?.upgrading}
+                  onClick={sidebar.onOpenUpgrade}
+                >
+                  {sidebar.t(sidebar.upgradeStatus?.downloaded ? "upgradeAction" : "upgradeDownloadAction")}
+                </Button>
+              ) : null}
+            </div>
+            {showUpgradeChannel ? (
+              <>
+                <div className={styles.settingLine}>
+                  <span className={styles.controlLabel}>{sidebar.t("upgradeChannel")}</span>
+                  <div className={styles.segmented} role="group" aria-label={sidebar.t("upgradeChannel")}>
+                    <button
+                      type="button"
+                      className={classNames(styles.textSegmentButton, upgradeChannel === "release" && styles.active)}
+                      aria-pressed={upgradeChannel === "release"}
+                      disabled={upgradeChannelDisabled}
+                      onClick={() => void sidebar.onUpgradeChannelChange("release")}
+                    >
+                      {sidebar.t("upgradeChannelRelease")}
+                    </button>
+                    <button
+                      type="button"
+                      className={classNames(styles.textSegmentButton, upgradeChannel === "beta" && styles.active)}
+                      aria-pressed={upgradeChannel === "beta"}
+                      disabled={upgradeChannelDisabled}
+                      onClick={() => void sidebar.onUpgradeChannelChange("beta")}
+                    >
+                      {sidebar.t("upgradeChannelBeta")}
+                    </button>
+                  </div>
+                </div>
+                {showUpgradeProgress ? (
+                  <div
+                    className={styles.upgradeProgressRow}
+                    role="progressbar"
+                    aria-label={sidebar.t("upgradeProgressLabel")}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={upgradeProgress.percent}
+                  >
+                    <div className={styles.upgradeProgressTrack} aria-hidden="true">
+                      <span style={{ width: `${upgradeProgress.percent}%` }}></span>
+                    </div>
+                    <span className={styles.upgradeProgressValue}>{upgradeProgress.percent}%</span>
+                  </div>
+                ) : null}
+              </>
             ) : null}
           </div>
         </SettingsRow>
@@ -267,6 +398,39 @@ export function SettingsPage() {
   );
 }
 
+function useSimulatedUpgradeProgress(active: boolean, completed: boolean) {
+  const [percent, setPercent] = useState(0);
+  const [visible, setVisible] = useState(false);
+  const activeRunRef = useRef(false);
+
+  useEffect(() => {
+    if (active) {
+      activeRunRef.current = true;
+      setVisible(true);
+      setPercent((current) => (current > 0 && current < 100 ? current : 3));
+      const timer = window.setInterval(() => {
+        setPercent((current) => nextSimulatedUpgradeProgress(current));
+      }, 1000);
+      return () => window.clearInterval(timer);
+    }
+    if (completed && activeRunRef.current) {
+      setPercent(100);
+      setVisible(true);
+      const timer = window.setTimeout(() => {
+        activeRunRef.current = false;
+        setVisible(false);
+      }, 600);
+      return () => window.clearTimeout(timer);
+    }
+    activeRunRef.current = false;
+    setPercent(0);
+    setVisible(false);
+    return undefined;
+  }, [active, completed]);
+
+  return { percent, visible };
+}
+
 function isMockUpgradePreviewEnabled(): boolean {
   if (typeof window === "undefined") {
     return false;
@@ -276,6 +440,19 @@ function isMockUpgradePreviewEnabled(): boolean {
   }
   const hashQuery = window.location.hash.split("?")[1] || "";
   return new URLSearchParams(hashQuery).get("mockUpgrade") === "1";
+}
+
+function permissionLabelSuffix(permission: "default" | "denied" | "granted" | "unsupported"): string {
+  switch (permission) {
+    case "granted":
+      return "Granted";
+    case "denied":
+      return "Denied";
+    case "default":
+      return "Default";
+    default:
+      return "Unsupported";
+  }
 }
 
 function SettingsRow({

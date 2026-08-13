@@ -11,6 +11,7 @@ import {
   type DesktopOAuthInput,
   type OAuthPurpose,
   type DesktopThemeSource,
+  type DesktopUpdateChannel,
 } from "../shared/desktopBridge.types";
 import { parseDesktopThemeSource } from "../shared/desktopTheme";
 import { isSafeHTTPSURL, isTrustedMainFrame } from "./navigationPolicy";
@@ -25,6 +26,7 @@ export function registerIPCHandlers(
   supervisor: SidecarSupervisor,
   updater: DesktopUpdater,
   restartSidecar: () => Promise<void>,
+  showWindow: () => void,
   setThemeSource: (theme: DesktopThemeSource) => void,
 ): () => void {
   const assertSender = (event: IpcMainInvokeEvent) => {
@@ -65,6 +67,7 @@ export function registerIPCHandlers(
   ipcMain.handle(DesktopIPC.checkForUpdates, async (event) => {
     assertSender(event);
     await updater.checkForUpdates();
+    return updater.currentStatus();
   });
   ipcMain.handle(DesktopIPC.installDownloadedUpdate, async (event) => {
     assertSender(event);
@@ -74,9 +77,18 @@ export function registerIPCHandlers(
     assertSender(event);
     await restartSidecar();
   });
+  ipcMain.handle(DesktopIPC.showWindow, (event) => {
+    assertSender(event);
+    showWindow();
+  });
   ipcMain.handle(DesktopIPC.setThemeSource, (event, input: unknown) => {
     assertSender(event);
     setThemeSource(parseDesktopThemeSource(input));
+  });
+  ipcMain.handle(DesktopIPC.setUpdateChannel, async (event, input: unknown) => {
+    assertSender(event);
+    await updater.setChannel(parseUpdateChannel(input));
+    return updater.currentStatus();
   });
 
   return () => {
@@ -85,8 +97,17 @@ export function registerIPCHandlers(
     ipcMain.removeHandler(DesktopIPC.checkForUpdates);
     ipcMain.removeHandler(DesktopIPC.installDownloadedUpdate);
     ipcMain.removeHandler(DesktopIPC.restartSidecar);
+    ipcMain.removeHandler(DesktopIPC.showWindow);
     ipcMain.removeHandler(DesktopIPC.setThemeSource);
+    ipcMain.removeHandler(DesktopIPC.setUpdateChannel);
   };
+}
+
+function parseUpdateChannel(input: unknown): DesktopUpdateChannel {
+  if (input === "release" || input === "beta") {
+    return input;
+  }
+  throw new Error("Desktop update channel must be release or beta.");
 }
 
 function parseOAuthInput(input: unknown): DesktopOAuthInput {
