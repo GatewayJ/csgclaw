@@ -8,14 +8,45 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
-func TestFetchAgenticHubSkillArchiveReadsTreeCursorPages(t *testing.T) {
+func TestFetchAgenticHubSkillArchivePrefersArchiveDownload(t *testing.T) {
+	want := testAgenticHubZip(t, map[string]string{
+		"SKILL.md":       "name: agent-builder\n",
+		"scripts/run.sh": "echo ready\n",
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/skills/AIWizards/agent-builder/download_archive/refs/main" {
+			t.Fatalf("unexpected AgenticHub request path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Accept"); got != "application/zip" {
+			t.Fatalf("Accept = %q, want application/zip", got)
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(want)
+	}))
+	defer server.Close()
+
+	got, err := FetchAgenticHubSkillArchive(context.Background(), server.URL, "AIWizards/agent-builder", "")
+	if err != nil {
+		t.Fatalf("FetchAgenticHubSkillArchive() error = %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("archive download was modified")
+	}
+}
+
+func TestFetchAgenticHubSkillArchiveFallsBackToTreeCursorPages(t *testing.T) {
+	archiveRequests := 0
 	treeRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/api/v1/skills/AIWizards/agent-builder/download_archive/refs/main":
+			archiveRequests++
+			http.NotFound(w, r)
 		case "/api/v1/skills/AIWizards/agent-builder/refs/main/tree/":
 			treeRequests++
 			if r.URL.Query().Get("cursor") == "" {
@@ -39,6 +70,9 @@ func TestFetchAgenticHubSkillArchiveReadsTreeCursorPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchAgenticHubSkillArchive() error = %v", err)
 	}
+	if archiveRequests != 1 {
+		t.Fatalf("archive requests = %d, want 1", archiveRequests)
+	}
 	if treeRequests != 2 {
 		t.Fatalf("tree requests = %d, want 2", treeRequests)
 	}
@@ -57,6 +91,39 @@ func TestFetchAgenticHubSkillArchiveReadsTreeCursorPages(t *testing.T) {
 	}
 	if string(data) != "name: agent-builder\n" {
 		t.Fatalf("skill file content = %q", string(data))
+	}
+}
+
+func TestFetchAgenticHubSkillArchiveDoesNotFallbackAfterArchiveFailure(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Error(w, "archive unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	_, err := FetchAgenticHubSkillArchive(context.Background(), server.URL, "AIWizards/agent-builder", "")
+	if err == nil {
+		t.Fatal("FetchAgenticHubSkillArchive() error = nil, want archive failure")
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want no tree fallback", requests)
+	}
+}
+
+func TestFetchAgenticHubSkillArchiveRejectsInvalidArchive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, "<html>not a zip</html>")
+	}))
+	defer server.Close()
+
+	_, err := FetchAgenticHubSkillArchive(context.Background(), server.URL, "AIWizards/agent-builder", "")
+	if err == nil {
+		t.Fatal("FetchAgenticHubSkillArchive() error = nil, want invalid archive error")
+	}
+	if !strings.Contains(err.Error(), "invalid AgenticHub skill archive") {
+		t.Fatalf("FetchAgenticHubSkillArchive() error = %q, want invalid archive error", err)
 	}
 }
 
@@ -80,6 +147,21 @@ func TestAgenticHubSkillTreeURLEscapesSlashRef(t *testing.T) {
 	want := "https://example.test/hub/api/v1/skills/AIWizards/agent-builder/refs/feature%2Finstall/tree/?cursor=next-page&limit=500"
 	if got != want {
 		t.Fatalf("tree URL = %q, want %q", got, want)
+	}
+}
+
+func TestAgenticHubSkillArchiveURLEscapesSlashRef(t *testing.T) {
+	got, err := agenticHubSkillArchiveURL(
+		"https://example.test/hub",
+		"AIWizards/agent-builder",
+		"feature/install",
+	)
+	if err != nil {
+		t.Fatalf("agenticHubSkillArchiveURL() error = %v", err)
+	}
+	want := "https://example.test/hub/api/v1/skills/AIWizards/agent-builder/download_archive/refs/feature%2Finstall"
+	if got != want {
+		t.Fatalf("archive URL = %q, want %q", got, want)
 	}
 }
 
@@ -170,4 +252,23 @@ func TestAgenticHubTotalTreatsNullAsUnknown(t *testing.T) {
 	if got := agenticHubTotal([]byte("null")); got != nil {
 		t.Fatalf("agenticHubTotal(null) = %v, want nil", got)
 	}
+}
+
+func testAgenticHubZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		writer, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %q: %v", name, err)
+		}
+		if _, err := writer.Write([]byte(content)); err != nil {
+			t.Fatalf("write zip entry %q: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return buf.Bytes()
 }

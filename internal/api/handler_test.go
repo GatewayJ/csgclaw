@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -4600,69 +4599,23 @@ func TestHandleSkillInstallFromOfficialHub(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	rootTreePages := 0
+	archiveRequests := 0
 	officialHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/v1/skills/AIWizards/agent-builder/refs/dev/tree/":
-			rootTreePages++
-			cursor := r.URL.Query().Get("cursor")
-			if r.URL.Query().Get("limit") != "500" {
-				t.Errorf("root tree query = %s, want limit=500", r.URL.RawQuery)
-				http.Error(w, "bad query", http.StatusBadRequest)
-				return
+		case "/api/v1/skills/AIWizards/agent-builder/download_archive/refs/dev":
+			archiveRequests++
+			if got := r.Header.Get("Accept"); got != "application/zip" {
+				t.Errorf("Accept = %q, want application/zip", got)
 			}
-			if cursor == "" {
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"data": map[string]any{
-						"Cursor": "next-root-page",
-						"Files":  []map[string]any{},
-					},
-				})
-				return
-			}
-			if cursor != "next-root-page" {
-				t.Errorf("root tree cursor = %q, want next-root-page", cursor)
-				http.Error(w, "bad cursor", http.StatusBadRequest)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": map[string]any{
-					"Files": []map[string]any{
-						{"name": "SKILL.md", "path": "SKILL.md", "type": "file"},
-						{"name": "scripts", "path": "scripts", "type": "dir"},
-					},
-				},
-			})
-		case "/api/v1/skills/AIWizards/agent-builder/refs/dev/tree/scripts":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": map[string]any{
-					"Files": []map[string]any{
-						{"name": "run.sh", "path": "scripts/run.sh", "type": "file"},
-					},
-				},
-			})
-		case "/api/v1/skills/AIWizards/agent-builder/blob/SKILL.md":
-			if r.URL.Query().Get("ref") != "dev" {
-				t.Errorf("blob ref = %q, want dev", r.URL.Query().Get("ref"))
-				http.Error(w, "bad ref", http.StatusBadRequest)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": map[string]any{
-					"content": base64.StdEncoding.EncodeToString([]byte("---\ndescription: Build agents\n---\n# Agent Builder\n")),
-					"path":    "SKILL.md",
-					"type":    "file",
-				},
-			})
-		case "/api/v1/skills/AIWizards/agent-builder/blob/scripts/run.sh":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": map[string]any{
-					"content": base64.StdEncoding.EncodeToString([]byte("#!/bin/sh\necho ready\n")),
-					"path":    "scripts/run.sh",
-					"type":    "file",
-				},
-			})
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write(mustZipBytes(t, map[string]string{
+				"SKILL.md":       "---\ndescription: Build agents\n---\n# Agent Builder\n",
+				"scripts/run.sh": "#!/bin/sh\necho ready\n",
+			}))
+		case "/api/v1/skills/AIWizards/agent-builder/download_archive/refs/broken":
+			archiveRequests++
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = io.WriteString(w, "<html>not a zip</html>")
 		default:
 			http.NotFound(w, r)
 		}
@@ -4744,8 +4697,18 @@ enabled = true
 	if _, err := os.Stat(staleFile); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stale file still exists after replace, err=%v", err)
 	}
-	if rootTreePages != 4 {
-		t.Fatalf("root tree pages = %d, want 4", rootTreePages)
+
+	invalidReq := httptest.NewRequest(http.MethodPost, "/api/v1/skills:install", strings.NewReader(`{
+		"remote_path": "AIWizards/agent-builder",
+		"ref": "broken"
+	}`))
+	invalidRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusBadGateway {
+		t.Fatalf("invalid archive status = %d, want %d; body=%s", invalidRec.Code, http.StatusBadGateway, invalidRec.Body.String())
+	}
+	if archiveRequests != 3 {
+		t.Fatalf("archive requests = %d, want 3", archiveRequests)
 	}
 }
 

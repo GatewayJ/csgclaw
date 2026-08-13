@@ -152,7 +152,7 @@ Server 保持当前 Hub catalog 的排序，并返回归一化后的 Skill 摘�
 
 ### `POST /api/v1/skills:install`
 
-从同一个有效 OpenCSG Hub 安装远端 Skill。设置 `replace` 可覆盖同名本地 Skill。
+从同一个有效 OpenCSG Hub 安装远端 Skill。Hub 支持时，Server 通过单个请求下载仓库压缩包；旧版 Hub 则兼容回退到 tree/blob API。设置 `replace` 可覆盖同名本地 Skill。
 
 ```json
 {
