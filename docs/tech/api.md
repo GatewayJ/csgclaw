@@ -152,7 +152,7 @@ The server keeps the current Hub catalog ordering and returns normalized Skill s
 
 ### `POST /api/v1/skills:install`
 
-Installs one remote Skill from the same effective OpenCSG Hub. Set `replace` to overwrite an existing local Skill with the same name.
+Installs one remote Skill from the same effective OpenCSG Hub. The server downloads the repository archive in one request when the Hub supports it and falls back to the legacy tree/blob APIs for compatibility. Set `replace` to overwrite an existing local Skill with the same name.
 
 ```json
 {

@@ -27,6 +27,7 @@ const (
 	agenticHubMaxTreePages      = 1000
 	agenticHubMaxJSONBytes      = 4 << 20
 	agenticHubMaxArchiveBytes   = 64 << 20
+	agenticHubArchiveTimeout    = 5 * time.Minute
 	agenticHubRequestTimeout    = 60 * time.Second
 	agenticHubSkillsAPIPathRoot = "skills"
 )
@@ -114,9 +115,26 @@ func FetchAgenticHubSkillArchive(ctx context.Context, baseURL, remotePath, ref s
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidAgenticHubRequest, err)
 	}
+	archiveClient := &http.Client{Timeout: agenticHubArchiveTimeout}
+	archive, available, err := downloadAgenticHubSkillArchive(ctx, archiveClient, baseURL, remotePath, ref)
+	if err != nil {
+		return nil, err
+	}
+	if available {
+		return archive, nil
+	}
+	requestClient := &http.Client{Timeout: agenticHubRequestTimeout}
+	return buildAgenticHubSkillArchive(ctx, requestClient, baseURL, remotePath, ref, skillName)
+}
+
+func buildAgenticHubSkillArchive(
+	ctx context.Context,
+	client *http.Client,
+	baseURL, remotePath, ref, skillName string,
+) ([]byte, error) {
 	builder := &agenticHubArchiveBuilder{
 		baseURL:    baseURL,
-		client:     &http.Client{Timeout: agenticHubRequestTimeout},
+		client:     client,
 		ref:        ref,
 		remotePath: remotePath,
 		skillName:  skillName,
@@ -136,6 +154,48 @@ func FetchAgenticHubSkillArchive(ctx context.Context, baseURL, remotePath, ref s
 		return nil, fmt.Errorf("close remote skill archive: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+func downloadAgenticHubSkillArchive(
+	ctx context.Context,
+	client *http.Client,
+	baseURL, remotePath, ref string,
+) ([]byte, bool, error) {
+	endpoint, err := agenticHubSkillArchiveURL(baseURL, remotePath, ref)
+	if err != nil {
+		return nil, false, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("create AgenticHub archive request: %w", err)
+	}
+	req.Header.Set("Accept", "application/zip")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, false, fmt.Errorf("AgenticHub archive request %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		// Older Hub deployments expose only tree/blob endpoints.
+		return nil, false, nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, agenticHubMaxArchiveBytes+1))
+	if err != nil {
+		return nil, false, fmt.Errorf("read AgenticHub archive response: %w", err)
+	}
+	if int64(len(body)) > agenticHubMaxArchiveBytes {
+		return nil, false, fmt.Errorf("remote skill archive exceeds %d bytes", agenticHubMaxArchiveBytes)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, false, fmt.Errorf("AgenticHub archive request failed with status %d: %s", resp.StatusCode, truncateAgenticHubBody(body))
+	}
+	if len(body) == 0 {
+		return nil, false, skilllocal.ErrSkillArchiveEmpty
+	}
+	if _, err := zip.NewReader(bytes.NewReader(body), int64(len(body))); err != nil {
+		return nil, false, fmt.Errorf("invalid AgenticHub skill archive: %w", err)
+	}
+	return body, true, nil
 }
 
 func ListAgenticHubSkills(ctx context.Context, baseURL string, options AgenticHubSkillListOptions) (AgenticHubSkillList, error) {
@@ -339,6 +399,13 @@ func agenticHubSkillTreeURL(baseURL, remotePath, ref, treePath, cursor string) (
 	query.Set("cursor", cursor)
 	query.Set("limit", fmt.Sprintf("%d", agenticHubSkillTreeLimit))
 	return buildAgenticHubURL(baseURL, parts, treePath == "", query)
+}
+
+func agenticHubSkillArchiveURL(baseURL, remotePath, ref string) (string, error) {
+	parts := []string{"api", "v1", agenticHubSkillsAPIPathRoot}
+	parts = append(parts, strings.Split(remotePath, "/")...)
+	parts = append(parts, "download_archive", "refs", ref)
+	return buildAgenticHubURL(baseURL, parts, false, nil)
 }
 
 func agenticHubSkillBlobURL(baseURL, remotePath, ref, filePath string) (string, error) {
