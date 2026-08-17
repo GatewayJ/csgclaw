@@ -29,6 +29,7 @@ import (
 	"csgclaw/internal/im"
 	"csgclaw/internal/llm"
 	"csgclaw/internal/mcp"
+	"csgclaw/internal/modelprovider"
 	"csgclaw/internal/participant"
 	agentruntime "csgclaw/internal/runtime"
 	"csgclaw/internal/runtime/picoclawsandbox"
@@ -154,6 +155,7 @@ type workerRuntimeChoiceResponse struct {
 	SandboxEnabled bool   `json:"sandbox_enabled"`
 	Installed      bool   `json:"installed"`
 	Message        string `json:"message,omitempty"`
+	MessageCode    string `json:"message_code,omitempty"`
 }
 
 type managerRuntimeResponse struct {
@@ -167,6 +169,13 @@ type managerRuntimeResponse struct {
 	InstallGuidance string `json:"install_guidance,omitempty"`
 	Message         string `json:"message,omitempty"`
 }
+
+const sandboxRuntimeChoiceAvailabilityTimeout = 2 * time.Second
+
+var (
+	sandboxProviderAvailability = sandboxproviders.Availability
+	sandboxProviderForRuntime   = sandboxproviders.Provider
+)
 
 type updateBootstrapConfigRequest struct {
 	DefaultManagerTemplate *string `json:"default_manager_template,omitempty"`
@@ -528,7 +537,7 @@ func bootstrapConfigView(ctx context.Context, cfg config.Config, hubSvc *hub.Ser
 		},
 		RuntimeDefaultImages: map[string]string{},
 		RuntimeOptionSchemas: runtimeOptionSchemas,
-		WorkerRuntimeChoices: workerRuntimeChoices(cfg),
+		WorkerRuntimeChoices: workerRuntimeChoices(ctx, cfg),
 	}
 	defaults, err := hub.ResolveBootstrapDefaults(ctx, cfg.Bootstrap, hubSvc)
 	if err != nil {
@@ -570,12 +579,14 @@ func codexInstallGuidance(_ string) string {
 	return "Codex CLI is bundled with CSGClaw. Reinstall CSGClaw if the bundled executable is missing."
 }
 
-func workerRuntimeChoices(cfg config.Config) []workerRuntimeChoiceResponse {
+func workerRuntimeChoices(ctx context.Context, cfg config.Config) []workerRuntimeChoiceResponse {
 	sandboxInstalled := true
 	sandboxMessage := ""
-	if err := sandboxproviders.Availability(cfg.Sandbox); err != nil {
+	sandboxMessageCode := ""
+	if err := sandboxRuntimeAvailability(ctx, cfg.Sandbox); err != nil {
 		sandboxInstalled = false
-		sandboxMessage = err.Error()
+		sandboxMessage = friendlySandboxRuntimeMessage(cfg.Sandbox, err)
+		sandboxMessageCode = sandboxRuntimeMessageCode(cfg.Sandbox, err)
 	}
 	choices := []workerRuntimeChoiceResponse{
 		{
@@ -590,6 +601,7 @@ func workerRuntimeChoices(cfg config.Config) []workerRuntimeChoiceResponse {
 			SandboxEnabled: true,
 			Installed:      sandboxInstalled,
 			Message:        sandboxMessage,
+			MessageCode:    sandboxMessageCode,
 		},
 		{
 			Name:           agent.RuntimeNamePicoClaw,
@@ -597,6 +609,7 @@ func workerRuntimeChoices(cfg config.Config) []workerRuntimeChoiceResponse {
 			SandboxEnabled: true,
 			Installed:      sandboxInstalled,
 			Message:        sandboxMessage,
+			MessageCode:    sandboxMessageCode,
 		},
 	}
 	if _, err := locateCodexCLI(); err != nil {
@@ -607,6 +620,48 @@ func workerRuntimeChoices(cfg config.Config) []workerRuntimeChoiceResponse {
 		return choices[:1]
 	}
 	return choices
+}
+
+func sandboxRuntimeMessageCode(cfg config.SandboxConfig, err error) string {
+	if !strings.EqualFold(strings.TrimSpace(cfg.Resolved().Provider), config.DockerProvider) {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return "docker_availability_timeout"
+	}
+	if sandbox.IsUnavailable(err) {
+		return "docker_unavailable"
+	}
+	return ""
+}
+
+func sandboxRuntimeAvailability(ctx context.Context, cfg config.SandboxConfig) error {
+	if err := sandboxProviderAvailability(cfg); err != nil {
+		return err
+	}
+	provider, err := sandboxProviderForRuntime(cfg)
+	if err != nil {
+		return err
+	}
+	checker, ok := provider.(sandbox.AvailabilityChecker)
+	if !ok {
+		return nil
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, sandboxRuntimeChoiceAvailabilityTimeout)
+	defer cancel()
+	return checker.CheckAvailability(probeCtx)
+}
+
+func friendlySandboxRuntimeMessage(cfg config.SandboxConfig, err error) string {
+	if strings.EqualFold(strings.TrimSpace(cfg.Resolved().Provider), config.DockerProvider) {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return "Docker availability check timed out. Make sure Docker Desktop or Docker Engine is running."
+		}
+		if sandbox.IsUnavailable(err) {
+			return "Docker is not running or cannot be reached. Start Docker Desktop or Docker Engine and try again."
+		}
+	}
+	return err.Error()
 }
 
 func (h *Handler) defaultWorkerCreateSpec(agentID, name string) agent.CreateAgentSpec {
@@ -1100,11 +1155,7 @@ func (h *Handler) handleAgentByID(w http.ResponseWriter, r *http.Request) {
 		}
 		updated, err := h.svc.Update(r.Context(), id, req)
 		if err != nil {
-			status := http.StatusBadRequest
-			if strings.Contains(err.Error(), "not found") {
-				status = http.StatusNotFound
-			}
-			http.Error(w, err.Error(), status)
+			writeAgentOperationError(w, err, http.StatusBadRequest)
 			return
 		}
 		h.publishUpdatedAgentUser(updated)
@@ -1215,11 +1266,7 @@ func (h *Handler) handleAgentProfile(w http.ResponseWriter, r *http.Request, id 
 		}
 		profile, err := h.svc.UpdateAgentProfile(id, req)
 		if err != nil {
-			status := http.StatusBadRequest
-			if strings.Contains(err.Error(), "not found") {
-				status = http.StatusNotFound
-			}
-			http.Error(w, err.Error(), status)
+			writeAgentOperationError(w, err, http.StatusBadRequest)
 			return
 		}
 		writeJSON(w, http.StatusOK, profileResponseFromAgentView(profile))
@@ -1239,11 +1286,7 @@ func (h *Handler) handleAgentRecreate(w http.ResponseWriter, r *http.Request, id
 	}
 	recreated, err := h.svc.Recreate(r.Context(), id)
 	if err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "not found") {
-			status = http.StatusNotFound
-		}
-		http.Error(w, err.Error(), status)
+		writeAgentOperationError(w, err, http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, http.StatusOK, presentAgent(recreated))
@@ -1260,11 +1303,7 @@ func (h *Handler) handleAgentUpgrade(w http.ResponseWriter, r *http.Request, id 
 	}
 	recreated, err := h.svc.Upgrade(r.Context(), id)
 	if err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "not found") {
-			status = http.StatusNotFound
-		}
-		http.Error(w, err.Error(), status)
+		writeAgentOperationError(w, err, http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, http.StatusOK, presentAgent(recreated))
@@ -1286,7 +1325,7 @@ func (h *Handler) handleAgentProfileModels(w http.ResponseWriter, r *http.Reques
 	}
 	models, err := h.svc.ListModelsForRequest(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeAgentOperationError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, agent.ProfileModelsResponse{
@@ -1318,11 +1357,7 @@ func (h *Handler) handleAgentStart(w http.ResponseWriter, r *http.Request, id st
 	}
 	started, err := h.svc.Start(r.Context(), id)
 	if err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "not found") {
-			status = http.StatusNotFound
-		}
-		http.Error(w, err.Error(), status)
+		writeAgentOperationError(w, err, http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, http.StatusOK, presentAgent(started))
@@ -1529,10 +1564,36 @@ func (h *Handler) handleCreateAgentWorker(w http.ResponseWriter, r *http.Request
 	createReq.HubService = hubSvc
 	created, err := h.svc.Create(r.Context(), createReq)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeAgentOperationError(w, err, http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, http.StatusCreated, h.presentAgentResponse(created))
+}
+
+func writeAgentOperationError(w http.ResponseWriter, err error, defaultStatus int) {
+	if status, code, message, ok := modelprovider.UserFacingUpstreamError(err); ok {
+		writeJSON(w, status, map[string]any{
+			"error": map[string]any{
+				"code":    code,
+				"message": message,
+			},
+		})
+		return
+	}
+	status := defaultStatus
+	if isAgentAPIResourceNotFoundError(err) {
+		status = http.StatusNotFound
+	}
+	http.Error(w, err.Error(), status)
+}
+
+func isAgentAPIResourceNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return (strings.HasPrefix(message, "agent \"") || strings.HasPrefix(message, "mcp server \"")) &&
+		strings.HasSuffix(message, " not found")
 }
 
 func agentCreateRequestFromAPI(req apitypes.CreateAgentRequest) agent.CreateRequest {

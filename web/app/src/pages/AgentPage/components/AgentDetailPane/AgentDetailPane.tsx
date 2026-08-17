@@ -24,6 +24,7 @@ import { errorMessage } from "@/api/client";
 import { fetchAgentInstructionsDocument, updateAgentEffectiveInstructions } from "@/api/agents";
 import { SHOW_AGENT_LIFECYCLE_ACTIONS } from "@/shared/constants/agents";
 import { AGENT_PROFILE_ACTIVE_TAB_STORAGE_KEY } from "@/shared/storage/keys";
+import { localizeAPIError } from "@/shared/i18n";
 import {
   EnvKeyValueEditor,
   FieldHelpTooltip,
@@ -38,21 +39,21 @@ import {
   agentProfilePageSaveDisabled,
   agentProfileConfig,
   agentSandboxEnabled,
+  agentAvailabilityStatusLabel,
+  agentGatewayUnavailableLabel,
   agentRuntimeKind,
   isAgentGatewayDegraded,
-  isAgentRuntimeStartupPending,
-  agentRuntimeState,
-  agentStatusLabel,
+  isAgentAvailable,
   agentModelID,
   agentToDraft,
   formatProviderLabel,
   formatRuntimeKindLabel,
   hasConnectedAgentChannel,
   isAgentIncomplete,
+  isAgentLifecycleRunning,
   isNotificationBotAgent,
   isAgentRestartNeeded,
   isAgentUpgradeNeeded,
-  isAgentRunning,
   isManagerAgent,
   isNotifierRuntimeDraftOnAgentPage,
   runtimeOptionSchemasForAgent,
@@ -283,9 +284,10 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
   const profileScrollTimerRef = useRef<number | null>(null);
   const isManager = isManagerAgent(item);
   const canEditAgentName = Boolean(draft && !isManager);
-  const running = isAgentRunning(item);
+  const running = isAgentAvailable(item);
+  const lifecycleRunning = isAgentLifecycleRunning(item);
   const gatewayDegraded = isAgentGatewayDegraded(item);
-  const startupPending = isAgentRuntimeStartupPending(item);
+  const statusLabel = agentAvailabilityStatusLabel(item, t);
   const draftBelongsToItem = Boolean(draft) && String(draft?.agent_id ?? "").trim() === String(item?.id ?? "").trim();
   const incomplete = isAgentIncomplete(item, draftBelongsToItem ? draft : undefined);
   const restartNeeded = isAgentRestartNeeded(item);
@@ -629,11 +631,9 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 <h1>{item.name}</h1>
               )}
               <span className={`agent-status-dot ${running ? "online" : ""}`} aria-hidden="true"></span>
-              <span className={`status-pill ${running ? "online" : ""}`}>
-                {agentStatusLabel(startupPending ? "starting" : agentRuntimeState(item), t)}
-              </span>
+              <span className={`status-pill ${running ? "online" : ""}`}>{statusLabel}</span>
               {gatewayDegraded ? (
-                <span className="status-pill profile-state-pill warn">{t("agentGatewayUnavailable")}</span>
+                <span className="status-pill profile-state-pill warn">{agentGatewayUnavailableLabel(item, t)}</span>
               ) : null}
               <span className={`status-pill profile-state-pill ${incomplete ? "warn" : "ready"}`}>
                 {incomplete ? t("profileIncompleteBadge") : t("profileCompleteBadge")}
@@ -713,7 +713,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
               busy={busyKey.startsWith(busyPrefix)}
               incomplete={incomplete}
               isManager={isManager}
-              running={running}
+              running={lifecycleRunning}
               upgradeNeeded={upgradeNeeded}
               canPublishLocal={canPublishLocal}
               canPublishCommunity={canPublishCommunity}
@@ -1585,7 +1585,7 @@ function AgentModelPanel({
                   <details className="agent-model-load-error-details">
                     <summary>{t("profileModelErrorDetails")}</summary>
                     <div className="agent-model-load-error-technical">
-                      <pre>{errorMessage(modelError, t("modelLoadFailed"))}</pre>
+                      <pre>{localizeAPIError(modelError, t, errorMessage(modelError, t("modelLoadFailed")))}</pre>
                     </div>
                   </details>
                 </div>

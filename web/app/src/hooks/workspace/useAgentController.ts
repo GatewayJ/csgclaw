@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBlocker } from "react-router-dom";
-import { errorMessage, type ApiError } from "@/api/client";
+import { errorMessage as apiErrorMessage, type ApiError } from "@/api/client";
 import { loginCLIProxyProviderRequest } from "@/api/cliproxy";
 import {
   batchAddAgentMCPServersRequest,
@@ -46,6 +46,7 @@ import {
 import { ACTION_REBUILD_MANAGER } from "@/shared/constants/messages";
 import { selectUnusedAgentAvatar } from "@/shared/avatarOptions";
 import { FEISHU_REGISTRATIONS_STORAGE_KEY } from "@/shared/storage/keys";
+import { localizeAPIError } from "@/shared/i18n";
 import { LAST_CREATED_AGENT_MODEL_STORAGE_KEY } from "@/shared/storage/keys";
 import {
   applyTemplateToDraft,
@@ -100,6 +101,7 @@ import type {
   AgentLike,
   AgentProfileLike,
   AgentTemplateLike,
+  RuntimeBootstrapConfig,
 } from "@/models/agents";
 import { isDirectConversation, localIdentitiesMatch, upsertUserInData } from "@/models/conversations";
 import { mcpServersFromMap } from "@/models/mcp";
@@ -121,6 +123,8 @@ import type { IMConversation, IMUser } from "@/models/conversations";
 import type { UseAgentControllerArgs } from "./types";
 import { useProfileModelOptions } from "./useProfileModelOptions";
 
+const SANDBOX_RUNTIME_REFRESH_INTERVAL_MS = 3000;
+
 type AgentModalMode = "create" | "edit";
 type AgentAction = "delete" | "recreate" | "start" | "stop" | "upgrade";
 
@@ -128,6 +132,14 @@ type FeishuPendingRegistration = FeishuRegistration & {
   agent_id: string;
   registration_id: string;
 };
+
+function runtimeChoicesFromBootstrapConfig(config: RuntimeBootstrapConfig | null | undefined) {
+  return Array.isArray(config?.worker_runtime_choices) ? config.worker_runtime_choices : [];
+}
+
+function hasUnavailableSandboxRuntimeChoice(config: RuntimeBootstrapConfig | null | undefined): boolean {
+  return runtimeChoicesFromBootstrapConfig(config).some((item) => item?.sandbox_enabled && item?.installed === false);
+}
 
 type AgentCreateMode = "template" | "custom";
 
@@ -457,6 +469,10 @@ export function useAgentController({
   setSelectedHubTemplateId,
   t,
 }: UseAgentControllerArgs) {
+  const errorMessage = useCallback(
+    (error: unknown, fallback = "") => localizeAPIError(error, t, apiErrorMessage(error, fallback) || fallback),
+    [t],
+  );
   const queryClient = useQueryClient();
   const [cliproxyAuthBusy, setCLIProxyAuthBusy] = useState("");
   const [agentsError, setAgentsError] = useState("");
@@ -466,6 +482,7 @@ export function useAgentController({
   const [agentCreateMode, setAgentCreateMode] = useState<AgentCreateMode>("template");
   const [editingAgent, setEditingAgent] = useState<AgentLike | null>(null);
   const [agentDraft, setAgentDraft] = useState<AgentDraft | null>(null);
+  const [agentModalBootstrapConfig, setAgentModalBootstrapConfig] = useState<RuntimeBootstrapConfig | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentError, setAgentError] = useState("");
   const [agentProgress, setAgentProgress] = useState<AgentCreateProgressState | null>(null);
@@ -840,7 +857,7 @@ export function useAgentController({
         setAgentPageError(errorMessage(err, t("agentActionFailed")));
       }
     },
-    [agentDraftFromItem, resetAgentPageModels, setAgentsData, t],
+    [agentDraftFromItem, errorMessage, resetAgentPageModels, setAgentsData, t],
   );
   const { cliproxyAuthStatuses, setCLIProxyAuthStatus } = useCLIProxyAuthStatuses(
     [
@@ -940,6 +957,32 @@ export function useAgentController({
     }, 1200);
     return () => window.clearInterval(timer);
   }, [progressBusy, agentProgress?.startedAt, agentProgress?.steps?.length]);
+
+  useEffect(() => {
+    if (
+      !showAgentModal ||
+      agentModalMode !== "create" ||
+      agentCreateBotKind !== BOT_CREATE_KIND_WORKER ||
+      !hasUnavailableSandboxRuntimeChoice(agentModalBootstrapConfig || bootstrapConfig)
+    ) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      void refreshWorkspaceBootstrapConfig().then((config) => {
+        if (config) {
+          setAgentModalBootstrapConfig(config);
+        }
+      });
+    }, SANDBOX_RUNTIME_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [
+    agentCreateBotKind,
+    agentModalMode,
+    agentModalBootstrapConfig,
+    bootstrapConfig,
+    refreshWorkspaceBootstrapConfig,
+    showAgentModal,
+  ]);
 
   useEffect(() => {
     if (!managerProfileIncomplete) {
@@ -1239,6 +1282,7 @@ export function useAgentController({
     setAgentCreateBotKind(BOT_CREATE_KIND_NOTIFICATION);
     setAgentCreateMode("custom");
     setEditingAgent(null);
+    setAgentModalBootstrapConfig(null);
     setAgentError("");
     setAgentProgress(null);
     resetAgentModels();
@@ -1262,14 +1306,15 @@ export function useAgentController({
     setAgentError("");
     setAgentProgress(null);
     resetAgentModels();
-    const runtimeChoices = Array.isArray(bootstrapConfig?.worker_runtime_choices)
-      ? bootstrapConfig.worker_runtime_choices
-      : [];
+    const refreshedBootstrapConfig = await refreshWorkspaceBootstrapConfig();
+    const effectiveBootstrapConfig = refreshedBootstrapConfig || bootstrapConfig;
+    setAgentModalBootstrapConfig(effectiveBootstrapConfig);
+    const runtimeChoices = runtimeChoicesFromBootstrapConfig(effectiveBootstrapConfig);
     const codexAvailable = runtimeChoices.some(
       (item) => !item?.sandbox_enabled && normalizeRuntimeName(item?.name) === "codex" && item?.installed !== false,
     );
     const isCSGHubSandboxProvider =
-      String(bootstrapConfig?.sandbox_provider || "")
+      String(effectiveBootstrapConfig?.sandbox_provider || "")
         .trim()
         .toLowerCase() === "csghub";
     const createWorkerTemplates = workerSelectableTemplates(hubTemplates).filter(
@@ -1288,7 +1333,7 @@ export function useAgentController({
     }
     const selectedTemplate =
       template === undefined
-        ? pickDefaultAgentTemplate(createWorkerTemplates, preferredRuntimeKind, bootstrapConfig)
+        ? pickDefaultAgentTemplate(createWorkerTemplates, preferredRuntimeKind, effectiveBootstrapConfig)
         : normalizeTemplateSelection(template);
     try {
       const defaults = await fetchAgentProfileDefaults();
@@ -1300,7 +1345,7 @@ export function useAgentController({
         image: defaultWorkerImageForRuntime(
           hubTemplates,
           initialRuntime.runtime_kind,
-          bootstrapConfig,
+          effectiveBootstrapConfig,
           managerAgent?.image || "",
         ),
         runtime_name: initialRuntime.runtime_name,
@@ -1309,7 +1354,7 @@ export function useAgentController({
         bot_type: BOT_TYPE_NORMAL,
         agent_profile: defaults,
       });
-      draft = applyTemplateToDraft(draft, selectedTemplate, bootstrapConfig, managerAgent?.image || "");
+      draft = applyTemplateToDraft(draft, selectedTemplate, effectiveBootstrapConfig, managerAgent?.image || "");
       draft = draftWithModelProviderFallback(draft, agentModelOptions);
       setAgentDraft(draft);
       setShowAgentModal(true);
@@ -1322,7 +1367,7 @@ export function useAgentController({
         image: defaultWorkerImageForRuntime(
           hubTemplates,
           initialRuntime.runtime_kind,
-          bootstrapConfig,
+          effectiveBootstrapConfig,
           managerAgent?.image || "",
         ),
         runtime_name: initialRuntime.runtime_name,
@@ -1331,7 +1376,7 @@ export function useAgentController({
         bot_type: BOT_TYPE_NORMAL,
         agent_profile: managerProfile,
       });
-      draft = applyTemplateToDraft(draft, selectedTemplate, bootstrapConfig, managerAgent?.image || "");
+      draft = applyTemplateToDraft(draft, selectedTemplate, effectiveBootstrapConfig, managerAgent?.image || "");
       draft = draftWithModelProviderFallback(draft, agentModelOptions);
       setAgentDraft(draft);
       setShowAgentModal(true);
@@ -1368,6 +1413,7 @@ export function useAgentController({
     setAgentCreateBotKind(isNotificationBotAgent(item) ? BOT_CREATE_KIND_NOTIFICATION : BOT_CREATE_KIND_WORKER);
     setAgentCreateMode("custom");
     setEditingAgent(null);
+    setAgentModalBootstrapConfig(bootstrapConfig);
     setAgentError("");
     setAgentProgress(null);
     resetAgentModels();
@@ -1998,7 +2044,15 @@ export function useAgentController({
         releaseAgentAction(agentID, busyKey);
       }
     },
-    [claimAgentAction, isAgentActionBusy, releaseAgentAction, showAgentPageNotice, t, updateFeishuPendingRegistrations],
+    [
+      claimAgentAction,
+      errorMessage,
+      isAgentActionBusy,
+      releaseAgentAction,
+      showAgentPageNotice,
+      t,
+      updateFeishuPendingRegistrations,
+    ],
   );
 
   useEffect(() => {
@@ -2248,7 +2302,7 @@ export function useAgentController({
         setAgentSkillAddBusy(false);
       }
     },
-    [agentSkillAddBusy, queryClient, agentDetailAgentID, t],
+    [agentSkillAddBusy, errorMessage, queryClient, agentDetailAgentID, t],
   );
 
   const deleteAgentSkill = useCallback(
@@ -2274,7 +2328,7 @@ export function useAgentController({
         setAgentSkillDeleteBusy(false);
       }
     },
-    [agentSkillDeleteBusy, queryClient, agentDetailAgentID, t],
+    [agentSkillDeleteBusy, errorMessage, queryClient, agentDetailAgentID, t],
   );
 
   const installAgentMCPServers = useCallback(
@@ -2306,7 +2360,7 @@ export function useAgentController({
         setAgentMCPAddBusy(false);
       }
     },
-    [agentMCPAddBusy, queryClient, agentDetailAgentID, t],
+    [agentMCPAddBusy, errorMessage, queryClient, agentDetailAgentID, t],
   );
 
   const deleteAgentMCPServer = useCallback(
@@ -2339,7 +2393,7 @@ export function useAgentController({
         setAgentMCPDeleteBusy(false);
       }
     },
-    [agentMCPDeleteBusy, queryClient, agentDetailAgentID, t],
+    [agentMCPDeleteBusy, errorMessage, queryClient, agentDetailAgentID, t],
   );
 
   function directConversationForUser(
@@ -2528,7 +2582,7 @@ export function useAgentController({
             onAgentDraftChange: setAgentDraft,
             onAgentModelsReset: resetAgentModels,
             hubTemplates,
-            bootstrapConfig,
+            bootstrapConfig: agentModalBootstrapConfig || bootstrapConfig,
             managerAgent,
             agentModels: agentModelOptions.map((option) => option.modelID),
             agentModelOptions,

@@ -955,7 +955,7 @@ func TestResponsesLLMAPICodexReturnsCompactResponsesErrorOnTransientFailure(t *t
 	if err != nil {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
-	want := `Post "https://chatgpt.com/backend-api/codex/responses": EOF (type=server_error, code=internal_server_error)`
+	want := "The model service encountered a temporary error. Please try again later."
 	if string(body) != want {
 		t.Fatalf("body = %q, want %q", string(body), want)
 	}
@@ -1487,5 +1487,173 @@ func TestNormalizeCompletionTokenLimitsLeavesSmallNonReasoningLimits(t *testing.
 	normalizeCompletionTokenLimits(payload)
 	if got, want := payloadInt(payload, "max_tokens"), 4096; got != want {
 		t.Fatalf("max_tokens = %d, want %d", got, want)
+	}
+}
+
+func TestCompactUpstreamErrorResponseUsesFriendlyMessages(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{
+			name:   "standard insufficient balance",
+			status: http.StatusPaymentRequired,
+			body:   `{"error":{"code":"insufficient_balance","message":"**Insufficient balance** stack detail","type":"insufficient_balance"}}`,
+			want:   "The model service balance is insufficient. Add funds or contact an administrator.",
+		},
+		{
+			name:   "errorx insufficient balance",
+			status: http.StatusPaymentRequired,
+			body:   `{"code":"ACT-ERR-0","msg":"internal account detail","context":{}}`,
+			want:   "The model service balance is insufficient. Add funds or contact an administrator.",
+		},
+		{
+			name:   "string validation error",
+			status: http.StatusBadRequest,
+			body:   `{"error":"Model cannot be empty: parser stack"}`,
+			want:   "The request or model configuration is invalid. Check it and try again.",
+		},
+		{
+			name:   "plain upstream failure",
+			status: http.StatusInternalServerError,
+			body:   "proxy initialization failed: connection stack",
+			want:   "The model service is temporarily unavailable. Please try again later.",
+		},
+		{
+			name:   "unsupported model",
+			status: http.StatusBadRequest,
+			body:   `{"error":{"code":"unsupported_model","message":"adapter missing"}}`,
+			want:   "The selected model does not support this feature. Adjust the request or choose another model.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, contentType := compactUpstreamErrorResponse(tt.status, []byte(tt.body))
+			if string(got) != tt.want {
+				t.Fatalf("body = %q, want %q", got, tt.want)
+			}
+			if contentType != "text/plain; charset=utf-8" {
+				t.Fatalf("content type = %q", contentType)
+			}
+		})
+	}
+}
+
+func TestRewriteResponsesEventStreamMapsFailedEventToSafeError(t *testing.T) {
+	input := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"model_unavailable\",\"message\":\"model secret-name has no route\"}}}\n\n"
+	var output strings.Builder
+	if err := rewriteResponsesEventStream(&output, strings.NewReader(input)); err != nil {
+		t.Fatalf("rewriteResponsesEventStream() error = %v", err)
+	}
+	got := output.String()
+	if !strings.Contains(got, "event: error") || !strings.Contains(got, `"code":"model_unavailable"`) || !strings.Contains(got, "temporarily unavailable") {
+		t.Fatalf("output = %q, want safe error event", got)
+	}
+	if strings.Contains(got, "secret-name") || strings.Contains(got, "no route") {
+		t.Fatalf("output leaks upstream details: %q", got)
+	}
+}
+
+func TestRewriteResponsesEventStreamJoinsMultilineData(t *testing.T) {
+	input := "event: response.failed\ndata: {\"type\":\"response.failed\",\ndata: \"response\":{\"status\":\"failed\",\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"account detail\"}}}\n\n"
+	var output strings.Builder
+	if err := rewriteResponsesEventStream(&output, strings.NewReader(input)); err != nil {
+		t.Fatalf("rewriteResponsesEventStream() error = %v", err)
+	}
+	got := output.String()
+	if !strings.Contains(got, `"code":"rate_limit_exceeded"`) || !strings.Contains(got, "quota has been reached") {
+		t.Fatalf("output = %q, want safe multiline rate-limit error", got)
+	}
+	if strings.Contains(got, "account detail") {
+		t.Fatalf("output leaks upstream details: %q", got)
+	}
+}
+
+func TestRewriteResponsesEventStreamPreservesLargeEvent(t *testing.T) {
+	largeText := strings.Repeat("x", 2*1024*1024)
+	input := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"" + largeText + "\"}}\n\n"
+	var output strings.Builder
+	if err := rewriteResponsesEventStream(&output, strings.NewReader(input)); err != nil {
+		t.Fatalf("rewriteResponsesEventStream() error = %v", err)
+	}
+	if got := output.String(); got != input {
+		t.Fatalf("large event was not preserved: got %d bytes, want %d", len(got), len(input))
+	}
+}
+
+func TestRewriteResponsesEventStreamRejectsOversizedUnterminatedLine(t *testing.T) {
+	input := strings.Repeat("x", maxResponsesSSEEventBytes+1)
+	err := rewriteResponsesEventStream(io.Discard, strings.NewReader(input))
+	if err == nil || !strings.Contains(err.Error(), "line exceeds") {
+		t.Fatalf("rewriteResponsesEventStream() error = %v, want bounded line rejection", err)
+	}
+}
+
+func TestRewriteResponsesEventStreamRejectsOversizedMultilineEvent(t *testing.T) {
+	line := strings.Repeat("x", maxResponsesSSEEventBytes/2)
+	input := "data: " + line + "\ndata: " + line + "\n\n"
+	err := rewriteResponsesEventStream(io.Discard, strings.NewReader(input))
+	if err == nil || !strings.Contains(err.Error(), "event exceeds") {
+		t.Fatalf("rewriteResponsesEventStream() error = %v, want bounded event rejection", err)
+	}
+}
+
+func TestRewriteResponsesEventStreamPreservesEventBoundaries(t *testing.T) {
+	input := "event: response.created\ndata: {\"type\":\"response.created\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
+	var output strings.Builder
+	if err := rewriteResponsesEventStream(&output, strings.NewReader(input)); err != nil {
+		t.Fatalf("rewriteResponsesEventStream() error = %v", err)
+	}
+	if got := output.String(); got != input {
+		t.Fatalf("event boundaries were not preserved: got %q, want %q", got, input)
+	}
+}
+
+func TestWriteChatCompletionStreamAsResponseMapsUpstreamError(t *testing.T) {
+	input := "data: {\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"account detail\"}}\n\n"
+	var output strings.Builder
+	if err := writeChatCompletionStreamAsResponse(&output, strings.NewReader(input), "gpt-test"); err != nil {
+		t.Fatalf("writeChatCompletionStreamAsResponse() error = %v", err)
+	}
+	got := output.String()
+	if !strings.Contains(got, "event: error") || !strings.Contains(got, `"code":"rate_limit_exceeded"`) || !strings.Contains(got, "quota has been reached") {
+		t.Fatalf("output = %q, want safe rate-limit event", got)
+	}
+	if strings.Contains(got, "account detail") {
+		t.Fatalf("output leaks upstream details: %q", got)
+	}
+}
+
+func TestWriteChatCompletionStreamAsResponseMapsUpstreamErrorWithoutCode(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		error  string
+	}{
+		{name: "missing code", error: `{"message":"route unavailable"}`},
+		{
+			name:   "null code after partial output",
+			prefix: "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+			error:  `{"code":null,"message":"route unavailable"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := tt.prefix + "data: {\"error\":" + tt.error + "}\n\n"
+			var output strings.Builder
+			if err := writeChatCompletionStreamAsResponse(&output, strings.NewReader(input), "gpt-test"); err != nil {
+				t.Fatalf("writeChatCompletionStreamAsResponse() error = %v", err)
+			}
+			got := output.String()
+			if !strings.Contains(got, "event: error") || !strings.Contains(got, `"code":"upstream_unavailable"`) {
+				t.Fatalf("output = %q, want fallback upstream error event", got)
+			}
+			if strings.Contains(got, "response.completed") || strings.Contains(got, "route unavailable") {
+				t.Fatalf("output = %q, must not complete or expose upstream details", got)
+			}
+		})
 	}
 }
