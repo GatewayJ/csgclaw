@@ -12,6 +12,7 @@ import { mentionMarkupPattern, escapeHTML } from "./mentions";
 import { hasAgentActivityMetadata, parseAgentActivity } from "@/models/agentActivity";
 import { AgentActivityMsgTypes } from "@/shared/constants/messages";
 import { prepareMermaidBlocks, renderMermaidBlocks } from "./mermaid";
+import { localizeError } from "@/shared/i18n";
 import "./MessageContent.css";
 
 export function MessageContent({
@@ -42,9 +43,10 @@ export function MessageContent({
     () => (activity || slashCommandText ? null : parseStructuredMessage(content)),
     [activity, content, slashCommandText],
   );
+  const displayContent = useMemo(() => localizeRuntimeError(content, message, t), [content, message, t]);
   const markup = useMemo(
-    () => ((activity && !resolvedQuestion) || slashCommandText || structured ? "" : renderMarkdown(content)),
-    [activity, content, resolvedQuestion, slashCommandText, structured],
+    () => ((activity && !resolvedQuestion) || slashCommandText || structured ? "" : renderMarkdown(displayContent)),
+    [activity, displayContent, resolvedQuestion, slashCommandText, structured],
   );
 
   useEffect(() => {
@@ -117,6 +119,65 @@ export function MessageContent({
   ) : (
     <div ref={containerRef} className="message-content" dangerouslySetInnerHTML={{ __html: markup }} />
   );
+}
+
+function localizeRuntimeError(
+  content: string | null | undefined,
+  message: MessageContentProps["message"],
+  t: MessageContentProps["t"],
+): string {
+  const value = String(content ?? "");
+  if (!t) {
+    return value;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized.startsWith("runtime error:") || !isTrustedRuntimeError(message)) {
+    return value;
+  }
+  const localized = localizeError(value, t);
+  const billingURL = runtimeErrorBillingURL(value);
+  return billingURL ? `${localized}\n\n👉 [${t("rechargeAccount")}](${billingURL})` : localized;
+}
+
+function isTrustedRuntimeError(message: MessageContentProps["message"]): boolean {
+  const metadata = message?.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return false;
+  }
+  const namespace = (metadata as Record<string, unknown>).csgclaw;
+  return (
+    Boolean(namespace) &&
+    typeof namespace === "object" &&
+    !Array.isArray(namespace) &&
+    (namespace as Record<string, unknown>).runtime_error === true
+  );
+}
+
+function runtimeErrorBillingURL(value: string): string {
+  const jsonMatch = value.match(/"billing_url"\s*:\s*("(?:\\.|[^"\\])*")/i);
+  if (jsonMatch) {
+    try {
+      return safeBillingURL(JSON.parse(jsonMatch[1]));
+    } catch (_) {
+      return "";
+    }
+  }
+  const markdownMatch = value.match(/\[Recharge your account\]\(([^)\s]+)\)/i);
+  return markdownMatch ? safeBillingURL(markdownMatch[1]) : "";
+}
+
+function safeBillingURL(candidate: unknown): string {
+  if (typeof candidate !== "string") {
+    return "";
+  }
+  try {
+    const parsed = new URL(candidate);
+    return (parsed.protocol === "https:" || parsed.protocol === "http:") && !parsed.username && !parsed.password
+      ? parsed.toString()
+      : "";
+  } catch (_) {
+    return "";
+  }
 }
 
 function isBlankTurnPlaceholder(content: string | null | undefined): boolean {
