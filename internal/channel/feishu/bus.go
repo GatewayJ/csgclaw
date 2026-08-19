@@ -11,7 +11,6 @@ const MessageEventTypeMessageCreated = "message.created"
 type MessageEvent struct {
 	Type         string      `json:"type"`
 	RoomID       string      `json:"room_id,omitempty"`
-	SenderBotID  string      `json:"sender_bot_id,omitempty"`
 	MentionBotID string      `json:"mention_bot_id,omitempty"`
 	Message      *im.Message `json:"message,omitempty"`
 }
@@ -54,14 +53,11 @@ func (b *MessageBus) Publish(evt MessageEvent) {
 		return
 	}
 
+	// Keep the lock while performing non-blocking sends so a concurrent cancel
+	// cannot close a snapshotted channel between lookup and delivery.
 	b.mu.Lock()
-	targets := make([]chan MessageEvent, 0, len(b.subscribers))
+	defer b.mu.Unlock()
 	for _, ch := range b.subscribers {
-		targets = append(targets, ch)
-	}
-	b.mu.Unlock()
-
-	for _, ch := range targets {
 		select {
 		case ch <- evt:
 		default:

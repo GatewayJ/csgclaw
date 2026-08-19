@@ -33,6 +33,10 @@ printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
   --restart
 ```
 
+Hosted Codex Feishu replies use the Markdown presentation fixed by the channel
+implementation. Presentation mode is not part of participant binding or stored
+participant configuration.
+
 Bind the manager app:
 
 ```bash
@@ -92,6 +96,27 @@ and CLI responses mask it as `present`.
   IDs, Feishu `open_id`, or Feishu `app_id`.
 - The default chat owner is the `feishu:admin` human participant's
   `channel_user_ref`.
+
+## Message and Mention Semantics
+
+- Group activation uses a structured mention that exactly matches the target
+  bot's Feishu `open_id`. Plain text such as `@name` is not a reliable dispatch
+  mechanism.
+- After one CSGClaw-hosted bot successfully sends a structured mention to a
+  different active bot through the Feishu channel, a process-local handoff feeds
+  the message into the target binding's normal ingress, deduplication, and Agent
+  Engine path.
+- A bot mentioning itself only creates the visible Feishu message; it does not
+  create another Agent Turn. Self-authored messages are filtered to prevent
+  recursive execution. A manager must complete its own part in the current Turn
+  and dispatch only to other bots.
+- An ordinary quoted reply is not promoted to a Feishu topic. Only a real
+  `thread_id` isolates the conversation and enables in-thread delivery.
+- The Feishu channel attempts to load quoted content. If it cannot, the current
+  message continues with only the quoted message ID.
+
+See [the current Feishu/Agent Engine architecture](agent-engine-channel-integration.zh.md)
+for the full data flow and safety boundaries.
 
 ## Security Note
 

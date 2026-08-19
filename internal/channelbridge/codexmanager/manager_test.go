@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"csgclaw/internal/agent"
-	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/channelbridge/codexbridge"
 	agentruntime "csgclaw/internal/runtime"
 	runtimecodex "csgclaw/internal/runtime/codex"
@@ -249,134 +248,6 @@ func TestCSGClawManagerStartupOnlyAttachesToLiveSession(t *testing.T) {
 	}
 }
 
-func TestMultiManagerRefreshFeishuChannelDoesNotRefreshCSGClawBridge(t *testing.T) {
-	sessions := &trackingSessionManager{
-		live: &runtimecodex.Session{
-			RuntimeID: "rt-agent-manager",
-			SessionID: "sess-manager",
-		},
-	}
-	runtime := runtimecodex.New(runtimecodex.Dependencies{Manager: sessions})
-	csgclawClient := newRecordingBotClient()
-	feishuClient := newRecordingBotClient()
-	manager := &multiManager{managers: []Manager{
-		newCSGClawManager(managerDeps{
-			runtime: runtime,
-			client:  csgclawClient,
-		}),
-		newFeishuManager(managerDeps{
-			runtime:  runtime,
-			client:   feishuClient,
-			provider: testCredentialProvider{agent.ManagerUserID: agent.ManagerParticipantID},
-		}),
-	}}
-	a := agent.Agent{
-		ID:              agent.ManagerUserID,
-		Name:            agent.ManagerName,
-		Role:            agent.RoleManager,
-		RuntimeKind:     agent.RuntimeKindCodex,
-		RuntimeID:       "rt-agent-manager",
-		Status:          string(agentruntime.StateRunning),
-		ProfileComplete: true,
-	}
-
-	if err := manager.RefreshAgentChannel(context.Background(), a, "feishu"); err != nil {
-		t.Fatalf("RefreshAgentChannel() error = %v", err)
-	}
-
-	feishuClient.waitStarted(t, agent.ManagerParticipantID)
-	if got := csgclawClient.totalStartedSignals(); got != 0 {
-		t.Fatalf("CSGClaw bridge starts = %d, want 0", got)
-	}
-	if got := csgclawClient.totalStoppedSignals(); got != 0 {
-		t.Fatalf("CSGClaw bridge stops = %d, want 0", got)
-	}
-}
-
-func TestFeishuManagerStopAgentStopsRememberedParticipant(t *testing.T) {
-	client := newRecordingBotClient()
-	bridge := codexbridge.NewService(client, noopPrompter{}, runtimecodex.NewEventSink())
-	manager := &feishuManager{
-		bridge:             bridge,
-		provider:           testCredentialProvider{},
-		activeParticipants: map[string]string{"agent-1": "pt-old"},
-	}
-
-	if err := bridge.StartBot(context.Background(), codexbridge.Binding{BotID: "pt-old", RuntimeID: "rt-1"}); err != nil {
-		t.Fatalf("StartBot() error = %v", err)
-	}
-	client.waitStarted(t, "pt-old")
-
-	manager.StopAgent("agent-1")
-
-	client.waitStopped(t, "pt-old")
-	if got := manager.clearActiveParticipant("agent-1"); got != "" {
-		t.Fatalf("active participant = %q, want cleared", got)
-	}
-}
-
-func TestFeishuManagerStopAgentBridgeStopsPreviousAndCurrentParticipants(t *testing.T) {
-	client := newRecordingBotClient()
-	bridge := codexbridge.NewService(client, noopPrompter{}, runtimecodex.NewEventSink())
-	manager := &feishuManager{
-		bridge:             bridge,
-		provider:           testCredentialProvider{"agent-1": "pt-new"},
-		activeParticipants: map[string]string{"agent-1": "pt-old"},
-	}
-
-	for _, botID := range []string{"pt-old", "pt-new"} {
-		if err := bridge.StartBot(context.Background(), codexbridge.Binding{BotID: botID, RuntimeID: "rt-1"}); err != nil {
-			t.Fatalf("StartBot(%s) error = %v", botID, err)
-		}
-		client.waitStarted(t, botID)
-	}
-
-	manager.stopAgentBridgeForAgent("agent-1", "pt-new", agent.Agent{ID: "agent-1"})
-
-	client.waitStopped(t, "pt-old")
-	client.waitStopped(t, "pt-new")
-}
-
-func TestFeishuManagerEnsureAgentStopsStaleParticipantBeforeSessionRestore(t *testing.T) {
-	client := newRecordingBotClient()
-	bridge := codexbridge.NewService(client, noopPrompter{}, runtimecodex.NewEventSink())
-	manager := &feishuManager{
-		runtime:            runtimecodex.New(runtimecodex.Dependencies{EventSink: runtimecodex.NewEventSink()}),
-		bridge:             bridge,
-		provider:           testCredentialProvider{"agent-1": "pt-new"},
-		activeParticipants: map[string]string{"agent-1": "pt-old"},
-	}
-
-	if err := bridge.StartBot(context.Background(), codexbridge.Binding{BotID: "pt-old", RuntimeID: "rt-1"}); err != nil {
-		t.Fatalf("StartBot() error = %v", err)
-	}
-	client.waitStarted(t, "pt-old")
-
-	err := manager.EnsureAgent(context.Background(), agent.Agent{
-		ID:              "agent-1",
-		Name:            "dev",
-		Role:            agent.RoleWorker,
-		RuntimeKind:     agent.RuntimeKindCodex,
-		RuntimeID:       "rt-1",
-		Status:          string(agentruntime.StateRunning),
-		ProfileComplete: true,
-	})
-	if err == nil {
-		t.Fatal("EnsureAgent() error = nil, want missing session error")
-	}
-
-	client.waitStopped(t, "pt-old")
-	if got := manager.clearActiveParticipant("agent-1"); got != "" {
-		t.Fatalf("active participant = %q, want cleared after stale stop", got)
-	}
-}
-
-type noopPrompter struct{}
-
-func (noopPrompter) Prompt(context.Context, runtimecodex.SessionHandle, runtimecodex.PromptRequest) (runtimecodex.PromptResponse, error) {
-	return runtimecodex.PromptResponse{}, nil
-}
-
 type staticAgentLister struct {
 	agents []agent.Agent
 }
@@ -437,13 +308,6 @@ func (m *trackingSessionManager) Session(runtimecodex.SessionHandle) (*runtimeco
 
 func (m *trackingSessionManager) Prompt(context.Context, runtimecodex.SessionHandle, runtimecodex.PromptRequest) (runtimecodex.PromptResponse, error) {
 	return runtimecodex.PromptResponse{}, os.ErrNotExist
-}
-
-type testCredentialProvider map[string]string
-
-func (p testCredentialProvider) BotConfigForAgent(agentID string) (string, feishu.AppConfig, bool) {
-	participantID := strings.TrimSpace(p[strings.TrimSpace(agentID)])
-	return participantID, feishu.AppConfig{}, participantID != ""
 }
 
 type recordingBotClient struct {

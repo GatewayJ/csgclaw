@@ -28,12 +28,8 @@ type SendMessageRequest = channelbridge.SendMessageRequest
 type SendMessageResponse = channelbridge.SendMessageResponse
 type UpdateMessageRequest = channelbridge.UpdateMessageRequest
 type UpdateMessageResponse = channelbridge.UpdateMessageResponse
-type AddMessageReactionRequest = channelbridge.AddMessageReactionRequest
-type AddMessageReactionResponse = channelbridge.AddMessageReactionResponse
-type DeleteMessageReactionRequest = channelbridge.DeleteMessageReactionRequest
 type BotClient = channelbridge.BotClient
 type MessageUpdater = channelbridge.MessageUpdater
-type MessageReactor = channelbridge.MessageReactor
 
 type HTTPClient struct {
 	BaseURL     string

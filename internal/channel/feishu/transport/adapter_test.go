@@ -1,0 +1,247 @@
+package transport
+
+import (
+	"context"
+	"errors"
+	"testing"
+)
+
+type contextKey string
+
+func TestAdapterUsesBindingLifetimeContextAndDelegatesProtocolOperations(t *testing.T) {
+	lifecycle := &fakeLifecycle{identity: Identity{
+		OpenID: "ou_bot", UserID: "user_bot", UnionID: "on_bot", Name: "Bot",
+	}}
+	oapi := &fakeOperations{}
+	adapter := newAdapter(lifecycle, oapi)
+	ctx := context.WithValue(context.Background(), contextKey("binding"), "binding-1")
+
+	if _, err := adapter.SendText(ctx, SendTextRequest{ChatID: "oc_chat", Text: "early"}); !errors.Is(err, ErrNotStarted) {
+		t.Fatalf("SendText() before Start error = %v, want ErrNotStarted", err)
+	}
+	if err := adapter.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if lifecycle.startCtx != ctx || lifecycle.startCtx.Value(contextKey("binding")) != "binding-1" {
+		t.Fatal("Start() did not pass the binding lifetime context through")
+	}
+	if got := adapter.Identity(); got != (Identity{OpenID: "ou_bot", UserID: "user_bot", UnionID: "on_bot", Name: "Bot"}) {
+		t.Fatalf("Identity() = %#v", got)
+	}
+	if err := adapter.Start(ctx); !errors.Is(err, ErrAlreadyStarted) {
+		t.Fatalf("second Start() error = %v, want ErrAlreadyStarted", err)
+	}
+	textResult, err := adapter.SendText(ctx, SendTextRequest{
+		ChatID: " oc_chat ", Text: "**hello**", Markdown: true, IdempotencyKey: " delivery-text ",
+		ReplyTo: " om_root ", ReplyInThread: true, ThreadID: " omt_thread ",
+	})
+	if err != nil || textResult.MessageID != "om_text" {
+		t.Fatalf("SendText() = %#v, %v", textResult, err)
+	}
+	if got := oapi.sendText; got.ChatID != " oc_chat " || got.Text != "**hello**" || !got.Markdown || got.IdempotencyKey != " delivery-text " || got.ReplyTo != " om_root " || !got.ReplyInThread || got.ThreadID != " omt_thread " {
+		t.Fatalf("SendText request = %#v", got)
+	}
+	if err := adapter.UpdateText(ctx, UpdateTextRequest{MessageID: " om_text ", Text: "updated", Markdown: true}); err != nil {
+		t.Fatalf("UpdateText() error = %v", err)
+	}
+	if oapi.updateText.MessageID != " om_text " || oapi.updateText.Text != "updated" || !oapi.updateText.Markdown {
+		t.Fatalf("UpdateText request = %#v", oapi.updateText)
+	}
+
+	cardResult, err := adapter.SendCard(ctx, SendCardRequest{
+		ChatID: " oc_chat ", Card: map[string]any{"schema": "2.0"}, IdempotencyKey: " delivery-card ", ReplyTo: " om_root ", ReplyInThread: true, ThreadID: " omt_thread ",
+	})
+	if err != nil || cardResult.MessageID != "om_card" {
+		t.Fatalf("SendCard() = %#v, %v", cardResult, err)
+	}
+	if oapi.sendCard.ChatID != " oc_chat " || oapi.sendCard.ThreadID != " omt_thread " || oapi.sendCard.IdempotencyKey != " delivery-card " || oapi.sendCard.Card["schema"] != "2.0" {
+		t.Fatalf("SendCard request = %#v", oapi.sendCard)
+	}
+	if err := adapter.UpdateCard(ctx, UpdateCardRequest{MessageID: " om_card ", Card: map[string]any{"updated": true}}); err != nil {
+		t.Fatalf("UpdateCard() error = %v", err)
+	}
+	if oapi.updateCard.MessageID != " om_card " || oapi.updateCard.Card["updated"] != true {
+		t.Fatalf("UpdateCard request = %#v", oapi.updateCard)
+	}
+
+	reaction, err := adapter.AddReaction(ctx, AddReactionRequest{MessageID: " om_message ", EmojiType: " Pin "})
+	if err != nil || reaction.ReactionID != "reaction-1" {
+		t.Fatalf("AddReaction() = %#v, %v", reaction, err)
+	}
+	if oapi.addReaction.MessageID != " om_message " || oapi.addReaction.EmojiType != " Pin " {
+		t.Fatalf("AddReaction request = %#v", oapi.addReaction)
+	}
+	if err := adapter.DeleteReaction(ctx, DeleteReactionRequest{MessageID: " om_message ", ReactionID: " reaction-1 "}); err != nil {
+		t.Fatalf("DeleteReaction() error = %v", err)
+	}
+	if oapi.deleteReaction.MessageID != " om_message " || oapi.deleteReaction.ReactionID != " reaction-1 " {
+		t.Fatalf("DeleteReaction request = %#v", oapi.deleteReaction)
+	}
+
+	download, err := adapter.DownloadResource(ctx, DownloadResourceRequest{
+		MessageID: " om_message ", FileKey: " file_key ", Type: DownloadFile, DestinationPath: "/tmp/feishu-resource",
+	})
+	if err != nil || download.ContentType != "application/octet-stream" || download.BytesWritten != 128 {
+		t.Fatalf("DownloadResource() = %#v, %v", download, err)
+	}
+	if oapi.download.MessageID != " om_message " || oapi.download.FileKey != " file_key " || oapi.download.Type != DownloadFile || oapi.download.DestinationPath != "/tmp/feishu-resource" {
+		t.Fatalf("DownloadResource request = %#v", oapi.download)
+	}
+
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if lifecycle.disconnectCalls != 1 {
+		t.Fatalf("Disconnect calls = %d, want 1", lifecycle.disconnectCalls)
+	}
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+	if lifecycle.disconnectCalls != 1 {
+		t.Fatalf("Disconnect calls after idempotent Close = %d, want 1", lifecycle.disconnectCalls)
+	}
+	if _, err := adapter.SendText(ctx, SendTextRequest{ChatID: "oc_chat", Text: "late"}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("SendText() after Close error = %v, want ErrClosed", err)
+	}
+}
+
+func TestAdapterCloseCanBeRetriedAfterDisconnectFailure(t *testing.T) {
+	disconnectErr := errors.New("temporary disconnect failure")
+	lifecycle := &fakeLifecycle{disconnectErr: disconnectErr}
+	adapter := newAdapter(lifecycle, &fakeOperations{})
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := adapter.Close(context.Background()); !errors.Is(err, disconnectErr) {
+		t.Fatalf("Close() error = %v, want disconnect failure", err)
+	}
+	lifecycle.disconnectErr = nil
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("retry Close() error = %v", err)
+	}
+	if lifecycle.disconnectCalls != 2 {
+		t.Fatalf("Disconnect calls = %d, want 2", lifecycle.disconnectCalls)
+	}
+}
+
+func TestAdapterPreparesIdentityBeforeStart(t *testing.T) {
+	lifecycle := &fakeLifecycle{identity: Identity{OpenID: "ou_bot", UserID: "user_bot"}}
+	adapter := newAdapter(lifecycle, &fakeOperations{})
+
+	identity, err := adapter.PrepareIdentity(context.Background())
+	if err != nil {
+		t.Fatalf("PrepareIdentity() error = %v", err)
+	}
+	if lifecycle.prepareCalls != 1 {
+		t.Fatalf("PrepareIdentity calls = %d, want 1", lifecycle.prepareCalls)
+	}
+	if identity != (Identity{OpenID: "ou_bot", UserID: "user_bot"}) || adapter.Identity() != identity {
+		t.Fatalf("prepared identity = %#v / %#v", identity, adapter.Identity())
+	}
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if lifecycle.prepareCalls != 1 {
+		t.Fatalf("Start() unexpectedly prepared identity again: %d calls", lifecycle.prepareCalls)
+	}
+}
+
+type fakeLifecycle struct {
+	startCtx        context.Context
+	startErr        error
+	disconnectErr   error
+	disconnectCalls int
+	identity        Identity
+	prepareErr      error
+	prepareCalls    int
+}
+
+func (f *fakeLifecycle) Start(ctx context.Context) error {
+	f.startCtx = ctx
+	return f.startErr
+}
+
+func (f *fakeLifecycle) Disconnect(context.Context) error {
+	f.disconnectCalls++
+	return f.disconnectErr
+}
+
+func (f *fakeLifecycle) BotIdentity() Identity {
+	return f.identity
+}
+
+func (f *fakeLifecycle) PrepareIdentity(context.Context) (Identity, error) {
+	f.prepareCalls++
+	return f.identity, f.prepareErr
+}
+
+type fakeOperations struct {
+	sendText       SendTextRequest
+	updateText     UpdateTextRequest
+	sendCard       SendCardRequest
+	updateCard     UpdateCardRequest
+	addReaction    AddReactionRequest
+	deleteReaction DeleteReactionRequest
+	download       DownloadResourceRequest
+}
+
+func (f *fakeOperations) SendText(_ context.Context, req SendTextRequest) (SendResult, error) {
+	f.sendText = req
+	return SendResult{MessageID: " om_text "}, nil
+}
+
+func (f *fakeOperations) SendCard(_ context.Context, req SendCardRequest) (SendResult, error) {
+	f.sendCard = req
+	return SendResult{MessageID: " om_card "}, nil
+}
+
+func (f *fakeOperations) UpdateText(_ context.Context, req UpdateTextRequest) error {
+	f.updateText = req
+	return nil
+}
+
+func (f *fakeOperations) UpdateCard(_ context.Context, req UpdateCardRequest) error {
+	f.updateCard = req
+	return nil
+}
+
+func (f *fakeOperations) AddReaction(_ context.Context, req AddReactionRequest) (AddReactionResult, error) {
+	f.addReaction = req
+	return AddReactionResult{ReactionID: " reaction-1 "}, nil
+}
+
+func (f *fakeOperations) DeleteReaction(_ context.Context, req DeleteReactionRequest) error {
+	f.deleteReaction = req
+	return nil
+}
+
+func (f *fakeOperations) DownloadResource(_ context.Context, req DownloadResourceRequest) (DownloadResourceResult, error) {
+	f.download = req
+	return DownloadResourceResult{ContentType: "application/octet-stream", BytesWritten: 128}, nil
+}
+
+type fakePublicAdapter struct{}
+
+func (*fakePublicAdapter) Start(context.Context) error { return nil }
+func (*fakePublicAdapter) Close(context.Context) error { return nil }
+func (*fakePublicAdapter) Identity() Identity          { return Identity{} }
+func (*fakePublicAdapter) SendText(context.Context, SendTextRequest) (SendResult, error) {
+	return SendResult{}, nil
+}
+func (*fakePublicAdapter) UpdateText(context.Context, UpdateTextRequest) error { return nil }
+func (*fakePublicAdapter) SendCard(context.Context, SendCardRequest) (SendResult, error) {
+	return SendResult{}, nil
+}
+func (*fakePublicAdapter) UpdateCard(context.Context, UpdateCardRequest) error { return nil }
+func (*fakePublicAdapter) AddReaction(context.Context, AddReactionRequest) (AddReactionResult, error) {
+	return AddReactionResult{}, nil
+}
+func (*fakePublicAdapter) DeleteReaction(context.Context, DeleteReactionRequest) error { return nil }
+func (*fakePublicAdapter) DownloadResource(context.Context, DownloadResourceRequest) (DownloadResourceResult, error) {
+	return DownloadResourceResult{}, nil
+}
+
+var _ larkLifecycle = (*fakeLifecycle)(nil)
+var _ larkIdentityPreparer = (*fakeLifecycle)(nil)
+var _ larkOperations = (*fakeOperations)(nil)
+var _ Adapter = (*fakePublicAdapter)(nil)

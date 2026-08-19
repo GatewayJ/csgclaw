@@ -651,8 +651,8 @@ func TestExecuteParticipantBindBotWritesConfigAndRecreatesWorkerWhenRestartFlagS
 				if channelUser["kind"] != "app_id" || channelUser["ref"] != nil {
 					t.Fatalf("channel_user = %#v, want app_id without open_id ref", channelUser)
 				}
-				if appConfig["app_id"] != "cli_dev" || appConfig["app_secret"] != "secret-value" {
-					t.Fatalf("channel_app_config = %#v, want app credentials", appConfig)
+				if appConfig["app_id"] != "cli_dev" || appConfig["app_secret"] != "secret-value" || len(appConfig) != 2 {
+					t.Fatalf("channel_app_config = %#v, want only app credentials", appConfig)
 				}
 				if agentBinding["mode"] != "reuse" || agentBinding["agent_id"] != "agent-dev" {
 					t.Fatalf("agent_binding = %#v, want reuse agent-dev", agentBinding)
