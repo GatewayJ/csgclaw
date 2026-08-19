@@ -43,6 +43,24 @@ make build
 
 See [docs/tech/build.md](docs/tech/build.md) for runtime image refs, sandbox CLI packaging, and other Makefile targets.
 
+**Build the desktop app (Electron):**
+
+```bash
+make desktop-package
+```
+
+This builds a desktop installer for the current platform. Outputs are written to
+`desktop/out/make/`.
+
+On Windows without `make`:
+
+```powershell
+.\scripts\build.cmd desktop-package
+```
+
+For signed and notarized macOS release packages, see the
+[desktop signing and release guide](docs/tech/desktop/electron-desktop-signing.zh.md).
+
 For most users, the install script above is the simpler option.
 
 ## Quick Start

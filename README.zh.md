@@ -43,6 +43,22 @@ make build
 
 Makefile 详细说明（embed 模板 version、可选 Docker 镜像构建等）见 [docs/tech/build.zh.md](docs/tech/build.zh.md)。
 
+**构建桌面 App（Electron）：**
+
+```bash
+make desktop-package
+```
+
+该命令会构建当前平台的桌面安装包，产物位于 `desktop/out/make/`。
+
+Windows 环境没有 `make` 时：
+
+```powershell
+.\scripts\build.cmd desktop-package
+```
+
+macOS 对外发布所需的签名与公证流程见[桌面应用签名与发布指南](docs/tech/desktop/electron-desktop-signing.zh.md)。
+
 对大多数用户来说，直接使用上面的安装脚本会更简单。
 
 ## 快速开始
