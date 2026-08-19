@@ -154,7 +154,8 @@ export function useAgentTurnNotifications(args: UseAgentTurnNotificationsArgs): 
     const room = current.rooms.find((candidate) => candidate.id === roomID);
     const agentName = String(input.agent.name || input.agent.user_name || input.agent.id || "Agent").trim();
     const message = input.message ?? latestVisibleAgentMessage(room, input.participantIdentities);
-    const preview = truncateNotificationPreview(formatMessagePreviewText(message?.content));
+    const rawPreview = formatMessagePreviewText(message?.content);
+    const preview = truncateNotificationPreview(rawPreview);
     const roomTitle = String(room?.title || "").trim();
     const body = formatTurnNotificationBody(current.t, {
       agentName,

@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "@/api/client";
 import { fetchHubWorkspace, fetchHubWorkspaceFile, updateHubWorkspaceFile } from "@/api/hub";
 import { hasSkillName, isOfficialSkill, isPersonalSkill } from "@/models/skillhub";
-import type { HubWorkspaceFile } from "@/models/hubWorkspace";
+import { mergeHubTemplateDetail, type HubWorkspaceFile } from "@/models/hubWorkspace";
 import { flattenWorkspaceDirectoryListings } from "@/models/workspace";
 import type { WorkspaceDirectoryListings } from "@/models/workspace";
 import { useWorkspaceUiStore } from "./workspaceUiStore";
@@ -28,6 +28,17 @@ type TemplateWorkspaceFilesState = {
 
 export function templateWorkspaceFilesStateNeedsReset(state: TemplateWorkspaceFilesState): boolean {
   return Boolean(state.templateID || Object.keys(state.files).length);
+}
+
+export function resolveHubTemplateSelection(
+  templates: readonly HubTemplate[],
+  current: string,
+  preserveMissing = false,
+): string {
+  if (templates.some((item) => item.id === current) || (current && preserveMissing)) {
+    return current;
+  }
+  return templates[0]?.id || "";
 }
 
 export function useWorkspaceHubSelection({
@@ -78,7 +89,10 @@ export function useWorkspaceHubSelection({
     );
   }, [officialSkillsQuery.data]);
   const selectedHubTemplate = useMemo(
-    () => resourcesTemplates.find((item) => item.id === selectedHubTemplateId) || resourcesTemplates[0] || null,
+    () =>
+      resourcesTemplates.find((item) => item.id === selectedHubTemplateId) ||
+      (selectedHubTemplateId ? null : resourcesTemplates[0]) ||
+      null,
     [resourcesTemplates, selectedHubTemplateId],
   );
   const selectedHubSkill = useMemo(
@@ -95,6 +109,7 @@ export function useWorkspaceHubSelection({
     files: {},
     templateID: "",
   });
+  const hubTemplateDetailQuery = useWorkspaceHubTemplateQuery(selectedHubTemplateId);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -105,14 +120,28 @@ export function useWorkspaceHubSelection({
 
   useEffect(() => {
     if (!resourcesTemplates.length) {
-      setSelectedHubTemplateId("");
       setSelectedHubWorkspacePath("");
-      return;
     }
     setSelectedHubTemplateId((current) =>
-      resourcesTemplates.some((item) => item.id === current) ? current : (resourcesTemplates[0]?.id ?? ""),
+      resolveHubTemplateSelection(
+        resourcesTemplates,
+        current,
+        !loaded ||
+          Boolean(templatesQuery?.isFetching) ||
+          (current === selectedHubTemplateId &&
+            (hubTemplateDetailQuery.isFetching || hubTemplateDetailQuery.data?.id === current)),
+      ),
     );
-  }, [resourcesTemplates, setSelectedHubTemplateId, setSelectedHubWorkspacePath]);
+  }, [
+    hubTemplateDetailQuery.data?.id,
+    hubTemplateDetailQuery.isFetching,
+    loaded,
+    resourcesTemplates,
+    selectedHubTemplateId,
+    setSelectedHubTemplateId,
+    setSelectedHubWorkspacePath,
+    templatesQuery?.isFetching,
+  ]);
 
   useEffect(() => {
     setSelectedHubWorkspacePath("");
@@ -136,7 +165,6 @@ export function useWorkspaceHubSelection({
     }
   }, [selectedHubSkillName, setSelectedHubSkillPath]);
 
-  const hubTemplateDetailQuery = useWorkspaceHubTemplateQuery(selectedHubTemplateId);
   const hubWorkspaceQuery = useWorkspaceHubWorkspaceQuery(selectedHubTemplateId);
   const hubWorkspaceFileQuery = useWorkspaceHubWorkspaceFileQuery(selectedHubTemplateId, selectedHubWorkspacePath);
   const skillTreeQuery = useWorkspaceSkillTreeQuery(selectedHubSkillName);
@@ -153,8 +181,10 @@ export function useWorkspaceHubSelection({
     await officialSkillsQuery.fetchNextPage();
   }, [officialSkillsQuery, remoteSkillsEnabled]);
 
-  const selectedHubTemplateView =
-    hubTemplateDetailQuery.data?.id === selectedHubTemplateId ? hubTemplateDetailQuery.data : selectedHubTemplate;
+  const selectedHubTemplateView = mergeHubTemplateDetail(
+    hubTemplateDetailQuery.data?.id === selectedHubTemplateId ? hubTemplateDetailQuery.data : null,
+    selectedHubTemplate,
+  );
   const workspaceListings = useMemo(
     () => (workspaceListingsState.templateID === selectedHubTemplateId ? workspaceListingsState.listings : {}),
     [selectedHubTemplateId, workspaceListingsState],

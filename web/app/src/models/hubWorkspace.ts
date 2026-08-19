@@ -73,8 +73,45 @@ export function isHubTemplateAccountEmailMissing(error: unknown): boolean {
   return normalized.includes("user-err-18") || normalized.includes("user email is empty");
 }
 
+export function isHubTemplateSensitiveInformationError(error: unknown): boolean {
+  const code =
+    error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  const message =
+    error && typeof error === "object" && "message" in error
+      ? String((error as { message?: unknown }).message ?? "")
+      : String(error ?? "");
+  const normalized = `${code} ${message}`.toLowerCase();
+  return normalized.includes("sensitive-err-0") || normalized.includes("template contains sensitive information");
+}
+
+export function isHubTemplateDeploySensitiveCheckError(error: unknown): boolean {
+  const code =
+    error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  const message =
+    error && typeof error === "object" && "message" in error
+      ? String((error as { message?: unknown }).message ?? "")
+      : String(error ?? "");
+  const normalized = `${code} ${message}`.toLowerCase();
+  return (
+    normalized.includes("agent-err-23") ||
+    normalized.includes("community template has not passed the sensitive-content check")
+  );
+}
+
+export function isHubTemplateDeployReviewPendingError(error: unknown): boolean {
+  const code =
+    error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  const message =
+    error && typeof error === "object" && "message" in error
+      ? String((error as { message?: unknown }).message ?? "")
+      : String(error ?? "");
+  const normalized = `${code} ${message}`.toLowerCase();
+  return normalized.includes("agent-err-22") || normalized.includes("sensitive-content review is still pending");
+}
+
 export type HubTemplate = AgentTemplateLike & {
   namespace?: string;
+  metadata?: HubTemplateMetadata | null;
   source?: HubTemplateSource | null;
   updated_at?: string | null;
   workspace?: {
@@ -82,6 +119,83 @@ export type HubTemplate = AgentTemplateLike & {
     kind?: string | null;
   } | null;
 };
+
+export type HubTemplateMetadata = {
+  sensitive_check?: {
+    status?: string | null;
+    failure_details?: Array<{
+      path?: string | null;
+      status?: string | null;
+      message?: string | null;
+    }> | null;
+  } | null;
+};
+
+export type HubTemplateReviewState = {
+  kind: "pending" | "exception";
+  messages: string[];
+};
+
+export function upsertHubTemplateReviewState(
+  templates: readonly HubTemplate[] | undefined,
+  templateID: string,
+  status: "Pending" | "Fail",
+  message = "",
+): HubTemplate[] {
+  const id = templateID.trim();
+  if (!id) return [...(templates ?? [])];
+  const separator = id.indexOf("/");
+  const namespace = separator > 0 ? id.slice(0, separator) : "";
+  const name = separator >= 0 ? id.slice(separator + 1) : id;
+  const sensitiveCheck = {
+    status,
+    failure_details: message.trim() ? [{ message: message.trim() }] : [],
+  };
+  const current = templates ?? [];
+  const existingIndex = current.findIndex((template) => template.id === id);
+  if (existingIndex < 0) {
+    return [
+      ...current,
+      {
+        id,
+        name,
+        namespace: namespace || undefined,
+        role: "worker",
+        source: { kind: HUB_REGISTRY_KIND_REMOTE, name: OFFICIAL_HUB_REGISTRY_NAME },
+        metadata: { sensitive_check: sensitiveCheck },
+      },
+    ];
+  }
+  return current.map((template, index) =>
+    index === existingIndex
+      ? {
+          ...template,
+          metadata: { ...template.metadata, sensitive_check: sensitiveCheck },
+        }
+      : template,
+  );
+}
+
+export function hubTemplateReviewState(template: HubTemplate | null | undefined): HubTemplateReviewState | null {
+  const check = template?.metadata?.sensitive_check;
+  const status = String(check?.status ?? "")
+    .trim()
+    .toLowerCase();
+  if (status !== "pending" && status !== "exception" && status !== "fail") {
+    return null;
+  }
+  const messages = (check?.failure_details ?? []).map((detail) => String(detail?.message ?? "").trim()).filter(Boolean);
+  return { kind: status === "pending" ? "pending" : "exception", messages };
+}
+
+export function mergeHubTemplateDetail(
+  detail: HubTemplate | null | undefined,
+  summary: HubTemplate | null | undefined,
+): HubTemplate | null {
+  if (!detail) return summary ?? null;
+  if (!summary || detail.id !== summary.id || detail.metadata?.sensitive_check) return detail;
+  return summary.metadata?.sensitive_check ? { ...detail, metadata: summary.metadata } : detail;
+}
 
 export function hubTemplateFullName(template: HubTemplate | null | undefined): string {
   const name = String(template?.name ?? "").trim();

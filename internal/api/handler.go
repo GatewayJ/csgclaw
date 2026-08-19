@@ -747,6 +747,7 @@ type createMessageRequest struct {
 	RoomID      string                       `json:"room_id"`
 	SenderID    string                       `json:"sender_id"`
 	Content     string                       `json:"content"`
+	Locale      string                       `json:"locale,omitempty"`
 	MentionID   string                       `json:"mention_id,omitempty"`
 	Metadata    map[string]any               `json:"metadata,omitempty"`
 	RelatesTo   *im.MessageRelation          `json:"relates_to,omitempty"`
@@ -1221,12 +1222,27 @@ func (h *Handler) publishUpdatedAgentUser(updated agent.Agent) {
 }
 
 func (h *Handler) handleAgentProfileByID(w http.ResponseWriter, r *http.Request) {
-	id := pathValue(r, "id")
-	if id == "" {
+	selector := strings.TrimSpace(pathValue(r, "id"))
+	if selector == "" {
 		http.NotFound(w, r)
 		return
 	}
-	h.handleAgentProfile(w, r, id)
+	if h.svc == nil {
+		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method == http.MethodGet {
+		if err := h.svc.Reload(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	canonicalID, ok := h.svc.ResolveAgentID(selector)
+	if !ok {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	h.handleAgentProfile(w, r, canonicalID)
 }
 
 func (h *Handler) handleAgentRecreateByID(w http.ResponseWriter, r *http.Request) {
@@ -1754,6 +1770,9 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, hub.ErrTemplateAlreadyExists) {
 				status = http.StatusConflict
 			}
+			if errors.Is(err, hub.ErrTemplateSensitiveInfo) {
+				status = http.StatusBadRequest
+			}
 			if strings.Contains(strings.ToLower(err.Error()), "not found") {
 				status = http.StatusNotFound
 			}
@@ -1762,7 +1781,24 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Deploy {
 			if err := createCommunityAgentInstance(r.Context(), item, authStatus); err != nil {
-				http.Error(w, fmt.Sprintf("template published but deployment failed: %v", err), http.StatusBadGateway)
+				status := http.StatusBadGateway
+				code := ""
+				if errors.Is(err, errCommunityInstanceTemplatePending) {
+					status = http.StatusConflict
+					code = communityInstanceTemplatePendingCode
+				} else if errors.Is(err, errCommunityInstanceSensitiveCheck) {
+					status = http.StatusConflict
+					code = communityInstanceSensitiveCheckCode
+				}
+				if code != "" {
+					writeJSON(w, status, map[string]any{"error": map[string]any{
+						"code":                  code,
+						"message":               communityInstanceUpstreamMessage(err),
+						"published_template_id": item.ID,
+					}})
+					return
+				}
+				http.Error(w, fmt.Sprintf("template published but deployment failed: %v", err), status)
 				return
 			}
 		}
@@ -1873,7 +1909,7 @@ func presentHubTemplates(items []hub.Template) []apitypes.HubTemplate {
 }
 
 func presentHubTemplate(item hub.Template) apitypes.HubTemplate {
-	return apitypes.HubTemplate{
+	presented := apitypes.HubTemplate{
 		ID:          item.ID,
 		Namespace:   item.Namespace,
 		Name:        item.Name,
@@ -1892,6 +1928,19 @@ func presentHubTemplate(item hub.Template) apitypes.HubTemplate {
 			Kind: item.WorkspaceRef.Kind,
 		},
 	}
+	if item.Metadata != nil && item.Metadata.SensitiveCheck != nil {
+		check := item.Metadata.SensitiveCheck
+		failures := make([]apitypes.HubTemplateSensitiveCheckFailureDetail, 0, len(check.FailureDetails))
+		for _, detail := range check.FailureDetails {
+			failures = append(failures, apitypes.HubTemplateSensitiveCheckFailureDetail{
+				Path: detail.Path, Status: detail.Status, Message: detail.Message,
+			})
+		}
+		presented.Metadata = &apitypes.HubTemplateMetadata{SensitiveCheck: &apitypes.HubTemplateSensitiveCheck{
+			Status: check.Status, FailureDetails: failures,
+		}}
+	}
+	return presented
 }
 
 func agentProfileFromAPI(req *apitypes.CreateAgentProfile) agent.AgentProfile {
@@ -2482,6 +2531,7 @@ func (h *Handler) updateCsgclawUser(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		Role:        req.Role,
 		Avatar:      req.Avatar,
+		Locale:      req.Locale,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -3423,6 +3473,7 @@ func (r createMessageRequest) toServiceRequest() (im.CreateMessageRequest, error
 		RoomID:      roomID,
 		SenderID:    r.SenderID,
 		Content:     r.Content,
+		Locale:      r.Locale,
 		MentionID:   r.MentionID,
 		Metadata:    r.Metadata,
 		RelatesTo:   r.RelatesTo,
