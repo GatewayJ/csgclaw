@@ -122,6 +122,7 @@ const (
 	SessionEventUserInputRequest   = activity.RuntimeEventUserInputRequest
 	SessionEventUserInputResolved  = activity.RuntimeEventUserInputResolved
 	SessionEventStructuredOutput   = activity.RuntimeEventStructuredOutput
+	SessionEventFileOutput         = activity.RuntimeEventFileOutput
 	SessionEventPromptCompleted    = activity.RuntimeEventPromptCompleted
 	SessionEventPromptFailed       = activity.RuntimeEventPromptFailed
 )
@@ -147,12 +148,13 @@ type Dependencies struct {
 	Permission     PermissionBroker
 	UserInput      UserInputBroker
 
-	MkdirAll  func(string, os.FileMode) error
-	ReadFile  func(string) ([]byte, error)
-	WriteFile func(string, []byte, os.FileMode) error
-	Stat      func(string) (os.FileInfo, error)
-	RemoveAll func(string) error
-	OpenFile  func(string, int, os.FileMode) (*os.File, error)
+	MkdirAll     func(string, os.FileMode) error
+	ReadFile     func(string) ([]byte, error)
+	WriteFile    func(string, []byte, os.FileMode) error
+	Stat         func(string) (os.FileInfo, error)
+	RemoveAll    func(string) error
+	OpenFile     func(string, int, os.FileMode) (*os.File, error)
+	RunInitShell func(context.Context, string, string, []string) error
 
 	StopRuntimeProcesses func(string) ([]int, error)
 }
@@ -245,12 +247,74 @@ func (r *Runtime) EnsureSession(ctx context.Context, runtimeID, conversationKey 
 	return ensurer.EnsureSession(ctx, SessionHandle{RuntimeID: runtimeID}, conversationKey)
 }
 
+func (r *Runtime) EnsureEngineSession(ctx context.Context, runtimeID, conversationKey string) (string, error) {
+	ensurer, ok := r.SessionManager().(interface {
+		EnsureEngineSession(context.Context, SessionHandle, string) (string, error)
+	})
+	if !ok {
+		return "", fmt.Errorf("codex session manager does not support Engine conversation sessions")
+	}
+	return ensurer.EnsureEngineSession(ctx, SessionHandle{RuntimeID: runtimeID}, conversationKey)
+}
+
+func (r *Runtime) ExistingSession(ctx context.Context, runtimeID, conversationKey string) (string, bool, error) {
+	resolver, ok := r.SessionManager().(interface {
+		ExistingSession(context.Context, SessionHandle, string) (string, bool, error)
+	})
+	if !ok {
+		return "", false, fmt.Errorf("codex session manager does not support strict conversation lookup")
+	}
+	return resolver.ExistingSession(ctx, SessionHandle{RuntimeID: runtimeID}, conversationKey)
+}
+
+func (r *Runtime) ExistingEngineSession(ctx context.Context, runtimeID, conversationKey string) (string, bool, error) {
+	resolver, ok := r.SessionManager().(interface {
+		ExistingEngineSession(context.Context, SessionHandle, string) (string, bool, error)
+	})
+	if !ok {
+		return "", false, fmt.Errorf("codex session manager does not support strict Engine conversation lookup")
+	}
+	return resolver.ExistingEngineSession(ctx, SessionHandle{RuntimeID: runtimeID}, conversationKey)
+}
+
 func (r *Runtime) Prompt(ctx context.Context, runtimeID, sessionID, prompt string) error {
 	_, err := r.SessionManager().Prompt(ctx, SessionHandle{RuntimeID: runtimeID}, PromptRequest{
 		SessionID: strings.TrimSpace(sessionID),
 		Prompt:    []PromptContentBlock{TextBlock(prompt)},
 	})
 	return err
+}
+
+func (r *Runtime) PromptTurn(ctx context.Context, runtimeID, sessionID, turnID string, blocks []PromptContentBlock, accepted func()) error {
+	_, err := r.SessionManager().Prompt(ctx, SessionHandle{RuntimeID: runtimeID}, PromptRequest{
+		SessionID:           strings.TrimSpace(sessionID),
+		ClientUserMessageID: strings.TrimSpace(turnID),
+		Prompt:              blocks,
+		OnAccepted:          accepted,
+	})
+	return err
+}
+
+func (r *Runtime) ResetConversation(ctx context.Context, runtimeID, conversationKey string) error {
+	resetter, ok := r.SessionManager().(interface {
+		ResetConversationHistory(context.Context, SessionHandle, string) error
+	})
+	if !ok {
+		return fmt.Errorf("codex session manager does not support conversation reset")
+	}
+	return resetter.ResetConversationHistory(ctx, SessionHandle{RuntimeID: runtimeID}, conversationKey)
+}
+
+func (r *Runtime) WorkspaceDir(runtimeID string) (string, error) {
+	session, err := r.SessionManager().LiveSession(SessionHandle{RuntimeID: strings.TrimSpace(runtimeID)})
+	if err != nil {
+		return "", err
+	}
+	workspace := strings.TrimSpace(session.WorkspaceDir)
+	if workspace == "" {
+		return "", fmt.Errorf("codex workspace is unavailable")
+	}
+	return workspace, nil
 }
 
 func (r *Runtime) Subscribe(runtimeID string) (<-chan SessionEvent, func()) {
@@ -299,7 +363,7 @@ func (r *Runtime) New(ctx context.Context, spec agentruntime.Spec) (agentruntime
 	}, nil
 }
 
-func (r *Runtime) Provision(_ context.Context, req agentruntime.ProvisionRequest) error {
+func (r *Runtime) Provision(ctx context.Context, req agentruntime.ProvisionRequest) error {
 	if r == nil {
 		return nil
 	}
@@ -338,6 +402,22 @@ func (r *Runtime) Provision(_ context.Context, req agentruntime.ProvisionRequest
 	}
 	if err := r.syncManagerTemplateSkills(agentID, codexHomeDir); err != nil {
 		return fmt.Errorf("sync manager codex skills for agent %q: %w", req.AgentName, err)
+	}
+	if len(req.Credentials) == 0 && len(req.PreviousCredentials) == 0 && strings.TrimSpace(req.InitShell) == "" {
+		return nil
+	}
+	credentialWorkspace, err := ResolveWorkspaceDir(agentHome, req.RuntimeOptions)
+	if err != nil {
+		return fmt.Errorf("resolve Codex workspace for Runtime credentials: %w", err)
+	}
+	initEnvironment := buildSessionEnv(SessionSpec{
+		WorkspaceDir: credentialWorkspace,
+		HomeDir:      r.hostSessionHomeDir(codexHomeDir),
+		CodexHomeDir: codexHomeDir,
+		Profile:      req.Profile,
+	})
+	if err := r.provisionWorkspaceCredentials(ctx, credentialWorkspace, initEnvironment, req.Credentials, req.PreviousCredentials, req.InitShell); err != nil {
+		return err
 	}
 	return nil
 }
