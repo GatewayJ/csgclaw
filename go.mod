@@ -2,7 +2,7 @@ module csgclaw
 
 go 1.26.2
 
-require github.com/larksuite/oapi-sdk-go/v3 v3.5.3
+require github.com/larksuite/oapi-sdk-go/v3 v3.9.7
 
 require (
 	github.com/gin-gonic/gin v1.10.1

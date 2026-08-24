@@ -17,6 +17,8 @@ import (
 	"csgclaw/cli/command"
 	"csgclaw/internal/activity"
 	"csgclaw/internal/agent"
+	"csgclaw/internal/agentengine"
+	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/channelbridge/runtimebridge"
 	"csgclaw/internal/config"
@@ -1174,6 +1176,87 @@ func TestServeForegroundStartsCodexBridgesAfterConfiguredAgents(t *testing.T) {
 	}
 }
 
+func TestServeForegroundSharesOneAgentEngineWithFeishuBindings(t *testing.T) {
+	restore := stubServeDependencies(t)
+	defer restore()
+
+	started := make(chan struct{})
+	closed := make(chan struct{})
+	manager := &fakeFeishuBindingManager{
+		start: func(context.Context) error {
+			close(started)
+			return nil
+		},
+		close: func() { close(closed) },
+	}
+	var bindingEngine agentengine.Interface
+	NewFeishuBindingManager = func(_ *feishu.Service, engine agentengine.Interface) (feishuBindingManager, error) {
+		bindingEngine = engine
+		return manager, nil
+	}
+	var serverEngine agentengine.Interface
+	RunServer = func(opts server.Options) error {
+		serverEngine = opts.AgentEngine
+		if opts.OnReady == nil {
+			return fmt.Errorf("OnReady is nil")
+		}
+		opts.OnReady(nil, nil)
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			return fmt.Errorf("Feishu binding manager did not start")
+		}
+		return nil
+	}
+
+	if err := serveForeground(context.Background(), testContext(), config.Config{Server: config.ServerConfig{ListenAddr: "127.0.0.1:18080"}}, "json"); err != nil {
+		t.Fatal(err)
+	}
+	if bindingEngine == nil || bindingEngine != serverEngine {
+		t.Fatalf("Feishu Engine = %p, server Engine = %p; want the same instance", bindingEngine, serverEngine)
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Feishu binding manager was not closed")
+	}
+}
+
+func TestChannelBindingActivatorRoutesToChannelOwner(t *testing.T) {
+	t.Parallel()
+
+	target := agent.Agent{ID: "agent-1"}
+	var csgclawCalls, feishuCalls int
+	csgclawManager := &fakeCodexBridgeManager{refresh: func(_ context.Context, got agent.Agent, channel string) error {
+		csgclawCalls++
+		if got.ID != target.ID || channel != csgclawchannel.ChannelID {
+			t.Fatalf("csgclaw refresh = (%q, %q)", got.ID, channel)
+		}
+		return nil
+	}}
+	feishuManager := &fakeFeishuBindingManager{reconcile: func(context.Context) error {
+		feishuCalls++
+		return nil
+	}}
+	activator := newChannelBindingActivator(csgclawManager, feishuManager)
+	if err := activator.RefreshAgentChannel(context.Background(), target, " CSGCLAW "); err != nil {
+		t.Fatalf("refresh csgclaw: %v", err)
+	}
+	if err := activator.RefreshAgentChannel(context.Background(), target, " FEISHU "); err != nil {
+		t.Fatalf("refresh feishu: %v", err)
+	}
+	if csgclawCalls != 1 || feishuCalls != 1 {
+		t.Fatalf("refresh calls = (csgclaw=%d, feishu=%d), want (1, 1)", csgclawCalls, feishuCalls)
+	}
+	if err := activator.RefreshAgentChannel(context.Background(), target, "unknown"); err == nil {
+		t.Fatal("refresh unknown channel succeeded")
+	}
+	feishuOnly := newChannelBindingActivator(nil, feishuManager)
+	if err := feishuOnly.RefreshAgentChannel(context.Background(), target, csgclawchannel.ChannelID); err == nil {
+		t.Fatal("refresh without csgclaw manager succeeded")
+	}
+}
+
 func TestServeForegroundPreservesBootstrapDefaultTemplates(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	origRunServer := RunServer
@@ -1662,6 +1745,7 @@ func stubServeDependencies(t *testing.T) func() {
 	origStartConfiguredAgents := StartConfiguredAgents
 	origStopRunningSandboxAgents := StopRunningSandboxAgents
 	origNewCodexBridgeManager := NewCodexBridgeManager
+	origNewFeishuBindingManager := NewFeishuBindingManager
 	origEnsureCLIProxy := EnsureCLIProxy
 	origShutdownCLIProxy := ShutdownCLIProxy
 	origDetectBootstrapState := DetectBootstrapState
@@ -1672,7 +1756,10 @@ func stubServeDependencies(t *testing.T) func() {
 	origWaitForHealthy := WaitForHealthy
 	RunServer = func(opts server.Options) error {
 		if opts.OnReady != nil {
-			go opts.OnReady(nil, nil)
+			// The real server invokes OnReady before RunServer returns. Keep the
+			// stub's lifetime ordering faithful so dependency restoration cannot
+			// race with values captured by OnReady's background work.
+			opts.OnReady(nil, nil)
 		}
 		return nil
 	}
@@ -1686,6 +1773,9 @@ func stubServeDependencies(t *testing.T) func() {
 	StartConfiguredAgents = func(context.Context, *agent.Service) error { return nil }
 	StopRunningSandboxAgents = func(context.Context, *agent.Service) error { return nil }
 	NewCodexBridgeManager = func(config.Config, *agent.Service, *feishu.Service, worklease.ParticipantWorkReporter) (codexBridgeManager, error) {
+		return nil, nil
+	}
+	NewFeishuBindingManager = func(*feishu.Service, agentengine.Interface) (feishuBindingManager, error) {
 		return nil, nil
 	}
 	EnsureCLIProxy = func(context.Context) error { return nil }
@@ -1717,6 +1807,7 @@ func stubServeDependencies(t *testing.T) func() {
 		StartConfiguredAgents = origStartConfiguredAgents
 		StopRunningSandboxAgents = origStopRunningSandboxAgents
 		NewCodexBridgeManager = origNewCodexBridgeManager
+		NewFeishuBindingManager = origNewFeishuBindingManager
 		EnsureCLIProxy = origEnsureCLIProxy
 		ShutdownCLIProxy = origShutdownCLIProxy
 		DetectBootstrapState = origDetectBootstrapState
@@ -1960,6 +2051,32 @@ type fakeCodexBridgeManager struct {
 	stop    func(string)
 	refresh func(context.Context, agent.Agent, string) error
 	close   func()
+}
+
+type fakeFeishuBindingManager struct {
+	start     func(context.Context) error
+	reconcile func(context.Context) error
+	close     func()
+}
+
+func (m *fakeFeishuBindingManager) Start(ctx context.Context) error {
+	if m != nil && m.start != nil {
+		return m.start(ctx)
+	}
+	return nil
+}
+
+func (m *fakeFeishuBindingManager) Reconcile(ctx context.Context) error {
+	if m != nil && m.reconcile != nil {
+		return m.reconcile(ctx)
+	}
+	return nil
+}
+
+func (m *fakeFeishuBindingManager) Close() {
+	if m != nil && m.close != nil {
+		m.close()
+	}
 }
 
 func (m *fakeCodexBridgeManager) Start(ctx context.Context) error {

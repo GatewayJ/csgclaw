@@ -35,8 +35,9 @@ import (
 	"csgclaw/internal/app/runtimewiring"
 	csgclawchannel "csgclaw/internal/channel/csgclaw"
 	"csgclaw/internal/channel/feishu"
+	feishubinding "csgclaw/internal/channel/feishu/binding"
 	"csgclaw/internal/channel/feishu/participantprovider"
-	"csgclaw/internal/channelbridge"
+	feishutransport "csgclaw/internal/channel/feishu/transport"
 	"csgclaw/internal/channelbridge/codexbridge"
 	"csgclaw/internal/channelbridge/codexmanager"
 	"csgclaw/internal/channelbridge/runtimebridge"
@@ -101,10 +102,11 @@ var (
 		}
 		return svc.StopRunningSandboxAgents(ctx)
 	}
-	NewCodexBridgeManager  = newCodexBridgeManager
-	OpenBrowser            = openBrowser
-	WaitForHealthy         = waitForHealthy
-	stopServerProcessByPID = stopServerProcess
+	NewCodexBridgeManager   = newCodexBridgeManager
+	NewFeishuBindingManager = newFeishuBindingManager
+	OpenBrowser             = openBrowser
+	WaitForHealthy          = waitForHealthy
+	stopServerProcessByPID  = stopServerProcess
 )
 
 type serveCmd struct{}
@@ -616,16 +618,34 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 	janitorCtx, stopJanitor := context.WithCancel(ctx)
 	defer stopJanitor()
 	go workRegistry.Run(janitorCtx)
+	// One Engine instance owns admission for both HTTP sessions and direct
+	// channel execution. Channel packages must never construct a second Engine.
+	conversationEngine := agentengine.New(svc)
 	codexBridgeMgr, err := NewCodexBridgeManager(cfg, svc, feishuSvc, workRegistry)
+	if err != nil {
+		return err
+	}
+	feishuBindingMgr, err := NewFeishuBindingManager(feishuSvc, conversationEngine)
 	if err != nil {
 		return err
 	}
 	if svc != nil {
 		svc.SetLifecycleObserver(codexBridgeMgr)
-		svc.SetBindingActivator(codexBridgeMgr)
+		if activator := newChannelBindingActivator(codexBridgeMgr, feishuBindingMgr); activator != nil {
+			svc.SetBindingActivator(activator)
+		}
 	}
 	if codexBridgeMgr != nil {
 		defer codexBridgeMgr.Close()
+	}
+	if feishuBindingMgr != nil {
+		defer feishuBindingMgr.Close()
+		// Establish the binding-owned lifetime context before the HTTP server
+		// accepts configuration updates. Reconciliation itself runs in the
+		// manager goroutine, so startup is not blocked on Feishu networking.
+		if err := feishuBindingMgr.Start(ctx); err != nil {
+			return err
+		}
 	}
 	llmSvc, err := NewLLMService(cfg, svc)
 	if err != nil {
@@ -714,7 +734,6 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 	if err := agentsession.ImportLegacyState(legacyStatePath, sessionBindings); err != nil {
 		return err
 	}
-	conversationEngine := agentengine.New(svc)
 	var beforeShutdown func(context.Context) error
 	if serveOpts.Distribution == "electron" {
 		beforeShutdown = func(shutdownCtx context.Context) error {
@@ -767,12 +786,14 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 				serveOpts.OnReady()
 			}
 			if !serveOpts.NoBrowser && output != "json" && run != nil {
+				waitForHealthy := WaitForHealthy
+				openBrowser := OpenBrowser
 				go func() {
-					if err := WaitForHealthy(apiURL, 5*time.Second); err != nil {
+					if err := waitForHealthy(apiURL, 5*time.Second); err != nil {
 						fmt.Fprintln(run.Stdout, "Open this URL in your browser after startup.")
 						return
 					}
-					if err := OpenBrowser(imURL); err != nil {
+					if err := openBrowser(imURL); err != nil {
 						fmt.Fprintln(run.Stdout, "Open this URL in your browser after startup.")
 					} else {
 						fmt.Fprintln(run.Stdout, "Opened this URL in your browser.")
@@ -1242,6 +1263,49 @@ func newAgentTemplateHubService(cfg config.HubConfig) (*hub.Service, error) {
 
 type codexBridgeManager = codexmanager.Manager
 
+type feishuBindingManager interface {
+	Start(context.Context) error
+	Reconcile(context.Context) error
+	Close()
+}
+
+// channelBindingActivator keeps binding configuration changes on their owning
+// channel manager. Agent runtime lifecycle remains owned by codexBridgeManager;
+// Feishu App Bindings are deliberately independent from that lifecycle.
+type channelBindingActivator struct {
+	csgclaw codexBridgeManager
+	feishu  feishuBindingManager
+}
+
+func newChannelBindingActivator(csgclaw codexBridgeManager, feishu feishuBindingManager) agent.BindingActivator {
+	if csgclaw == nil && feishu == nil {
+		return nil
+	}
+	return &channelBindingActivator{csgclaw: csgclaw, feishu: feishu}
+}
+
+func (a *channelBindingActivator) RefreshAgentChannel(ctx context.Context, target agent.Agent, channel string) error {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	switch channel {
+	case csgclawchannel.ChannelID:
+		if a.csgclaw == nil {
+			return fmt.Errorf("channel %q binding activator is not configured", channel)
+		}
+		return a.csgclaw.RefreshAgentChannel(ctx, target, channel)
+	case feishu.ChannelID:
+		if a.feishu == nil {
+			return fmt.Errorf("channel %q binding activator is not configured", channel)
+		}
+		return a.feishu.Reconcile(ctx)
+	default:
+		return fmt.Errorf("unsupported agent channel %q", channel)
+	}
+}
+
+func (a *channelBindingActivator) CanRefreshStoppedAgentBinding(channel string) bool {
+	return a != nil && a.feishu != nil && strings.EqualFold(strings.TrimSpace(channel), feishu.ChannelID)
+}
+
 func channelActivityDecider(m codexBridgeManager) api.ActivityDecider {
 	withPermissions, ok := m.(interface {
 		PermissionDecider() runtimecodex.PermissionDecider
@@ -1266,7 +1330,7 @@ func channelUserInputResponder(m codexBridgeManager) api.UserInputResponder {
 	return withUserInput.UserInputResponder()
 }
 
-func newCodexBridgeManager(cfg config.Config, svc *agent.Service, feishuSvc *feishu.Service, workReporter worklease.ParticipantWorkReporter) (codexBridgeManager, error) {
+func newCodexBridgeManager(cfg config.Config, svc *agent.Service, _ *feishu.Service, workReporter worklease.ParticipantWorkReporter) (codexBridgeManager, error) {
 	if svc == nil {
 		return nil, nil
 	}
@@ -1280,13 +1344,39 @@ func newCodexBridgeManager(cfg config.Config, svc *agent.Service, feishuSvc *fei
 			MentionOnly: true,
 		},
 	}
-	if feishuSvc != nil {
-		if provider := feishuSvc.ConfigProvider(); provider != nil {
-			opts.FeishuClient = channelbridge.NewFeishuClient(feishuSvc)
-			opts.FeishuProvider = provider
-		}
-	}
 	return codexmanager.New(opts)
+}
+
+func newFeishuBindingManager(feishuSvc *feishu.Service, engine agentengine.Interface) (feishuBindingManager, error) {
+	if feishuSvc == nil || engine == nil {
+		return nil, nil
+	}
+	provider := feishuSvc.ConfigProvider()
+	if provider == nil {
+		return nil, nil
+	}
+	root, err := config.DefaultChannelDir(feishu.ChannelID)
+	if err != nil {
+		return nil, err
+	}
+	workers, err := feishubinding.NewPipelineFactory(feishubinding.PipelineFactoryOptions{
+		Engine:    engine,
+		Transport: feishutransport.NewFactory(),
+		MediaRoot: filepath.Join(root, "media"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	manager, err := feishubinding.NewManager(feishubinding.ManagerOptions{
+		Agents:   engine.Agents(),
+		Provider: provider,
+		Workers:  workers,
+		Messages: feishuSvc.MessageBus(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return manager, nil
 }
 
 func sandboxServiceOptions(cfg config.SandboxConfig) ([]agent.ServiceOption, error) {

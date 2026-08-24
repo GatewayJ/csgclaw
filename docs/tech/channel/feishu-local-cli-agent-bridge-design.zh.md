@@ -1,5 +1,10 @@
 # Feishu 与本地 Coding Agent Runtime 通用桥接架构方案
 
+> 状态：历史阶段性设计，不代表当前运行拓扑。当前 CSGClaw-hosted Codex Feishu Binding 已直接
+> 接入 Agent Engine，并已实现 `feishu.MessageBus -> binding.Manager -> 目标 Worker Intake` 的
+> 跨 Bot 本地 handoff。自提及仍按自消息过滤，不会创建新 Turn。现行架构与消息语义以
+> [飞书直连渠道与 Agent Engine 当前架构](agent-engine-channel-integration.zh.md) 为准。
+
 本文档用于约束下一阶段开发：在不破坏当前 PicoClaw 运行时直连 Feishu 能力的前提下，把 CSGClaw 内已有的 participant、IM、Feishu Service、Codex Runtime 和 Codex Bridge 收敛成一条可扩展的本地 Coding Agent runtime 桥接路径。
 
 结论先行：

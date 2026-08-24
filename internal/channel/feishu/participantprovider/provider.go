@@ -31,14 +31,25 @@ func (p *ParticipantConfigProvider) BotConfig(participantID string) (feishu.AppC
 }
 
 func (p *ParticipantConfigProvider) BotConfigForAgent(agentID string) (string, feishu.AppConfig, bool) {
+	participantID, app, ok, err := p.BotConfigForAgentWithError(agentID)
+	if err != nil {
+		slog.Warn("read feishu participant config failed", "agent_id", strings.TrimSpace(agentID), "error", err)
+		return "", feishu.AppConfig{}, false
+	}
+	return participantID, app, ok
+}
+
+// BotConfigForAgentWithError lets the hosted Binding Manager distinguish an
+// authoritative missing binding from a transient store read failure. The
+// legacy three-result method remains available to Runtime-native channels.
+func (p *ParticipantConfigProvider) BotConfigForAgentWithError(agentID string) (string, feishu.AppConfig, bool, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return "", feishu.AppConfig{}, false
+		return "", feishu.AppConfig{}, false, nil
 	}
 	store, err := p.openStore()
 	if err != nil {
-		slog.Warn("read feishu participant config failed", "agent_id", agentID, "error", err)
-		return "", feishu.AppConfig{}, false
+		return "", feishu.AppConfig{}, false, err
 	}
 	items := store.List(participant.ListOptions{
 		Channel: participant.ChannelFeishu,
@@ -46,7 +57,7 @@ func (p *ParticipantConfigProvider) BotConfigForAgent(agentID string) (string, f
 		AgentID: agentID,
 	})
 	if len(items) == 0 {
-		return "", feishu.AppConfig{}, false
+		return "", feishu.AppConfig{}, false, nil
 	}
 
 	canonicalID := agent.ParticipantIDForAgent("", agentID)
@@ -63,7 +74,7 @@ func (p *ParticipantConfigProvider) BotConfigForAgent(agentID string) (string, f
 					"participant_id", canonicalID,
 					"ignored_participant_id", fallback.ID)
 			}
-			return items[i].ID, app, true
+			return items[i].ID, app, true, nil
 		}
 		if fallback == nil {
 			candidate := items[i]
@@ -71,17 +82,17 @@ func (p *ParticipantConfigProvider) BotConfigForAgent(agentID string) (string, f
 		}
 	}
 	if fallback == nil {
-		return "", feishu.AppConfig{}, false
+		return "", feishu.AppConfig{}, false, nil
 	}
 	app, ok := appConfigFromParticipant(*fallback)
 	if !ok {
-		return "", feishu.AppConfig{}, false
+		return "", feishu.AppConfig{}, false, nil
 	}
 	slog.Debug("using feishu participant for agent",
 		"agent_id", agentID,
 		"participant_id", fallback.ID,
 		"canonical_participant_id", canonicalID)
-	return fallback.ID, app, true
+	return fallback.ID, app, true, nil
 }
 
 func (p *ParticipantConfigProvider) DefaultAdminOpenID() (string, bool) {
@@ -178,7 +189,10 @@ func appConfigFromParticipant(item apitypes.Participant) (feishu.AppConfig, bool
 	if appID == "" || appSecret == "" {
 		return feishu.AppConfig{}, false
 	}
-	return feishu.AppConfig{AppID: appID, AppSecret: appSecret}, true
+	return feishu.AppConfig{
+		AppID:     appID,
+		AppSecret: appSecret,
+	}, true
 }
 
 func openIDFromHumanParticipant(item apitypes.Participant) (string, bool) {

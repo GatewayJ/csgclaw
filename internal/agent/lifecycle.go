@@ -99,6 +99,13 @@ type BindingActivator interface {
 	RefreshAgentChannel(context.Context, Agent, string) error
 }
 
+// StoppedAgentBindingActivator is an optional channel capability. Agent keeps
+// the policy transport-neutral; a binding-owned channel can remain connected
+// while its Runtime is stopped and report unavailability through Agent Engine.
+type StoppedAgentBindingActivator interface {
+	CanRefreshStoppedAgentBinding(string) bool
+}
+
 type ExternalBindingActivation string
 
 const (
@@ -152,12 +159,13 @@ func (s *Service) ApplyExternalBinding(ctx context.Context, id, channel string) 
 		return Agent{}, "", fmt.Errorf("agent %q not found", id)
 	}
 	if strings.EqualFold(strings.TrimSpace(got.RuntimeKind), RuntimeKindCodex) {
-		if !shouldEnsureLifecycle(got) {
-			return Agent{}, "", fmt.Errorf("agent %q must be running with a complete profile to refresh external bindings", got.ID)
-		}
 		activator := s.bindingActivator()
 		if activator == nil {
 			return Agent{}, "", fmt.Errorf("agent binding activator is not configured")
+		}
+		policy, keepsBindingAlive := activator.(StoppedAgentBindingActivator)
+		if !shouldEnsureLifecycle(got) && (!keepsBindingAlive || !policy.CanRefreshStoppedAgentBinding(channel)) {
+			return Agent{}, "", fmt.Errorf("agent %q must be running with a complete profile to refresh external bindings", got.ID)
 		}
 		if err := activator.RefreshAgentChannel(ctx, got, channel); err != nil {
 			return Agent{}, "", err

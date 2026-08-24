@@ -1384,7 +1384,6 @@ func (s *Service) SendMessage(req im.CreateMessageRequest) (im.Message, error) {
 		s.messageBus.Publish(MessageEvent{
 			Type:         MessageEventTypeMessageCreated,
 			RoomID:       roomID,
-			SenderBotID:  senderID,
 			MentionBotID: mentionID,
 			Message:      &message,
 		})

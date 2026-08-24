@@ -1,6 +1,7 @@
 package feishu
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +27,21 @@ func TestFeishuMessageBusPublishesToSubscribers(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for feishu message event")
+	}
+}
+
+func TestFeishuMessageBusPublishAndCancelAreSafeConcurrently(t *testing.T) {
+	bus := NewMessageBus()
+	for index := 0; index < 100; index++ {
+		_, cancel := bus.Subscribe()
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			bus.Publish(MessageEvent{Type: MessageEventTypeMessageCreated})
+		}()
+		cancel()
+		wg.Wait()
 	}
 }
 

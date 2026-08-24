@@ -6697,7 +6697,6 @@ func TestHandleFeishuEventsStreamsMessageBusEvents(t *testing.T) {
 	feishuSvc.MessageBus().Publish(feishu.MessageEvent{
 		Type:         feishu.MessageEventTypeMessageCreated,
 		RoomID:       "oc_alpha",
-		SenderBotID:  "u-worker",
 		MentionBotID: "u-manager",
 		Message: &im.Message{
 			ID:       "om_1",
@@ -6717,8 +6716,8 @@ func TestHandleFeishuEventsStreamsMessageBusEvents(t *testing.T) {
 	if !strings.Contains(body, `"room_id":"oc_alpha"`) {
 		t.Fatalf("body = %q, want room_id", body)
 	}
-	if !strings.Contains(body, `"sender_bot_id":"u-worker"`) || !strings.Contains(body, `"mention_bot_id":"u-manager"`) {
-		t.Fatalf("body = %q, want bot id bridge metadata", body)
+	if !strings.Contains(body, `"mention_bot_id":"u-manager"`) {
+		t.Fatalf("body = %q, want mentioned bot bridge metadata", body)
 	}
 	if strings.Contains(body, "om_ignored") || strings.Contains(body, "oc_ignored") {
 		t.Fatalf("body = %q, want only u-manager events", body)

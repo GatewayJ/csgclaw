@@ -27,8 +27,6 @@ const (
 	localChannel               = csgclawchannel.ChannelID
 	turnPlaceholderText        = "\u200b"
 	turnCompleteText           = "Done."
-	processingPinEmoji         = "Pin"
-	processingReactionTimeout  = 2 * time.Second
 	participantWorkTTLSeconds  = 15
 	participantWorkRenewEvery  = 5 * time.Second
 	participantWorkStopTimeout = 2 * time.Second
@@ -403,16 +401,12 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent) error {
 	defer finishTurn()
 	ctx = turnCtx
 	eventStartedAt := time.Now()
-	cleanupProcessingReaction := w.startProcessingReaction(ctx, evt)
-	defer cleanupProcessingReaction(context.Background())
 	if cmd, ok, err := slashcommand.Parse(evt.Text); err == nil && ok && slashcommand.IsNewConversationCommand(cmd) {
-		cleanupProcessingReaction(ctx)
 		return w.handleConversationReset(ctx, evt)
 	} else if err != nil {
 		renderer := runtimebridge.NewTurnRenderer()
 		renderer.SetLocale(evt.Locale)
 		renderer.SetPromptError(err.Error())
-		cleanupProcessingReaction(ctx)
 		_, err := w.flushTurn(ctx, evt.RoomID, "", renderer, codexFinalDeliveryMetadata(evt.MessageID))
 		return err
 	}
@@ -421,7 +415,6 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent) error {
 		renderer := runtimebridge.NewTurnRenderer()
 		renderer.SetLocale(evt.Locale)
 		renderer.SetPromptError(err.Error())
-		cleanupProcessingReaction(ctx)
 		_, err := w.flushTurn(ctx, evt.RoomID, "", renderer, codexFinalDeliveryMetadata(evt.MessageID))
 		return err
 	}
@@ -482,7 +475,6 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent) error {
 	structuredActivated := false
 	turnSucceeded := false
 	flushTurn := func() (string, error) {
-		cleanupProcessingReaction(ctx)
 		if w.isSuperseded(evt) {
 			slog.Debug("codex bridge suppressed superseded turn final",
 				"bot_id", w.binding.BotID,
@@ -688,7 +680,6 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent) error {
 				return ctx.Err()
 			}
 			if w.isSuperseded(evt) {
-				cleanupProcessingReaction(ctx)
 				// Prompt completion is published through the event sink before the
 				// Prompt call returns, but buffered sink consumption is asynchronous.
 				// Drain that terminal event before the next queued turn starts so
@@ -734,7 +725,6 @@ func (w *worker) handleEvent(ctx context.Context, evt BotEvent) error {
 					break
 				}
 				if w.isSuperseded(evt) {
-					cleanupProcessingReaction(ctx)
 					return nil
 				}
 				if generatedRootID == "" && len(renderer.FinalMessages()) == 0 {
@@ -1177,102 +1167,6 @@ func runtimeErrorMessageMetadata(metadata map[string]any, code string) map[strin
 	namespace["presentation_version"] = 2
 	out[runtimebridge.CSGClawMetadataKey] = namespace
 	return out
-}
-
-func (w *worker) startProcessingReaction(ctx context.Context, evt BotEvent) func(context.Context) {
-	if !strings.EqualFold(strings.TrimSpace(evt.Channel), "feishu") {
-		return func(context.Context) {}
-	}
-	messageID := strings.TrimSpace(evt.MessageID)
-	if messageID == "" {
-		return func(context.Context) {}
-	}
-	reactor, ok := w.service.client.(MessageReactor)
-	if !ok {
-		return func(context.Context) {}
-	}
-
-	addCtx, cancelAdd := contextWithDefaultTimeout(ctx, processingReactionTimeout)
-	resultCh := make(chan processingReactionResult, 1)
-	go func() {
-		defer cancelAdd()
-		resp, err := reactor.AddMessageReaction(addCtx, w.binding.BotID, AddMessageReactionRequest{
-			MessageID: messageID,
-			EmojiType: processingPinEmoji,
-		})
-		if err != nil {
-			slog.Debug("codex bridge add processing reaction failed",
-				"bot_id", w.binding.BotID,
-				"room_id", strings.TrimSpace(evt.RoomID),
-				"message_id", messageID,
-				"emoji_type", processingPinEmoji,
-				"error", err,
-			)
-			resultCh <- processingReactionResult{}
-			return
-		}
-		resultCh <- processingReactionResult{reactionID: strings.TrimSpace(resp.ReactionID)}
-	}()
-
-	var once sync.Once
-	return func(cleanupCtx context.Context) {
-		once.Do(func() {
-			cancelAdd()
-			go w.deleteProcessingReaction(cleanupCtx, evt, reactor, messageID, resultCh)
-		})
-	}
-}
-
-type processingReactionResult struct {
-	reactionID string
-}
-
-func (w *worker) deleteProcessingReaction(cleanupCtx context.Context, evt BotEvent, reactor MessageReactor, messageID string, resultCh <-chan processingReactionResult) {
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), processingReactionTimeout)
-	defer cancelWait()
-
-	var result processingReactionResult
-	select {
-	case result = <-resultCh:
-	case <-waitCtx.Done():
-		slog.Debug("codex bridge processing reaction cleanup timed out",
-			"bot_id", w.binding.BotID,
-			"room_id", strings.TrimSpace(evt.RoomID),
-			"message_id", messageID,
-			"emoji_type", processingPinEmoji,
-		)
-		return
-	}
-	reactionID := strings.TrimSpace(result.reactionID)
-	if reactionID == "" {
-		return
-	}
-
-	deleteCtx, cancelDelete := contextWithDefaultTimeout(cleanupCtx, processingReactionTimeout)
-	defer cancelDelete()
-	if err := reactor.DeleteMessageReaction(deleteCtx, w.binding.BotID, DeleteMessageReactionRequest{
-		MessageID:  messageID,
-		ReactionID: reactionID,
-	}); err != nil {
-		slog.Debug("codex bridge delete processing reaction failed",
-			"bot_id", w.binding.BotID,
-			"room_id", strings.TrimSpace(evt.RoomID),
-			"message_id", messageID,
-			"reaction_id", reactionID,
-			"emoji_type", processingPinEmoji,
-			"error", err,
-		)
-	}
-}
-
-func contextWithDefaultTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if _, ok := ctx.Deadline(); ok {
-		return ctx, func() {}
-	}
-	return context.WithTimeout(ctx, timeout)
 }
 
 func (w *worker) sendMessage(ctx context.Context, roomID, threadRootID, text string) (string, error) {

@@ -497,8 +497,9 @@ func (f *fakeLifecycleObserver) StopAgent(agentID string) {
 }
 
 type fakeBindingActivator struct {
-	refreshCalls []bindingRefreshCall
-	refreshErr   error
+	refreshCalls        []bindingRefreshCall
+	refreshErr          error
+	refreshWhileStopped map[string]bool
 }
 
 type bindingRefreshCall struct {
@@ -509,6 +510,10 @@ type bindingRefreshCall struct {
 func (f *fakeBindingActivator) RefreshAgentChannel(_ context.Context, a Agent, channel string) error {
 	f.refreshCalls = append(f.refreshCalls, bindingRefreshCall{agent: a, channel: channel})
 	return f.refreshErr
+}
+
+func (f *fakeBindingActivator) CanRefreshStoppedAgentBinding(channel string) bool {
+	return f.refreshWhileStopped[strings.ToLower(strings.TrimSpace(channel))]
 }
 
 type cancelOnWrite struct {
@@ -7414,8 +7419,8 @@ func TestApplyExternalBindingRefreshesCodexChannelWithoutStartingRuntime(t *test
 	}
 }
 
-func TestApplyExternalBindingRejectsStoppedCodexAgent(t *testing.T) {
-	activator := &fakeBindingActivator{}
+func TestApplyExternalBindingRefreshesStoppedCodexFeishuBinding(t *testing.T) {
+	activator := &fakeBindingActivator{refreshWhileStopped: map[string]bool{"feishu": true}}
 	svc, err := NewService(
 		config.ModelConfig{},
 		config.ServerConfig{}, "manager-image:test", "",
@@ -7441,8 +7446,42 @@ func TestApplyExternalBindingRejectsStoppedCodexAgent(t *testing.T) {
 		ProfileComplete: true,
 	}
 
-	if _, _, err := svc.ApplyExternalBinding(context.Background(), ManagerUserID, "feishu"); err == nil {
-		t.Fatal("ApplyExternalBinding() error = nil, want stopped agent rejection")
+	got, activation, err := svc.ApplyExternalBinding(context.Background(), ManagerUserID, "feishu")
+	if err != nil {
+		t.Fatalf("ApplyExternalBinding() error = %v", err)
+	}
+	if got.ID != ManagerUserID || activation != ExternalBindingActivationChannelRefreshed {
+		t.Fatalf("ApplyExternalBinding() = (%q, %q), want stopped Agent binding refresh", got.ID, activation)
+	}
+	if len(activator.refreshCalls) != 1 || activator.refreshCalls[0].channel != "feishu" {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want one Feishu refresh", activator.refreshCalls)
+	}
+}
+
+func TestApplyExternalBindingRejectsStoppedCodexChannelWithoutBindingOwnedLifetime(t *testing.T) {
+	activator := &fakeBindingActivator{refreshWhileStopped: map[string]bool{"feishu": true}}
+	svc, err := NewService(
+		config.ModelConfig{},
+		config.ServerConfig{}, "manager-image:test", "",
+		WithBindingActivator(activator),
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindCodex}),
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents[ManagerUserID] = Agent{
+		ID:              ManagerUserID,
+		Name:            ManagerName,
+		Role:            RoleManager,
+		RuntimeID:       "rt-manager",
+		RuntimeKind:     RuntimeKindCodex,
+		Status:          string(agentruntime.StateStopped),
+		AgentProfile:    AgentProfile{Name: ManagerName, Provider: ProviderCodex, ModelID: "gpt-5.4", ProfileComplete: true},
+		ProfileComplete: true,
+	}
+
+	if _, _, err := svc.ApplyExternalBinding(context.Background(), ManagerUserID, "runtime-owned"); err == nil {
+		t.Fatal("ApplyExternalBinding() error = nil, want stopped Agent rejection")
 	}
 	if len(activator.refreshCalls) != 0 {
 		t.Fatalf("RefreshAgentChannel() calls = %+v, want none", activator.refreshCalls)

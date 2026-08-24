@@ -1433,9 +1433,8 @@ func TestFeishuParticipantEventsRouteUsesBotOpenIDForAppIDParticipant(t *testing
 		return strings.Contains(rec.Body.String(), ": connected")
 	})
 	feishuSvc.MessageBus().Publish(feishu.MessageEvent{
-		Type:        feishu.MessageEventTypeMessageCreated,
-		RoomID:      "oc_alpha",
-		SenderBotID: "manager",
+		Type:   feishu.MessageEventTypeMessageCreated,
+		RoomID: "oc_alpha",
 		Message: &im.Message{
 			ID:       "om_dev",
 			SenderID: "ou_manager",
