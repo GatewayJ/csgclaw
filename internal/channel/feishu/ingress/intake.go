@@ -178,23 +178,39 @@ func (i *Intake) HandleEvent(_ context.Context, event transport.Event) error {
 		identity := i.identity
 		i.identityMu.RUnlock()
 		message, accepted, err := normalizeMessage(i.binding, event, identity)
-		if err != nil || !accepted {
+		if err != nil {
+			slog.Warn("normalize Feishu message event failed", eventLogAttrs(i.binding, event, "error", err)...)
 			return err
 		}
-		if !i.acceptFresh(event, message.ConversationKey) || !i.dedup.Claim(message.Source) {
+		if !accepted {
+			slog.Debug("ignore Feishu message event", eventLogAttrs(i.binding, event, "reason", "not accepted")...)
 			return nil
 		}
+		if !i.acceptFresh(event, message.ConversationKey) {
+			return nil
+		}
+		if !i.dedup.Claim(message.Source) {
+			slog.Debug("drop duplicate Feishu message event", inboundMessageLogAttrs(message)...)
+			return nil
+		}
+		slog.Debug("admit Feishu message event", inboundMessageLogAttrs(message)...)
 		i.admit(intakeItem{message: &message})
 		return nil
 
 	case transport.EventCardAction:
 		card, err := normalizeCardAction(i.binding, event, i.runner, i.state)
 		if err != nil {
+			slog.Warn("normalize Feishu card action failed", eventLogAttrs(i.binding, event, "error", err)...)
 			return err
 		}
-		if !i.acceptFresh(event, firstNonEmpty(card.conversationKey, card.source.ChatID)) || !i.dedup.Claim(card.source) {
+		if !i.acceptFresh(event, firstNonEmpty(card.conversationKey, card.source.ChatID)) {
 			return nil
 		}
+		if !i.dedup.Claim(card.source) {
+			slog.Debug("drop duplicate Feishu card action", cardLogAttrs(card)...)
+			return nil
+		}
+		slog.Debug("admit Feishu card action", cardLogAttrs(card)...)
 		i.admit(intakeItem{card: &card})
 		return nil
 
@@ -203,20 +219,33 @@ func (i *Intake) HandleEvent(_ context.Context, event transport.Event) error {
 		identity := i.identity
 		i.identityMu.RUnlock()
 		comment, accepted, err := normalizeComment(i.binding, event, identity)
-		if err != nil || !accepted {
+		if err != nil {
+			slog.Warn("normalize Feishu comment event failed", eventLogAttrs(i.binding, event, "error", err)...)
 			return err
 		}
-		if i.comments == nil {
-			return ErrCommentUnsupported
-		}
-		if !i.acceptFresh(event, comment.ConversationKey) || !i.dedup.Claim(comment.Source) {
+		if !accepted {
+			slog.Debug("ignore Feishu comment event", eventLogAttrs(i.binding, event, "reason", "not accepted")...)
 			return nil
 		}
+		if i.comments == nil {
+			slog.Warn("drop Feishu comment event because comment adapter is unavailable", eventLogAttrs(i.binding, event)...)
+			return ErrCommentUnsupported
+		}
+		if !i.acceptFresh(event, comment.ConversationKey) {
+			return nil
+		}
+		if !i.dedup.Claim(comment.Source) {
+			slog.Debug("drop duplicate Feishu comment event", commentLogAttrs(comment, "agent_id", i.binding.AgentID)...)
+			return nil
+		}
+		slog.Debug("admit Feishu comment event", commentLogAttrs(comment, "agent_id", i.binding.AgentID)...)
 		i.admit(intakeItem{comment: &comment})
 		return nil
 
 	default:
-		return fmt.Errorf("unsupported Feishu ingress event %q", event.Kind)
+		err := fmt.Errorf("unsupported Feishu ingress event %q", event.Kind)
+		slog.Warn("drop unsupported Feishu ingress event", eventLogAttrs(i.binding, event, "error", err)...)
+		return err
 	}
 }
 
@@ -227,7 +256,8 @@ func (i *Intake) admit(item intakeItem) {
 		// There is intentionally no durable fallback. A saturated process drops
 		// new ingress instead of replaying an old message after the user context
 		// has moved on.
-		slog.Warn("drop Feishu event because in-memory intake is full", "binding_id", i.binding.ID)
+		slog.Warn("drop Feishu event because in-memory intake is full",
+			intakeItemLogAttrs(i.binding, item, "queue_size", len(i.queue), "queue_capacity", cap(i.queue))...)
 	}
 }
 
@@ -242,11 +272,13 @@ func (i *Intake) acceptFresh(event transport.Event, scope string) bool {
 		now.Sub(occurredAt) > i.maxEventAge ||
 		occurredAt.After(now.Add(defaultFutureClockSkew)) {
 		slog.Warn("drop stale Feishu event",
-			"binding_id", i.binding.ID,
-			"event_id", event.EventID,
-			"occurred_at", occurredAt,
-			"received_at", now,
-		)
+			eventLogAttrs(i.binding, event,
+				"scope", scope,
+				"occurred_at", occurredAt,
+				"received_at", now,
+				"started_at", i.startedAt,
+				"max_event_age", i.maxEventAge,
+			)...)
 		return false
 	}
 	scope = strings.TrimSpace(scope)
@@ -257,12 +289,11 @@ func (i *Intake) acceptFresh(event transport.Event, scope string) bool {
 	defer i.clockMu.Unlock()
 	if latest := i.latest[scope]; !latest.IsZero() && occurredAt.Before(latest) {
 		slog.Warn("drop out-of-order Feishu event",
-			"binding_id", i.binding.ID,
-			"event_id", event.EventID,
-			"scope", scope,
-			"occurred_at", occurredAt,
-			"latest_at", latest,
-		)
+			eventLogAttrs(i.binding, event,
+				"scope", scope,
+				"occurred_at", occurredAt,
+				"latest_at", latest,
+			)...)
 		return false
 	}
 	if len(i.latest) >= maxConversationClocks {
@@ -328,11 +359,10 @@ func (i *Intake) process(ctx context.Context, item intakeItem) {
 		message := *item.message
 		if hydrated, hydrateErr := hydrateQuotedMessage(ctx, i.messages, message); hydrateErr != nil {
 			slog.Warn("load quoted Feishu message failed",
-				"binding_id", i.binding.ID,
-				"message_id", message.Source.MessageID,
-				"quoted_message_id", firstNonEmpty(message.Source.ParentID, message.Source.RootID),
-				"error", hydrateErr,
-			)
+				inboundMessageLogAttrs(message,
+					"quoted_message_id", firstNonEmpty(message.Source.ParentID, message.Source.RootID),
+					"error", hydrateErr,
+				)...)
 		} else {
 			message = hydrated
 		}
@@ -361,7 +391,7 @@ func (i *Intake) process(ctx context.Context, item intakeItem) {
 		}
 	}
 	if err != nil && ctx.Err() == nil {
-		slog.Warn("process Feishu inbound event failed", "binding_id", i.binding.ID, "error", err)
+		slog.Warn("process Feishu inbound event failed", intakeItemLogAttrs(i.binding, item, "error", err)...)
 	}
 }
 

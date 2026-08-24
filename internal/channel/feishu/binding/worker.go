@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -98,13 +99,16 @@ func (w *pipelineWorker) Start(ctx context.Context) error {
 	workerCtx, cancel := context.WithCancel(ctx)
 	w.mu.Unlock()
 
+	slog.Debug("start Feishu binding worker", resolvedLogAttrs(w.resolved)...)
 	sink := &deferredSink{}
+	slog.Debug("create Feishu transport adapter", resolvedLogAttrs(w.resolved)...)
 	adapter, err := w.factory.transport.New(transport.Config{
 		AppID:     w.resolved.App.AppID,
 		AppSecret: w.resolved.App.AppSecret,
 	}, sink)
 	if err != nil {
 		cancel()
+		slog.Warn("create Feishu transport adapter failed", resolvedLogAttrs(w.resolved, "error", err)...)
 		return err
 	}
 	var intake *ingress.Intake
@@ -121,6 +125,7 @@ func (w *pipelineWorker) Start(ctx context.Context) error {
 	if err := files.CleanupStaging(stagingRoot); err != nil {
 		return fail(fmt.Errorf("clean Feishu attachment staging for binding %q: %w", w.resolved.Binding.ID, err))
 	}
+	slog.Debug("cleaned Feishu attachment staging", resolvedLogAttrs(w.resolved, "staging_root", stagingRoot)...)
 	preparer := &files.Preparer{
 		Downloader: adapter,
 		Files:      w.factory.engine.Conversations(w.resolved.Binding.AgentID).Files(),
@@ -162,16 +167,27 @@ func (w *pipelineWorker) Start(ctx context.Context) error {
 		if strings.TrimSpace(identity.OpenID) == "" {
 			return fail(fmt.Errorf("prepare Feishu binding %q: bot open_id is required for exact mention filtering", w.resolved.Binding.ID))
 		}
+		slog.Debug("prepared Feishu binding bot identity",
+			resolvedLogAttrs(w.resolved,
+				"bot_open_id", identity.OpenID,
+				"bot_name", identity.Name,
+			)...)
 		intake.SetIdentity(identity)
 	}
 	sink.Set(intake)
 	if err := adapter.Start(workerCtx); err != nil {
+		slog.Warn("start Feishu transport adapter failed", resolvedLogAttrs(w.resolved, "error", err)...)
 		return fail(err)
 	}
 	identity := adapter.Identity()
 	if strings.TrimSpace(identity.OpenID) == "" {
 		return fail(fmt.Errorf("start feishu binding %q: bot open_id is required for exact mention filtering", w.resolved.Binding.ID))
 	}
+	slog.Debug("started Feishu transport adapter",
+		resolvedLogAttrs(w.resolved,
+			"bot_open_id", identity.OpenID,
+			"bot_name", identity.Name,
+		)...)
 	intake.SetIdentity(identity)
 	// Events observed during adapter.Start may enter the bounded memory buffer,
 	// but execution starts only after the binding identity is ready.
@@ -181,9 +197,11 @@ func (w *pipelineWorker) Start(ctx context.Context) error {
 	if err := intake.Activate(); err != nil {
 		return fail(fmt.Errorf("activate Feishu binding %q ingress: %w", w.resolved.Binding.ID, err))
 	}
+	slog.Debug("activated Feishu ingress intake", resolvedLogAttrs(w.resolved)...)
 	if err := dispatcher.Start(workerCtx); err != nil {
 		return fail(err)
 	}
+	slog.Debug("started Feishu delivery dispatcher", resolvedLogAttrs(w.resolved)...)
 
 	w.mu.Lock()
 	w.ctx = workerCtx
@@ -193,6 +211,7 @@ func (w *pipelineWorker) Start(ctx context.Context) error {
 	w.runner = runner
 	w.dispatcher = dispatcher
 	w.mu.Unlock()
+	slog.Debug("Feishu binding worker ready", resolvedLogAttrs(w.resolved)...)
 	return nil
 }
 
@@ -241,6 +260,7 @@ func (w *pipelineWorker) Close(ctx context.Context) error {
 	if cancel == nil {
 		return nil
 	}
+	slog.Debug("close Feishu binding worker", resolvedLogAttrs(w.resolved)...)
 	cancel()
 	if intake != nil {
 		intake.Close()
@@ -267,6 +287,11 @@ func (w *pipelineWorker) Close(ctx context.Context) error {
 		if err := adapter.Close(waitCtx); err != nil {
 			closeErr = errors.Join(closeErr, err)
 		}
+	}
+	if closeErr != nil {
+		slog.Warn("close Feishu binding worker failed", resolvedLogAttrs(w.resolved, "error", closeErr)...)
+	} else {
+		slog.Debug("closed Feishu binding worker", resolvedLogAttrs(w.resolved)...)
 	}
 	return closeErr
 }

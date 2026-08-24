@@ -142,7 +142,8 @@ func (d *Dispatcher) drain(ctx context.Context) {
 		}
 		if _, stale := superseded[intent.ID]; stale {
 			if err := d.state.MarkFailed(intent.ID, ErrDeliverySuperseded); err != nil {
-				slog.Warn("record superseded Feishu presentation delivery failed", "intent_id", intent.ID, "error", err)
+				slog.Error("record superseded Feishu presentation delivery failed",
+					intentLogAttrs(intent, "error", err)...)
 				blockedScopes[lane] = struct{}{}
 			}
 			continue
@@ -153,28 +154,36 @@ func (d *Dispatcher) drain(ctx context.Context) {
 		}
 		if d.reserveTerminalMarkdownEdit(intent) {
 			if err := d.state.MarkFailed(intent.ID, ErrPresentationEditBudgetReserved); err != nil {
-				slog.Warn("reserve Feishu terminal presentation edit failed", "intent_id", intent.ID, "error", err)
+				slog.Error("reserve Feishu terminal presentation edit failed",
+					intentLogAttrs(intent, "error", err)...)
 				blockedScopes[lane] = struct{}{}
 			}
 			continue
 		}
 		if err := d.state.Begin(intent.ID); err != nil {
-			slog.Warn("begin Feishu delivery failed", "intent_id", intent.ID, "error", err)
+			slog.Error("begin Feishu delivery failed", intentLogAttrs(intent, "error", err)...)
 			blockedScopes[lane] = struct{}{}
 			continue
 		}
+		slog.Debug("dispatch Feishu delivery intent", intentLogAttrs(intent)...)
 		delivered, err := d.deliver(ctx, intent)
 		if err != nil {
 			failedAt := time.Now()
 			var markErr error
 			retry := false
+			var nextAttemptAt time.Time
 			if terminalMarkdownEditLimit(intent, err) {
 				markErr = d.state.MarkFailed(intent.ID, err)
 				if markErr == nil {
 					if fallbackErr := d.enqueueTerminalCompletionFallback(intent); fallbackErr != nil {
-						slog.Warn("enqueue Feishu terminal completion fallback failed", "intent_id", intent.ID, "error", fallbackErr)
+						slog.Warn("enqueue Feishu terminal completion fallback failed",
+							intentLogAttrs(intent,
+								"delivery_error", err,
+								"error", fallbackErr,
+							)...)
 					} else {
-						slog.Warn("Feishu terminal presentation reached edit limit; queued completion fallback", "intent_id", intent.ID)
+						slog.Warn("Feishu terminal presentation reached edit limit; queued completion fallback",
+							deliveryErrorLogAttrs(intent, err)...)
 						d.Notify()
 					}
 				}
@@ -182,28 +191,43 @@ func (d *Dispatcher) drain(ctx context.Context) {
 				markErr = d.state.MarkFailed(intent.ID, err)
 			} else if errors.Is(err, ErrDependencyPending) || retryableDelivery(intent, err) {
 				retry = true
-				markErr = d.state.MarkRetryable(intent.ID, err, nextRetryAt(failedAt, d.interval, intent.Attempts+1))
+				nextAttemptAt = nextRetryAt(failedAt, d.interval, intent.Attempts+1)
+				markErr = d.state.MarkRetryable(intent.ID, err, nextAttemptAt)
 			} else {
 				// Permanent and unclassified failures are terminal.
 				// Delivery failure never causes the Agent turn to run again.
 				markErr = d.state.MarkFailed(intent.ID, err)
 			}
 			if markErr != nil {
-				slog.Warn("record Feishu delivery failure failed", "intent_id", intent.ID, "error", markErr)
+				slog.Error("record Feishu delivery failure failed",
+					deliveryErrorLogAttrs(intent, err, "record_error", markErr)...)
 				blockedScopes[lane] = struct{}{}
 			}
-			slog.Warn("Feishu delivery failed", "intent_id", intent.ID, "kind", intent.Kind, "attempt", intent.Attempts+1, "error", err)
+			d.logDeliveryFailure(intent, err, retry, nextAttemptAt)
 			if retry {
 				blockedScopes[lane] = struct{}{}
 			}
 			continue
 		}
 		if err := d.state.MarkDelivered(delivered); err != nil {
-			slog.Warn("record delivered Feishu intent failed", "intent_id", intent.ID, "error", err)
+			slog.Error("record delivered Feishu intent failed", intentLogAttrs(delivered, "error", err)...)
 			blockedScopes[lane] = struct{}{}
 			continue
 		}
+		slog.Debug("delivered Feishu intent", intentLogAttrs(delivered)...)
 	}
+}
+
+func (d *Dispatcher) logDeliveryFailure(intent channeltypes.DeliveryIntent, err error, retry bool, nextAttemptAt time.Time) {
+	attrs := deliveryErrorLogAttrs(intent, err, "retry", retry)
+	if !nextAttemptAt.IsZero() {
+		attrs = append(attrs, "next_attempt_at", nextAttemptAt)
+	}
+	if retry {
+		slog.Warn("Feishu delivery failed; will retry", attrs...)
+		return
+	}
+	slog.Error("Feishu delivery failed permanently", attrs...)
 }
 
 func (d *Dispatcher) reserveTerminalMarkdownEdit(intent channeltypes.DeliveryIntent) bool {

@@ -129,10 +129,16 @@ func (r *Runner) Submit(ctx context.Context, message channeltypes.InboundMessage
 	// The channel owns only work that has not crossed into Agent Engine. The
 	// transition to engineEntered uses this same lock, so a replacement either
 	// cancels preflight or leaves an Engine-visible Turn to AdmissionSupersede.
-	if previous != nil && !previous.engineEntered {
+	canceledPreviousPreflight := previous != nil && !previous.engineEntered
+	if canceledPreviousPreflight {
 		previous.cancel()
 	}
 	r.mu.Unlock()
+	slog.Debug("accepted Feishu turn",
+		messageLogAttrs(message,
+			"presentation_mode", mode,
+			"canceled_previous_preflight", canceledPreviousPreflight,
+		)...)
 	go r.run(runCtx, active, message)
 	return nil
 }
@@ -155,6 +161,11 @@ func (r *Runner) run(ctx context.Context, active *activeRun, message channeltype
 	cleanupFiles := func() {}
 	if len(message.Files) > 0 {
 		if r.files == nil {
+			slog.Warn("prepare Feishu turn files failed",
+				messageLogAttrs(message,
+					"error_code", agentengine.ErrorFileUnavailable,
+					"error", "Feishu attachment handling is unavailable",
+				)...)
 			if err := r.finalize(message, agentengine.TurnResult{
 				Status: agentengine.TurnFailed,
 				Error:  &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: "Feishu attachment handling is unavailable"},
@@ -169,6 +180,11 @@ func (r *Runner) run(ctx context.Context, active *activeRun, message channeltype
 		}
 		if err != nil {
 			cleanupFiles()
+			slog.Warn("prepare Feishu turn files failed",
+				messageLogAttrs(message,
+					"error_code", agentengine.ErrorCodeOf(err),
+					"error", err,
+				)...)
 			if finalizeErr := r.finalize(message, resultFromError(err), true, presentation.Rendered{}); finalizeErr != nil {
 				r.logFinalizeError(message, finalizeErr)
 			}
@@ -178,6 +194,10 @@ func (r *Runner) run(ctx context.Context, active *activeRun, message channeltype
 	}
 	defer cleanupFiles()
 	if len(input) == 0 {
+		slog.Warn("reject Feishu turn without supported input",
+			messageLogAttrs(message,
+				"error_code", agentengine.ErrorInvalidRequest,
+			)...)
 		if err := r.finalize(message, agentengine.TurnResult{
 			Status: agentengine.TurnFailed,
 			Error:  &agentengine.TurnError{Code: agentengine.ErrorInvalidRequest, Message: "Feishu message contains no supported text or attachment"},
@@ -187,16 +207,22 @@ func (r *Runner) run(ctx context.Context, active *activeRun, message channeltype
 		return
 	}
 	if err := r.state.BeginTurn(turnRecord(message, channeltypes.TurnRunning)); err != nil {
-		slog.Error("record running Feishu turn failed", "binding_id", message.Source.BindingID, "turn_id", message.TurnID, "error", err)
+		slog.Error("record running Feishu turn failed", messageLogAttrs(message, "error", err)...)
 		return
 	}
 	if !r.markEngineEntered(ctx, active) {
+		slog.Debug("cancel Feishu turn before Agent Engine run", messageLogAttrs(message)...)
 		if err := r.finalize(message, resultFromError(context.Canceled), true, presentation.Rendered{}); err != nil {
 			r.logFinalizeError(message, err)
 		}
 		return
 	}
 
+	slog.Debug("start Feishu Agent Engine run",
+		messageLogAttrs(message,
+			"input_part_count", len(input),
+			"presentation_mode", active.mode,
+		)...)
 	progress := presentation.NewProgress(active.mode, message.TurnID, message.ConversationKey,
 		strings.TrimSpace(message.Source.ThreadID))
 	result := r.engine.Conversations(message.AgentID).Run(ctx, agentengine.TurnRequest{
@@ -222,6 +248,7 @@ func (r *Runner) run(ctx context.Context, active *activeRun, message channeltype
 		return nil
 	}))
 	result = normalizeTerminalResult(result)
+	r.logTerminalResult(message, result)
 	if err := r.finalize(message, result, true, progress.Finalize(presentationResult(result))); err != nil {
 		r.logFinalizeError(message, err)
 	}
@@ -238,9 +265,14 @@ func (r *Runner) Reset(ctx context.Context, message channeltypes.InboundMessage)
 	if err := r.state.Put(turnRecord(message, channeltypes.TurnAccepted)); err != nil {
 		return fmt.Errorf("record accepted Feishu reset: %w", err)
 	}
+	slog.Debug("accepted Feishu reset", messageLogAttrs(message)...)
 	if active := r.current(message.ConversationKey); active != nil {
 		// Engine cannot see attachment preparation, so cancel it before crossing
 		// the atomic Reset boundary. A late Run observes its canceled context.
+		slog.Debug("cancel active Feishu turn before reset",
+			messageLogAttrs(message,
+				"active_turn_id", active.turnID,
+			)...)
 		active.cancel()
 	}
 	if err := r.state.BeginTurn(turnRecord(message, channeltypes.TurnRunning)); err != nil {
@@ -249,12 +281,16 @@ func (r *Runner) Reset(ctx context.Context, message channeltypes.InboundMessage)
 	err := r.engine.Conversations(message.AgentID).Reset(ctx, agentengine.ConversationKey(message.ConversationKey))
 	if err != nil {
 		result := resultFromError(err)
+		slog.Warn("Feishu Agent Engine reset failed",
+			messageLogAttrs(message, resultLogAttrs(result)...,
+			)...)
 		return r.finalize(message, result, false, presentation.Rendered{})
 	}
 	intent := r.textIntent(message, message.TurnID+":reset", 1, "Cleared my internal history for this conversation. The IM room messages were not cleared.")
 	if err := r.state.FinishTurn(message.TurnID, channeltypes.TurnSucceeded, intent); err != nil {
 		return fmt.Errorf("record terminal Feishu reset: %w", err)
 	}
+	slog.Debug("Feishu Agent Engine reset completed", messageLogAttrs(message, "status", channeltypes.TurnSucceeded)...)
 	r.notify()
 	return nil
 }
@@ -273,6 +309,11 @@ func (r *Runner) Cancel(ctx context.Context, agentID, conversationKey, turnID st
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	slog.Debug("cancel Feishu Agent Engine turn requested",
+		"agent_id", agentID,
+		"conversation_key", conversationKey,
+		"turn_id", turnID,
+	)
 	active := r.current(conversationKey)
 	if active != nil && active.agentID == agentID && active.turnID == turnID {
 		active.cancel()
@@ -656,10 +697,19 @@ func (r *Runner) notify() {
 
 func (r *Runner) logFinalizeError(message channeltypes.InboundMessage, err error) {
 	slog.Error("record terminal Feishu turn failed",
-		"binding_id", message.Source.BindingID,
-		"turn_id", message.TurnID,
-		"source_event_id", message.Source.EventID,
-		"error", err)
+		messageLogAttrs(message, "error", err)...)
+}
+
+func (r *Runner) logTerminalResult(message channeltypes.InboundMessage, result agentengine.TurnResult) {
+	attrs := messageLogAttrs(message, resultLogAttrs(result)...)
+	switch result.Status {
+	case agentengine.TurnSucceeded:
+		slog.Debug("Feishu Agent Engine run completed", attrs...)
+	case agentengine.TurnCanceled:
+		slog.Debug("Feishu Agent Engine run canceled", attrs...)
+	default:
+		slog.Warn("Feishu Agent Engine run failed", attrs...)
+	}
 }
 
 func (r *Runner) IsResetCommand(text string) bool {

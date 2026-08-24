@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -55,6 +56,15 @@ func (p *Preparer) Prepare(ctx context.Context, message channeltypes.InboundMess
 	if err := authorize(message.Files, p.Policy); err != nil {
 		return nil, func() {}, &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: err.Error()}
 	}
+	slog.Debug("prepare Feishu attachments",
+		"binding_id", message.Source.BindingID,
+		"agent_id", message.AgentID,
+		"turn_id", message.TurnID,
+		"source_event_id", message.Source.EventID,
+		"message_id", message.Source.MessageID,
+		"chat_id", message.Source.ChatID,
+		"file_count", len(message.Files),
+	)
 	root := strings.TrimSpace(p.Root)
 	if root == "" {
 		return nil, func() {}, &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: "Feishu attachment staging directory is unavailable"}
@@ -81,10 +91,23 @@ func (p *Preparer) Prepare(ctx context.Context, message channeltypes.InboundMess
 	cleanup := func() {
 		cleanupOnce.Do(func() {
 			for _, path := range paths {
-				_ = os.Remove(path)
+				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+					slog.Warn("clean Feishu attachment staging file failed",
+						attachmentMessageLogAttrs(message,
+							"staging_path", path,
+							"error", err,
+						)...)
+				}
 			}
 			for _, fileID := range fileIDs {
-				_ = p.Files.Delete(context.Background(), fileID)
+				if err := p.Files.Delete(context.Background(), fileID); err != nil &&
+					agentengine.ErrorCodeOf(err) != agentengine.ErrorFileNotFound {
+					slog.Warn("delete staged Feishu attachment from Agent Engine failed",
+						attachmentMessageLogAttrs(message,
+							"agent_file_id", fileID,
+							"error", err,
+						)...)
+				}
 			}
 			reservation.release()
 		})
@@ -110,6 +133,12 @@ func (p *Preparer) Prepare(ctx context.Context, message channeltypes.InboundMess
 			cleanup()
 			return nil, func() {}, &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: "Feishu attachment download limit is exhausted"}
 		}
+		slog.Debug("download Feishu attachment",
+			attachmentResourceLogAttrs(message, resource,
+				"download_type", kind,
+				"download_limit_bytes", downloadLimit,
+				"staging_path", path,
+			)...)
 		releaseDownload, err := p.quota.acquireDownload(ctx)
 		if err != nil {
 			cleanup()
@@ -133,37 +162,88 @@ func (p *Preparer) Prepare(ctx context.Context, message channeltypes.InboundMess
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, func() {}, err
 			}
+			slog.Warn("download Feishu attachment failed",
+				attachmentResourceLogAttrs(message, resource,
+					"download_type", kind,
+					"download_limit_bytes", downloadLimit,
+					"error", err,
+				)...)
 			return nil, func() {}, fileError("download Feishu attachment", err)
 		}
 		info, err := os.Lstat(path)
 		if err != nil {
 			cleanup()
+			slog.Warn("inspect Feishu attachment failed",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"error", err,
+				)...)
 			return nil, func() {}, fileError("inspect Feishu attachment", err)
 		}
 		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 			cleanup()
+			slog.Warn("reject downloaded Feishu attachment",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"size_bytes", info.Size(),
+					"reason", "not_regular_file",
+				)...)
 			return nil, func() {}, &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: "downloaded Feishu attachment is not a regular file"}
 		}
 		if result.BytesWritten < 0 || (result.BytesWritten > 0 && result.BytesWritten != info.Size()) {
 			cleanup()
+			slog.Warn("reject downloaded Feishu attachment",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"transport_bytes_written", result.BytesWritten,
+					"size_bytes", info.Size(),
+					"reason", "transport_size_mismatch",
+				)...)
 			return nil, func() {}, &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: "downloaded Feishu attachment size does not match the transport result"}
 		}
 		if resource.SizeBytes > 0 && info.Size() > resource.SizeBytes {
 			cleanup()
+			slog.Warn("reject downloaded Feishu attachment",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"size_bytes", info.Size(),
+					"reason", "declared_size_exceeded",
+				)...)
 			return nil, func() {}, &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: "downloaded Feishu attachment exceeds its declared size"}
 		}
 		if info.Size() > policy.MaxFileBytes {
 			cleanup()
+			slog.Warn("reject downloaded Feishu attachment",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"size_bytes", info.Size(),
+					"max_file_bytes", policy.MaxFileBytes,
+					"reason", "file_limit_exceeded",
+				)...)
 			return nil, func() {}, &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: fmt.Sprintf("Feishu attachment exceeds the %d byte limit", policy.MaxFileBytes)}
 		}
 		if info.Size() > policy.MaxTotal-actualTotal {
 			cleanup()
+			slog.Warn("reject downloaded Feishu attachment",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"size_bytes", info.Size(),
+					"current_total_bytes", actualTotal,
+					"max_total_bytes", policy.MaxTotal,
+					"reason", "total_limit_exceeded",
+				)...)
 			return nil, func() {}, &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: fmt.Sprintf("Feishu attachments exceed the %d byte total limit", policy.MaxTotal)}
 		}
 		actualTotal += info.Size()
 		hash, detectedType, err := inspectFile(path)
 		if err != nil {
 			cleanup()
+			slog.Warn("authorize Feishu attachment failed",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"size_bytes", info.Size(),
+					"error", err,
+				)...)
 			return nil, func() {}, fileError("authorize Feishu attachment", err)
 		}
 		mediaType := strings.TrimSpace(result.ContentType)
@@ -176,6 +256,14 @@ func (p *Preparer) Prepare(ctx context.Context, message channeltypes.InboundMess
 		source, err := os.Open(path)
 		if err != nil {
 			cleanup()
+			slog.Warn("open authorized Feishu attachment failed",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"size_bytes", info.Size(),
+					"mime_type", mediaType,
+					"sha256", hash,
+					"error", err,
+				)...)
 			return nil, func() {}, fileError("open authorized Feishu attachment", err)
 		}
 		created, createErr := p.Files.Create(ctx, agentengine.FileCreateRequest{
@@ -187,13 +275,35 @@ func (p *Preparer) Prepare(ctx context.Context, message channeltypes.InboundMess
 		closeErr := source.Close()
 		if createErr != nil || closeErr != nil {
 			cleanup()
+			slog.Warn("store authorized Feishu attachment failed",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"size_bytes", info.Size(),
+					"mime_type", mediaType,
+					"sha256", hash,
+					"error", errors.Join(createErr, closeErr),
+				)...)
 			return nil, func() {}, fileError("store authorized Feishu attachment", errors.Join(createErr, closeErr))
 		}
 		if strings.TrimSpace(created.ID) == "" {
 			cleanup()
+			slog.Warn("store authorized Feishu attachment returned empty file ID",
+				attachmentResourceLogAttrs(message, resource,
+					"staging_path", path,
+					"size_bytes", info.Size(),
+					"mime_type", mediaType,
+					"sha256", hash,
+				)...)
 			return nil, func() {}, &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: "authorized Feishu attachment file ID is unavailable"}
 		}
 		fileIDs = append(fileIDs, created.ID)
+		slog.Debug("stored Feishu attachment for Agent Engine",
+			attachmentResourceLogAttrs(message, resource,
+				"agent_file_id", created.ID,
+				"size_bytes", info.Size(),
+				"mime_type", mediaType,
+				"sha256", hash,
+			)...)
 		inputs = append(inputs, agentengine.InputPart{
 			Kind: agentengine.InputPartFile,
 			File: &agentengine.InputFile{ID: created.ID},
@@ -276,4 +386,30 @@ func fileError(operation string, err error) error {
 		message += ": " + err.Error()
 	}
 	return &agentengine.TurnError{Code: agentengine.ErrorFileUnavailable, Message: message}
+}
+
+func attachmentMessageLogAttrs(message channeltypes.InboundMessage, extra ...any) []any {
+	attrs := []any{
+		"binding_id", message.Source.BindingID,
+		"agent_id", message.AgentID,
+		"turn_id", message.TurnID,
+		"conversation_key", message.ConversationKey,
+		"source_event_id", message.Source.EventID,
+		"message_id", message.Source.MessageID,
+		"chat_id", message.Source.ChatID,
+		"thread_id", message.Source.ThreadID,
+		"file_count", len(message.Files),
+	}
+	return append(attrs, extra...)
+}
+
+func attachmentResourceLogAttrs(message channeltypes.InboundMessage, resource channeltypes.InboundFile, extra ...any) []any {
+	attrs := attachmentMessageLogAttrs(message,
+		"file_key", resource.ID,
+		"file_kind", resource.Kind,
+		"file_name", resource.Name,
+		"declared_size_bytes", resource.SizeBytes,
+		"resource_url", resource.URL,
+	)
+	return append(attrs, extra...)
 }

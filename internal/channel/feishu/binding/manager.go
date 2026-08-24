@@ -328,7 +328,7 @@ func (m *Manager) start(ctx context.Context, id string, resolved Resolved) error
 	}
 	m.active[id] = entry
 	m.mu.Unlock()
-	slog.Info("feishu binding started", "binding_id", id, "agent_id", resolved.Binding.AgentID, "participant_id", resolved.Binding.ParticipantID)
+	slog.Info("feishu binding started", resolvedLogAttrs(resolved)...)
 	return nil
 }
 
@@ -348,7 +348,7 @@ func (m *Manager) stop(ctx context.Context, id string, expected *activeWorker) e
 		delete(m.active, id)
 	}
 	m.mu.Unlock()
-	slog.Info("feishu binding stopped", "binding_id", id, "agent_id", current.resolved.Binding.AgentID, "participant_id", current.resolved.Binding.ParticipantID)
+	slog.Info("feishu binding stopped", resolvedLogAttrs(current.resolved)...)
 	return nil
 }
 
