@@ -626,7 +626,7 @@ The two Phase 2 sides can be developed and verified independently, Phase 3 owns 
 - Anonymous Sessions create no IM entities and preserve their public API contract.
 - Different Conversations can run concurrently while one Conversation remains serialized.
 - Built-in IM preserves Room, Thread, Mention, file, Activity, Stop, Work, interaction, and `/new` behavior.
-- Feishu preserves its currently supported text behavior without claiming file support.
+- Feishu preserves its text behavior and delivers successful Engine output files through Agent-scoped snapshots. Supported images use Feishu image messages; larger images and other artifacts use file messages within Feishu upload limits.
 - Binding creation, update, and deletion reconcile exactly one Channel Event Worker through idempotent operations.
 - Agent Stop, Recreate, and Runtime restart neither restart Channel Event Workers nor delete bindings or transcripts.
 - Agent API deletion removes or deactivates referenced bindings, stops their Event Workers, and preserves saved transcripts.

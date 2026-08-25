@@ -30,6 +30,7 @@ var (
 type DispatcherOptions struct {
 	State         *feishustate.Store
 	Adapter       transport.Adapter
+	Files         FileResolver
 	RetryInterval time.Duration
 }
 
@@ -38,12 +39,16 @@ type DispatcherOptions struct {
 type Dispatcher struct {
 	state    *feishustate.Store
 	adapter  transport.Adapter
+	files    FileResolver
 	interval time.Duration
 	wake     chan struct{}
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
+
+	uploadMu sync.Mutex
+	uploads  map[string]mediaUpload
 }
 
 func NewDispatcher(options DispatcherOptions) (*Dispatcher, error) {
@@ -60,6 +65,7 @@ func NewDispatcher(options DispatcherOptions) (*Dispatcher, error) {
 	return &Dispatcher{
 		state:    options.State,
 		adapter:  options.Adapter,
+		files:    options.Files,
 		interval: interval,
 		wake:     make(chan struct{}, 1),
 		done:     make(chan struct{}),
@@ -202,6 +208,8 @@ func (d *Dispatcher) drain(ctx context.Context) {
 				slog.Error("record Feishu delivery failure failed",
 					deliveryErrorLogAttrs(intent, err, "record_error", markErr)...)
 				blockedScopes[lane] = struct{}{}
+			} else if !retry && intent.Kind == channeltypes.DeliveryFile {
+				d.discardMediaUpload(intent.ID)
 			}
 			d.logDeliveryFailure(intent, err, retry, nextAttemptAt)
 			if retry {
@@ -213,6 +221,9 @@ func (d *Dispatcher) drain(ctx context.Context) {
 			slog.Error("record delivered Feishu intent failed", intentLogAttrs(delivered, "error", err)...)
 			blockedScopes[lane] = struct{}{}
 			continue
+		}
+		if intent.Kind == channeltypes.DeliveryFile {
+			d.discardMediaUpload(intent.ID)
 		}
 		slog.Debug("delivered Feishu intent", intentLogAttrs(delivered)...)
 	}
@@ -421,6 +432,7 @@ func retryableDelivery(intent channeltypes.DeliveryIntent, err error) bool {
 	// deduplication key, so an ambiguous outcome must not be repeated.
 	switch intent.Kind {
 	case channeltypes.DeliveryText, channeltypes.DeliveryMarkdown, channeltypes.DeliveryCard,
+		channeltypes.DeliveryFile,
 		channeltypes.DeliveryMarkdownUpdate, channeltypes.DeliveryCardUpdate, channeltypes.DeliveryReactionDelete:
 		return true
 	default:
@@ -435,6 +447,8 @@ func (d *Dispatcher) deliver(ctx context.Context, intent channeltypes.DeliveryIn
 			return intent, err
 		}
 		return deliverText(ctx, d.adapter, intent)
+	case channeltypes.DeliveryFile:
+		return d.deliverMedia(ctx, intent)
 	case channeltypes.DeliveryMarkdownUpdate:
 		return d.deliverMarkdownUpdate(ctx, intent)
 	case channeltypes.DeliveryCard:

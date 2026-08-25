@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	channeltypes "csgclaw/internal/channel"
 	"csgclaw/internal/channel/feishu/presentation"
 	feishustate "csgclaw/internal/channel/feishu/state"
+	"csgclaw/internal/channel/feishu/transport"
 )
 
 type fakeEngine struct{ conversation *fakeConversation }
@@ -316,6 +318,140 @@ func TestRunnerRendersEngineEventsIntoMemoryDelivery(t *testing.T) {
 	final, ok := store.Delivery(finalID)
 	if !ok || final.Kind != channeltypes.DeliveryMarkdownUpdate || !strings.Contains(final.Text, "answer") {
 		t.Fatalf("final delivery = %#v, found=%t", final, ok)
+	}
+}
+
+func TestRunnerQueuesOutputFilesForChatDelivery(t *testing.T) {
+	runFinished := make(chan struct{})
+	conversation := &fakeConversation{run: func(context.Context, agentengine.TurnRequest, agentengine.EventSink) agentengine.TurnResult {
+		defer close(runFinished)
+		return agentengine.TurnResult{
+			Status: agentengine.TurnSucceeded,
+			Output: "done",
+			Files: []agentengine.OutputFile{
+				{OutputFileMetadata: agentengine.OutputFileMetadata{
+					ID: "file-image", Name: "result.png", MediaType: "image/png", SizeBytes: 3, SHA256: strings.Repeat("a", 64),
+				}},
+				{OutputFileMetadata: agentengine.OutputFileMetadata{
+					ID: "file-report", Name: "report.pdf", MediaType: "application/pdf", SizeBytes: 3, SHA256: strings.Repeat("b", 64),
+				}},
+				{OutputFileMetadata: agentengine.OutputFileMetadata{
+					ID: "file-svg", Name: "diagram.svg", MediaType: "image/svg+xml", SizeBytes: 3, SHA256: strings.Repeat("c", 64),
+				}},
+			},
+		}
+	}}
+	store := feishustate.NewStore()
+	runner, err := NewRunner(RunnerOptions{
+		Engine: fakeEngine{conversation}, State: store, Presentation: presentation.ModeMarkdown,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := runnerMessage("event-files", "turn-files", "conversation", "create a chart")
+	if err := runner.Submit(context.Background(), message); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runFinished:
+	case <-time.After(time.Second):
+		t.Fatal("Engine run did not finish")
+	}
+	if err := runner.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	image, imageOK := store.Delivery(fileDeliveryID(message.TurnID, 0))
+	file, fileOK := store.Delivery(fileDeliveryID(message.TurnID, 1))
+	svg, svgOK := store.Delivery(fileDeliveryID(message.TurnID, 2))
+	if !imageOK || image.Kind != channeltypes.DeliveryFile || image.FileID != "file-image" {
+		t.Fatalf("image intent = %#v, found=%t", image, imageOK)
+	}
+	if !fileOK || file.Kind != channeltypes.DeliveryFile || file.FileID != "file-report" {
+		t.Fatalf("file intent = %#v, found=%t", file, fileOK)
+	}
+	if !svgOK || svg.Kind != channeltypes.DeliveryFile || svg.FileID != "file-svg" {
+		t.Fatalf("svg intent = %#v, found=%t", svg, svgOK)
+	}
+}
+
+func TestFileDeliveryIntentsEnforceOutboundPolicyAndWarnUser(t *testing.T) {
+	message := runnerMessage("event-file-policy", "turn-file-policy", "conversation", "create files")
+	files := make([]agentengine.OutputFile, 0, maxFeishuOutputFileCount+2)
+	for index := 0; index < maxFeishuOutputFileCount+1; index++ {
+		files = append(files, agentengine.OutputFile{OutputFileMetadata: agentengine.OutputFileMetadata{
+			ID: fmt.Sprintf("file-%d", index), Name: fmt.Sprintf("file-%d.txt", index), MediaType: "text/plain", SizeBytes: 1,
+		}})
+	}
+	files = append(files, agentengine.OutputFile{OutputFileMetadata: agentengine.OutputFileMetadata{
+		ID: "file-large", Name: "large.zip", MediaType: "application/zip", SizeBytes: transport.FileUploadLimitBytes + 1,
+	}})
+
+	intents := (&Runner{}).fileDeliveryIntents(message, files, 10)
+	if len(intents) != maxFeishuOutputFileCount+1 {
+		t.Fatalf("intent count = %d, want %d", len(intents), maxFeishuOutputFileCount+1)
+	}
+	for index, intent := range intents[:maxFeishuOutputFileCount] {
+		if intent.Kind != channeltypes.DeliveryFile || intent.FileID != fmt.Sprintf("file-%d", index) || intent.Sequence != uint64(10+index) {
+			t.Fatalf("file intent %d = %#v", index, intent)
+		}
+	}
+	warning := intents[len(intents)-1]
+	if warning.Kind != channeltypes.DeliveryText || warning.ID != message.TurnID+":files:warning" ||
+		warning.Sequence != 10+maxFeishuOutputFileCount || !strings.Contains(warning.Text, "could not send 2 generated file(s)") {
+		t.Fatalf("warning intent = %#v", warning)
+	}
+}
+
+func TestFileDeliveryIntentsEnforceAggregateSizeLimit(t *testing.T) {
+	message := runnerMessage("event-file-total", "turn-file-total", "conversation", "create files")
+	files := []agentengine.OutputFile{
+		{OutputFileMetadata: agentengine.OutputFileMetadata{
+			ID: "file-30", Name: "first.zip", MediaType: "application/zip", SizeBytes: transport.FileUploadLimitBytes,
+		}},
+		{OutputFileMetadata: agentengine.OutputFileMetadata{
+			ID: "file-21", Name: "second.zip", MediaType: "application/zip", SizeBytes: 21 << 20,
+		}},
+	}
+
+	intents := (&Runner{}).fileDeliveryIntents(message, files, 1)
+	if len(intents) != 2 || intents[0].Kind != channeltypes.DeliveryFile || intents[0].FileID != "file-30" ||
+		intents[1].Kind != channeltypes.DeliveryText || !strings.Contains(intents[1].Text, "could not send 1 generated file(s)") {
+		t.Fatalf("intents = %#v", intents)
+	}
+}
+
+func TestRunnerDoesNotQueueOutputFilesForFailedTurn(t *testing.T) {
+	runFinished := make(chan struct{})
+	conversation := &fakeConversation{run: func(context.Context, agentengine.TurnRequest, agentengine.EventSink) agentengine.TurnResult {
+		defer close(runFinished)
+		return agentengine.TurnResult{
+			Status: agentengine.TurnFailed,
+			Error:  &agentengine.TurnError{Code: agentengine.ErrorRuntimeFailed, Message: "failed"},
+			Files: []agentengine.OutputFile{{OutputFileMetadata: agentengine.OutputFileMetadata{
+				ID: "file-failed", Name: "failed.pdf", MediaType: "application/pdf", SizeBytes: 3,
+			}}},
+		}
+	}}
+	store := feishustate.NewStore()
+	runner, err := NewRunner(RunnerOptions{Engine: fakeEngine{conversation}, State: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := runnerMessage("event-failed-files", "turn-failed-files", "conversation", "fail")
+	if err := runner.Submit(context.Background(), message); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runFinished:
+	case <-time.After(time.Second):
+		t.Fatal("Engine run did not finish")
+	}
+	if err := runner.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if intent, ok := store.Delivery(fileDeliveryID(message.TurnID, 0)); ok {
+		t.Fatalf("failed turn queued file delivery: %#v", intent)
 	}
 }
 

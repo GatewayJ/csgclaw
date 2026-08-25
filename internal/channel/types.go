@@ -174,6 +174,7 @@ const (
 	DeliveryMarkdownUpdate DeliveryKind = "markdown_update"
 	DeliveryCard           DeliveryKind = "card"
 	DeliveryCardUpdate     DeliveryKind = "card_update"
+	DeliveryFile           DeliveryKind = "file"
 	DeliveryReactionAdd    DeliveryKind = "reaction_add"
 	DeliveryReactionDelete DeliveryKind = "reaction_delete"
 	DeliveryCommentReply   DeliveryKind = "comment_reply"
@@ -209,6 +210,7 @@ type DeliveryIntent struct {
 	TopLevel      bool           `json:"top_level,omitempty"`
 	Text          string         `json:"text,omitempty"`
 	Card          map[string]any `json:"card,omitempty"`
+	FileID        string         `json:"file_id,omitempty"`
 	EmojiType     string         `json:"emoji_type,omitempty"`
 	ReactionID    string         `json:"reaction_id,omitempty"`
 	Attempts      int            `json:"attempts,omitempty"`

@@ -14,10 +14,15 @@ import (
 	feishuctx "csgclaw/internal/channel/feishu/context"
 	"csgclaw/internal/channel/feishu/presentation"
 	feishustate "csgclaw/internal/channel/feishu/state"
+	"csgclaw/internal/channel/feishu/transport"
 	"csgclaw/internal/slashcommand"
 )
 
-const processingPinEmoji = "Pin"
+const (
+	processingPinEmoji       = "Pin"
+	maxFeishuOutputFileCount = 8
+	maxFeishuOutputFileTotal = int64(50 << 20)
+)
 
 type FilePreparer interface {
 	Prepare(context.Context, channeltypes.InboundMessage) ([]agentengine.InputPart, func(), error)
@@ -376,6 +381,9 @@ func (r *Runner) finalize(message channeltypes.InboundMessage, result agentengin
 			terminal = presentation.Terminal(mode, presentationResult(result))
 		}
 		intents = append(intents, r.presentationUpdateIntents(message, finalSequence, true, terminal)...)
+		if status == channeltypes.TurnSucceeded {
+			intents = append(intents, r.fileDeliveryIntents(message, result.Files, finalSequence+1)...)
+		}
 		if cleanup, ok := r.reactionCleanupIntent(message); ok {
 			intents = append(intents, cleanup)
 		}
@@ -460,6 +468,68 @@ func (r *Runner) textIntent(message channeltypes.InboundMessage, id string, sequ
 	intent.Kind = channeltypes.DeliveryText
 	intent.Text = text
 	return intent
+}
+
+func (r *Runner) fileDeliveryIntents(message channeltypes.InboundMessage, files []agentengine.OutputFile, startSequence uint64) []channeltypes.DeliveryIntent {
+	if len(files) == 0 {
+		return nil
+	}
+	intents := make([]channeltypes.DeliveryIntent, 0, len(files)+1)
+	var totalSize int64
+	rejected := 0
+	for index, file := range files {
+		fileID := strings.TrimSpace(file.ID)
+		if reason := outputFileRejection(file, len(intents), totalSize); reason != "" {
+			slog.Warn("skip unsupported Feishu output file delivery",
+				messageLogAttrs(message,
+					"file_id", fileID,
+					"file_name", file.Name,
+					"file_media_type", file.MediaType,
+					"file_size_bytes", file.SizeBytes,
+					"reason", reason,
+				)...)
+			rejected++
+			continue
+		}
+		intent := baseIntent(message, fileDeliveryID(message.TurnID, index), startSequence+uint64(len(intents)))
+		intent.Kind = channeltypes.DeliveryFile
+		intent.FileID = fileID
+		intents = append(intents, intent)
+		totalSize += file.SizeBytes
+	}
+	if rejected > 0 {
+		warning := baseIntent(message, strings.TrimSpace(message.TurnID)+":files:warning", startSequence+uint64(len(intents)))
+		warning.Kind = channeltypes.DeliveryText
+		warning.Text = fmt.Sprintf(
+			"Feishu could not send %d generated file(s) because their metadata or delivery limits were invalid (maximum %d files, %d MiB per file, %d MiB total).",
+			rejected, maxFeishuOutputFileCount, transport.FileUploadLimitBytes>>20, maxFeishuOutputFileTotal>>20,
+		)
+		intents = append(intents, warning)
+	}
+	return intents
+}
+
+func outputFileRejection(file agentengine.OutputFile, accepted int, acceptedBytes int64) string {
+	if strings.TrimSpace(file.ID) == "" {
+		return "Engine file ID is empty"
+	}
+	if file.SizeBytes < 0 {
+		return "file size is negative"
+	}
+	if file.SizeBytes > transport.FileUploadLimitBytes {
+		return "file exceeds Feishu's per-file upload limit"
+	}
+	if accepted >= maxFeishuOutputFileCount {
+		return "Turn exceeds the Feishu output file count limit"
+	}
+	if file.SizeBytes > maxFeishuOutputFileTotal-acceptedBytes {
+		return "Turn exceeds the Feishu output file total size limit"
+	}
+	return ""
+}
+
+func fileDeliveryID(turnID string, index int) string {
+	return strings.TrimSpace(turnID) + fmt.Sprintf(":file:%d", index+1)
 }
 
 func (r *Runner) enqueueInitialPresentation(message channeltypes.InboundMessage, mode presentation.Mode) error {

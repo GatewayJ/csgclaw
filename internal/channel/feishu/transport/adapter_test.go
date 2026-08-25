@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +63,45 @@ func TestAdapterUsesBindingLifetimeContextAndDelegatesProtocolOperations(t *test
 	}
 	if oapi.updateCard.MessageID != " om_card " || oapi.updateCard.Card["updated"] != true {
 		t.Fatalf("UpdateCard request = %#v", oapi.updateCard)
+	}
+
+	imageUpload, err := adapter.UploadImage(ctx, UploadImageRequest{
+		MediaType: " image/png ", SizeBytes: 5, Content: strings.NewReader("image"),
+	})
+	if err != nil || imageUpload.Key != "image-key" {
+		t.Fatalf("UploadImage() = %#v, %v", imageUpload, err)
+	}
+	if oapi.uploadImage.MediaType != " image/png " || oapi.uploadImage.SizeBytes != 5 {
+		t.Fatalf("UploadImage request = %#v", oapi.uploadImage)
+	}
+	imageResult, err := adapter.SendImage(ctx, SendImageRequest{
+		ChatID: " oc_chat ", ImageKey: imageUpload.Key,
+		IdempotencyKey: " delivery-image ", ReplyTo: " om_root ", ReplyInThread: true, ThreadID: " omt_thread ",
+	})
+	if err != nil || imageResult.MessageID != "om_image" {
+		t.Fatalf("SendImage() = %#v, %v", imageResult, err)
+	}
+	if oapi.sendImage.ChatID != " oc_chat " || oapi.sendImage.ImageKey != "image-key" || oapi.sendImage.IdempotencyKey != " delivery-image " || oapi.sendImage.ThreadID != " omt_thread " {
+		t.Fatalf("SendImage request = %#v", oapi.sendImage)
+	}
+	fileUpload, err := adapter.UploadFile(ctx, UploadFileRequest{
+		Name: " report.pdf ", SizeBytes: 4, Content: strings.NewReader("file"),
+	})
+	if err != nil || fileUpload.Key != "file-key" {
+		t.Fatalf("UploadFile() = %#v, %v", fileUpload, err)
+	}
+	if oapi.uploadFile.Name != " report.pdf " || oapi.uploadFile.SizeBytes != 4 {
+		t.Fatalf("UploadFile request = %#v", oapi.uploadFile)
+	}
+	fileResult, err := adapter.SendFile(ctx, SendFileRequest{
+		ChatID: " oc_chat ", FileKey: fileUpload.Key,
+		IdempotencyKey: " delivery-file ", ReplyTo: " om_root ", ReplyInThread: true, ThreadID: " omt_thread ",
+	})
+	if err != nil || fileResult.MessageID != "om_file" {
+		t.Fatalf("SendFile() = %#v, %v", fileResult, err)
+	}
+	if oapi.sendFile.ChatID != " oc_chat " || oapi.sendFile.FileKey != "file-key" || oapi.sendFile.IdempotencyKey != " delivery-file " || oapi.sendFile.ThreadID != " omt_thread " {
+		t.Fatalf("SendFile request = %#v", oapi.sendFile)
 	}
 
 	reaction, err := adapter.AddReaction(ctx, AddReactionRequest{MessageID: " om_message ", EmojiType: " Pin "})
@@ -180,6 +220,10 @@ type fakeOperations struct {
 	updateText     UpdateTextRequest
 	sendCard       SendCardRequest
 	updateCard     UpdateCardRequest
+	uploadImage    UploadImageRequest
+	uploadFile     UploadFileRequest
+	sendImage      SendImageRequest
+	sendFile       SendFileRequest
 	addReaction    AddReactionRequest
 	deleteReaction DeleteReactionRequest
 	download       DownloadResourceRequest
@@ -203,6 +247,26 @@ func (f *fakeOperations) UpdateText(_ context.Context, req UpdateTextRequest) er
 func (f *fakeOperations) UpdateCard(_ context.Context, req UpdateCardRequest) error {
 	f.updateCard = req
 	return nil
+}
+
+func (f *fakeOperations) UploadImage(_ context.Context, req UploadImageRequest) (UploadResult, error) {
+	f.uploadImage = req
+	return UploadResult{Key: " image-key "}, nil
+}
+
+func (f *fakeOperations) UploadFile(_ context.Context, req UploadFileRequest) (UploadResult, error) {
+	f.uploadFile = req
+	return UploadResult{Key: " file-key "}, nil
+}
+
+func (f *fakeOperations) SendImage(_ context.Context, req SendImageRequest) (SendResult, error) {
+	f.sendImage = req
+	return SendResult{MessageID: " om_image "}, nil
+}
+
+func (f *fakeOperations) SendFile(_ context.Context, req SendFileRequest) (SendResult, error) {
+	f.sendFile = req
+	return SendResult{MessageID: " om_file "}, nil
 }
 
 func (f *fakeOperations) AddReaction(_ context.Context, req AddReactionRequest) (AddReactionResult, error) {
@@ -233,6 +297,18 @@ func (*fakePublicAdapter) SendCard(context.Context, SendCardRequest) (SendResult
 	return SendResult{}, nil
 }
 func (*fakePublicAdapter) UpdateCard(context.Context, UpdateCardRequest) error { return nil }
+func (*fakePublicAdapter) UploadImage(context.Context, UploadImageRequest) (UploadResult, error) {
+	return UploadResult{}, nil
+}
+func (*fakePublicAdapter) UploadFile(context.Context, UploadFileRequest) (UploadResult, error) {
+	return UploadResult{}, nil
+}
+func (*fakePublicAdapter) SendImage(context.Context, SendImageRequest) (SendResult, error) {
+	return SendResult{}, nil
+}
+func (*fakePublicAdapter) SendFile(context.Context, SendFileRequest) (SendResult, error) {
+	return SendResult{}, nil
+}
 func (*fakePublicAdapter) AddReaction(context.Context, AddReactionRequest) (AddReactionResult, error) {
 	return AddReactionResult{}, nil
 }
