@@ -38,11 +38,8 @@ func newOAPIIngress(appID, appSecret string, client *lark.Client) (*oapiIngress,
 	if strings.TrimSpace(appID) == "" || strings.TrimSpace(appSecret) == "" || client == nil {
 		return nil, ErrInvalidConfig
 	}
-	dispatcher := larkdispatcher.NewEventDispatcher("", "")
 	ingress := &oapiIngress{appID: appID, client: client}
-	dispatcher.OnP2MessageReceiveV1(ingress.handleMessage)
-	dispatcher.OnCustomizedEvent("drive.notice.comment_add_v1", ingress.handleComment)
-	dispatcher.OnP2CardActionTrigger(ingress.handleCardAction)
+	dispatcher := newOAPIEventDispatcher(ingress)
 	ingress.socket = larkws.NewClient(
 		appID,
 		appSecret,
@@ -50,6 +47,18 @@ func newOAPIIngress(appID, appSecret string, client *lark.Client) (*oapiIngress,
 		larkws.WithDomain(lark.FeishuBaseUrl),
 	)
 	return ingress, nil
+}
+
+func newOAPIEventDispatcher(ingress *oapiIngress) *larkdispatcher.EventDispatcher {
+	dispatcher := larkdispatcher.NewEventDispatcher("", "")
+	dispatcher.OnP2MessageReceiveV1(ingress.handleMessage)
+	dispatcher.OnCustomizedEvent("drive.notice.comment_add_v1", ingress.handleComment)
+	dispatcher.OnP2CardActionTrigger(ingress.handleCardAction)
+	// Processing reactions are outbound presentation state, not Agent input.
+	// Feishu may echo their lifecycle events back to this connection.
+	dispatcher.OnP2MessageReactionCreatedV1(func(context.Context, *larkim.P2MessageReactionCreatedV1) error { return nil })
+	dispatcher.OnP2MessageReactionDeletedV1(func(context.Context, *larkim.P2MessageReactionDeletedV1) error { return nil })
+	return dispatcher
 }
 
 func (i *oapiIngress) Connect(ctx context.Context, handler func(context.Context, Event) error) error {

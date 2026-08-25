@@ -94,6 +94,22 @@ func TestHandleMessageExtractsImageFromDirectPostBody(t *testing.T) {
 	}
 }
 
+func TestIngressDispatcherAcceptsReactionLifecycleEvents(t *testing.T) {
+	dispatcher := newOAPIEventDispatcher(&oapiIngress{})
+	for _, eventType := range []string{"im.message.reaction.created_v1", "im.message.reaction.deleted_v1"} {
+		t.Run(eventType, func(t *testing.T) {
+			payload := []byte(fmt.Sprintf(`{
+				"schema":"2.0",
+				"header":{"event_id":"event-1","event_type":%q,"create_time":"1787628112287"},
+				"event":{"message_id":"message-1","reaction_id":"reaction-1"}
+			}`, eventType))
+			if _, err := dispatcher.Do(context.Background(), payload); err != nil {
+				t.Fatalf("dispatch %s: %v", eventType, err)
+			}
+		})
+	}
+}
+
 func TestIngressRoutingHelpers(t *testing.T) {
 	if got := ingressChatMode("group", "thread"); got != ModeTopic {
 		t.Fatalf("mode = %q", got)
