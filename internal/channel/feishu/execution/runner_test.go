@@ -421,6 +421,20 @@ func TestFileDeliveryIntentsEnforceAggregateSizeLimit(t *testing.T) {
 	}
 }
 
+func TestFileDeliveryIntentsRejectEmptyFileAndWarnUser(t *testing.T) {
+	message := runnerMessage("event-empty-file", "turn-empty-file", "conversation", "create an empty file")
+	files := []agentengine.OutputFile{{OutputFileMetadata: agentengine.OutputFileMetadata{
+		ID: "file-empty", Name: "empty.txt", MediaType: "text/plain", SizeBytes: 0,
+	}}}
+
+	intents := (&Runner{}).fileDeliveryIntents(message, files, 4)
+	if len(intents) != 1 || intents[0].Kind != channeltypes.DeliveryText ||
+		intents[0].ID != message.TurnID+":files:warning" || intents[0].Sequence != 4 ||
+		!strings.Contains(intents[0].Text, "could not send 1 generated file(s)") {
+		t.Fatalf("intents = %#v", intents)
+	}
+}
+
 func TestRunnerDoesNotQueueOutputFilesForFailedTurn(t *testing.T) {
 	runFinished := make(chan struct{})
 	conversation := &fakeConversation{run: func(context.Context, agentengine.TurnRequest, agentengine.EventSink) agentengine.TurnResult {

@@ -140,6 +140,25 @@ func TestDirectOutboundRejectsUnsupportedImageMediaTypeBeforeUpload(t *testing.T
 	}
 }
 
+func TestDirectOutboundRejectsEmptyUploadsBeforeOpenAPI(t *testing.T) {
+	t.Parallel()
+	api := &fakeLarkOpenAPI{}
+	outbound := newDirectOutboundWithAPI(api)
+
+	_, imageErr := outbound.UploadImage(context.Background(), UploadImageRequest{
+		MediaType: "image/png", Content: strings.NewReader(""),
+	})
+	_, fileErr := outbound.UploadFile(context.Background(), UploadFileRequest{
+		Name: "empty.txt", Content: strings.NewReader(""),
+	})
+	if imageErr == nil || fileErr == nil || api.createImageCalls != 0 || api.createFileCalls != 0 {
+		t.Fatalf("image error=%v file error=%v image uploads=%d file uploads=%d", imageErr, fileErr, api.createImageCalls, api.createFileCalls)
+	}
+	if SupportsImageUpload("image/png", 0) {
+		t.Fatal("zero-byte image was considered uploadable")
+	}
+}
+
 func TestDirectOutboundUploadsFileThenRepliesWithMessage(t *testing.T) {
 	t.Parallel()
 	api := &fakeLarkOpenAPI{}

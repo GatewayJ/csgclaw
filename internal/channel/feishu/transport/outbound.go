@@ -147,8 +147,8 @@ func (o *directOutbound) UploadImage(ctx context.Context, req UploadImageRequest
 	if req.Content == nil {
 		return UploadResult{}, errors.New("feishu image content is required")
 	}
-	if req.SizeBytes < 0 {
-		return UploadResult{}, errors.New("feishu image size must be non-negative")
+	if req.SizeBytes <= 0 {
+		return UploadResult{}, errors.New("feishu image size must be positive")
 	}
 	if req.SizeBytes > ImageUploadLimitBytes {
 		return UploadResult{}, fmt.Errorf("feishu image upload is %d bytes; limit is %d: %w", req.SizeBytes, ImageUploadLimitBytes, ErrPayloadTooLarge)
@@ -186,8 +186,8 @@ func (o *directOutbound) UploadFile(ctx context.Context, req UploadFileRequest) 
 	if fileName == "" {
 		return UploadResult{}, errors.New("feishu file name is required")
 	}
-	if req.SizeBytes < 0 {
-		return UploadResult{}, errors.New("feishu file size must be non-negative")
+	if req.SizeBytes <= 0 {
+		return UploadResult{}, errors.New("feishu file size must be positive")
 	}
 	if req.SizeBytes > FileUploadLimitBytes {
 		return UploadResult{}, fmt.Errorf("feishu file upload is %d bytes; limit is %d: %w", req.SizeBytes, FileUploadLimitBytes, ErrPayloadTooLarge)
@@ -480,7 +480,7 @@ func uploadedFileKey(resp *larkim.CreateFileResp) (string, error) {
 // SupportsImageUpload reports whether metadata can use Feishu's image endpoint.
 // Larger supported images should be sent through the generic file endpoint.
 func SupportsImageUpload(mediaType string, sizeBytes int64) bool {
-	if sizeBytes < 0 || sizeBytes > ImageUploadLimitBytes {
+	if sizeBytes <= 0 || sizeBytes > ImageUploadLimitBytes {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(mediaType)) {

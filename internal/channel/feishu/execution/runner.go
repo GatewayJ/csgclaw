@@ -513,8 +513,8 @@ func outputFileRejection(file agentengine.OutputFile, accepted int, acceptedByte
 	if strings.TrimSpace(file.ID) == "" {
 		return "Engine file ID is empty"
 	}
-	if file.SizeBytes < 0 {
-		return "file size is negative"
+	if file.SizeBytes <= 0 {
+		return "file size must be positive"
 	}
 	if file.SizeBytes > transport.FileUploadLimitBytes {
 		return "file exceeds Feishu's per-file upload limit"
