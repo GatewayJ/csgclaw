@@ -85,7 +85,6 @@ type WorkspaceTabPanelsProps = Pick<
   | "onOpenCreateScheduledTask"
   | "onOpenCreateTask"
   | "onOpenCreateTeam"
-  | "onPreviewAgent"
   | "onPreviewUser"
   | "onSelectAgent"
   | "onSelectComputer"
@@ -269,7 +268,6 @@ export function WorkspaceTabPanels({
   notificationAgentItems = [],
   onSelectAgent,
   onSelectModelProvider = () => {},
-  onPreviewAgent,
   onSelectComputer,
   onCreateModelProvider,
   onSelectTaskBoardView = () => {},
@@ -504,7 +502,6 @@ export function WorkspaceTabPanels({
                 locale={locale}
                 t={t}
                 onSelect={onSelectConversation}
-                onPreviewUser={onPreviewUser}
               />
             ))
           ) : (
@@ -537,7 +534,6 @@ export function WorkspaceTabPanels({
                 locale={locale}
                 t={t}
                 onSelect={onSelectConversation}
-                onPreviewUser={onPreviewUser}
               />
             ))
           ) : (
@@ -651,7 +647,6 @@ export function WorkspaceTabPanels({
                 active={activePane.type === WorkspacePaneTypes.agent && activePane.id === item.id}
                 t={t}
                 onSelect={onSelectAgent}
-                onPreview={onPreviewAgent}
               />
             ))
           ) : (
@@ -716,7 +711,6 @@ export function WorkspaceTabPanels({
                 active={activePane.type === WorkspacePaneTypes.agent && activePane.id === item.id}
                 t={t}
                 onSelect={onSelectAgent}
-                onPreview={onPreviewAgent}
                 notification
               />
             ))

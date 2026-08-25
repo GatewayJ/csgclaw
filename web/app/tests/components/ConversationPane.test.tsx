@@ -187,8 +187,6 @@ function renderThreadPane({
   onClearRoomMessages = vi.fn(),
   onCloseThread = vi.fn(),
   onDeleteRoom = vi.fn(),
-  onCancelProfilePreviewClose = vi.fn(),
-  onCloseProfilePreview = vi.fn(),
   onOpenAgentDetail = vi.fn(),
   onPreviewUser = vi.fn(),
   onRemoveMember = vi.fn(),
@@ -219,8 +217,6 @@ function renderThreadPane({
   onCloseThread?: () => void;
   onDeleteRoom?: (id: string) => void;
   onApplyMention?: (user: IMUser) => void;
-  onCancelProfilePreviewClose?: () => void;
-  onCloseProfilePreview?: () => void;
   onOpenAgentDetail?: NonNullable<ConversationPaneProps["onOpenAgentDetail"]>;
   onPreviewUser?: (user: IMUser) => void;
   onRemoveMember?: (memberID: string) => void;
@@ -303,8 +299,6 @@ function renderThreadPane({
         onInviteAction={() => {}}
         onMessageAction={() => {}}
         onNotifyAllAgentsChange={onNotifyAllAgentsChange}
-        onCancelProfilePreviewClose={onCancelProfilePreviewClose}
-        onCloseProfilePreview={onCloseProfilePreview}
         onOpenAgentDetail={onOpenAgentDetail}
         onOpenThread={() => {}}
         onRemoveMember={onRemoveMember}
@@ -604,34 +598,26 @@ describe("ConversationPane", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent(title);
   });
 
-  it("previews human message avatars on hover without opening details on click", async () => {
+  it("opens human message profile previews only on click", async () => {
     const user = userEvent.setup();
-    const onCancelProfilePreviewClose = vi.fn();
-    const onCloseProfilePreview = vi.fn();
     const onOpenAgentDetail = vi.fn();
     const onPreviewUser = vi.fn();
 
     renderThreadPane({
-      onCancelProfilePreviewClose,
-      onCloseProfilePreview,
       onOpenAgentDetail,
       onPreviewUser,
     });
 
     const avatar = screen.getAllByRole("button", { name: "profilePreview manager" })[0] as HTMLElement;
     await user.hover(avatar);
-
-    expect(onCancelProfilePreviewClose).toHaveBeenCalled();
-    expect(onPreviewUser).toHaveBeenCalledWith(expect.objectContaining({ id: "u-manager" }), avatar);
-
-    await user.unhover(avatar);
-    expect(onCloseProfilePreview).toHaveBeenCalled();
+    expect(onPreviewUser).not.toHaveBeenCalled();
 
     await user.click(avatar);
+    expect(onPreviewUser).toHaveBeenCalledWith(expect.objectContaining({ id: "u-manager" }), avatar);
     expect(onOpenAgentDetail).not.toHaveBeenCalled();
   });
 
-  it("opens agent details instead of profile details when clicking an agent avatar", async () => {
+  it("opens the profile preview when clicking an agent avatar", async () => {
     const user = userEvent.setup();
     const onOpenAgentDetail = vi.fn();
     const onPreviewUser = vi.fn();
@@ -644,13 +630,15 @@ describe("ConversationPane", () => {
 
     const avatar = screen.getAllByRole("button", { name: "profilePreview manager" })[0] as HTMLElement;
     await user.hover(avatar);
-    expect(onPreviewUser).toHaveBeenCalledWith(expect.objectContaining({ id: "u-manager" }), avatar);
+    expect(onPreviewUser).not.toHaveBeenCalled();
 
+    onPreviewUser.mockClear();
     await user.click(avatar);
-    expect(onOpenAgentDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "u-manager" }), avatar);
+    expect(onPreviewUser).toHaveBeenCalledWith(expect.objectContaining({ id: "u-manager" }), avatar);
+    expect(onOpenAgentDetail).not.toHaveBeenCalled();
   });
 
-  it("opens agent details when the message sender id is a channel identity alias", async () => {
+  it("opens the profile preview when the message sender id is a channel identity alias", async () => {
     const user = userEvent.setup();
     const weatherUser: IMUser = {
       avatar: "O",
@@ -664,6 +652,7 @@ describe("ConversationPane", () => {
       ["openclaw-weather", weatherUser],
     ]);
     const onOpenAgentDetail = vi.fn();
+    const onPreviewUser = vi.fn();
 
     renderThreadPane({
       agents: [{ id: "openclaw-weather", name: "OpenClaw weather", role: "worker" }],
@@ -677,15 +666,15 @@ describe("ConversationPane", () => {
         },
       ],
       onOpenAgentDetail,
+      onPreviewUser,
       usersByIdOverride: userAliases,
     });
 
-    await user.click(screen.getByRole("button", { name: "profilePreview openclaw-weather" }));
+    const avatar = screen.getByRole("button", { name: "profilePreview openclaw-weather" });
+    await user.click(avatar);
 
-    expect(onOpenAgentDetail).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "openclaw-weather" }),
-      expect.any(HTMLElement),
-    );
+    expect(onPreviewUser).toHaveBeenCalledWith(weatherUser, avatar);
+    expect(onOpenAgentDetail).not.toHaveBeenCalled();
   });
 
   it("renders agent details as a modal drawer with keyboard dismissal", async () => {

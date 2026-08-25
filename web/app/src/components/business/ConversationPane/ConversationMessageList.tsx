@@ -38,8 +38,6 @@ export type ConversationMessageListProps = {
   messageActionBusy: string;
   messageActionFeedback: MessageActionFeedback;
   messageListRef: RefObject<HTMLElement | null>;
-  onCancelProfilePreviewClose?: () => void;
-  onCloseProfilePreview?: () => void;
   onOpenAgentDetail?: (agent: AgentLike, anchor: HTMLElement) => VoidOrPromise;
   onMessageAction: (action: MessageAction, message?: MessageLike | null) => VoidOrPromise;
   onOpenThread: (message: IMMessage) => VoidOrPromise;
@@ -64,9 +62,6 @@ export const ConversationMessageList = memo(function ConversationMessageList({
   theme,
   usersById,
   visibleMessages,
-  onCancelProfilePreviewClose,
-  onCloseProfilePreview,
-  onOpenAgentDetail,
   onMessageAction,
   onOpenThread,
   onPreviewUser,
@@ -134,19 +129,9 @@ export const ConversationMessageList = memo(function ConversationMessageList({
                 type="button"
                 className="avatar avatar-button"
                 aria-label={`${t("profilePreview")} ${user.name}`}
-                onBlur={onCloseProfilePreview}
                 onClick={(event) => {
-                  if (messageAgent && onOpenAgentDetail) {
-                    onOpenAgentDetail(messageAgent, event.currentTarget);
-                    return;
-                  }
                   onPreviewUser(user, event.currentTarget);
                 }}
-                onPointerEnter={(event) => {
-                  onCancelProfilePreviewClose?.();
-                  onPreviewUser(user, event.currentTarget);
-                }}
-                onPointerLeave={onCloseProfilePreview}
               >
                 <AgentAvatarContent avatar={messageAvatar} fallback={messageAvatarFallback} />
                 {messageAgent ? (

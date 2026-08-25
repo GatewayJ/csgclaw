@@ -1,4 +1,6 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
 import {
   WorkspaceAgentRow,
   WorkspaceConversationRow,
@@ -19,6 +21,19 @@ const t: TranslateFn = (key, params = {}) => {
 };
 
 describe("WorkspaceRows", () => {
+  it("keeps agent list avatars decorative and selects from the row", async () => {
+    const onSelect = vi.fn();
+    const item = { id: "u-dev", name: "dev" };
+    const user = userEvent.setup();
+
+    render(<WorkspaceAgentRow active={false} item={item} onSelect={onSelect} t={t} />);
+
+    expect(screen.queryByRole("button", { name: "profilePreview dev" })).not.toBeInTheDocument();
+    const row = screen.getByRole("button");
+    await user.click(row);
+    expect(onSelect).toHaveBeenCalledWith(item);
+  });
+
   it("grays the agent presence dot when runtime availability is degraded", () => {
     const { container } = render(
       <WorkspaceAgentRow
@@ -98,7 +113,7 @@ describe("WorkspaceRows", () => {
     expect(badge.querySelector("img")).toHaveAttribute("src", "icons/feishu.png");
   });
 
-  it("renders direct message rows without room avatar placeholders", () => {
+  it("keeps direct-message avatars decorative and selects from the row", async () => {
     const usersById = new Map([
       ["u-local", { id: "u-local", name: "本地用户", avatar: "LU" }],
       ["u-agent", { id: "u-agent", name: "Alice Bob", avatar: "" }],
@@ -111,23 +126,27 @@ describe("WorkspaceRows", () => {
       title: "Alice",
     };
 
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
     render(
       <WorkspaceConversationRow
         active={false}
         conversation={conversation}
         currentUserID="u-local"
         locale="en"
-        onSelect={() => {}}
-        onPreviewUser={() => {}}
+        onSelect={onSelect}
         t={t}
         usersById={usersById}
       />,
     );
 
-    const row = screen.getAllByRole("button")[0];
+    expect(screen.queryByRole("button", { name: "profilePreview Alice Bob" })).not.toBeInTheDocument();
+    const row = screen.getByRole("button");
     expect(row).toHaveTextContent("Alice");
     expect(row).not.toHaveTextContent("#");
     expect(row).toHaveTextContent(avatarFallbackText("", "Alice Bob", "", "u-agent"));
+    await user.click(row);
+    expect(onSelect).toHaveBeenCalledWith(conversation.id);
   });
 
   it("renders thread rows without markdown code-fence language prefixes", () => {

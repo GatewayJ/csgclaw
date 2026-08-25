@@ -70,9 +70,7 @@ export type ConversationThreadPanelProps = {
   locale: LocaleCode;
   mentionableUsers?: MentionPickerUser[];
   onApplyThreadSlashCandidate?: (name: string) => void;
-  onCancelProfilePreviewClose?: () => void;
   onClose: () => void;
-  onCloseProfilePreview?: () => void;
   onDismissThreadSlashPicker?: () => void;
   onDraftChange: (segments: ComposerSegment[]) => void;
   onSlashQueryChange?: (query: string | null) => void;
@@ -119,8 +117,6 @@ export function ConversationThreadPanel({
   onApplyThreadSlashCandidate = (_name) => {},
   onDismissThreadSlashPicker = () => {},
   onSetThreadSlashIndex = (_index) => {},
-  onCancelProfilePreviewClose,
-  onCloseProfilePreview,
   onOpenAgentDetail,
   onPreviewUser,
   onQuestionSelect,
@@ -311,8 +307,6 @@ export function ConversationThreadPanel({
               locale={locale}
               theme={theme}
               t={t}
-              onCancelProfilePreviewClose={onCancelProfilePreviewClose}
-              onCloseProfilePreview={onCloseProfilePreview}
               onOpenAgentDetail={onOpenAgentDetail}
               onPreviewUser={onPreviewUser}
               onQuestionSelect={onQuestionSelect}
@@ -331,8 +325,6 @@ export function ConversationThreadPanel({
                 locale={locale}
                 theme={theme}
                 t={t}
-                onCancelProfilePreviewClose={onCancelProfilePreviewClose}
-                onCloseProfilePreview={onCloseProfilePreview}
                 onOpenAgentDetail={onOpenAgentDetail}
                 onPreviewUser={onPreviewUser}
                 onQuestionSelect={onQuestionSelect}
@@ -537,8 +529,6 @@ type ThreadMessageProps = {
   compact?: boolean;
   locale: LocaleCode;
   message: IMMessage;
-  onCancelProfilePreviewClose?: () => void;
-  onCloseProfilePreview?: () => void;
   onOpenAgentDetail?: (agent: AgentLike, anchor: HTMLElement) => VoidOrPromise;
   onPreviewUser: (user: IMUser, anchor: HTMLElement) => void;
   onQuestionSelect?: (activityID: string, questionID?: string, optionIndex?: number) => void;
@@ -554,9 +544,6 @@ function ThreadMessage({
   locale,
   theme,
   t,
-  onCancelProfilePreviewClose,
-  onCloseProfilePreview,
-  onOpenAgentDetail,
   onPreviewUser,
   onQuestionSelect,
   compact = false,
@@ -577,19 +564,9 @@ function ThreadMessage({
           type="button"
           className="thread-message-avatar"
           aria-label={`${t("profilePreview")} ${name}`}
-          onBlur={onCloseProfilePreview}
           onClick={(event) => {
-            if (messageAgent && onOpenAgentDetail) {
-              onOpenAgentDetail(messageAgent, event.currentTarget);
-              return;
-            }
             onPreviewUser(user, event.currentTarget);
           }}
-          onPointerEnter={(event) => {
-            onCancelProfilePreviewClose?.();
-            onPreviewUser(user, event.currentTarget);
-          }}
-          onPointerLeave={onCloseProfilePreview}
         >
           <AgentAvatarContent avatar={avatar} fallback={fallback} />
         </button>

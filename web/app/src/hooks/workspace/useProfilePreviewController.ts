@@ -1,7 +1,6 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import { agentMatchesUser } from "@/models/conversations";
 import { WorkspacePaneTypes } from "@/models/routing";
-import type { AgentLike } from "@/models/agents";
 import type { IMUser } from "@/models/conversations";
 import type { ProfilePreviewAnchorRect, ProfilePreviewController, UseProfilePreviewControllerArgs } from "./types";
 
@@ -9,11 +8,8 @@ type ProfilePreviewState = {
   anchorEl: HTMLElement;
   anchorRect: ProfilePreviewAnchorRect;
   id: string;
-  mode: "hover" | "manual";
   type: "user" | typeof WorkspacePaneTypes.agent;
 };
-
-const PROFILE_PREVIEW_CLOSE_DELAY_MS = 120;
 
 export function useProfilePreviewController({
   agentItems,
@@ -25,16 +21,6 @@ export function useProfilePreviewController({
 }: UseProfilePreviewControllerArgs): ProfilePreviewController {
   const [profilePreview, setProfilePreview] = useState<ProfilePreviewState | null>(null);
   const profilePreviewRef = useRef<HTMLElement | null>(null);
-  const profilePreviewCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function clearProfilePreviewCloseTimer() {
-    const timer = profilePreviewCloseTimerRef.current;
-    if (!timer) {
-      return;
-    }
-    clearTimeout(timer);
-    profilePreviewCloseTimerRef.current = null;
-  }
 
   useEffect(() => {
     const activePreview = profilePreview;
@@ -53,28 +39,32 @@ export function useProfilePreviewController({
       ) {
         return;
       }
-      clearProfilePreviewCloseTimer();
       setProfilePreview(null);
     }
 
     function handleViewportChange() {
-      clearProfilePreviewCloseTimer();
       setProfilePreview(null);
     }
 
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      setProfilePreview(null);
+      activeAnchor.focus();
+    }
+
     document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", handleViewportChange);
     window.addEventListener("scroll", handleViewportChange, true);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", handleViewportChange);
       window.removeEventListener("scroll", handleViewportChange, true);
     };
   }, [profilePreview]);
-
-  useEffect(() => {
-    return () => clearProfilePreviewCloseTimer();
-  }, []);
 
   const previewUser =
     profilePreview?.type === "user"
@@ -101,66 +91,19 @@ export function useProfilePreviewController({
     };
   }
 
-  function openProfilePreview(
-    user: IMUser | null | undefined,
-    anchor: HTMLElement | null | undefined,
-    mode: ProfilePreviewState["mode"],
-  ) {
+  function openProfilePreview(user: IMUser | null | undefined, anchor: HTMLElement | null | undefined) {
     const target = profileTargetForUser(user);
     if (!target || !anchor) {
       return;
     }
-    clearProfilePreviewCloseTimer();
     const rect = anchor.getBoundingClientRect();
     setProfilePreview((current) => {
-      if (
-        mode === "manual" &&
-        current?.mode === "manual" &&
-        current?.type === target.type &&
-        current?.id === target.id
-      ) {
+      if (current?.type === target.type && current?.id === target.id) {
         return null;
       }
       return {
         type: target.type,
         id: target.id,
-        mode,
-        anchorRect: {
-          top: rect.top,
-          right: rect.right,
-          bottom: rect.bottom,
-          left: rect.left,
-        },
-        anchorEl: anchor,
-      };
-    });
-    closeConversationTools();
-  }
-
-  function openAgentProfilePreview(
-    item: AgentLike | null | undefined,
-    anchor: HTMLElement | null | undefined,
-    mode: ProfilePreviewState["mode"],
-  ) {
-    if (!item?.id || !anchor) {
-      return;
-    }
-    clearProfilePreviewCloseTimer();
-    const itemID = item.id;
-    const rect = anchor.getBoundingClientRect();
-    setProfilePreview((current) => {
-      if (
-        mode === "manual" &&
-        current?.mode === "manual" &&
-        current?.type === WorkspacePaneTypes.agent &&
-        current?.id === itemID
-      ) {
-        return null;
-      }
-      return {
-        type: WorkspacePaneTypes.agent,
-        id: itemID,
-        mode,
         anchorRect: {
           top: rect.top,
           right: rect.right,
@@ -174,42 +117,15 @@ export function useProfilePreviewController({
   }
 
   function openParticipantPreview(user: IMUser | null | undefined, anchor: HTMLElement | null | undefined) {
-    openProfilePreview(user, anchor, "manual");
-  }
-
-  function showParticipantPreview(user: IMUser | null | undefined, anchor: HTMLElement | null | undefined) {
-    openProfilePreview(user, anchor, "hover");
-  }
-
-  function openAgentPreview(item: AgentLike | null | undefined, anchor: HTMLElement | null | undefined) {
-    openAgentProfilePreview(item, anchor, "manual");
-  }
-
-  function showAgentPreview(item: AgentLike | null | undefined, anchor: HTMLElement | null | undefined) {
-    openAgentProfilePreview(item, anchor, "hover");
+    openProfilePreview(user, anchor);
   }
 
   function closeProfilePreview() {
-    clearProfilePreviewCloseTimer();
     setProfilePreview(null);
   }
 
-  function scheduleProfilePreviewClose() {
-    clearProfilePreviewCloseTimer();
-    profilePreviewCloseTimerRef.current = setTimeout(() => {
-      profilePreviewCloseTimerRef.current = null;
-      setProfilePreview((current) => (current?.mode === "hover" ? null : current));
-    }, PROFILE_PREVIEW_CLOSE_DELAY_MS);
-  }
-
-  function cancelProfilePreviewClose() {
-    clearProfilePreviewCloseTimer();
-  }
-
   return {
-    cancelProfilePreviewClose,
     closeProfilePreview,
-    openAgentPreview,
     openParticipantPreview,
     profilePreviewProps:
       profilePreview && (previewAgent || previewUser)
@@ -220,8 +136,6 @@ export function useProfilePreviewController({
             anchorRect: profilePreview.anchorRect,
             t,
             onClose: closeProfilePreview,
-            onMouseEnter: cancelProfilePreviewClose,
-            onMouseLeave: scheduleProfilePreviewClose,
             onOpenAgent: (item) => {
               closeProfilePreview();
               startTransition(() => {
@@ -234,8 +148,5 @@ export function useProfilePreviewController({
             },
           }
         : null,
-    scheduleProfilePreviewClose,
-    showAgentPreview,
-    showParticipantPreview,
   };
 }
