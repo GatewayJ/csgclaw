@@ -216,6 +216,7 @@ function useAgentControllerHarness(
     bootstrapConfig?: RuntimeBootstrapConfig | null;
     refreshedBootstrapConfig?: RuntimeBootstrapConfig | null;
     refreshMCPServers?: () => Promise<unknown>;
+    setHubPublishError?: (message: string) => void;
     t?: TranslateFn;
   } = {},
 ) {
@@ -290,6 +291,7 @@ function useAgentControllerHarness(
     setBootstrapData: (value) => {
       setData((current) => (typeof value === "function" ? value(current) : value));
     },
+    setHubPublishError: options.setHubPublishError,
     setSelectedHubTemplateId: setSelectedHubTemplateIdRef.current,
     t: options.t ?? t,
   });
@@ -1181,6 +1183,55 @@ describe("useAgentController", () => {
     expect(published).toBe(true);
     expect(result.current.refreshHubTemplates).toHaveBeenCalledOnce();
     expect(result.current.setSelectedHubTemplateId).toHaveBeenCalledWith("alice/reviewer");
+    expect(result.current.navigatePane).toHaveBeenCalledWith(
+      { type: WorkspacePaneTypes.hub, id: "alice/reviewer", resourceType: "template" },
+      [],
+    );
+  });
+
+  it.each([
+    ["RESOURCE-ERR-1", "deployment resource is unavailable"],
+    ["template_deploy_failed", "template deployment failed"],
+  ])("opens the published template after partial deployment failure %s", async (code, message) => {
+    const setHubPublishError = vi.fn();
+    const worker: AgentLike = {
+      ...oldAgent,
+      id: "u-worker",
+      name: "reviewer",
+      role: "worker",
+      runtime_kind: "codex",
+    };
+    vi.mocked(publishAgentTemplateRequest).mockRejectedValueOnce({
+      status: 502,
+      code,
+      message,
+      publishedTemplateId: "alice/reviewer",
+    } satisfies ApiError);
+    const { result } = renderHook(
+      () =>
+        useAgentControllerHarness({
+          activePane: { type: WorkspacePaneTypes.agent, id: "u-worker" },
+          agents: [worker],
+          openCSGAuthenticated: true,
+          setHubPublishError,
+        }),
+      { wrapper: createWrapper() },
+    );
+
+    let published = false;
+    await act(async () => {
+      published =
+        (await result.current.controller.agentViewProps.onPublish?.(
+          "official_deploy",
+          "reviewer",
+          "Reviews changes",
+        )) ?? false;
+    });
+
+    expect(published).toBe(true);
+    expect(result.current.refreshHubTemplates).toHaveBeenCalledOnce();
+    expect(result.current.setSelectedHubTemplateId).toHaveBeenCalledWith("alice/reviewer");
+    expect(setHubPublishError).toHaveBeenCalledWith(message);
     expect(result.current.navigatePane).toHaveBeenCalledWith(
       { type: WorkspacePaneTypes.hub, id: "alice/reviewer", resourceType: "template" },
       [],
