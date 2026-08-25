@@ -53,6 +53,47 @@ func TestParseMessageContentPrefersChinesePostLocale(t *testing.T) {
 	}
 }
 
+func TestParseMessageContentAcceptsDirectPostBody(t *testing.T) {
+	text, raw, resources := parseMessageContent("post", `{
+		"title":"",
+		"content":[
+			[{"tag":"img","image_key":"img_screenshot"}],
+			[{"tag":"text","text":"你能看到这个图片么"}]
+		]
+	}`)
+	if text != "![image](img_screenshot)\n你能看到这个图片么" || len(raw) == 0 {
+		t.Fatalf("text=%q raw=%q", text, raw)
+	}
+	if len(resources) != 1 || resources[0].Kind != "image" || resources[0].ID != "img_screenshot" {
+		t.Fatalf("resources = %#v", resources)
+	}
+}
+
+func TestHandleMessageExtractsImageFromDirectPostBody(t *testing.T) {
+	var got Event
+	ingress := &oapiIngress{handler: func(_ context.Context, event Event) error {
+		got = event
+		return nil
+	}}
+	messageID, chatID, chatType := "message-1", "chat-1", "p2p"
+	messageType := "post"
+	content := `{"title":"","content":[[{"tag":"img","image_key":"img_screenshot"}],[{"tag":"text","text":"请查看图片"}]]}`
+	if err := ingress.handleMessage(context.Background(), &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{Message: &larkim.EventMessage{
+			MessageId: &messageID, ChatId: &chatID, ChatType: &chatType,
+			MessageType: &messageType, Content: &content,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Message == nil || got.Message.Text != "![image](img_screenshot)\n请查看图片" {
+		t.Fatalf("message = %#v", got.Message)
+	}
+	if len(got.Message.Resources) != 1 || got.Message.Resources[0].ID != "img_screenshot" || got.Message.Resources[0].Kind != "image" {
+		t.Fatalf("resources = %#v", got.Message.Resources)
+	}
+}
+
 func TestIngressRoutingHelpers(t *testing.T) {
 	if got := ingressChatMode("group", "thread"); got != ModeTopic {
 		t.Fatalf("mode = %q", got)

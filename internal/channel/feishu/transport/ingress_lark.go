@@ -398,38 +398,60 @@ func parseMessageContent(kind, rawValue string) (string, json.RawMessage, []Reso
 }
 
 func preferredPostContent(raw json.RawMessage) string {
-	locales := make(map[string]json.RawMessage)
-	if err := json.Unmarshal(raw, &locales); err != nil {
+	fields := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return string(raw)
+	}
+	if isPostBody(fields) {
+		return localizedPostContent("zh_cn", raw, raw)
 	}
 
 	selectedLocale := ""
 	selectedBody := json.RawMessage(nil)
-	for _, locale := range []string{"zh_cn", "en_us"} {
-		if body, ok := locales[locale]; ok && json.Valid(body) && strings.HasPrefix(strings.TrimSpace(string(body)), "{") {
-			selectedLocale, selectedBody = locale, body
-			break
+	selectedRank := 0
+	for locale, body := range fields {
+		bodyFields := make(map[string]json.RawMessage)
+		if json.Unmarshal(body, &bodyFields) != nil || !isPostBody(bodyFields) {
+			continue
 		}
-	}
-	if selectedLocale == "" {
-		for locale, body := range locales {
-			if !json.Valid(body) || !strings.HasPrefix(strings.TrimSpace(string(body)), "{") {
-				continue
-			}
-			if selectedLocale == "" || locale < selectedLocale {
-				selectedLocale, selectedBody = locale, body
-			}
+		rank := postLocaleRank(locale)
+		if selectedLocale == "" || rank < selectedRank || rank == selectedRank && locale < selectedLocale {
+			selectedLocale, selectedBody, selectedRank = locale, body, rank
 		}
 	}
 	if selectedLocale == "" {
 		return string(raw)
 	}
+	return localizedPostContent(selectedLocale, selectedBody, raw)
+}
 
-	selected, err := json.Marshal(map[string]json.RawMessage{selectedLocale: selectedBody})
+func localizedPostContent(locale string, body, fallback json.RawMessage) string {
+	selected, err := json.Marshal(map[string]json.RawMessage{locale: body})
 	if err != nil {
-		return string(raw)
+		return string(fallback)
 	}
 	return string(selected)
+}
+
+func isPostBody(fields map[string]json.RawMessage) bool {
+	for _, name := range []string{"content_v2", "content"} {
+		var paragraphs []json.RawMessage
+		if value, ok := fields[name]; ok && json.Unmarshal(value, &paragraphs) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func postLocaleRank(locale string) int {
+	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(locale)), "-", "_") {
+	case "zh_cn":
+		return 0
+	case "en_us":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func parseMillis(value string) time.Time {
