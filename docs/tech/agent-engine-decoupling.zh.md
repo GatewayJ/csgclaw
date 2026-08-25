@@ -624,7 +624,7 @@ Agent 删除由 Application 和 Binding 边界协调：删除或停用关联 Bin
 - 匿名 Session 不创建 IM Entity，并保留公共 API Contract。
 - 不同 Conversation 可以并发，一个 Conversation 内保持串行。
 - 内置 IM 保留 Room、Thread、Mention、File、Activity、Stop、Work、Interaction 和 `/new` 行为。
-- 飞书保留当前支持的 Text 行为，不声称支持 File。
+- 飞书保留已有 Text 行为，并通过 Agent-scoped 快照投递成功 Turn 的 Engine Output File。受支持图片使用飞书 Image Message；较大图片和其他产物在飞书上传限制内使用 File Message。
 - Binding 创建、更新和删除通过幂等操作协调唯一的 Channel Event Worker。
 - Agent Stop、Recreate 和 Runtime Restart 既不重启 Channel Event Worker，也不删除 Binding 或 Transcript。
 - Agent API 删除会删除或停用关联 Binding、停止对应 Event Worker，并保留已保存的 Transcript。

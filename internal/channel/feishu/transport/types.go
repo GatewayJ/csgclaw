@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"time"
 )
 
@@ -203,6 +204,44 @@ type SendCardRequest struct {
 	ThreadID       string
 }
 
+type UploadImageRequest struct {
+	MediaType string
+	SizeBytes int64
+	Content   io.Reader
+}
+
+type UploadFileRequest struct {
+	Name      string
+	SizeBytes int64
+	Content   io.Reader
+}
+
+type UploadResult struct {
+	Key string
+}
+
+type SendImageRequest struct {
+	ChatID   string
+	ImageKey string
+	// IdempotencyKey is a process-local delivery ID. It is hashed into the UUID
+	// sent to Feishu and is never sent verbatim.
+	IdempotencyKey string
+	ReplyTo        string
+	ReplyInThread  bool
+	ThreadID       string
+}
+
+type SendFileRequest struct {
+	ChatID  string
+	FileKey string
+	// IdempotencyKey is a process-local delivery ID. It is hashed into the UUID
+	// sent to Feishu and is never sent verbatim.
+	IdempotencyKey string
+	ReplyTo        string
+	ReplyInThread  bool
+	ThreadID       string
+}
+
 type UpdateCardRequest struct {
 	MessageID string
 	Card      map[string]any
@@ -263,6 +302,10 @@ type Adapter interface {
 	UpdateText(context.Context, UpdateTextRequest) error
 	SendCard(context.Context, SendCardRequest) (SendResult, error)
 	UpdateCard(context.Context, UpdateCardRequest) error
+	UploadImage(context.Context, UploadImageRequest) (UploadResult, error)
+	UploadFile(context.Context, UploadFileRequest) (UploadResult, error)
+	SendImage(context.Context, SendImageRequest) (SendResult, error)
+	SendFile(context.Context, SendFileRequest) (SendResult, error)
 	AddReaction(context.Context, AddReactionRequest) (AddReactionResult, error)
 	DeleteReaction(context.Context, DeleteReactionRequest) error
 	DownloadResource(context.Context, DownloadResourceRequest) (DownloadResourceResult, error)

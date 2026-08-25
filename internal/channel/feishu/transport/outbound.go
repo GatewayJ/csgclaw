@@ -14,12 +14,22 @@ import (
 )
 
 type larkOpenAPI interface {
+	CreateImage(context.Context, createImageAPIRequest) (*larkim.CreateImageResp, error)
+	CreateFile(context.Context, createFileAPIRequest) (*larkim.CreateFileResp, error)
 	CreateMessage(context.Context, createMessageAPIRequest) (*larkim.CreateMessageResp, error)
 	ReplyMessage(context.Context, replyMessageAPIRequest) (*larkim.ReplyMessageResp, error)
 	UpdateMessage(context.Context, updateMessageAPIRequest) (*larkim.UpdateMessageResp, error)
 	PatchMessage(context.Context, patchMessageAPIRequest) (*larkim.PatchMessageResp, error)
 	CreateMessageReaction(context.Context, createReactionAPIRequest) (*larkim.CreateMessageReactionResp, error)
 	DeleteMessageReaction(context.Context, deleteReactionAPIRequest) (*larkim.DeleteMessageReactionResp, error)
+}
+
+type createImageAPIRequest struct {
+	Body *larkim.CreateImageReqBody
+}
+
+type createFileAPIRequest struct {
+	Body *larkim.CreateFileReqBody
 }
 
 type createMessageAPIRequest struct {
@@ -55,11 +65,14 @@ type deleteReactionAPIRequest struct {
 const (
 	feishuTextRequestBodyLimit = 150 << 10
 	feishuRichRequestBodyLimit = 30 << 10
+	// ImageUploadLimitBytes and FileUploadLimitBytes mirror Feishu's upload
+	// endpoint limits. Delivery policy may impose lower aggregate limits.
+	ImageUploadLimitBytes int64 = 10 << 20
+	FileUploadLimitBytes  int64 = 30 << 20
 )
 
-// directOutbound maps one delivery attempt to exactly one generated
-// OpenAPI method call. It never invokes the SDK channel Send helper, whose
-// retry, fallback, and chunking policy sits above the raw message APIs.
+// directOutbound maps one operation to exactly one raw OpenAPI call. Retry and
+// multi-step upload/send orchestration stay in the delivery dispatcher.
 type directOutbound struct {
 	api larkOpenAPI
 }
@@ -122,6 +135,108 @@ func (o *directOutbound) SendCard(ctx context.Context, req SendCardRequest) (Sen
 		return SendResult{}, fmt.Errorf("encode feishu card: %w", err)
 	}
 	return o.sendMessage(ctx, req.ChatID, req.ReplyTo, req.ReplyInThread, req.IdempotencyKey, "interactive", string(content))
+}
+
+func (o *directOutbound) UploadImage(ctx context.Context, req UploadImageRequest) (UploadResult, error) {
+	if ctx == nil {
+		return UploadResult{}, errNilContext
+	}
+	if o == nil || o.api == nil {
+		return UploadResult{}, ErrInvalidConfig
+	}
+	if req.Content == nil {
+		return UploadResult{}, errors.New("feishu image content is required")
+	}
+	if req.SizeBytes <= 0 {
+		return UploadResult{}, errors.New("feishu image size must be positive")
+	}
+	if req.SizeBytes > ImageUploadLimitBytes {
+		return UploadResult{}, fmt.Errorf("feishu image upload is %d bytes; limit is %d: %w", req.SizeBytes, ImageUploadLimitBytes, ErrPayloadTooLarge)
+	}
+	if !SupportsImageUpload(req.MediaType, req.SizeBytes) {
+		return UploadResult{}, fmt.Errorf("feishu image media type %q is not supported for image upload", req.MediaType)
+	}
+	resp, err := o.api.CreateImage(ctx, createImageAPIRequest{
+		Body: larkim.NewCreateImageReqBodyBuilder().
+			ImageType("message").
+			Image(req.Content).
+			Build(),
+	})
+	if err != nil {
+		return UploadResult{}, requestAPIError("create image", err)
+	}
+	imageKey, err := uploadedImageKey(resp)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	return UploadResult{Key: imageKey}, nil
+}
+
+func (o *directOutbound) UploadFile(ctx context.Context, req UploadFileRequest) (UploadResult, error) {
+	if ctx == nil {
+		return UploadResult{}, errNilContext
+	}
+	if o == nil || o.api == nil {
+		return UploadResult{}, ErrInvalidConfig
+	}
+	if req.Content == nil {
+		return UploadResult{}, errors.New("feishu file content is required")
+	}
+	fileName := strings.TrimSpace(req.Name)
+	if fileName == "" {
+		return UploadResult{}, errors.New("feishu file name is required")
+	}
+	if req.SizeBytes <= 0 {
+		return UploadResult{}, errors.New("feishu file size must be positive")
+	}
+	if req.SizeBytes > FileUploadLimitBytes {
+		return UploadResult{}, fmt.Errorf("feishu file upload is %d bytes; limit is %d: %w", req.SizeBytes, FileUploadLimitBytes, ErrPayloadTooLarge)
+	}
+	resp, err := o.api.CreateFile(ctx, createFileAPIRequest{
+		Body: larkim.NewCreateFileReqBodyBuilder().
+			FileType("stream").
+			FileName(fileName).
+			File(req.Content).
+			Build(),
+	})
+	if err != nil {
+		return UploadResult{}, requestAPIError("create file", err)
+	}
+	fileKey, err := uploadedFileKey(resp)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	return UploadResult{Key: fileKey}, nil
+}
+
+func (o *directOutbound) SendImage(ctx context.Context, req SendImageRequest) (SendResult, error) {
+	if err := validateDirectSend(ctx, req.ChatID, req.IdempotencyKey, req.ReplyTo, req.ReplyInThread, req.ThreadID); err != nil {
+		return SendResult{}, err
+	}
+	imageKey := strings.TrimSpace(req.ImageKey)
+	if imageKey == "" {
+		return SendResult{}, errors.New("feishu image key is required")
+	}
+	content, err := json.Marshal(map[string]string{"image_key": imageKey})
+	if err != nil {
+		return SendResult{}, fmt.Errorf("encode feishu image message: %w", err)
+	}
+	return o.sendMessage(ctx, req.ChatID, req.ReplyTo, req.ReplyInThread, req.IdempotencyKey, larkim.MsgTypeImage, string(content))
+}
+
+func (o *directOutbound) SendFile(ctx context.Context, req SendFileRequest) (SendResult, error) {
+	if err := validateDirectSend(ctx, req.ChatID, req.IdempotencyKey, req.ReplyTo, req.ReplyInThread, req.ThreadID); err != nil {
+		return SendResult{}, err
+	}
+	fileKey := strings.TrimSpace(req.FileKey)
+	if fileKey == "" {
+		return SendResult{}, errors.New("feishu file key is required")
+	}
+	content, err := json.Marshal(map[string]string{"file_key": fileKey})
+	if err != nil {
+		return SendResult{}, fmt.Errorf("encode feishu file message: %w", err)
+	}
+	return o.sendMessage(ctx, req.ChatID, req.ReplyTo, req.ReplyInThread, req.IdempotencyKey, larkim.MsgTypeFile, string(content))
 }
 
 func (o *directOutbound) UpdateText(ctx context.Context, req UpdateTextRequest) error {
@@ -336,6 +451,46 @@ func (o *directOutbound) sendMessage(ctx context.Context, chatID, replyTo string
 	return SendResult{MessageID: strings.TrimSpace(*resp.Data.MessageId)}, nil
 }
 
+func uploadedImageKey(resp *larkim.CreateImageResp) (string, error) {
+	if resp == nil {
+		return "", missingAPIResponse("create image")
+	}
+	if apiResponseFailed(resp.Success(), resp.ApiResp) {
+		return "", responseAPIError("create image", resp.Code, resp.Msg, resp.ApiResp)
+	}
+	if resp.Data == nil || resp.Data.ImageKey == nil || strings.TrimSpace(*resp.Data.ImageKey) == "" {
+		return "", missingAPIResult("create image", "image_key", resp.ApiResp)
+	}
+	return strings.TrimSpace(*resp.Data.ImageKey), nil
+}
+
+func uploadedFileKey(resp *larkim.CreateFileResp) (string, error) {
+	if resp == nil {
+		return "", missingAPIResponse("create file")
+	}
+	if apiResponseFailed(resp.Success(), resp.ApiResp) {
+		return "", responseAPIError("create file", resp.Code, resp.Msg, resp.ApiResp)
+	}
+	if resp.Data == nil || resp.Data.FileKey == nil || strings.TrimSpace(*resp.Data.FileKey) == "" {
+		return "", missingAPIResult("create file", "file_key", resp.ApiResp)
+	}
+	return strings.TrimSpace(*resp.Data.FileKey), nil
+}
+
+// SupportsImageUpload reports whether metadata can use Feishu's image endpoint.
+// Larger supported images should be sent through the generic file endpoint.
+func SupportsImageUpload(mediaType string, sizeBytes int64) bool {
+	if sizeBytes <= 0 || sizeBytes > ImageUploadLimitBytes {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/tiff", "image/bmp", "image/x-icon", "image/vnd.microsoft.icon":
+		return true
+	default:
+		return false
+	}
+}
+
 // validateMessageRequestSize measures the exact JSON body handed to the SDK.
 // It rejects an invalid attempt instead of splitting, downgrading, or relying
 // on a remote 4xx. Feishu limits text bodies to 150 KiB and rich/card bodies to
@@ -428,6 +583,34 @@ func apiResponseFailed(success bool, response *larkcore.ApiResp) bool {
 type sdkLarkOpenAPI struct {
 	client *lark.Client
 	tokens tenantTokenSource
+}
+
+func (a *sdkLarkOpenAPI) CreateImage(ctx context.Context, req createImageAPIRequest) (*larkim.CreateImageResp, error) {
+	token, err := a.token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := a.client.Im.V1.Image.Create(ctx, larkim.NewCreateImageReqBuilder().
+		Body(req.Body).
+		Build(), larkcore.WithTenantAccessToken(token))
+	if resp != nil {
+		a.invalidateRejectedToken(token, resp.Code)
+	}
+	return resp, err
+}
+
+func (a *sdkLarkOpenAPI) CreateFile(ctx context.Context, req createFileAPIRequest) (*larkim.CreateFileResp, error) {
+	token, err := a.token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := a.client.Im.V1.File.Create(ctx, larkim.NewCreateFileReqBuilder().
+		Body(req.Body).
+		Build(), larkcore.WithTenantAccessToken(token))
+	if resp != nil {
+		a.invalidateRejectedToken(token, resp.Code)
+	}
+	return resp, err
 }
 
 func (a *sdkLarkOpenAPI) CreateMessage(ctx context.Context, req createMessageAPIRequest) (*larkim.CreateMessageResp, error) {

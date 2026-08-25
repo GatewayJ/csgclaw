@@ -25,6 +25,10 @@ type larkOperations interface {
 	UpdateText(context.Context, UpdateTextRequest) error
 	SendCard(context.Context, SendCardRequest) (SendResult, error)
 	UpdateCard(context.Context, UpdateCardRequest) error
+	UploadImage(context.Context, UploadImageRequest) (UploadResult, error)
+	UploadFile(context.Context, UploadFileRequest) (UploadResult, error)
+	SendImage(context.Context, SendImageRequest) (SendResult, error)
+	SendFile(context.Context, SendFileRequest) (SendResult, error)
 	AddReaction(context.Context, AddReactionRequest) (AddReactionResult, error)
 	DeleteReaction(context.Context, DeleteReactionRequest) error
 }
@@ -228,6 +232,54 @@ func (a *adapter) UpdateCard(ctx context.Context, req UpdateCardRequest) error {
 		return fmt.Errorf("update feishu card: %w", err)
 	}
 	return nil
+}
+
+func (a *adapter) UploadImage(ctx context.Context, req UploadImageRequest) (UploadResult, error) {
+	if err := a.ready(ctx); err != nil {
+		return UploadResult{}, err
+	}
+	result, err := a.oapi.UploadImage(ctx, req)
+	if err != nil {
+		return UploadResult{}, fmt.Errorf("upload feishu image: %w", err)
+	}
+	result.Key = strings.TrimSpace(result.Key)
+	return result, nil
+}
+
+func (a *adapter) UploadFile(ctx context.Context, req UploadFileRequest) (UploadResult, error) {
+	if err := a.ready(ctx); err != nil {
+		return UploadResult{}, err
+	}
+	result, err := a.oapi.UploadFile(ctx, req)
+	if err != nil {
+		return UploadResult{}, fmt.Errorf("upload feishu file: %w", err)
+	}
+	result.Key = strings.TrimSpace(result.Key)
+	return result, nil
+}
+
+func (a *adapter) SendImage(ctx context.Context, req SendImageRequest) (SendResult, error) {
+	if err := a.ready(ctx); err != nil {
+		return SendResult{}, err
+	}
+	result, err := a.oapi.SendImage(ctx, req)
+	if err != nil {
+		return SendResult{}, fmt.Errorf("send feishu image: %w", err)
+	}
+	result.MessageID = strings.TrimSpace(result.MessageID)
+	return result, nil
+}
+
+func (a *adapter) SendFile(ctx context.Context, req SendFileRequest) (SendResult, error) {
+	if err := a.ready(ctx); err != nil {
+		return SendResult{}, err
+	}
+	result, err := a.oapi.SendFile(ctx, req)
+	if err != nil {
+		return SendResult{}, fmt.Errorf("send feishu file: %w", err)
+	}
+	result.MessageID = strings.TrimSpace(result.MessageID)
+	return result, nil
 }
 
 func (a *adapter) AddReaction(ctx context.Context, req AddReactionRequest) (AddReactionResult, error) {

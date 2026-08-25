@@ -117,7 +117,13 @@ func (w *pipelineWorker) Start(ctx context.Context) error {
 		return errors.Join(cause, cleanupFailedStart(cancel, adapter, intake, runner))
 	}
 	store := feishustate.NewStore()
-	dispatcher, err := delivery.NewDispatcher(delivery.DispatcherOptions{State: store, Adapter: adapter})
+	dispatcher, err := delivery.NewDispatcher(delivery.DispatcherOptions{
+		State:   store,
+		Adapter: adapter,
+		Files: delivery.NewEngineFileResolver(
+			w.factory.engine.Conversations(w.resolved.Binding.AgentID).Files(),
+		),
+	})
 	if err != nil {
 		return fail(err)
 	}

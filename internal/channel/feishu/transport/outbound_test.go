@@ -86,6 +86,137 @@ func TestDirectOutboundCreateCardUsesStableUUIDAndExactJSON(t *testing.T) {
 	}
 }
 
+func TestDirectOutboundUploadsImageThenSendsMessage(t *testing.T) {
+	t.Parallel()
+	api := &fakeLarkOpenAPI{}
+	outbound := newDirectOutboundWithAPI(api)
+	key := "delivery-image-1"
+
+	upload, err := outbound.UploadImage(context.Background(), UploadImageRequest{
+		MediaType: "image/png", SizeBytes: 3, Content: strings.NewReader("png"),
+	})
+	if err != nil || upload.Key != "img-test" {
+		t.Fatalf("UploadImage() = %+v, %v", upload, err)
+	}
+	if api.createImageCalls != 1 || api.createCalls != 0 || api.replyCalls != 0 || api.createImageReq == nil || api.createImageReq.Body == nil {
+		t.Fatalf("OpenAPI calls after upload: image=%d create=%d reply=%d request=%#v", api.createImageCalls, api.createCalls, api.replyCalls, api.createImageReq)
+	}
+	result, err := outbound.SendImage(context.Background(), SendImageRequest{
+		ChatID: " chat-1 ", ImageKey: upload.Key, IdempotencyKey: key,
+	})
+	if err != nil || result.MessageID != "created-message" {
+		t.Fatalf("SendImage() = %+v, %v", result, err)
+	}
+	if api.createImageCalls != 1 || api.createCalls != 1 || api.replyCalls != 0 || api.createImageReq == nil || api.createImageReq.Body == nil {
+		t.Fatalf("OpenAPI calls: upload image=%d create=%d reply=%d request=%#v", api.createImageCalls, api.createCalls, api.replyCalls, api.createImageReq)
+	}
+	if api.createImageReq.Body.ImageType == nil || *api.createImageReq.Body.ImageType != "message" {
+		t.Fatalf("image upload body = %#v", api.createImageReq.Body)
+	}
+	uploaded, readErr := io.ReadAll(api.createImageReq.Body.Image)
+	if readErr != nil || string(uploaded) != "png" {
+		t.Fatalf("uploaded image = %q, error=%v", uploaded, readErr)
+	}
+	body := api.createReq.Body
+	if body.MsgType == nil || *body.MsgType != larkim.MsgTypeImage || body.Content == nil || body.Uuid == nil || *body.Uuid != feishuMessageUUID(key) {
+		t.Fatalf("image message body = %#v", body)
+	}
+	var content map[string]string
+	if err := json.Unmarshal([]byte(*body.Content), &content); err != nil || content["image_key"] != "img-test" {
+		t.Fatalf("image message content = %#v, error=%v", content, err)
+	}
+}
+
+func TestDirectOutboundRejectsUnsupportedImageMediaTypeBeforeUpload(t *testing.T) {
+	t.Parallel()
+	api := &fakeLarkOpenAPI{}
+	outbound := newDirectOutboundWithAPI(api)
+
+	_, err := outbound.UploadImage(context.Background(), UploadImageRequest{
+		MediaType: "image/svg+xml", SizeBytes: 3, Content: strings.NewReader("svg"),
+	})
+	if err == nil || api.createImageCalls != 0 || api.createCalls != 0 || api.replyCalls != 0 {
+		t.Fatalf("SendImage() error=%v upload=%d create=%d reply=%d", err, api.createImageCalls, api.createCalls, api.replyCalls)
+	}
+}
+
+func TestDirectOutboundRejectsEmptyUploadsBeforeOpenAPI(t *testing.T) {
+	t.Parallel()
+	api := &fakeLarkOpenAPI{}
+	outbound := newDirectOutboundWithAPI(api)
+
+	_, imageErr := outbound.UploadImage(context.Background(), UploadImageRequest{
+		MediaType: "image/png", Content: strings.NewReader(""),
+	})
+	_, fileErr := outbound.UploadFile(context.Background(), UploadFileRequest{
+		Name: "empty.txt", Content: strings.NewReader(""),
+	})
+	if imageErr == nil || fileErr == nil || api.createImageCalls != 0 || api.createFileCalls != 0 {
+		t.Fatalf("image error=%v file error=%v image uploads=%d file uploads=%d", imageErr, fileErr, api.createImageCalls, api.createFileCalls)
+	}
+	if SupportsImageUpload("image/png", 0) {
+		t.Fatal("zero-byte image was considered uploadable")
+	}
+}
+
+func TestDirectOutboundUploadsFileThenRepliesWithMessage(t *testing.T) {
+	t.Parallel()
+	api := &fakeLarkOpenAPI{}
+	outbound := newDirectOutboundWithAPI(api)
+	key := "delivery-file-1"
+
+	upload, err := outbound.UploadFile(context.Background(), UploadFileRequest{
+		Name: " report.pdf ", SizeBytes: 3, Content: strings.NewReader("pdf"),
+	})
+	if err != nil || upload.Key != "file-test" {
+		t.Fatalf("UploadFile() = %+v, %v", upload, err)
+	}
+	if api.createFileCalls != 1 || api.replyCalls != 0 || api.createCalls != 0 || api.createFileReq == nil || api.createFileReq.Body == nil {
+		t.Fatalf("OpenAPI calls after upload: file=%d reply=%d create=%d request=%#v", api.createFileCalls, api.replyCalls, api.createCalls, api.createFileReq)
+	}
+	result, err := outbound.SendFile(context.Background(), SendFileRequest{
+		ChatID: "chat-1", FileKey: upload.Key, IdempotencyKey: key,
+		ReplyTo: "message-root", ReplyInThread: true, ThreadID: "thread-1",
+	})
+	if err != nil || result.MessageID != "reply-message" {
+		t.Fatalf("SendFile() = %+v, %v", result, err)
+	}
+	if api.createFileCalls != 1 || api.replyCalls != 1 || api.createCalls != 0 || api.createFileReq == nil || api.createFileReq.Body == nil {
+		t.Fatalf("OpenAPI calls: upload file=%d reply=%d create=%d request=%#v", api.createFileCalls, api.replyCalls, api.createCalls, api.createFileReq)
+	}
+	if api.createFileReq.Body.FileType == nil || *api.createFileReq.Body.FileType != "stream" ||
+		api.createFileReq.Body.FileName == nil || *api.createFileReq.Body.FileName != "report.pdf" {
+		t.Fatalf("file upload body = %#v", api.createFileReq.Body)
+	}
+	uploaded, readErr := io.ReadAll(api.createFileReq.Body.File)
+	if readErr != nil || string(uploaded) != "pdf" {
+		t.Fatalf("uploaded file = %q, error=%v", uploaded, readErr)
+	}
+	body := api.replyReq.Body
+	if api.replyReq.MessageID != "message-root" || body.MsgType == nil || *body.MsgType != larkim.MsgTypeFile ||
+		body.Content == nil || body.Uuid == nil || *body.Uuid != feishuMessageUUID(key) ||
+		body.ReplyInThread == nil || !*body.ReplyInThread {
+		t.Fatalf("file reply body = %#v request=%#v", body, api.replyReq)
+	}
+	var content map[string]string
+	if err := json.Unmarshal([]byte(*body.Content), &content); err != nil || content["file_key"] != "file-test" {
+		t.Fatalf("file message content = %#v, error=%v", content, err)
+	}
+}
+
+func TestDirectOutboundRejectsOversizedFileBeforeUpload(t *testing.T) {
+	t.Parallel()
+	api := &fakeLarkOpenAPI{}
+	outbound := newDirectOutboundWithAPI(api)
+
+	_, err := outbound.UploadFile(context.Background(), UploadFileRequest{
+		Name: "archive.zip", SizeBytes: FileUploadLimitBytes + 1, Content: strings.NewReader("zip"),
+	})
+	if !errors.Is(err, ErrPayloadTooLarge) || api.createFileCalls != 0 {
+		t.Fatalf("UploadFile() error=%v upload calls=%d", err, api.createFileCalls)
+	}
+}
+
 func TestDirectOutboundPatchAndReactionsEachCallOnce(t *testing.T) {
 	t.Parallel()
 	api := &fakeLarkOpenAPI{}
@@ -405,6 +536,8 @@ func (s *recordingTenantTokenSource) Invalidate(token string) {
 }
 
 type fakeLarkOpenAPI struct {
+	createImageCalls    int
+	createFileCalls     int
 	createCalls         int
 	replyCalls          int
 	updateCalls         int
@@ -412,6 +545,8 @@ type fakeLarkOpenAPI struct {
 	createReactionCalls int
 	deleteReactionCalls int
 
+	createImageReq    *createImageAPIRequest
+	createFileReq     *createFileAPIRequest
 	createReq         *createMessageAPIRequest
 	replyReq          *replyMessageAPIRequest
 	updateReq         *updateMessageAPIRequest
@@ -419,6 +554,10 @@ type fakeLarkOpenAPI struct {
 	createReactionReq *createReactionAPIRequest
 	deleteReactionReq *deleteReactionAPIRequest
 
+	createImageErr    error
+	createImageResp   *larkim.CreateImageResp
+	createFileErr     error
+	createFileResp    *larkim.CreateFileResp
 	createErr         error
 	createResp        *larkim.CreateMessageResp
 	replyErr          error
@@ -426,6 +565,30 @@ type fakeLarkOpenAPI struct {
 	patchErr          error
 	createReactionErr error
 	deleteReactionErr error
+}
+
+func (f *fakeLarkOpenAPI) CreateImage(_ context.Context, req createImageAPIRequest) (*larkim.CreateImageResp, error) {
+	f.createImageCalls++
+	f.createImageReq = &req
+	if f.createImageErr != nil {
+		return nil, f.createImageErr
+	}
+	if f.createImageResp != nil {
+		return f.createImageResp, nil
+	}
+	return &larkim.CreateImageResp{Data: &larkim.CreateImageRespData{ImageKey: testStringPointer("img-test")}}, nil
+}
+
+func (f *fakeLarkOpenAPI) CreateFile(_ context.Context, req createFileAPIRequest) (*larkim.CreateFileResp, error) {
+	f.createFileCalls++
+	f.createFileReq = &req
+	if f.createFileErr != nil {
+		return nil, f.createFileErr
+	}
+	if f.createFileResp != nil {
+		return f.createFileResp, nil
+	}
+	return &larkim.CreateFileResp{Data: &larkim.CreateFileRespData{FileKey: testStringPointer("file-test")}}, nil
 }
 
 func (f *fakeLarkOpenAPI) CreateMessage(_ context.Context, req createMessageAPIRequest) (*larkim.CreateMessageResp, error) {

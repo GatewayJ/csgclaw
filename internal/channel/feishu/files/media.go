@@ -25,13 +25,17 @@ const stagingFilePrefix = "feishu-attachment-"
 // Preparer downloads Feishu resources into a private channel-owned staging
 // directory, applies channel policy, and returns Engine-neutral file inputs.
 type Preparer struct {
-	Downloader transport.Adapter
+	Downloader Downloader
 	Files      agentengine.FileInterface
 	Root       string
 	Policy     Policy
 
 	quotaOnce sync.Once
 	quota     *bindingQuota
+}
+
+type Downloader interface {
+	DownloadResource(context.Context, transport.DownloadResourceRequest) (transport.DownloadResourceResult, error)
 }
 
 // Prepare returns inputs and a cleanup function. Cleanup is safe after

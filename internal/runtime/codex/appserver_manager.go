@@ -733,7 +733,7 @@ func appServerThreadStartParams(spec SessionSpec, publishFiles bool) map[string]
 func appServerPublishFileToolSpec() map[string]any {
 	return map[string]any{
 		"name":        appServerPublishFileToolName,
-		"description": "Publish an existing file from the current Runtime workspace to the user. Call this only after the file is complete. The path must be relative to the workspace; do not pass a URL or an absolute path.",
+		"description": "Publish a generated workspace file through the active channel. When the user asks to generate, send, return, or download a file, call this tool immediately after creating it. Do not search for or use csgclaw-cli, curl, Feishu APIs, or other upload methods. The path must be relative to the workspace; do not pass a URL or an absolute path.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
