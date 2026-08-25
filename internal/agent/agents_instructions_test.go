@@ -110,6 +110,28 @@ func TestRenderAgentsInstructionsBlockWithInstructions(t *testing.T) {
 	}
 }
 
+func TestRenderRuntimeAgentsInstructionsBlockAddsSharedFilePublishingRules(t *testing.T) {
+	for _, agentID := range []string{ManagerUserID, "agent-worker"} {
+		rendered := RenderRuntimeAgentsInstructionsBlock(agentID, "Stay concise.")
+		for _, want := range []string{
+			"Output File Delivery",
+			"When `csgclaw_publish_file` is available",
+			"workspace-relative path immediately after creating it",
+			"Do not search for or use `csgclaw-cli`, `curl`, HTTP APIs, channel-specific APIs, or other upload methods",
+			"Mention the file in the final answer only after the tool succeeds",
+		} {
+			if !strings.Contains(rendered, want) {
+				t.Fatalf("runtime instructions for %q missing %q in %q", agentID, want, rendered)
+			}
+		}
+	}
+
+	plain := RenderAgentsInstructionsBlock("Stay concise.")
+	if strings.Contains(plain, "Output File Delivery") || strings.Contains(plain, "csgclaw_publish_file") {
+		t.Fatalf("non-runtime instructions include file publishing guidance: %q", plain)
+	}
+}
+
 func TestRenderRuntimeAgentsInstructionsBlockAddsManagerConnectorRulesOnlyForManager(t *testing.T) {
 	manager := RenderRuntimeAgentsInstructionsBlock(ManagerUserID, "Stay concise.")
 	if !strings.Contains(manager, "# Managed Runtime Instructions") {

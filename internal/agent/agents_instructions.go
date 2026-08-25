@@ -54,12 +54,19 @@ func RenderAgentsInstructionsBlock(instructions string) string {
 }
 
 func RenderRuntimeAgentsInstructionsBlock(agentID, instructions string) string {
-	managedInstructions := ""
+	managedInstructions := strings.TrimSpace(runtimeFilePublishingInstructions)
 	if strings.TrimSpace(agentID) == ManagerUserID {
-		managedInstructions = strings.TrimSpace(managerRuntimeConnectorInstructions)
+		managedInstructions += "\n\n" + strings.TrimSpace(managerRuntimeConnectorInstructions)
 	}
 	return renderAgentsInstructionsBlock(instructions, managedInstructions)
 }
+
+const runtimeFilePublishingInstructions = `### Output File Delivery
+
+- When ` + "`csgclaw_publish_file`" + ` is available and the user asks to receive a generated file, create the file in the Runtime workspace.
+- Call ` + "`csgclaw_publish_file`" + ` with the file's workspace-relative path immediately after creating it.
+- Do not search for or use ` + "`csgclaw-cli`" + `, ` + "`curl`" + `, HTTP APIs, channel-specific APIs, or other upload methods for output file delivery.
+- Calling the tool publishes the file through the active channel. Mention the file in the final answer only after the tool succeeds.`
 
 const managerRuntimeConnectorInstructions = `### GitHub Connector Access
 

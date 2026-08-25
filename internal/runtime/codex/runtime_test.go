@@ -470,6 +470,9 @@ func TestRefreshCodexHomeAgentsFileCreatesManagedFileWhenMissing(t *testing.T) {
 	if !strings.Contains(text, "Prefer targeted tests.") {
 		t.Fatalf("AGENTS.md = %q, want agent instructions", text)
 	}
+	if !strings.Contains(text, "Output File Delivery") || !strings.Contains(text, "`csgclaw_publish_file`") {
+		t.Fatalf("AGENTS.md = %q, want shared file publishing instructions", text)
+	}
 	if !strings.Contains(text, "END CSGCLAW-INSTRUCTIONS") {
 		t.Fatalf("AGENTS.md = %q, want instructions block end marker", text)
 	}

@@ -2306,8 +2306,14 @@ func TestAppServerThreadStartRegistersPublishFileDynamicTool(t *testing.T) {
 		t.Fatalf("dynamicTools = %#v, want one typed tool", params["dynamicTools"])
 	}
 	tool := tools[0]
-	if tool["name"] != "csgclaw_publish_file" || strings.TrimSpace(fmt.Sprint(tool["description"])) == "" {
+	description := strings.TrimSpace(fmt.Sprint(tool["description"]))
+	if tool["name"] != "csgclaw_publish_file" || description == "" {
 		t.Fatalf("publish file tool = %#v", tool)
+	}
+	for _, want := range []string{"generate, send, return, or download a file", "call this tool immediately after creating it", "Do not search for or use csgclaw-cli, curl, Feishu APIs, or other upload methods"} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("publish file tool description missing %q in %q", want, description)
+		}
 	}
 	schema, _ := tool["inputSchema"].(map[string]any)
 	properties, _ := schema["properties"].(map[string]any)
