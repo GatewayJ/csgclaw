@@ -478,6 +478,71 @@ func TestRefreshCodexHomeAgentsFileCreatesManagedFileWhenMissing(t *testing.T) {
 	}
 }
 
+func TestRefreshCodexHomeAgentsFileAddsFeishuLarkCLIInstructionsWhenBound(t *testing.T) {
+	root := t.TempDir()
+	rt := newTestCodexRuntime(root, func(h agentruntime.Handle) (AgentRef, error) {
+		return AgentRef{ID: "u-alice", Name: "alice", RuntimeID: h.RuntimeID, Instructions: "Prefer targeted tests."}, nil
+	})
+	codexHomeDir := filepath.Join(root, "agent-alice", ".codex", "home")
+	sourcePath := larkCLISourceConfigPath(codexHomeDir)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(larkCLIBindMarkerPath(codexHomeDir), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rt.RefreshCodexHomeAgentsFile(context.Background(), agentruntime.Handle{RuntimeID: "rt-u-alice"}); err != nil {
+		t.Fatalf("RefreshCodexHomeAgentsFile() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(codexHomeDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		"Feishu lark-cli Access",
+		"`LARK_CHANNEL_CONFIG`",
+		"lark-cli docs +fetch --api-version v2",
+		"lark-cli auth login --no-wait --json --recommend",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("AGENTS.md missing %q in %q", want, text)
+		}
+	}
+}
+
+func TestRefreshCodexHomeAgentsFileDoesNotAddFeishuLarkCLIInstructionsForSourceOnly(t *testing.T) {
+	root := t.TempDir()
+	rt := newTestCodexRuntime(root, func(h agentruntime.Handle) (AgentRef, error) {
+		return AgentRef{ID: "u-alice", Name: "alice", RuntimeID: h.RuntimeID, Instructions: "Prefer targeted tests."}, nil
+	})
+	codexHomeDir := filepath.Join(root, "agent-alice", ".codex", "home")
+	sourcePath := larkCLISourceConfigPath(codexHomeDir)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rt.RefreshCodexHomeAgentsFile(context.Background(), agentruntime.Handle{RuntimeID: "rt-u-alice"}); err != nil {
+		t.Fatalf("RefreshCodexHomeAgentsFile() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(codexHomeDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if strings.Contains(string(raw), "Feishu lark-cli Access") {
+		t.Fatalf("AGENTS.md unexpectedly includes lark-cli instructions for source-only state: %q", string(raw))
+	}
+}
+
 func TestRefreshCodexHomeAgentsFileAddsManagerConnectorRules(t *testing.T) {
 	root := t.TempDir()
 	rt := newTestCodexRuntime(root, func(h agentruntime.Handle) (AgentRef, error) {
@@ -942,8 +1007,14 @@ func TestBuildSessionEnvOnlyInjectsOpenAIAPIKey(t *testing.T) {
 	t.Setenv("ZDOTDIR", "/host-zdotdir")
 	t.Setenv("BASH_ENV", "/host-bashenv")
 	t.Setenv("ENV", "/host-env")
+	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", "/host-lark-cli")
+	t.Setenv("LARK_CHANNEL", "1")
+	t.Setenv("LARK_CHANNEL_HOME", "/host/lark-channel")
+	t.Setenv("LARK_CHANNEL_PROFILE", "host-profile")
+	t.Setenv("LARK_CHANNEL_CONFIG", "/host/lark-channel/config.json")
 
 	env := buildSessionEnv(SessionSpec{
+		AgentID:      "agent-dev",
 		HomeDir:      "/host-home",
 		CodexHomeDir: "/tmp/runtime-codex-home",
 		Profile: agentruntime.Profile{
@@ -951,10 +1022,13 @@ func TestBuildSessionEnvOnlyInjectsOpenAIAPIKey(t *testing.T) {
 			BaseURL: "https://runtime.example/v1/",
 			APIKey:  " runtime-key ",
 			Env: map[string]string{
-				"OPENAI_BASE_URL": "https://env.example/v1",
-				"OPENAI_API_KEY":  "env-key",
-				"OPENAI_MODEL":    "env-model",
-				" EXTRA_FLAG ":    " 1 ",
+				"OPENAI_BASE_URL":          "https://env.example/v1",
+				"OPENAI_API_KEY":           "env-key",
+				"OPENAI_MODEL":             "env-model",
+				"LARKSUITE_CLI_CONFIG_DIR": "/profile-lark-cli",
+				"LARK_CHANNEL":             "0",
+				"LARK_CHANNEL_CONFIG":      "/profile/lark-channel/config.json",
+				" EXTRA_FLAG ":             " 1 ",
 			},
 		},
 	})
@@ -986,10 +1060,52 @@ func TestBuildSessionEnvOnlyInjectsOpenAIAPIKey(t *testing.T) {
 	if got, want := envMap["EXTRA_FLAG"], "1"; got != want {
 		t.Fatalf("EXTRA_FLAG = %q, want %q", got, want)
 	}
-	for _, key := range []string{"ZDOTDIR", "BASH_ENV", "ENV"} {
+	for _, key := range []string{"ZDOTDIR", "BASH_ENV", "ENV", "LARKSUITE_CLI_CONFIG_DIR", "LARK_CHANNEL", "LARK_CHANNEL_HOME", "LARK_CHANNEL_PROFILE", "LARK_CHANNEL_CONFIG"} {
 		if got, ok := envMap[key]; ok {
 			t.Fatalf("%s = %q, want omitted from runtime env", key, got)
 		}
+	}
+}
+
+func TestBuildSessionEnvInjectsLarkCLIOnlyWhenBound(t *testing.T) {
+	codexHomeDir := t.TempDir()
+	sourcePath := larkCLISourceConfigPath(codexHomeDir)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(larkCLIBindMarkerPath(codexHomeDir), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	env := buildSessionEnv(SessionSpec{
+		AgentID:      "agent-dev",
+		HomeDir:      "/host-home",
+		CodexHomeDir: codexHomeDir,
+		Profile:      agentruntime.Profile{APIKey: "runtime-key"},
+	})
+	envMap := make(map[string]string, len(env))
+	for _, entry := range env {
+		key, value, _ := strings.Cut(entry, "=")
+		envMap[key] = value
+	}
+
+	if got, want := envMap["LARKSUITE_CLI_CONFIG_DIR"], filepath.Join(codexHomeDir, "lark-cli"); got != want {
+		t.Fatalf("LARKSUITE_CLI_CONFIG_DIR = %q, want %q", got, want)
+	}
+	if got, want := envMap["LARK_CHANNEL"], "1"; got != want {
+		t.Fatalf("LARK_CHANNEL = %q, want %q", got, want)
+	}
+	if got, want := envMap["LARK_CHANNEL_HOME"], codexHomeDir; got != want {
+		t.Fatalf("LARK_CHANNEL_HOME = %q, want %q", got, want)
+	}
+	if got, want := envMap["LARK_CHANNEL_PROFILE"], "agent-dev"; got != want {
+		t.Fatalf("LARK_CHANNEL_PROFILE = %q, want %q", got, want)
+	}
+	if got, want := envMap["LARK_CHANNEL_CONFIG"], sourcePath; got != want {
+		t.Fatalf("LARK_CHANNEL_CONFIG = %q, want %q", got, want)
 	}
 }
 

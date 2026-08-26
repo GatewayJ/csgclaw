@@ -53,10 +53,21 @@ func RenderAgentsInstructionsBlock(instructions string) string {
 	return renderAgentsInstructionsBlock(instructions, "")
 }
 
+type RuntimeManagedInstructionsOptions struct {
+	FeishuLarkCLI bool
+}
+
 func RenderRuntimeAgentsInstructionsBlock(agentID, instructions string) string {
+	return RenderRuntimeAgentsInstructionsBlockWithOptions(agentID, instructions, RuntimeManagedInstructionsOptions{})
+}
+
+func RenderRuntimeAgentsInstructionsBlockWithOptions(agentID, instructions string, options RuntimeManagedInstructionsOptions) string {
 	managedInstructions := strings.TrimSpace(runtimeFilePublishingInstructions)
 	if strings.TrimSpace(agentID) == ManagerUserID {
-		managedInstructions += "\n\n" + strings.TrimSpace(managerRuntimeConnectorInstructions)
+		managedInstructions = joinManagedInstructions(managedInstructions, managerRuntimeConnectorInstructions)
+	}
+	if options.FeishuLarkCLI {
+		managedInstructions = joinManagedInstructions(managedInstructions, feishuLarkCLIManagedInstructions)
 	}
 	return renderAgentsInstructionsBlock(instructions, managedInstructions)
 }
@@ -67,6 +78,16 @@ const runtimeFilePublishingInstructions = `### Output File Delivery
 - Call ` + "`csgclaw_publish_file`" + ` with the file's workspace-relative path immediately after creating it.
 - Do not search for or use ` + "`csgclaw-cli`" + `, ` + "`curl`" + `, HTTP APIs, channel-specific APIs, or other upload methods for output file delivery.
 - Calling the tool publishes the file through the active channel. Mention the file in the final answer only after the tool succeeds.`
+
+func joinManagedInstructions(values ...string) string {
+	var parts []string
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
 
 const managerRuntimeConnectorInstructions = `### GitHub Connector Access
 
@@ -100,6 +121,17 @@ const managerRuntimeConnectorInstructions = `### GitHub Connector Access
 - If the current room has no match and the user clearly refers to an upload from another conversation, list rooms and inspect only the relevant candidate rooms.
 - Do not search the web for a referenced upload, rely only on ` + "`find`" + ` in the current workspace, or request a re-upload until durable CSGClaw history has been checked.
 - Never print, echo, or include ` + "`CSGCLAW_ACCESS_TOKEN`" + ` or a capability token in tool output, logs, prompts, or responses.`
+
+const feishuLarkCLIManagedInstructions = `### Feishu lark-cli Access
+
+- This worker is bound to a Feishu app through lark-cli. Plain ` + "`lark-cli ...`" + ` commands inherit the current worker context from ` + "`LARK_CHANNEL=1`" + `, ` + "`LARK_CHANNEL_HOME`" + `, ` + "`LARK_CHANNEL_PROFILE`" + `, ` + "`LARK_CHANNEL_CONFIG`" + `, and ` + "`LARKSUITE_CLI_CONFIG_DIR`" + `.
+- Do not unset those variables, do not use the host default lark-cli profile, and do not read or print lark-cli config files, app secrets, access tokens, refresh tokens, OAuth device codes, or CSGClaw API tokens.
+- If lark-cli reports that the lark-channel context is not bound, stop and tell the user to initialize lark-cli for this worker from the Feishu channel profile page or restart the worker after initialization. Do not run bind manually from an ordinary prompt.
+- For Feishu Doc/Docx file tokens, first try ` + "`lark-cli docs +fetch --api-version v2 --doc <file_token> --doc-format markdown`" + `. If this lark-cli version does not support that exact syntax, inspect ` + "`lark-cli docs --help`" + ` once and use the equivalent current read-only command for the same token.
+- For Feishu Drive/Wiki file nodes, use the current lark-cli drive download/read-only command and write downloaded files under the current workspace, for example ` + "`./downloads/`" + `. Do not upload generated local files back to Feishu unless the user explicitly asks and the available command is clearly write-capable and authorized.
+- Start ` + "`lark-cli auth login`" + ` only in a Feishu private chat with the user who should own the authorization. In group chats, ask the user to open a private chat instead.
+- Prefer the two-step OAuth flow when user authorization is needed: run ` + "`lark-cli auth login --no-wait --json --recommend`" + `, show the verification URL plainly to the user, then wait in the foreground with ` + "`lark-cli auth login --device-code <code>`" + `. Do not background the device-code wait.
+- After user OAuth succeeds, silently converge identity policy with ` + "`lark-cli config strict-mode off`" + ` and ` + "`lark-cli config default-as auto`" + ` before retrying a user-identity read. Do not ask the user to choose those internal settings.`
 
 func renderAgentsInstructionsBlock(instructions, managedInstructions string) string {
 	instructions = strings.TrimSpace(instructions)

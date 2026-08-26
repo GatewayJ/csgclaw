@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -609,6 +611,22 @@ func TestDeleteFeishuCodexAgentParticipantRefreshesBridgeWithoutRecreate(t *test
 		svc:         agentSvc,
 		participant: participantSvc,
 	}
+	layout, err := agentSvc.AgentLayout("agent-dev")
+	if err != nil {
+		t.Fatalf("AgentLayout() error = %v", err)
+	}
+	codexHomeDir := codexHomeDirFromLayout(layout)
+	for _, dir := range []string{
+		filepath.Join(codexHomeDir, larkCLIConfigDirName),
+		filepath.Join(codexHomeDir, larkCLISourceDirName),
+	} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("create stale lark-cli dir %s: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "stale.json"), []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write stale lark-cli file in %s: %v", dir, err)
+		}
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/channels/feishu/participants/dev", nil)
@@ -630,6 +648,14 @@ func TestDeleteFeishuCodexAgentParticipantRefreshesBridgeWithoutRecreate(t *test
 	}
 	if bridge.refreshCalls[0].agent.ID != "agent-dev" || bridge.refreshCalls[0].channel != participant.ChannelFeishu {
 		t.Fatalf("RefreshAgentChannel() call = %+v, want agent-dev feishu", bridge.refreshCalls[0])
+	}
+	for _, dir := range []string{
+		filepath.Join(codexHomeDir, larkCLIConfigDirName),
+		filepath.Join(codexHomeDir, larkCLISourceDirName),
+	} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("stat stale lark-cli dir %s = %v, want not exist", dir, err)
+		}
 	}
 }
 

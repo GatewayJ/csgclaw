@@ -172,3 +172,29 @@ func TestRenderRuntimeAgentsInstructionsBlockAddsManagerConnectorRulesOnlyForMan
 		t.Fatalf("worker runtime instructions include manager connector guidance: %q", worker)
 	}
 }
+
+func TestRenderRuntimeAgentsInstructionsBlockAddsFeishuLarkCLIWhenEnabled(t *testing.T) {
+	plain := RenderRuntimeAgentsInstructionsBlock("agent-worker", "Stay concise.")
+	if strings.Contains(plain, "Feishu lark-cli Access") {
+		t.Fatalf("plain worker instructions unexpectedly include lark-cli guidance: %q", plain)
+	}
+
+	got := RenderRuntimeAgentsInstructionsBlockWithOptions("agent-worker", "Stay concise.", RuntimeManagedInstructionsOptions{
+		FeishuLarkCLI: true,
+	})
+	for _, want := range []string{
+		"Feishu lark-cli Access",
+		"`LARK_CHANNEL_CONFIG`",
+		"`LARKSUITE_CLI_CONFIG_DIR`",
+		"lark-cli docs +fetch --api-version v2",
+		"lark-cli auth login --no-wait --json --recommend",
+		"Do not background the device-code wait",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("lark-cli managed instructions missing %q in %q", want, got)
+		}
+	}
+	if strings.Contains(got, "GitHub Connector Access") {
+		t.Fatalf("worker lark-cli instructions should not include manager connector guidance: %q", got)
+	}
+}

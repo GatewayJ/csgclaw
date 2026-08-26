@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -87,6 +88,15 @@ func buildSessionEnv(spec SessionSpec) []string {
 		envMap["HOME"] = homeDir
 	}
 	envMap["CODEX_HOME"] = spec.CodexHomeDir
+	if codexHomeDir := strings.TrimSpace(spec.CodexHomeDir); codexHomeDir != "" {
+		if hasFeishuLarkCLIBinding(codexHomeDir, os.Stat) {
+			envMap["LARKSUITE_CLI_CONFIG_DIR"] = larkCLIConfigDir(codexHomeDir)
+			envMap["LARK_CHANNEL"] = "1"
+			envMap["LARK_CHANNEL_HOME"] = codexHomeDir
+			envMap["LARK_CHANNEL_PROFILE"] = strings.TrimSpace(spec.AgentID)
+			envMap["LARK_CHANNEL_CONFIG"] = larkCLISourceConfigPath(codexHomeDir)
+		}
+	}
 	if apiKey := spec.Profile.APIKey; apiKey != "" {
 		envMap["OPENAI_API_KEY"] = apiKey
 	}
@@ -115,7 +125,7 @@ func buildSessionEnv(spec SessionSpec) []string {
 
 func shouldOmitInheritedSessionEnvKey(key string) bool {
 	switch strings.ToUpper(strings.TrimSpace(key)) {
-	case "ZDOTDIR", "BASH_ENV", "ENV":
+	case "ZDOTDIR", "BASH_ENV", "ENV", "LARKSUITE_CLI_CONFIG_DIR", "LARK_CHANNEL", "LARK_CHANNEL_HOME", "LARK_CHANNEL_PROFILE", "LARK_CHANNEL_CONFIG":
 		return true
 	default:
 		return false
@@ -124,11 +134,37 @@ func shouldOmitInheritedSessionEnvKey(key string) bool {
 
 func isReservedSessionEnvKey(key string) bool {
 	switch strings.ToUpper(strings.TrimSpace(key)) {
-	case "HOME", "CODEX_HOME", "OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL":
+	case "HOME", "CODEX_HOME", "OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL", "LARKSUITE_CLI_CONFIG_DIR", "LARK_CHANNEL", "LARK_CHANNEL_HOME", "LARK_CHANNEL_PROFILE", "LARK_CHANNEL_CONFIG":
 		return true
 	default:
 		return false
 	}
+}
+
+func larkCLIConfigDir(codexHomeDir string) string {
+	return filepath.Join(codexHomeDir, "lark-cli")
+}
+
+func larkCLISourceConfigPath(codexHomeDir string) string {
+	return filepath.Join(codexHomeDir, "lark-cli-source", "config.json")
+}
+
+func larkCLIBindMarkerPath(codexHomeDir string) string {
+	return filepath.Join(codexHomeDir, "lark-cli-source", "bound.json")
+}
+
+func hasFeishuLarkCLIBinding(codexHomeDir string, stat func(string) (os.FileInfo, error)) bool {
+	codexHomeDir = strings.TrimSpace(codexHomeDir)
+	if codexHomeDir == "" || stat == nil {
+		return false
+	}
+	for _, path := range []string{larkCLISourceConfigPath(codexHomeDir), larkCLIBindMarkerPath(codexHomeDir)} {
+		info, err := stat(path)
+		if err != nil || info.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 func uniqueStrings(values []string) []string {

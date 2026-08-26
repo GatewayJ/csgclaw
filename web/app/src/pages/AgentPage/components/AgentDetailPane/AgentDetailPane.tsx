@@ -14,6 +14,7 @@ import {
   Save,
   Server,
   Square,
+  Terminal,
   Trash2,
   Unlink2,
   UploadCloud,
@@ -108,6 +109,10 @@ type VoidOrPromise = void | Promise<void>;
 type AgentActionHandler = (item: AgentLike) => VoidOrPromise;
 type AgentMetadataSavePatch = Pick<Partial<AgentDraft>, "description" | "name">;
 type AgentNoticeTone = "info" | "warning" | "success";
+type AgentPageDialogView = {
+  message?: string;
+  title?: string;
+} | null;
 const AGENT_PROFILE_TAB_IDS = ["profile", "channels", "instructions", "memory", "skills", "mcp"] as const;
 type AgentProfileTabID = (typeof AGENT_PROFILE_TAB_IDS)[number];
 type UpdateAgentDraft = (patch: Partial<AgentDraft>) => void;
@@ -136,6 +141,7 @@ export type AgentDetailPaneProps = {
   feishuPendingRegistration?: FeishuPendingRegistrationView;
   hasUnsavedChanges?: boolean;
   item: AgentLike;
+  larkCLIErrorDialog?: AgentPageDialogView;
   modelBusy?: boolean;
   modelError?: unknown;
   modelOptions?: ModelProviderOption[];
@@ -161,6 +167,8 @@ export type AgentDetailPaneProps = {
   onStop: AgentActionHandler;
   onFinalizeFeishuConnect?: AgentActionHandler;
   onDisconnectFeishu?: AgentActionHandler;
+  onDismissLarkCLIErrorDialog?: () => void;
+  onInitLarkCLI?: AgentActionHandler;
   onUpgrade?: AgentActionHandler;
   publishBusy?: boolean;
   publishDisabled?: boolean;
@@ -213,6 +221,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     error = "",
     feishuConnectBusy = "",
     feishuPendingRegistration = null,
+    larkCLIErrorDialog = null,
     draft,
     savedDraft = null,
     hasUnsavedChanges: hasUnsavedChangesProp = undefined,
@@ -262,6 +271,8 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     onMemoryChange,
     onStartFeishuConnect,
     onDisconnectFeishu,
+    onDismissLarkCLIErrorDialog,
+    onInitLarkCLI,
     onUpgrade,
     onDelete,
     onInvite,
@@ -908,6 +919,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 pendingRegistration={feishuPendingRegistration}
                 onStartFeishuConnect={onStartFeishuConnect}
                 onDisconnectFeishu={onDisconnectFeishu}
+                onInitLarkCLI={onInitLarkCLI}
               />
             ) : null}
 
@@ -956,6 +968,27 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
           </div>
         ) : null}
       </div>
+      <DialogRoot
+        open={Boolean(larkCLIErrorDialog?.message)}
+        onOpenChange={(open) => {
+          if (!open) {
+            onDismissLarkCLIErrorDialog?.();
+          }
+        }}
+      >
+        <DialogContent portalContainer={dialogPortalContainer}>
+          <DialogHeader>
+            <DialogTitle>{larkCLIErrorDialog?.title || t("larkCLIInitFailed")}</DialogTitle>
+            <DialogDescription>{larkCLIErrorDialog?.message || ""}</DialogDescription>
+            <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="primary" size="sm" onClick={() => onDismissLarkCLIErrorDialog?.()}>
+              {t("confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </DialogRoot>
       <DialogRoot open={addSkillsDialogOpen} onOpenChange={setAddSkillsDialogOpen}>
         <DialogContent className="agent-skills-dialog" portalContainer={dialogPortalContainer}>
           <DialogHeader className="agent-skills-dialog-header">
@@ -2066,6 +2099,7 @@ type AgentChannelsSectionProps = {
   busyKey: string;
   item: AgentLike;
   onDisconnectFeishu?: AgentActionHandler;
+  onInitLarkCLI?: AgentActionHandler;
   onStartFeishuConnect?: AgentActionHandler;
   pendingRegistration?: FeishuPendingRegistrationView;
   t: TranslateFn;
@@ -2077,6 +2111,7 @@ function AgentChannelsSection({
   busyKey,
   pendingRegistration = null,
   onDisconnectFeishu,
+  onInitLarkCLI,
   onStartFeishuConnect,
 }: AgentChannelsSectionProps) {
   const connected = hasConnectedAgentChannel(item, "feishu");
@@ -2084,6 +2119,7 @@ function AgentChannelsSection({
   const actionBusy = Boolean(busyKey);
   const connectBusy = busyKey.endsWith(":feishu:connect") || busyKey.endsWith(":feishu:finalize");
   const disconnectBusy = busyKey.endsWith(":feishu:disconnect");
+  const larkCLIInitBusy = busyKey.endsWith(":feishu:lark-cli");
   const statusLabel = connected ? t("feishuConnected") : pending ? t("feishuPending") : t("feishuDisconnected");
   const statusIcon = connected ? (
     <CheckCircle2 aria-hidden="true" size={16} strokeWidth={2.2} />
@@ -2095,6 +2131,7 @@ function AgentChannelsSection({
   const connectLabel = connected ? t("feishuReconnect") : t("feishuConnect");
   const canStart = Boolean(onStartFeishuConnect);
   const canDisconnect = connected && Boolean(onDisconnectFeishu);
+  const canInitLarkCLI = Boolean(onInitLarkCLI);
   const connectURL = String(pendingRegistration?.connect_url || "").trim();
 
   return (
@@ -2149,6 +2186,18 @@ function AgentChannelsSection({
               <Link2 aria-hidden="true" size={15} strokeWidth={2} />
             )}
             {connectLabel}
+          </Button>
+          <Button
+            variant="secondaryGray"
+            size="sm"
+            type="button"
+            loading={larkCLIInitBusy}
+            loadingLabel={t("larkCLIInit")}
+            disabled={!canInitLarkCLI || actionBusy}
+            onClick={() => onInitLarkCLI?.(item)}
+          >
+            <Terminal aria-hidden="true" size={15} strokeWidth={2} />
+            {t("larkCLIInit")}
           </Button>
           {connected ? (
             <Button

@@ -127,11 +127,13 @@ func commentReplyText(thread transport.CommentThread, replyID string) (string, b
 func commentPrompt(fileToken, fileType, quote, question string) string {
 	const (
 		questionLabel = "\n用户的问题："
-		guidance      = "\n\n如需读取正文，请使用当前可用的飞书文档工具读取对应文档；不要调用评论回复接口，渠道会负责回复。" +
-			"\n最终答案请直接输出纯文本，不要包含内部思考、工具日志或 Markdown 代码块。"
-		quoteLabel = "\n用户选中的原文：\n> "
+		quoteLabel    = "\n用户选中的原文：\n> "
 	)
 
+	readInstruction := commentLarkCLIReadInstruction(fileType, fileToken)
+	guidance := "\n\n" + readInstruction +
+		"\n不要调用评论回复接口，渠道会负责回复。" +
+		"\n最终答案请直接输出纯文本，不要包含内部思考、工具日志或 Markdown 代码块。"
 	prefix := "我在飞书云文档评论里被 @了。\n文档类型：" +
 		truncateCommentSection(strings.TrimSpace(fileType), 64) +
 		"\nfile_token：" + truncateCommentSection(strings.TrimSpace(fileToken), 512)
@@ -147,6 +149,23 @@ func commentPrompt(fileToken, fileType, quote, question string) string {
 	renderedQuote := strings.ReplaceAll(quote, "\n", "\n> ")
 	renderedQuote = truncateCommentSection(renderedQuote, quoteBudget)
 	return prefix + quoteLabel + renderedQuote + questionLabel + question + guidance
+}
+
+func commentLarkCLIReadInstruction(fileType, fileToken string) string {
+	fileType = strings.ToLower(strings.TrimSpace(fileType))
+	fileToken = strings.TrimSpace(fileToken)
+	switch fileType {
+	case "doc", "docx":
+		return "如需读取正文，优先使用当前 worker 已绑定的 lark-cli：" +
+			"\n`lark-cli docs +fetch --api-version v2 --doc " + fileToken + " --doc-format markdown`" +
+			"\n如果本机 lark-cli 不支持上述参数，请只检查一次 `lark-cli docs --help`，然后使用当前版本等价的只读读取命令读取同一 file_token；不要改用浏览器登录或宿主默认 lark-cli profile。"
+	case "file":
+		return "如需读取或下载普通文件，请使用当前 worker 已绑定的 lark-cli drive/wiki 只读下载命令处理同一 file_token，并把下载结果放在当前 workspace 的 `./downloads/` 下；不要改用浏览器登录或宿主默认 lark-cli profile。"
+	case "sheet":
+		return "这是 sheet 类型；不要使用 `lark-cli docs +fetch` 读取。只有在当前 lark-cli 明确提供表格只读读取命令时才读取同一 file_token，否则仅根据评论片段和用户选中的原文回答，并说明未读取表格全文。"
+	default:
+		return "如需读取正文或资源，请优先使用当前 worker 已绑定的 lark-cli 中与该文件类型匹配的只读命令处理同一 file_token；不要改用浏览器登录或宿主默认 lark-cli profile。"
+	}
 }
 
 func truncateCommentSection(value string, limit int) string {
