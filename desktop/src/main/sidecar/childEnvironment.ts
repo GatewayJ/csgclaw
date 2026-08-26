@@ -3,7 +3,7 @@ import { userInfo } from "node:os";
 import path from "node:path";
 import { DesktopPlatform } from "../../shared/desktopEnvironment";
 import {
-  resolveSystemProxyEnvironment,
+  resolveSystemCLIProxyEnvironment,
   type SystemProxyResolver,
 } from "./systemProxy";
 
@@ -137,7 +137,7 @@ export async function resolveSidecarEnvironment({
   }
 
   if (resolveSystemProxy) {
-    const systemProxy = await resolveSystemProxyEnvironment(resolveSystemProxy);
+    const systemProxy = await resolveSystemCLIProxyEnvironment(resolveSystemProxy);
     for (const [key, value] of Object.entries(systemProxy)) {
       if (value && !environmentValue(env, key, platform)?.trim()) {
         setEnvironmentValue(env, key, value, platform);
