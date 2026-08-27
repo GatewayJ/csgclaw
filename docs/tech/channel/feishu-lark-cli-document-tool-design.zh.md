@@ -21,6 +21,8 @@ Channel Transport 直接调用文档 API。
 - Runtime 只有在 source config 和 bound marker 同时存在时才注入 lark 环境变量。
 - 同一宿主机多个 worker 可以同时使用同一个 `lark-cli` 二进制，但不能共用同一个 worker 配置目录。
 - 同一个 Feishu AppID 当前不允许绑定给多个 worker；初始化时发现 AppID 被其他 worker 使用会拒绝。
+- 重建 Codex worker 时保留该 worker 的 `lark-cli` 和 `lark-cli-source` 目录，避免已绑定的渠道工具
+  退回未初始化状态。
 - 断开 Feishu Agent Participant 后，会删除该 worker 的 `lark-cli` 和 `lark-cli-source` 目录。
 
 形象地说：
@@ -456,6 +458,8 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 - Agent Profile 不能覆盖 `LARKSUITE_CLI_CONFIG_DIR`、`LARK_CHANNEL_CONFIG` 等保留变量；
 - worker A 和 worker B 的 `LARKSUITE_CLI_CONFIG_DIR` 不同；
 - 同一个 AppID 不能同时完成多个 worker 的 lark-cli 初始化；
+- 重建 Codex worker 后原有 `<CODEX_HOME>/lark-cli` 和 `<CODEX_HOME>/lark-cli-source` 仍然存在，
+  状态保持为已配置；
 - 断开 Feishu 后旧的 `<CODEX_HOME>/lark-cli` 和 `<CODEX_HOME>/lark-cli-source` 会被删除；
 - 飞书文档评论 prompt 会优先引导已绑定 worker 使用 `lark-cli docs +fetch` 读取 Doc/Docx；
 - 已绑定 worker 查找飞书历史附件时，只查询当前隐藏上下文的 `chat_id`，默认显式使用 Bot 身份；

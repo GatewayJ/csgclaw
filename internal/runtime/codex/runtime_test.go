@@ -1307,6 +1307,7 @@ func TestDeletePreservesDurableStateForRuntimeRecreate(t *testing.T) {
 	root := t.TempDir()
 	agentHome := filepath.Join(root, "agent-manager")
 	runtimeDir := filepath.Join(agentHome, ".codex")
+	codexHomeDir := filepath.Join(runtimeDir, homeDirName)
 	preservedFiles := map[string]string{
 		filepath.Join(runtimeDir, workspaceDirName, "project.txt"):                                     "workspace state\n",
 		filepath.Join(runtimeDir, sessionFileName):                                                     `{"conversation_sessions":{"room":"thread"}}`,
@@ -1323,6 +1324,9 @@ func TestDeletePreservesDurableStateForRuntimeRecreate(t *testing.T) {
 		filepath.Join(runtimeDir, homeDirName, "rules", "default.rules"):                               "rules state\n",
 		filepath.Join(runtimeDir, homeDirName, "hooks.json"):                                           "hooks state\n",
 		filepath.Join(runtimeDir, homeDirName, "installation_id"):                                      "installation state\n",
+		filepath.Join(larkCLIConfigDir(codexHomeDir), "lark-channel", "config.json"):                   `{"app_id":"cli_manager"}`,
+		larkCLISourceConfigPath(codexHomeDir):                                                          `{"source":"lark-channel"}`,
+		larkCLIBindMarkerPath(codexHomeDir):                                                            `{"app_id":"cli_manager"}`,
 	}
 	ephemeralFiles := map[string]string{
 		filepath.Join(runtimeDir, homeDirName, configFileName):                  "features.memories = true\n",
@@ -1365,6 +1369,9 @@ func TestDeletePreservesDurableStateForRuntimeRecreate(t *testing.T) {
 		if err != nil || string(raw) != want {
 			t.Fatalf("preserved file %s = %q, %v; want %q", path, raw, err, want)
 		}
+	}
+	if !hasFeishuLarkCLIBinding(codexHomeDir, os.Stat) {
+		t.Fatal("Feishu lark-cli binding was not preserved across runtime recreate")
 	}
 	for path := range ephemeralFiles {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {

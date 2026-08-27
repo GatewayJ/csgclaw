@@ -9,6 +9,11 @@ import (
 	"sync"
 )
 
+const (
+	larkCLIConfigDirName = "lark-cli"
+	larkCLISourceDirName = "lark-cli-source"
+)
+
 type liveSession struct {
 	mu                    sync.Mutex
 	conversationResumeMu  sync.Mutex
@@ -142,15 +147,15 @@ func isReservedSessionEnvKey(key string) bool {
 }
 
 func larkCLIConfigDir(codexHomeDir string) string {
-	return filepath.Join(codexHomeDir, "lark-cli")
+	return filepath.Join(codexHomeDir, larkCLIConfigDirName)
 }
 
 func larkCLISourceConfigPath(codexHomeDir string) string {
-	return filepath.Join(codexHomeDir, "lark-cli-source", "config.json")
+	return filepath.Join(codexHomeDir, larkCLISourceDirName, "config.json")
 }
 
 func larkCLIBindMarkerPath(codexHomeDir string) string {
-	return filepath.Join(codexHomeDir, "lark-cli-source", "bound.json")
+	return filepath.Join(codexHomeDir, larkCLISourceDirName, "bound.json")
 }
 
 func hasFeishuLarkCLIBinding(codexHomeDir string, stat func(string) (os.FileInfo, error)) bool {
