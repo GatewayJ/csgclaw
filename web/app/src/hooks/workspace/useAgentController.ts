@@ -434,6 +434,25 @@ export function shouldReturnToAgentOverviewAfterAgentMissing(
   return activePane?.type === WorkspacePaneTypes.agent;
 }
 
+export function agentSelectionAfterDelete(
+  items: AgentLike[],
+  deletedAgentID: string,
+  managerAgentID = MANAGER_AGENT_ID,
+): AgentLike | null {
+  const deletedIndex = items.findIndex((item) => item.id === deletedAgentID);
+  const ordinaryAgents = items.filter(
+    (item) => item.id !== managerAgentID && !isManagerAgent(item) && !isNotificationBotAgent(item),
+  );
+  const nextOrdinaryAgent =
+    items.slice(Math.max(0, deletedIndex + 1)).find((item) => ordinaryAgents.some((agent) => agent.id === item.id)) ??
+    items
+      .slice(0, Math.max(0, deletedIndex))
+      .reverse()
+      .find((item) => ordinaryAgents.some((agent) => agent.id === item.id));
+
+  return nextOrdinaryAgent ?? items.find((item) => item.id === managerAgentID || isManagerAgent(item)) ?? null;
+}
+
 export function useAgentController({
   activeConversationId,
   activePane,
@@ -1983,6 +2002,21 @@ export function useAgentController({
       const deletingNotificationBot = action === "delete" && isNotificationBotAgent(item);
       if (action === "delete") {
         await deleteAgentLikeRequest(item);
+        if (activePane.type === WorkspacePaneTypes.agent && activePane.id === item.id) {
+          const fallbackAgent = agentSelectionAfterDelete(agentItems, item.id);
+          if (fallbackAgent) {
+            selectAgent(fallbackAgent, { replace: true });
+            showAgentPageNotice(
+              t("agentDeletedAndSwitched", {
+                deleted: String(item.name || item.id),
+                selected: String(fallbackAgent.name || fallbackAgent.id),
+              }),
+              "success",
+              5000,
+              fallbackAgent.id,
+            );
+          }
+        }
       } else {
         updatedAgent = await runAgentActionRequest(item.id, action);
       }
@@ -2487,9 +2521,8 @@ export function useAgentController({
 
   const selectedAgentAction = selectedAgentForPage?.id ? agentActionBusyByAgent[selectedAgentForPage.id] : undefined;
   const selectedAgentActionBusy = selectedAgentAction?.visible ? selectedAgentAction.busyKey : "";
-  const selectedAgentPageNotice = selectedAgentForPage?.id
-    ? agentPageNotices[selectedAgentForPage.id] || agentPageNotices[GLOBAL_AGENT_PAGE_NOTICE_KEY]
-    : agentPageNotices[GLOBAL_AGENT_PAGE_NOTICE_KEY];
+  const selectedAgentOwnedNotice = selectedAgentForPage?.id ? agentPageNotices[selectedAgentForPage.id] : undefined;
+  const selectedAgentPageNotice = selectedAgentOwnedNotice || agentPageNotices[GLOBAL_AGENT_PAGE_NOTICE_KEY];
 
   return {
     agentActionBusy: selectedAgentActionBusy,
@@ -2547,6 +2580,7 @@ export function useAgentController({
       saveBillingURL: agentPageBillingURL,
       notice: selectedAgentPageNotice?.message || "",
       noticeTone: selectedAgentPageNotice?.tone || "warning",
+      onDismissNotice: () => clearAgentPageNotice(selectedAgentOwnedNotice ? selectedAgentForPage?.id : null),
       feishuConnectBusy: selectedAgentActionBusy.includes(`:${FEISHU_CHANNEL_ACTION}:`) ? selectedAgentActionBusy : "",
       feishuPendingRegistration: selectedFeishuPendingRegistration,
       authStatuses: cliproxyAuthStatuses,
