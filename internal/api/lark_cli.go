@@ -14,14 +14,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"csgclaw/internal/agent"
 	"csgclaw/internal/apitypes"
 	"csgclaw/internal/config"
 	"csgclaw/internal/participant"
+	"csgclaw/internal/participant/feishubind"
 	agentruntime "csgclaw/internal/runtime"
 )
 
@@ -37,19 +38,23 @@ const (
 	larkCLISourceProviderName     = "csgclaw-pt"
 	larkCLIAppSecretExecID        = "app_secret"
 	larkCLIIdentityPreset         = "bot-only"
-	larkCLIDefaultNPMPackage      = "@larksuite/cli@latest"
 	feishuBotNotConfiguredCode    = "feishu_bot_not_configured"
 	feishuBotAppIDConflictCode    = "feishu_bot_app_id_conflict"
-	larkCLIInstallTimeout         = 3 * time.Minute
 	larkCLIBindTimeout            = 90 * time.Second
+	larkCLIProbeTimeout           = 5 * time.Second
+	larkCLIProbeCacheTTL          = 30 * time.Second
 	larkCLIExecProviderTimeoutMS  = 10_000
 	larkCLIExecProviderMaxBytes   = 64 * 1024
 	larkCLICommandOutputMaxDetail = 2000
+	larkCLIStatusUnbound          = "unbound"
+	larkCLIStatusBound            = "bound"
+	larkCLIStatusMismatch         = "mismatch"
+	larkCLIStatusUnavailable      = "unavailable"
 )
 
 var (
 	errFeishuBotNotConfigured = errors.New("feishu bot is not configured")
-	errFeishuBotAppIDConflict = errors.New("feishu bot app_id is already used by another worker")
+	errFeishuBotAppIDConflict = feishubind.ErrBotAppIDConflict
 
 	larkCLILookPath       = exec.LookPath
 	larkCLICommandContext = exec.CommandContext
@@ -67,6 +72,32 @@ type larkCLISourceTokenPayload struct {
 	Version string `json:"version"`
 	Purpose string `json:"purpose"`
 	AgentID string `json:"agent_id"`
+}
+
+type larkCLIConfigureError struct {
+	status int
+	code   string
+	err    error
+}
+
+type larkCLIProbeCache struct {
+	Path      string
+	CheckedAt time.Time
+	Error     string
+}
+
+func (e *larkCLIConfigureError) Error() string {
+	if e == nil || e.err == nil {
+		return "lark-cli configuration failed"
+	}
+	return e.err.Error()
+}
+
+func (e *larkCLIConfigureError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
 }
 
 func (h *Handler) initAgentLarkCLI(w http.ResponseWriter, r *http.Request) {
@@ -93,122 +124,175 @@ func (h *Handler) initAgentLarkCLI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	appInfo, err := h.feishuBotAppInfoForAgent(target.ID)
+	result, err := h.configureAgentLarkCLI(r.Context(), target, h.internalSourceBaseURL(r), true)
 	if err != nil {
-		h.writeFeishuBotAppInfoError(w, err)
+		h.writeLarkCLIConfigureError(w, err)
 		return
 	}
-	if err := h.validateFeishuBotAppIDExclusive(target.ID, appInfo.AppID); err != nil {
-		h.writeFeishuBotAppInfoError(w, err)
-		return
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) configureAgentLarkCLI(
+	ctx context.Context,
+	target agent.Agent,
+	baseURL string,
+	restartRuntime bool,
+) (apitypes.AgentLarkCLIInitResponse, error) {
+	unlock := h.lockAgentLarkCLIBind(target.ID)
+	defer unlock()
+
+	appInfo, err := h.feishuBotAppInfoForAgent(target.ID)
+	if err != nil {
+		return apitypes.AgentLarkCLIInitResponse{}, err
+	}
+	if err := feishubind.ValidateBotAppIDExclusive(h.participant, target.ID, appInfo.AppID); err != nil {
+		return apitypes.AgentLarkCLIInitResponse{}, err
+	}
+	larkCLIPath, err := ensureLarkCLI(ctx)
+	if err != nil {
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(
+			http.StatusServiceUnavailable, "lark_cli_unavailable", err,
+		)
 	}
 	accessToken, err := h.sourceAccessToken(target.ID)
 	if err != nil {
-		writeCodedAPIError(w, http.StatusServiceUnavailable, "lark_cli_source_auth_unavailable", err.Error())
-		return
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(
+			http.StatusServiceUnavailable, "lark_cli_source_auth_unavailable", err,
+		)
 	}
-
 	layout, err := h.svc.AgentLayout(target.ID)
 	if err != nil {
-		writeAgentOperationError(w, err, http.StatusBadRequest)
-		return
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(http.StatusBadRequest, "agent_layout_unavailable", err)
 	}
 	codexHomeDir := codexHomeDirFromLayout(layout)
 	if codexHomeDir == "" {
-		writeCodedAPIError(w, http.StatusBadRequest, "codex_home_unavailable", "agent Codex home directory is unavailable")
-		return
-	}
-	configDir := filepath.Join(codexHomeDir, larkCLIConfigDirName)
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
-		http.Error(w, fmt.Sprintf("create lark-cli config dir: %v", err), http.StatusInternalServerError)
-		return
-	}
-	_ = os.Chmod(configDir, 0o700)
-
-	larkCLIPath, installed, err := ensureLarkCLI(r.Context())
-	if err != nil {
-		writeCodedAPIError(w, http.StatusServiceUnavailable, "lark_cli_unavailable", err.Error())
-		return
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(
+			http.StatusBadRequest, "codex_home_unavailable", errors.New("agent Codex home directory is unavailable"),
+		)
 	}
 	helperPath, err := larkCLISourceHelperPath()
 	if err != nil {
-		writeCodedAPIError(w, http.StatusServiceUnavailable, "lark_cli_source_unavailable", err.Error())
-		return
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(
+			http.StatusServiceUnavailable, "lark_cli_source_unavailable", err,
+		)
 	}
 
+	configDir := filepath.Join(codexHomeDir, larkCLIConfigDirName)
 	sourceDir := filepath.Join(codexHomeDir, larkCLISourceDirName)
-	if err := os.MkdirAll(sourceDir, 0o700); err != nil {
-		http.Error(w, fmt.Sprintf("create lark-cli source dir: %v", err), http.StatusInternalServerError)
-		return
-	}
-	_ = os.Chmod(sourceDir, 0o700)
-
 	sourcePath := filepath.Join(sourceDir, larkCLISourceConfigFileName)
-	bindMarkerPath := filepath.Join(sourceDir, larkCLIBindMarkerFileName)
-	previousSource, hadPreviousSource, err := readOptionalFile(sourcePath)
+	stagingConfigDir, stagingSourceDir, err := createLarkCLIBindingStagingDirs(codexHomeDir)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("read previous lark-cli source config: %v", err), http.StatusInternalServerError)
-		return
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(
+			http.StatusInternalServerError, "lark_cli_config_failed", fmt.Errorf("create lark-cli staging dirs: %w", err),
+		)
 	}
-	previousMarker, hadPreviousMarker, err := readOptionalFile(bindMarkerPath)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("read previous lark-cli bind marker: %v", err), http.StatusInternalServerError)
-		return
-	}
-	if err := writeLarkChannelSourceConfig(sourcePath, larkChannelSourceConfig{
+	defer func() {
+		_ = os.RemoveAll(stagingConfigDir)
+		_ = os.RemoveAll(stagingSourceDir)
+	}()
+
+	stagingSourcePath := filepath.Join(stagingSourceDir, larkCLISourceConfigFileName)
+	stagingBindMarkerPath := filepath.Join(stagingSourceDir, larkCLIBindMarkerFileName)
+	if err := writeLarkChannelSourceConfig(stagingSourcePath, larkChannelSourceConfig{
 		AppID:       appInfo.AppID,
-		BaseURL:     h.internalSourceBaseURL(r),
+		BaseURL:     baseURL,
 		AccessToken: accessToken,
 		HelperPath:  helperPath,
 		AgentID:     target.ID,
 	}); err != nil {
-		http.Error(w, fmt.Sprintf("write lark-cli source config: %v", err), http.StatusInternalServerError)
-		return
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(
+			http.StatusInternalServerError, "lark_cli_config_failed", fmt.Errorf("write lark-cli source config: %w", err),
+		)
 	}
-
-	if err := runLarkCLIConfigBind(r.Context(), larkCLIPath, configDir, sourcePath, codexHomeDir, target.ID); err != nil {
-		if restoreErr := restoreLarkChannelBinding(sourcePath, bindMarkerPath, previousSource, hadPreviousSource, previousMarker, hadPreviousMarker); restoreErr != nil {
-			slog.Warn("restore lark-cli source config after bind failure failed", "agent_id", target.ID, "error", restoreErr)
-		}
-		writeCodedAPIError(w, http.StatusBadGateway, "lark_cli_bind_failed", err.Error())
-		return
+	if err := runLarkCLIConfigBind(ctx, larkCLIPath, stagingConfigDir, stagingSourcePath, codexHomeDir, target.ID); err != nil {
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(http.StatusBadGateway, "lark_cli_bind_failed", err)
 	}
-	if err := writeLarkCLIBindMarker(bindMarkerPath, larkCLIBindMarker{
+	stagingConfigPath := filepath.Join(stagingConfigDir, larkCLIWorkspaceName, larkCLIConfigFileName)
+	boundAppID, ok := readLarkCLIConfigAppID(stagingConfigPath)
+	if !ok || strings.TrimSpace(boundAppID) != strings.TrimSpace(appInfo.AppID) {
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(
+			http.StatusBadGateway,
+			"lark_cli_bind_failed",
+			fmt.Errorf("lark-cli config bind did not generate a config for app %q", appInfo.AppID),
+		)
+	}
+	if err := writeLarkCLIBindMarker(stagingBindMarkerPath, larkCLIBindMarker{
 		AgentID:          target.ID,
 		AppID:            appInfo.AppID,
 		ConfigPath:       filepath.Join(configDir, larkCLIWorkspaceName, larkCLIConfigFileName),
 		SourceConfigPath: sourcePath,
 		BoundAt:          time.Now().UTC(),
 	}); err != nil {
-		http.Error(w, fmt.Sprintf("write lark-cli bind marker: %v", err), http.StatusInternalServerError)
-		return
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(
+			http.StatusInternalServerError, "lark_cli_config_failed", fmt.Errorf("write lark-cli bind marker: %w", err),
+		)
 	}
-	if err := h.refreshAgentInstructionsForLarkCLI(r.Context(), target); err != nil {
+	if err := replaceLarkCLIBindingDirs(configDir, sourceDir, stagingConfigDir, stagingSourceDir); err != nil {
+		return apitypes.AgentLarkCLIInitResponse{}, newLarkCLIConfigureError(
+			http.StatusInternalServerError, "lark_cli_config_failed", fmt.Errorf("activate lark-cli binding: %w", err),
+		)
+	}
+	if err := h.refreshAgentInstructionsForLarkCLI(ctx, target); err != nil {
 		slog.Warn("refresh lark-cli managed instructions failed", "agent_id", target.ID, "error", err)
 	}
+
 	restartStatus := "restart_skipped"
 	var restartError string
-	if restarted, err := h.restartAgentCodexRuntimeForLarkCLI(r.Context(), target.ID); err != nil {
-		restartStatus = "restart_failed"
-		restartError = err.Error()
-		slog.Warn("restart codex worker after lark-cli init failed", "agent_id", target.ID, "error", err)
-	} else if restarted {
-		restartStatus = "runtime_restarted"
+	if restartRuntime {
+		if restarted, err := h.restartAgentCodexRuntimeForLarkCLI(ctx, target.ID); err != nil {
+			restartStatus = "restart_failed"
+			restartError = err.Error()
+			slog.Warn("restart codex worker after lark-cli init failed", "agent_id", target.ID, "error", err)
+		} else if restarted {
+			restartStatus = "runtime_restarted"
+		}
 	}
 
-	writeJSON(w, http.StatusOK, apitypes.AgentLarkCLIInitResponse{
+	return apitypes.AgentLarkCLIInitResponse{
 		Status:           "configured",
 		AgentID:          target.ID,
 		ParticipantID:    appInfo.ParticipantID,
 		AppID:            appInfo.AppID,
-		Installed:        installed,
 		LarkCLIPath:      larkCLIPath,
 		ConfigDir:        configDir,
 		ConfigPath:       filepath.Join(configDir, larkCLIWorkspaceName, larkCLIConfigFileName),
 		SourceConfigPath: sourcePath,
 		RestartStatus:    restartStatus,
 		RestartError:     restartError,
-	})
+	}, nil
+}
+
+func newLarkCLIConfigureError(status int, code string, err error) error {
+	return &larkCLIConfigureError{status: status, code: strings.TrimSpace(code), err: err}
+}
+
+func (h *Handler) writeLarkCLIConfigureError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errFeishuBotNotConfigured) || errors.Is(err, errFeishuBotAppIDConflict) {
+		h.writeFeishuBotAppInfoError(w, err)
+		return
+	}
+	var configureErr *larkCLIConfigureError
+	if errors.As(err, &configureErr) {
+		writeCodedAPIError(w, configureErr.status, configureErr.code, configureErr.Error())
+		return
+	}
+	writeAgentOperationError(w, err, http.StatusInternalServerError)
+}
+
+func (h *Handler) lockAgentLarkCLIBind(agentID string) func() {
+	key := agent.CanonicalID(agentID)
+	h.larkCLIBindLocksMu.Lock()
+	if h.larkCLIBindLocks == nil {
+		h.larkCLIBindLocks = make(map[string]*sync.Mutex)
+	}
+	lock := h.larkCLIBindLocks[key]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		h.larkCLIBindLocks[key] = lock
+	}
+	h.larkCLIBindLocksMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
 }
 
 func (h *Handler) refreshAgentInstructionsForLarkCLI(ctx context.Context, target agent.Agent) error {
@@ -235,6 +319,8 @@ func (h *Handler) clearAgentLarkCLIState(ctx context.Context, agentID string) er
 	if h == nil || h.svc == nil {
 		return nil
 	}
+	unlock := h.lockAgentLarkCLIBind(agentID)
+	defer unlock()
 	target, ok := h.svc.Agent(agentID)
 	if !ok {
 		return nil
@@ -283,6 +369,175 @@ func codexHomeDirFromLayout(layout agentruntime.Layout) string {
 		}
 	}
 	return ""
+}
+
+func (h *Handler) agentLarkCLIStatus(target agent.Agent) *apitypes.AgentLarkCLIStatus {
+	if h == nil || h.svc == nil {
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(target.RuntimeKind), agent.RuntimeKindCodex) {
+		return nil
+	}
+	larkCLIPath, availabilityErr := h.usableLarkCLI(context.Background())
+	available := availabilityErr == nil
+	baseStatus := apitypes.AgentLarkCLIStatus{
+		Available:      available,
+		State:          larkCLIStatusUnbound,
+		ExecutablePath: larkCLIPath,
+	}
+	if availabilityErr != nil {
+		baseStatus.Error = availabilityErr.Error()
+	}
+	layout, err := h.svc.AgentLayout(target.ID)
+	if err != nil {
+		if !available {
+			baseStatus.State = larkCLIStatusUnavailable
+		}
+		return &baseStatus
+	}
+	codexHomeDir := codexHomeDirFromLayout(layout)
+	if codexHomeDir == "" {
+		if !available {
+			baseStatus.State = larkCLIStatusUnavailable
+		}
+		return &baseStatus
+	}
+	status := readAgentLarkCLIStatus(codexHomeDir, target.ID)
+	status.Available = available
+	status.ExecutablePath = larkCLIPath
+	if availabilityErr != nil {
+		status.Error = availabilityErr.Error()
+	}
+	if status.Bound && h.participant != nil {
+		currentAppID := h.feishuBotAppIDForExistingAgent(target)
+		if strings.TrimSpace(currentAppID) != "" &&
+			strings.TrimSpace(status.AppID) != "" &&
+			strings.TrimSpace(currentAppID) != strings.TrimSpace(status.AppID) {
+			status.State = larkCLIStatusMismatch
+		}
+	}
+	if !available {
+		status.State = larkCLIStatusUnavailable
+	}
+	return &status
+}
+
+func readAgentLarkCLIStatus(codexHomeDir, agentID string) apitypes.AgentLarkCLIStatus {
+	configDir := filepath.Join(codexHomeDir, larkCLIConfigDirName)
+	configPath := filepath.Join(configDir, larkCLIWorkspaceName, larkCLIConfigFileName)
+	sourcePath := filepath.Join(codexHomeDir, larkCLISourceDirName, larkCLISourceConfigFileName)
+	markerPath := filepath.Join(codexHomeDir, larkCLISourceDirName, larkCLIBindMarkerFileName)
+	status := apitypes.AgentLarkCLIStatus{
+		State:            larkCLIStatusUnbound,
+		ConfigDir:        configDir,
+		ConfigPath:       configPath,
+		SourceConfigPath: sourcePath,
+	}
+	marker, ok := readLarkCLIBindMarker(markerPath)
+	if !ok {
+		return status
+	}
+	sourceAppID, ok := readLarkChannelSourceAppID(sourcePath)
+	if !ok {
+		status.State = larkCLIStatusMismatch
+		status.Error = "lark-cli source config is missing or invalid"
+		return status
+	}
+	status.AppID = strings.TrimSpace(marker.AppID)
+	if status.AppID == "" {
+		status.AppID = strings.TrimSpace(sourceAppID)
+	}
+	if !marker.BoundAt.IsZero() {
+		boundAt := marker.BoundAt.UTC()
+		status.BoundAt = &boundAt
+	}
+	if markerConfigPath := strings.TrimSpace(marker.ConfigPath); markerConfigPath != "" && markerConfigPath != configPath {
+		status.State = larkCLIStatusMismatch
+		status.Error = "lark-cli bind marker points to a different config file"
+		return status
+	}
+	if markerSourcePath := strings.TrimSpace(marker.SourceConfigPath); markerSourcePath != "" && markerSourcePath != sourcePath {
+		status.State = larkCLIStatusMismatch
+		status.Error = "lark-cli bind marker points to a different source config file"
+		return status
+	}
+	if strings.TrimSpace(marker.AppID) != "" &&
+		strings.TrimSpace(sourceAppID) != "" &&
+		strings.TrimSpace(marker.AppID) != strings.TrimSpace(sourceAppID) {
+		status.State = larkCLIStatusMismatch
+		status.Error = "lark-cli bind marker and source config use different app IDs"
+		return status
+	}
+	if expectedAgentID := agent.CanonicalID(agentID); expectedAgentID != "" {
+		markerAgentID := agent.CanonicalID(marker.AgentID)
+		if markerAgentID != "" && markerAgentID != expectedAgentID {
+			status.State = larkCLIStatusMismatch
+			status.Error = "lark-cli bind marker belongs to a different worker"
+			return status
+		}
+	}
+	configAppID, ok := readLarkCLIConfigAppID(configPath)
+	if !ok {
+		status.State = larkCLIStatusMismatch
+		status.Error = "lark-cli config file is missing or invalid"
+		return status
+	}
+	if strings.TrimSpace(configAppID) != strings.TrimSpace(sourceAppID) {
+		status.State = larkCLIStatusMismatch
+		status.Error = "lark-cli config and source config use different app IDs"
+		return status
+	}
+	status.Bound = true
+	status.State = larkCLIStatusBound
+	return status
+}
+
+func readLarkCLIBindMarker(path string) (larkCLIBindMarker, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return larkCLIBindMarker{}, false
+	}
+	var marker larkCLIBindMarker
+	if err := json.Unmarshal(data, &marker); err != nil {
+		return larkCLIBindMarker{}, false
+	}
+	return marker, true
+}
+
+func readLarkChannelSourceAppID(path string) (string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	var payload struct {
+		Accounts struct {
+			App struct {
+				ID string `json:"id"`
+			} `json:"app"`
+		} `json:"accounts"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", false
+	}
+	appID := strings.TrimSpace(payload.Accounts.App.ID)
+	return appID, appID != ""
+}
+
+func readLarkCLIConfigAppID(path string) (string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	var payload struct {
+		Apps []struct {
+			AppID string `json:"appId"`
+		} `json:"apps"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil || len(payload.Apps) == 0 {
+		return "", false
+	}
+	appID := strings.TrimSpace(payload.Apps[0].AppID)
+	return appID, appID != ""
 }
 
 func (h *Handler) getAgentFeishuAppInfo(w http.ResponseWriter, r *http.Request) {
@@ -337,14 +592,12 @@ func (h *Handler) feishuBotAppInfoForAgent(agentID string) (feishuBotAppInfo, er
 }
 
 func feishuBotAppInfoFromParticipant(agentID string, item apitypes.Participant) (feishuBotAppInfo, bool) {
-	if !strings.EqualFold(strings.TrimSpace(item.Channel), participant.ChannelFeishu) ||
-		strings.TrimSpace(item.Type) != participant.TypeAgent ||
-		strings.TrimSpace(item.AgentID) != strings.TrimSpace(agentID) {
+	appID, ok := feishuBotAppIDFromParticipant(agentID, item)
+	if !ok {
 		return feishuBotAppInfo{}, false
 	}
-	appID := channelAppConfigString(item.ChannelAppConfig, "app_id")
 	appSecret := channelAppConfigString(item.ChannelAppConfig, participant.ChannelAppConfigAppSecretKey)
-	if appID == "" || appSecret == "" || appSecret == participant.RedactedSecretValue {
+	if appSecret == "" || appSecret == participant.RedactedSecretValue {
 		return feishuBotAppInfo{}, false
 	}
 	return feishuBotAppInfo{
@@ -355,30 +608,36 @@ func feishuBotAppInfoFromParticipant(agentID string, item apitypes.Participant) 
 	}, true
 }
 
-func (h *Handler) validateFeishuBotAppIDExclusive(agentID, appID string) error {
+func (h *Handler) feishuBotAppIDForExistingAgent(target agent.Agent) string {
 	if h == nil || h.participant == nil {
-		return nil
+		return ""
 	}
-	agentID = strings.TrimSpace(agentID)
-	appID = strings.TrimSpace(appID)
-	if appID == "" {
-		return nil
+	canonicalParticipantID := agent.ParticipantIDForAgent(target.Name, target.ID)
+	if item, ok := h.participant.Get(participant.ChannelFeishu, canonicalParticipantID); ok {
+		if appID, ok := feishuBotAppIDFromParticipant(target.ID, item); ok {
+			return appID
+		}
 	}
 	for _, item := range h.participant.List(participant.ListOptions{
 		Channel: participant.ChannelFeishu,
 		Type:    participant.TypeAgent,
+		AgentID: target.ID,
 	}) {
-		if strings.TrimSpace(item.AgentID) == agentID {
-			continue
-		}
-		if strings.TrimSpace(item.AgentID) == "" {
-			continue
-		}
-		if channelAppConfigString(item.ChannelAppConfig, "app_id") == appID {
-			return fmt.Errorf("%w: app_id %q is used by agent %q", errFeishuBotAppIDConflict, appID, item.AgentID)
+		if appID, ok := feishuBotAppIDFromParticipant(target.ID, item); ok {
+			return appID
 		}
 	}
-	return nil
+	return ""
+}
+
+func feishuBotAppIDFromParticipant(agentID string, item apitypes.Participant) (string, bool) {
+	if !strings.EqualFold(strings.TrimSpace(item.Channel), participant.ChannelFeishu) ||
+		strings.TrimSpace(item.Type) != participant.TypeAgent ||
+		strings.TrimSpace(item.AgentID) != strings.TrimSpace(agentID) {
+		return "", false
+	}
+	appID := channelAppConfigString(item.ChannelAppConfig, "app_id")
+	return appID, appID != ""
 }
 
 func (h *Handler) writeFeishuBotAppInfoError(w http.ResponseWriter, err error) {
@@ -413,64 +672,113 @@ func channelAppConfigString(values map[string]any, key string) string {
 	return ""
 }
 
-func ensureLarkCLI(ctx context.Context) (string, bool, error) {
-	if path, err := larkCLILookPath("lark-cli"); err == nil && strings.TrimSpace(path) != "" {
-		return path, false, nil
-	}
-	npmPath, err := larkCLILookPath("npm")
+func ensureLarkCLI(ctx context.Context) (string, error) {
+	path, err := findLarkCLI()
 	if err != nil {
-		return "", false, fmt.Errorf("lark-cli is not installed and npm is not available to install %s: %w", larkCLINPMPackage(), err)
+		return "", err
 	}
+	if err := probeLarkCLI(ctx, path); err != nil {
+		return path, err
+	}
+	return path, nil
+}
 
-	installCtx, cancel := context.WithTimeout(ctx, larkCLIInstallTimeout)
+func findLarkCLI() (string, error) {
+	path, err := larkCLILookPath("lark-cli")
+	path = strings.TrimSpace(path)
+	if err != nil || path == "" {
+		return "", fmt.Errorf("lark-cli is not installed or not on PATH. Install lark-cli on this host and retry")
+	}
+	return path, nil
+}
+
+func probeLarkCLI(ctx context.Context, path string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, larkCLIProbeTimeout)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
-	cmd := larkCLICommandContext(installCtx, npmPath, "install", "-g", larkCLINPMPackage())
+	cmd := larkCLICommandContext(probeCtx, path, "-v")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Env = os.Environ()
 	if err := cmd.Run(); err != nil {
-		return "", true, fmt.Errorf("install lark-cli with npm install -g failed: %w%s", err, commandOutputDetail(stdout.String(), stderr.String()))
+		return fmt.Errorf("lark-cli at %q cannot be started: %w%s", path, err, commandOutputDetail(stdout.String(), stderr.String()))
 	}
-	if path, err := larkCLILookPath("lark-cli"); err == nil && strings.TrimSpace(path) != "" {
-		return path, true, nil
-	}
-	if path, err := npmGlobalLarkCLIPath(ctx, npmPath); err == nil && strings.TrimSpace(path) != "" {
-		return path, true, nil
-	}
-	return "", true, fmt.Errorf("installed %s, but lark-cli was not found on PATH", larkCLINPMPackage())
+	return nil
 }
 
-func larkCLINPMPackage() string {
-	if value := strings.TrimSpace(os.Getenv("CSGCLAW_LARK_CLI_NPM_PACKAGE")); value != "" {
-		return value
-	}
-	return larkCLIDefaultNPMPackage
-}
-
-func npmGlobalLarkCLIPath(ctx context.Context, npmPath string) (string, error) {
-	cmd := larkCLICommandContext(ctx, npmPath, "prefix", "-g")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+func (h *Handler) usableLarkCLI(ctx context.Context) (string, error) {
+	path, err := findLarkCLI()
 	if err != nil {
-		return "", fmt.Errorf("resolve npm global prefix: %w%s", err, commandOutputDetail("", stderr.String()))
+		return path, err
 	}
-	prefix := strings.TrimSpace(string(out))
-	if prefix == "" {
-		return "", fmt.Errorf("npm global prefix is empty")
+	if h == nil {
+		return path, probeLarkCLI(ctx, path)
 	}
-	name := "lark-cli"
-	if goruntime.GOOS == "windows" {
-		name = "lark-cli.cmd"
-	}
-	candidates := []string{filepath.Join(prefix, "bin", name), filepath.Join(prefix, name)}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate, nil
+	now := time.Now()
+	h.larkCLIProbeMu.Lock()
+	defer h.larkCLIProbeMu.Unlock()
+	if h.larkCLIProbe.Path == path && now.Sub(h.larkCLIProbe.CheckedAt) < larkCLIProbeCacheTTL {
+		if h.larkCLIProbe.Error != "" {
+			return path, errors.New(h.larkCLIProbe.Error)
 		}
+		return path, nil
 	}
-	return "", fmt.Errorf("lark-cli not found under npm global prefix %q", prefix)
+	err = probeLarkCLI(ctx, path)
+	h.larkCLIProbe = larkCLIProbeCache{Path: path, CheckedAt: now}
+	if err != nil {
+		h.larkCLIProbe.Error = err.Error()
+	}
+	return path, err
+}
+
+func createLarkCLIBindingStagingDirs(codexHomeDir string) (string, string, error) {
+	if err := os.MkdirAll(codexHomeDir, 0o700); err != nil {
+		return "", "", fmt.Errorf("create Codex home dir: %w", err)
+	}
+	configDir, err := os.MkdirTemp(codexHomeDir, "."+larkCLIConfigDirName+"-*")
+	if err != nil {
+		return "", "", fmt.Errorf("create config staging dir: %w", err)
+	}
+	_ = os.Chmod(configDir, 0o700)
+	sourceDir, err := os.MkdirTemp(codexHomeDir, "."+larkCLISourceDirName+"-*")
+	if err != nil {
+		_ = os.RemoveAll(configDir)
+		return "", "", fmt.Errorf("create source staging dir: %w", err)
+	}
+	_ = os.Chmod(sourceDir, 0o700)
+	return configDir, sourceDir, nil
+}
+
+func replaceLarkCLIBindingDirs(configDir, sourceDir, stagingConfigDir, stagingSourceDir string) error {
+	if err := replacePathByRemoveAndRename(configDir, stagingConfigDir); err != nil {
+		return fmt.Errorf("activate lark-cli config dir: %w", err)
+	}
+	if err := replacePathByRemoveAndRename(sourceDir, stagingSourceDir); err != nil {
+		return fmt.Errorf("activate lark-cli source dir: %w", err)
+	}
+	_ = os.Chmod(configDir, 0o700)
+	_ = os.Chmod(sourceDir, 0o700)
+	return nil
+}
+
+func replacePathByRemoveAndRename(target, staged string) error {
+	parent := filepath.Dir(target)
+	if parent == "." || parent == "" {
+		return fmt.Errorf("target parent is unavailable")
+	}
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return fmt.Errorf("create target parent: %w", err)
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return fmt.Errorf("remove existing target: %w", err)
+	}
+	if err := os.Rename(staged, target); err != nil {
+		return err
+	}
+	return nil
 }
 
 func runLarkCLIConfigBind(ctx context.Context, larkCLIPath, configDir, sourcePath, channelHome, channelProfile string) error {
@@ -567,34 +875,6 @@ func writeLarkCLIBindMarker(path string, marker larkCLIBindMarker) error {
 		return err
 	}
 	return writeFile0600Atomic(path, append(data, '\n'))
-}
-
-func readOptionalFile(path string) ([]byte, bool, error) {
-	data, err := os.ReadFile(path)
-	if err == nil {
-		return data, true, nil
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, false, nil
-	}
-	return nil, false, err
-}
-
-func restoreLarkChannelBinding(sourcePath, bindMarkerPath string, previousSource []byte, hadPreviousSource bool, previousMarker []byte, hadPreviousMarker bool) error {
-	if hadPreviousSource && hadPreviousMarker {
-		if err := writeFile0600Atomic(sourcePath, previousSource); err != nil {
-			return err
-		}
-		return writeFile0600Atomic(bindMarkerPath, previousMarker)
-	}
-	var errs []error
-	if err := os.Remove(sourcePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, err)
-	}
-	if err := os.Remove(bindMarkerPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, err)
-	}
-	return errors.Join(errs...)
 }
 
 func writeFile0600Atomic(path string, data []byte) error {

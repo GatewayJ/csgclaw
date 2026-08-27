@@ -132,6 +132,11 @@ export type FeishuRegistrationFinalizeResult = FeishuRegistration & {
   restart_error?: string;
   restart_status?: string;
   warnings?: string[];
+  lark_cli_status?: string;
+  lark_cli_error?: {
+    code?: string;
+    message?: string;
+  };
 };
 
 export type AgentLarkCLIInitResult = {
@@ -139,7 +144,6 @@ export type AgentLarkCLIInitResult = {
   app_id?: string;
   config_dir?: string;
   config_path?: string;
-  installed?: boolean;
   lark_cli_path?: string;
   participant_id?: string;
   restart_error?: string;

@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -58,6 +60,17 @@ type feishuRegistrationResponse struct {
 	ExpiresAt       time.Time `json:"expires_at"`
 	NextPollSeconds int       `json:"next_poll_seconds,omitempty"`
 	Status          string    `json:"status,omitempty"`
+}
+
+type feishuRegistrationFinalizeResponse struct {
+	feishubind.Result
+	LarkCLIStatus string                          `json:"lark_cli_status,omitempty"`
+	LarkCLIError  *feishuRegistrationLarkCLIError `json:"lark_cli_error,omitempty"`
+}
+
+type feishuRegistrationLarkCLIError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 func (h *Handler) createFeishuRegistration(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +199,10 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err := feishubind.ValidateBotAppIDExclusive(h.participant, target.ID, appID); err != nil {
+		h.writeFeishuBotAppInfoError(w, err)
+		return
+	}
 
 	userInfo := userInfoFromRegistrationResult(poll)
 	if userInfo.OpenID != "" && feishuRegistrationBindsAdmin(target) {
@@ -202,8 +219,23 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 	}
 	result, err := feishubind.BindBot(r.Context(), h.svc, h.participant, state.AgentID, appID, appSecret, false)
 	if err != nil {
+		if errors.Is(err, errFeishuBotAppIDConflict) {
+			h.writeFeishuBotAppInfoError(w, err)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	var larkCLIStatus string
+	var larkCLIError *feishuRegistrationLarkCLIError
+	if strings.EqualFold(strings.TrimSpace(target.RuntimeKind), agent.RuntimeKindCodex) {
+		if _, err := h.configureAgentLarkCLI(r.Context(), target, h.internalSourceBaseURL(r), false); err != nil {
+			larkCLIStatus, larkCLIError = feishuRegistrationLarkCLIWarning(err)
+			result.Warnings = append(result.Warnings, larkCLIError.Message)
+			slog.Warn("configure lark-cli after Feishu connection failed", "agent_id", target.ID, "error", err)
+		} else {
+			larkCLIStatus = "configured"
+		}
 	}
 	if _, activation, err := h.svc.ApplyExternalBinding(r.Context(), state.AgentID, participant.ChannelFeishu); err != nil {
 		result.Status = "partial"
@@ -213,7 +245,29 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 		result.ActivationStatus = string(activation)
 	}
 	_ = h.deleteFeishuRegistration(state.RegistrationID)
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, feishuRegistrationFinalizeResponse{
+		Result:        result,
+		LarkCLIStatus: larkCLIStatus,
+		LarkCLIError:  larkCLIError,
+	})
+}
+
+func feishuRegistrationLarkCLIWarning(err error) (string, *feishuRegistrationLarkCLIError) {
+	code := "lark_cli_config_failed"
+	message := "lark-cli automatic configuration failed; retry from the worker profile"
+	status := "error"
+	var configureErr *larkCLIConfigureError
+	if errors.As(err, &configureErr) && strings.TrimSpace(configureErr.code) != "" {
+		code = strings.TrimSpace(configureErr.code)
+	}
+	switch code {
+	case "lark_cli_unavailable":
+		status = "unavailable"
+		message = "lark-cli is not installed or cannot be started on the host; install or repair it, then initialize from the worker profile"
+	case "lark_cli_bind_failed":
+		message = "lark-cli config bind failed; check the installed lark-cli version and retry from the worker profile"
+	}
+	return status, &feishuRegistrationLarkCLIError{Code: code, Message: message}
 }
 
 func feishuRegistrationBindsAdmin(target agent.Agent) bool {

@@ -57,6 +57,7 @@ const labels: Record<string, string> = {
   feishuChannelName: "Feishu",
   feishuConnect: "Connect Feishu",
   feishuReconnect: "Reconnect Feishu",
+  larkCLIInit: "Initialize lark-cli",
   feishuDisconnect: "Disconnect Feishu",
   feishuCompleteConnection: "Complete connection",
   feishuPending: "Waiting",
@@ -731,11 +732,12 @@ describe("agent action visibility", () => {
     );
 
     expect(screen.getByText("Connected")).toHaveClass("connected");
-    expect(screen.getByText("Feishu connection configured.")).toHaveClass("success");
+    expect(screen.getByText("Feishu connection configured.").closest(".form-warning")).toHaveClass("success");
     expect(screen.getByRole("button", { name: "Reconnect Feishu" })).toBeInTheDocument();
     const channelActionButtons = Array.from(document.querySelectorAll(".agent-channel-actions .btn"));
     expect(channelActionButtons.map((button) => button.textContent?.trim())).toEqual([
       "Reconnect Feishu",
+      "Initialize lark-cli",
       "Disconnect Feishu",
     ]);
     const disconnectButton = screen.getByRole("button", { name: "Disconnect Feishu" });

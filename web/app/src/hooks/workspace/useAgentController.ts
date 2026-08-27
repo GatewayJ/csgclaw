@@ -27,7 +27,12 @@ import {
   startFeishuRegistrationRequest,
   updateAgentRequest,
 } from "@/api/agents";
-import type { AgentUpdatePayload, FeishuRegistration, FetchAgentsOptions } from "@/api/agents";
+import type {
+  AgentUpdatePayload,
+  FeishuRegistration,
+  FeishuRegistrationFinalizeResult,
+  FetchAgentsOptions,
+} from "@/api/agents";
 import { patchCsgclawUserRequest } from "@/api/participants";
 import { publishAgentTemplateRequest, type AgentTemplatePublishTarget } from "@/api/hub";
 import { HubTemplateErrorCodes, hubTemplateErrorCode, upsertHubTemplateReviewState } from "@/models/hubWorkspace";
@@ -176,6 +181,24 @@ type AgentActionBusyEntry = {
 };
 type AgentActionBusyState = Record<string, AgentActionBusyEntry>;
 type FeishuActionKind = "connect" | "disconnect" | "finalize" | "lark-cli";
+
+export function feishuRegistrationFinalizeNotice(result: FeishuRegistrationFinalizeResult | null | undefined): {
+  kind: "success" | "unavailable" | "bind_failed" | "error" | "warnings";
+  warnings: string[];
+} {
+  const code = String(result?.lark_cli_error?.code || "").trim();
+  if (code === "lark_cli_unavailable") {
+    return { kind: "unavailable", warnings: [] };
+  }
+  if (code === "lark_cli_bind_failed") {
+    return { kind: "bind_failed", warnings: [] };
+  }
+  if (code) {
+    return { kind: "error", warnings: [] };
+  }
+  const warnings = (result?.warnings || []).map((warning) => String(warning || "").trim()).filter(Boolean);
+  return { kind: warnings.length > 0 ? "warnings" : "success", warnings };
+}
 
 const AGENT_RUNTIME_SYNC_INTERVAL_MS = 2_000;
 const AGENT_RUNTIME_SYNC_TIMEOUT_MS = 120_000;
@@ -2103,7 +2126,23 @@ export function useAgentController({
           return next;
         });
         await refreshAgentStateRef.current(agentID);
-        showAgentPageNotice(t("feishuConnectConfigured"), "success", 5000, agentID);
+        const finalizeNotice = feishuRegistrationFinalizeNotice(result);
+        if (finalizeNotice.kind === "unavailable") {
+          showAgentPageNotice(t("feishuConnectConfiguredLarkCLIUnavailable"), "warning", 8000, agentID);
+        } else if (finalizeNotice.kind === "bind_failed") {
+          showAgentPageNotice(t("feishuConnectConfiguredLarkCLIBindFailed"), "warning", 8000, agentID);
+        } else if (finalizeNotice.kind === "error") {
+          showAgentPageNotice(t("feishuConnectConfiguredLarkCLIError"), "warning", 8000, agentID);
+        } else if (finalizeNotice.kind === "warnings") {
+          showAgentPageNotice(
+            t("feishuConnectConfiguredWithWarnings", { warnings: finalizeNotice.warnings.join("; ") }),
+            "warning",
+            8000,
+            agentID,
+          );
+        } else {
+          showAgentPageNotice(t("feishuConnectConfigured"), "success", 5000, agentID);
+        }
       } catch (err) {
         if (feishuRegistrationFinalizeClearsPending(err)) {
           updateFeishuPendingRegistrations((current) => {
@@ -2246,12 +2285,7 @@ export function useAgentController({
     try {
       const result = await initAgentLarkCLIRequest(agentID);
       await refreshAgentStateRef.current(agentID);
-      showAgentPageNotice(
-        result?.installed ? t("larkCLIInstalledAndConfigured") : t("larkCLIConfigured"),
-        "success",
-        5000,
-        agentID,
-      );
+      showAgentPageNotice(t("larkCLIConfigured"), "success", 5000, agentID);
       if (result?.restart_error) {
         setAgentPageSaveError(`${t("larkCLIRestartFailed")} ${result.restart_error}`);
       }
@@ -2261,6 +2295,11 @@ export function useAgentController({
         setAgentPageDialog({
           title: t("larkCLINoFeishuBotTitle"),
           message: t("larkCLINoFeishuBotMessage"),
+        });
+      } else if (apiError?.code === "lark_cli_unavailable") {
+        setAgentPageDialog({
+          title: t("larkCLIMissingTitle"),
+          message: t("larkCLIMissingMessage"),
         });
       } else {
         setAgentPageSaveError(errorMessage(err, t("larkCLIInitFailed")));

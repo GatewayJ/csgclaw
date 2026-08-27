@@ -2133,6 +2133,19 @@ function AgentChannelsSection({
   const canDisconnect = connected && Boolean(onDisconnectFeishu);
   const canInitLarkCLI = Boolean(onInitLarkCLI);
   const connectURL = String(pendingRegistration?.connect_url || "").trim();
+  const larkCLIState = String(item.lark_cli?.state || "")
+    .trim()
+    .toLowerCase();
+  const larkCLIUnavailable = larkCLIState === "unavailable";
+  const larkCLIMismatch = larkCLIState === "mismatch";
+  const larkCLIBound = Boolean(item.lark_cli?.bound) && !larkCLIUnavailable && !larkCLIMismatch;
+  const larkCLIButtonLabel = larkCLIUnavailable
+    ? t("larkCLIInstallRequiredAction")
+    : larkCLIMismatch
+      ? t("larkCLIReinit")
+      : larkCLIBound
+        ? t("larkCLIConfiguredAction")
+        : t("larkCLIInit");
 
   return (
     <section
@@ -2192,12 +2205,20 @@ function AgentChannelsSection({
             size="sm"
             type="button"
             loading={larkCLIInitBusy}
-            loadingLabel={t("larkCLIInit")}
+            loadingLabel={larkCLIButtonLabel}
             disabled={!canInitLarkCLI || actionBusy}
             onClick={() => onInitLarkCLI?.(item)}
           >
-            <Terminal aria-hidden="true" size={15} strokeWidth={2} />
-            {t("larkCLIInit")}
+            {larkCLIUnavailable ? (
+              <AlertCircle aria-hidden="true" size={15} strokeWidth={2} />
+            ) : larkCLIMismatch ? (
+              <RefreshCw aria-hidden="true" size={15} strokeWidth={2} />
+            ) : larkCLIBound ? (
+              <CheckCircle2 aria-hidden="true" size={15} strokeWidth={2} />
+            ) : (
+              <Terminal aria-hidden="true" size={15} strokeWidth={2} />
+            )}
+            {larkCLIButtonLabel}
           </Button>
           {connected ? (
             <Button

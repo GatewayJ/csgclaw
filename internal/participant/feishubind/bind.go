@@ -2,11 +2,18 @@ package feishubind
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"csgclaw/internal/agent"
 	"csgclaw/internal/participant"
+)
+
+var (
+	ErrBotAppIDConflict = errors.New("feishu bot app_id is already used by another worker")
+	bindBotMu           sync.Mutex
 )
 
 type Result struct {
@@ -72,6 +79,11 @@ func BindBot(ctx context.Context, agentSvc *agent.Service, participantSvc *parti
 	if err != nil {
 		return Result{}, fmt.Errorf("resolve agent %q: %w", agentRef, err)
 	}
+	bindBotMu.Lock()
+	defer bindBotMu.Unlock()
+	if err := ValidateBotAppIDExclusive(participantSvc, target.ID, appID); err != nil {
+		return Result{}, err
+	}
 	participantID := agent.ParticipantIDForAgent(target.Name, target.ID)
 	item, warnings, err := upsertBotParticipant(ctx, participantSvc, participantID, target, appID, appSecret)
 	if err != nil {
@@ -103,6 +115,30 @@ func BindBot(ctx context.Context, agentSvc *agent.Service, participantSvc *parti
 		result.RestartStatus = "restart_skipped"
 	}
 	return result, nil
+}
+
+func ValidateBotAppIDExclusive(participantSvc *participant.Service, agentID, appID string) error {
+	if participantSvc == nil {
+		return fmt.Errorf("participant service is required")
+	}
+	agentID = agent.CanonicalID(agentID)
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return nil
+	}
+	for _, item := range participantSvc.List(participant.ListOptions{
+		Channel: participant.ChannelFeishu,
+		Type:    participant.TypeAgent,
+	}) {
+		otherAgentID := agent.CanonicalID(item.AgentID)
+		if otherAgentID == "" || otherAgentID == agentID {
+			continue
+		}
+		if channelAppConfigString(item.ChannelAppConfig, "app_id") == appID {
+			return fmt.Errorf("%w: app_id %q is used by agent %q", ErrBotAppIDConflict, appID, otherAgentID)
+		}
+	}
+	return nil
 }
 
 func ResolveAgent(agentSvc *agent.Service, ref string) (agent.Agent, error) {
@@ -271,4 +307,13 @@ func findParticipantByID(participantSvc *participant.Service, channel, id string
 	}
 	item, ok := participantSvc.Get(channel, id)
 	return item, ok, nil
+}
+
+func channelAppConfigString(values map[string]any, key string) string {
+	for candidate, value := range values {
+		if strings.EqualFold(strings.TrimSpace(candidate), key) {
+			return strings.TrimSpace(fmt.Sprint(value))
+		}
+	}
+	return ""
 }

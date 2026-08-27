@@ -6,7 +6,7 @@ Channel Transport 直接调用文档 API。
 
 当前实现已经落地了 worker 级 `lark-cli` 绑定、配置隔离、运行时环境注入、Feishu 评论 prompt
 引导、断开飞书后的本地状态清理。尚未实现多阶段 document-tool CLI、OAuth subject guard、固定
-版本安装锁和官方 skill 全量同步。
+托管安装、下载、版本锁和官方 skill 全量同步。
 
 ## 1. 当前结论
 
@@ -15,7 +15,7 @@ Channel Transport 直接调用文档 API。
   `channel_app_config`，不放入 Agent profile、prompt 或普通环境变量。
 - worker profile 的 Feishu Channel 页面提供“初始化 lark-cli”按钮。
 - 初始化按钮调用 `POST /api/v1/agents/{id}/lark-cli:init`。
-- 如果宿主机已有 `lark-cli`，直接执行绑定；如果没有，则尝试通过 `npm install -g` 安装。
+- 如果宿主机已有 `lark-cli`，直接执行绑定；如果没有，则提示用户先在宿主机安装 `lark-cli`。
 - 每个 worker 使用自己的 `<CODEX_HOME>/lark-cli` 作为 `LARKSUITE_CLI_CONFIG_DIR`。
 - 每个 worker 使用自己的 `<CODEX_HOME>/lark-cli-source/config.json` 作为 `LARK_CHANNEL_CONFIG`。
 - Runtime 只有在 source config 和 bound marker 同时存在时才注入 lark 环境变量。
@@ -38,28 +38,14 @@ bound.json                       = “这个抽屉已经绑定完成”的门牌
 `lark-cli` 对 CSGClaw 来说是一个外部可执行文件。当前代码通过 `exec.LookPath("lark-cli")` 查找它，
 worker 运行时直接执行 `lark-cli ...` 命令。
 
-当前安装逻辑位于 `internal/api/lark_cli.go`：
+当前检测逻辑位于 `internal/api/lark_cli.go`：
 
-1. 先在 `PATH` 中查找 `lark-cli`；
-2. 找到则复用现有二进制；
-3. 找不到则查找 `npm`；
-4. 找到 `npm` 后执行：
+1. 在 `PATH` 中查找 `lark-cli`；
+2. 找到则复用现有二进制并继续绑定；
+3. 找不到则返回 `lark_cli_unavailable`，提示用户在宿主机安装 `lark-cli` 后重试。
 
-```bash
-npm install -g ${CSGCLAW_LARK_CLI_NPM_PACKAGE:-@larksuite/cli@latest}
-```
-
-因此当前代码不需要 JVM。若宿主机已经有 `lark-cli`，初始化阶段也不需要 Node.js；若宿主机没有
-`lark-cli`，则需要可用的 Node.js/npm 来完成自动安装。
-
-当前默认 npm 包是 `@larksuite/cli@latest`，可以通过服务进程环境变量
-`CSGCLAW_LARK_CLI_NPM_PACKAGE` 覆盖，例如：
-
-```bash
-CSGCLAW_LARK_CLI_NPM_PACKAGE=@larksuite/cli@1.2.3
-```
-
-生产最佳实践仍建议固定版本和主机级安装锁；这属于后续强化项，当前代码尚未实现。
+因此当前代码不需要 JVM，也不要求 CSGClaw 进程具备 Node.js/npm。Node.js/npm/npx 只是官方
+`lark-cli` 安装方式的一种依赖；CSGClaw 自己不会执行 npm、npx、下载或全局安装动作。
 
 ## 3. 当前初始化不是 config init
 
@@ -79,6 +65,11 @@ lark-cli config bind --source lark-channel --identity bot-only --force --lang zh
 配置抽屉”。App Secret 不通过命令行参数或 stdin 传给 `lark-cli`，而是由 source config 中的
 exec provider 按需读取。
 
+配置有两个入口，但复用同一个幂等后端流程：
+
+- Codex worker 完成飞书连接时，如果宿主机 `PATH` 中存在 `lark-cli`，自动完成配置；
+- Profile 的 Feishu Channel 页面保留初始化按钮，供安装二进制后初始化、失败重试或主动刷新绑定。
+
 完整步骤如下：
 
 1. 校验目标 Agent 存在且 runtime kind 为 Codex；
@@ -86,13 +77,20 @@ exec provider 按需读取。
 3. 从 Participant `channel_app_config` 读取 `app_id/app_secret`；
 4. 校验这个 `app_id` 没有被其他 worker 使用；
 5. 解析该 worker 的 `CODEX_HOME`；
-6. 确保 `<CODEX_HOME>/lark-cli` 目录存在，权限为 `0700`；
-7. 确保宿主机有 `lark-cli`，必要时用 npm 安装；
-8. 写入 `<CODEX_HOME>/lark-cli-source/config.json`，权限为 `0600`；
-9. 执行 `lark-cli config bind --source lark-channel --identity bot-only --force --lang zh`；
-10. 写入 `<CODEX_HOME>/lark-cli-source/bound.json`，权限为 `0600`；
-11. 刷新 worker 的 managed instructions；
-12. 如果 Codex worker 当前正在运行，则重启 worker 以加载新环境。
+6. 准备正式配置路径 `<CODEX_HOME>/lark-cli` 和 `<CODEX_HOME>/lark-cli-source`；
+7. 确认宿主机 `PATH` 中存在 `lark-cli`，找不到则返回错误提示用户自行安装；
+8. 创建 staging `lark-cli` 配置目录和 staging source 目录；
+9. 在 staging source 中写入 `config.json`，权限为 `0600`；
+10. 对 staging 配置目录执行 `lark-cli config bind --source lark-channel --identity bot-only --force --lang zh`；
+11. 在 staging source 中写入 `bound.json`，权限为 `0600`；
+12. bind 成功后用 staging 目录覆盖正式 `<CODEX_HOME>/lark-cli` 和 `<CODEX_HOME>/lark-cli-source`；
+13. 刷新 worker 的 managed instructions；
+14. 手动初始化时，如果 Codex worker 当前正在运行，则重启 worker 以加载新环境；飞书连接流程中的自动配置
+    由紧随其后的渠道激活动作一次性加载，不额外重启。
+
+正式目录不做备份。bind 失败时失败发生在 staging 中，旧的正式目录不会被改写；bind 成功后以本次
+staging 结果为准直接覆盖旧目录，因此同一个 worker 可以重复点击初始化来重试或刷新绑定。后端按
+Agent ID 串行化配置，避免飞书自动配置和用户点击初始化同时改写同一 worker 的目录。
 
 ## 4. Bot 信息放在哪里
 
@@ -262,7 +260,6 @@ POST /api/v1/agents/{id}/lark-cli:init
   "agent_id": "agent-dev",
   "participant_id": "pt-dev",
   "app_id": "cli_xxx",
-  "installed": false,
   "lark_cli_path": "/usr/local/bin/lark-cli",
   "config_dir": "<CODEX_HOME>/lark-cli",
   "config_path": "<CODEX_HOME>/lark-cli/lark-channel/config.json",
@@ -271,14 +268,42 @@ POST /api/v1/agents/{id}/lark-cli:init
 }
 ```
 
+Agent API 会由后端读取 worker 的 `bound.json` 和 source config，并返回当前 lark-cli 状态，前端不
+直接读取 worker 文件：
+
+```json
+{
+  "id": "agent-dev",
+  "lark_cli": {
+    "bound": true,
+    "available": true,
+    "state": "bound",
+    "executable_path": "/usr/local/bin/lark-cli",
+    "app_id": "cli_xxx",
+    "config_dir": "<CODEX_HOME>/lark-cli",
+    "config_path": "<CODEX_HOME>/lark-cli/lark-channel/config.json",
+    "source_config_path": "<CODEX_HOME>/lark-cli-source/config.json",
+    "bound_at": "2026-08-27T12:00:00Z"
+  }
+}
+```
+
+`state=bound` 时按钮显示“已配置”；`state=mismatch` 时显示“重新初始化 lark-cli”；二进制可用但没有
+marker 或 source config 时显示“初始化 lark-cli”；宿主机找不到二进制时返回 `state=unavailable`，按钮
+显示“安装后初始化 lark-cli”。这个按钮仍然调用同一个幂等 init API，因此用户完成手动安装后可以直接
+点击，不要求先刷新页面。
+
+飞书连接本身不依赖 lark-cli 自动配置成功。宿主机未安装或 bind 失败时，Feishu Bot 连接仍然成功，
+后端记录 warning，Agent API 则返回对应的 `unavailable` 或 `unbound/mismatch` 状态供页面提示和重试。
+
 常见错误：
 
 | 错误码 | 含义 | UI 行为 |
 | --- | --- | --- |
 | `feishu_bot_not_configured` | 该 worker 没有 Feishu Bot app info | 弹窗提示先连接飞书并完成 Bot 配置 |
 | `feishu_bot_app_id_conflict` | 该 AppID 已被其他 worker 使用 | 显示初始化失败 |
-| `lark_cli_unavailable` | 宿主机没有 `lark-cli` 且无法用 npm 安装 | 显示初始化失败 |
-| `lark_cli_bind_failed` | `lark-cli config bind` 失败 | 显示初始化失败，并恢复 source/marker |
+| `lark_cli_unavailable` | 宿主机没有 `lark-cli` 或不在 `PATH` 中 | 弹窗提示用户先在宿主机安装 |
+| `lark_cli_bind_failed` | `lark-cli config bind` 失败 | 显示初始化失败；正式 source/marker 不会被改写 |
 | `unsupported_runtime` | 目标不是 Codex worker | 显示初始化失败 |
 
 如果 bind 成功但 worker 重启失败，接口仍返回 `status=configured`，并带
@@ -369,8 +394,8 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 - OAuth subject 与评论 actor 的强制匹配；
 - 群聊中阻止使用某个用户 OAuth Token 的服务端 guard；
 - scope 状态校验和 `ready/needs_reauth` 状态机；
-- `lark-cli` 固定版本与安装锁；
-- bind/config/marker 的完全原子切换；
+- CSGClaw 托管的 `lark-cli` 下载、固定版本与安装锁；
+- 覆盖正式目录时跨 `lark-cli` 和 `lark-cli-source` 两个目录的完全事务原子切换；
 - 对 `lark-cli` stderr 的结构化错误分类；
 - 官方 lark skills 的全量同步和版本对账。
 
@@ -381,7 +406,9 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 
 | 模块 | 当前职责 |
 | --- | --- |
-| `internal/api/lark_cli.go` | init API、安装/查找 lark-cli、写 source config、执行 bind、写 marker、source token |
+| `internal/api/lark_cli.go` | 手动/自动共用的幂等配置、per-agent 锁、查找 lark-cli、写 staging source config、执行 bind、切换正式目录、写 marker、source token |
+| `internal/api/feishu_registration.go` | 飞书连接成功后对 Codex worker 尝试自动配置 lark-cli，再激活渠道 |
+| `internal/api/handler.go` | Agent API 返回后端读取的 `lark_cli` status |
 | `internal/api/router.go` | 注册 `/api/v1/agents/{id}/lark-cli:init` 和 `/api/v1/agents/{id}/feishu/app-info` |
 | `cli/participant/app_info.go` | 提供 `pt app-info --exec-provider` 给 lark-cli source provider 调用 |
 | `internal/runtime/codex/session_manager.go` | 根据 bound marker 注入并保护 `LARK*` 环境变量 |
@@ -389,25 +416,25 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 | `internal/agent/agents_instructions.go` | `Feishu lark-cli Access` managed instructions |
 | `internal/api/participant.go` | 断开 Feishu participant 后清理 worker lark-cli 状态 |
 | `internal/channel/feishu/ingress/comment.go` | 在评论 prompt 中提示按文件类型使用 lark-cli |
-| `web/app/src/pages/AgentPage/components/AgentDetailPane/AgentDetailPane.tsx` | Feishu Channel 页面展示“初始化 lark-cli”按钮 |
+| `web/app/src/pages/AgentPage/components/AgentDetailPane/AgentDetailPane.tsx` | Feishu Channel 页面按 `lark_cli` status 展示安装后初始化/初始化/已配置/重新初始化按钮 |
 | `web/app/src/hooks/workspace/useAgentController.ts` | 调用 init API、展示成功/错误/缺少 Bot 弹窗 |
 
 ## 14. 后续最佳实践
 
 当前代码已经能让不同 worker 在同一宿主机上用各自的 lark-cli 配置运行。后续建议按优先级补齐：
 
-1. 把默认 npm 包从 `@latest` 改成固定版本，并加主机级安装锁；
-2. 增加 staging config dir，避免 bind 成功但 marker 写失败造成半绑定状态；
-3. 增加 lark-cli init 的 per-agent 锁，避免同一个 worker 并发点击初始化；
-4. 增加 OAuth subject guard，私聊/评论 actor 必须匹配授权用户；
-5. 把 lark-cli auth/status/scope 变成可观测状态；
-6. 评估官方 Auth Sidecar，使 App Secret 和用户 Token 留在 CSGClaw 可信控制面；
-7. 需要多人共享时，设计按 `operator.open_id` 隔离的 OAuth Token 映射，不能复用首个用户 token。
+1. 增加可选的 `CSGCLAW_LARK_CLI_PATH` 或运维配置项，允许显式指定 `lark-cli` 二进制；
+2. 增加 OAuth subject guard，私聊/评论 actor 必须匹配授权用户；
+3. 把 lark-cli auth/scope 变成更完整的可观测状态；
+4. 评估官方 Auth Sidecar，使 App Secret 和用户 Token 留在 CSGClaw 可信控制面；
+5. 需要多人共享时，设计按 `operator.open_id` 隔离的 OAuth Token 映射，不能复用首个用户 token。
 
 ## 15. 验收标准
 
 当前代码应满足：
 
+- Codex worker 完成飞书连接时，宿主机已有 `lark-cli` 会自动完成 worker 私有绑定；
+- 宿主机没有 `lark-cli` 时飞书连接仍然成功，Agent API 返回 `state=unavailable`；
 - 未配置 Feishu Bot 的 worker 点击初始化会返回 `feishu_bot_not_configured`；
 - 已配置 Feishu Bot 的 Codex worker 点击初始化会生成独立的 `lark-cli` 和 `lark-cli-source` 目录；
 - source config 权限为 `0600`，目录权限为 `0700`；
