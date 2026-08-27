@@ -507,6 +507,8 @@ func TestRefreshCodexHomeAgentsFileAddsFeishuLarkCLIInstructionsWhenBound(t *tes
 	for _, want := range []string{
 		"Feishu lark-cli Access",
 		"`LARK_CHANNEL_CONFIG`",
+		"Run every lark-cli command directly through `command_execution`",
+		"Do not invoke lark-cli through `mcp_tool_call`",
 		"lark-cli docs +fetch --api-version v2",
 		"Feishu Historical Attachment Recovery",
 		"lark-cli im +chat-messages-list --as bot --chat-id <current_chat_id>",

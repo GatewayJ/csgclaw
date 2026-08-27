@@ -365,6 +365,11 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 `Feishu lark-cli Access` 指令。该指令要求：
 
 - 普通 `lark-cli ...` 命令继承当前 worker 的 lark-channel 环境；
+- 所有 lark-cli 命令必须直接通过 `command_execution` 执行，不能通过 `mcp_tool_call`、MCP 代码执行、
+  Node.js/Python 子进程或其他工具包装层调用，因为这些环境可能清理 worker 的 `LARK*` 变量并错误读取
+  宿主默认 profile；
+- 非 `command_execution` 环境返回 `not_configured` 时不能直接判定未配置，必须通过
+  `command_execution` 对同一个只读状态命令复核一次；
 - 不要切到宿主默认 lark-cli profile；
 - 不要读取或打印 lark-cli config、app secret、access token、refresh token、OAuth device code 或
   CSGClaw API token；
@@ -446,6 +451,8 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 - source config 权限为 `0600`，目录权限为 `0700`；
 - `lark-cli config bind` 的环境变量指向当前 worker 的目录；
 - runtime 只在 source config 和 bound marker 同时存在时注入 `LARK*` 环境；
+- worker 通过 `command_execution` 调用 lark-cli，MCP 代码执行环境的 `not_configured` 结果不能作为绑定
+  状态依据；
 - Agent Profile 不能覆盖 `LARKSUITE_CLI_CONFIG_DIR`、`LARK_CHANNEL_CONFIG` 等保留变量；
 - worker A 和 worker B 的 `LARKSUITE_CLI_CONFIG_DIR` 不同；
 - 同一个 AppID 不能同时完成多个 worker 的 lark-cli 初始化；
