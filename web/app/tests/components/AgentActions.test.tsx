@@ -680,6 +680,7 @@ describe("agent action visibility", () => {
     expect(screen.getByText("Manage external channels.")).toBeInTheDocument();
     expect(document.querySelector(".agent-channel-icon img")).toHaveAttribute("src", "icons/feishu.png");
     expect(screen.getByText("Disconnected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Initialize lark-cli" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disconnect Feishu" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Connect Feishu" }));
     expect(onStartFeishuConnect).toHaveBeenCalledWith(expect.objectContaining({ id: worker.id }));
@@ -794,6 +795,7 @@ describe("agent action visibility", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open Feishu" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Complete connection" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Initialize lark-cli" })).not.toBeInTheDocument();
   });
 
   it("shows connected Feishu status while a reconnect authorization is pending", async () => {

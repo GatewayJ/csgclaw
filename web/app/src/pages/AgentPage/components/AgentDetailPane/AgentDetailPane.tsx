@@ -2200,26 +2200,28 @@ function AgentChannelsSection({
             )}
             {connectLabel}
           </Button>
-          <Button
-            variant="secondaryGray"
-            size="sm"
-            type="button"
-            loading={larkCLIInitBusy}
-            loadingLabel={larkCLIButtonLabel}
-            disabled={!canInitLarkCLI || actionBusy}
-            onClick={() => onInitLarkCLI?.(item)}
-          >
-            {larkCLIUnavailable ? (
-              <AlertCircle aria-hidden="true" size={15} strokeWidth={2} />
-            ) : larkCLIMismatch ? (
-              <RefreshCw aria-hidden="true" size={15} strokeWidth={2} />
-            ) : larkCLIBound ? (
-              <CheckCircle2 aria-hidden="true" size={15} strokeWidth={2} />
-            ) : (
-              <Terminal aria-hidden="true" size={15} strokeWidth={2} />
-            )}
-            {larkCLIButtonLabel}
-          </Button>
+          {connected ? (
+            <Button
+              variant="secondaryGray"
+              size="sm"
+              type="button"
+              loading={larkCLIInitBusy}
+              loadingLabel={larkCLIButtonLabel}
+              disabled={!canInitLarkCLI || actionBusy}
+              onClick={() => onInitLarkCLI?.(item)}
+            >
+              {larkCLIUnavailable ? (
+                <AlertCircle aria-hidden="true" size={15} strokeWidth={2} />
+              ) : larkCLIMismatch ? (
+                <RefreshCw aria-hidden="true" size={15} strokeWidth={2} />
+              ) : larkCLIBound ? (
+                <CheckCircle2 aria-hidden="true" size={15} strokeWidth={2} />
+              ) : (
+                <Terminal aria-hidden="true" size={15} strokeWidth={2} />
+              )}
+              {larkCLIButtonLabel}
+            </Button>
+          ) : null}
           {connected ? (
             <Button
               variant="outlineDanger"
