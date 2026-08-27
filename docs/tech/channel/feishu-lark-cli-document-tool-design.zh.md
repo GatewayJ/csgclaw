@@ -370,6 +370,12 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
   CSGClaw API token；
 - 如果 lark-cli 提示当前上下文未绑定，则让用户在 Feishu channel profile 页面初始化或重启 worker；
 - Doc/Docx 优先使用 `lark-cli docs +fetch --api-version v2 --doc <file_token> --doc-format markdown`；
+- 用户提到当前飞书会话中以前上传的附件时，只使用隐藏上下文中的当前 `chat_id`，先以 Bot 身份执行
+  `lark-cli im +chat-messages-list` 查询消息元数据，再按唯一匹配的 `message_id + file_key` 执行
+  `lark-cli im +messages-resources-download`；
+- 历史附件发现阶段不使用 `--download-resources` 批量下载，不查询其他飞书会话，不复用 CSGClaw
+  内置渠道的附件目录或下载 API；
+- Bot 缺少消息读取权限或不在当前会话时，报告 lark-cli 权限错误，不静默切换到用户身份；
 - 需要用户 OAuth 时，只在飞书私聊中启动 `lark-cli auth login`；
 - 用户 OAuth 成功后可收敛 `strict-mode` 和 `default-as`。
 
@@ -444,7 +450,10 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 - worker A 和 worker B 的 `LARKSUITE_CLI_CONFIG_DIR` 不同；
 - 同一个 AppID 不能同时完成多个 worker 的 lark-cli 初始化；
 - 断开 Feishu 后旧的 `<CODEX_HOME>/lark-cli` 和 `<CODEX_HOME>/lark-cli-source` 会被删除；
-- 飞书文档评论 prompt 会优先引导已绑定 worker 使用 `lark-cli docs +fetch` 读取 Doc/Docx。
+- 飞书文档评论 prompt 会优先引导已绑定 worker 使用 `lark-cli docs +fetch` 读取 Doc/Docx；
+- 已绑定 worker 查找飞书历史附件时，只查询当前隐藏上下文的 `chat_id`，默认显式使用 Bot 身份；
+- 唯一匹配的历史附件通过同一条消息的 `message_id + file_key` 单独下载，不使用 CSGClaw 内置渠道的
+  附件目录或 `/api/v1/attachments/{id}`。
 
 ## 16. 参考
 

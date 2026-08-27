@@ -187,6 +187,13 @@ func TestRenderRuntimeAgentsInstructionsBlockAddsFeishuLarkCLIWhenEnabled(t *tes
 		"`LARK_CHANNEL_CONFIG`",
 		"`LARKSUITE_CLI_CONFIG_DIR`",
 		"lark-cli docs +fetch --api-version v2",
+		"Feishu Historical Attachment Recovery",
+		"lark-cli im +chat-messages-list --as bot --chat-id <current_chat_id>",
+		"Do not search, list, or inspect other chats",
+		"Do not use `--download-resources` during discovery",
+		"lark-cli im +messages-resources-download --as bot --message-id <message_id>",
+		"must come from the same message",
+		"do not silently retry as a user",
 		"lark-cli auth login --no-wait --json --recommend",
 		"Do not background the device-code wait",
 	} {
@@ -196,5 +203,14 @@ func TestRenderRuntimeAgentsInstructionsBlockAddsFeishuLarkCLIWhenEnabled(t *tes
 	}
 	if strings.Contains(got, "GitHub Connector Access") {
 		t.Fatalf("worker lark-cli instructions should not include manager connector guidance: %q", got)
+	}
+	for _, unwanted := range []string{
+		".csgclaw/attachments",
+		"csgclaw-cli message list",
+		"/api/v1/attachments/",
+	} {
+		if strings.Contains(feishuLarkCLIManagedInstructions, unwanted) {
+			t.Fatalf("Feishu lark-cli instructions include CSGClaw attachment mechanism %q", unwanted)
+		}
 	}
 }

@@ -508,6 +508,9 @@ func TestRefreshCodexHomeAgentsFileAddsFeishuLarkCLIInstructionsWhenBound(t *tes
 		"Feishu lark-cli Access",
 		"`LARK_CHANNEL_CONFIG`",
 		"lark-cli docs +fetch --api-version v2",
+		"Feishu Historical Attachment Recovery",
+		"lark-cli im +chat-messages-list --as bot --chat-id <current_chat_id>",
+		"lark-cli im +messages-resources-download --as bot --message-id <message_id>",
 		"lark-cli auth login --no-wait --json --recommend",
 	} {
 		if !strings.Contains(text, want) {
