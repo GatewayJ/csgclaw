@@ -58,6 +58,7 @@ const labels: Record<string, string> = {
   feishuConnect: "Connect Feishu",
   feishuReconnect: "Reconnect Feishu",
   larkCLIInit: "Initialize lark-cli",
+  larkCLIConfiguredAction: "Channel tool configured",
   feishuDisconnect: "Disconnect Feishu",
   feishuCompleteConnection: "Complete connection",
   feishuPending: "Waiting",
@@ -689,6 +690,11 @@ describe("agent action visibility", () => {
       <AgentDetailPane
         item={{
           ...worker,
+          lark_cli: {
+            available: true,
+            bound: true,
+            state: "bound",
+          },
           participants: [
             {
               agent_id: worker.id,
@@ -738,7 +744,7 @@ describe("agent action visibility", () => {
     const channelActionButtons = Array.from(document.querySelectorAll(".agent-channel-actions .btn"));
     expect(channelActionButtons.map((button) => button.textContent?.trim())).toEqual([
       "Reconnect Feishu",
-      "Initialize lark-cli",
+      "Channel tool configured",
       "Disconnect Feishu",
     ]);
     const disconnectButton = screen.getByRole("button", { name: "Disconnect Feishu" });
