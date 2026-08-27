@@ -132,6 +132,36 @@ func TestRenderRuntimeAgentsInstructionsBlockAddsSharedFilePublishingRules(t *te
 	}
 }
 
+func TestRenderRuntimeAgentsInstructionsBlockAddsCurrentRoomAttachmentRecoveryForAllAgents(t *testing.T) {
+	for _, agentID := range []string{ManagerUserID, "agent-worker"} {
+		rendered := RenderRuntimeAgentsInstructionsBlock(agentID, "Stay concise.")
+		for _, want := range []string{
+			"Historical Attachment Recovery",
+			"runtime-local cache copies, not as the durable attachment index",
+			"csgclaw-cli message list --channel <current_channel> --room-id <current_room_id>",
+			"Do not list or inspect other rooms",
+			"jq '[.[] as $message | ($message.attachments // [])[]",
+			"GET $CSGCLAW_BASE_URL/api/v1/attachments/<attachment-id>",
+			"curl -fsS -H \"Authorization: Bearer ${CSGCLAW_ACCESS_TOKEN:?}\"",
+			"Use the stable attachment ID for authenticated downloads",
+			"current room's durable CSGClaw history has been checked",
+		} {
+			if !strings.Contains(rendered, want) {
+				t.Fatalf("runtime instructions for %q missing %q in %q", agentID, want, rendered)
+			}
+		}
+		if strings.Count(rendered, "### Historical Attachment Recovery") != 1 {
+			t.Fatalf("runtime instructions for %q contain duplicate recovery rules: %q", agentID, rendered)
+		}
+	}
+
+	worker := RenderRuntimeAgentsInstructionsBlock("agent-worker", "Stay concise.")
+	if strings.Contains(worker, "Cross-Room Historical Attachment Recovery") ||
+		strings.Contains(worker, "may list rooms") {
+		t.Fatalf("worker runtime instructions include cross-room recovery guidance: %q", worker)
+	}
+}
+
 func TestRenderRuntimeAgentsInstructionsBlockAddsManagerConnectorRulesOnlyForManager(t *testing.T) {
 	manager := RenderRuntimeAgentsInstructionsBlock(ManagerUserID, "Stay concise.")
 	if !strings.Contains(manager, "# Managed Runtime Instructions") {
@@ -147,14 +177,8 @@ func TestRenderRuntimeAgentsInstructionsBlockAddsManagerConnectorRulesOnlyForMan
 		"Do not rely on connector tokens from environment variables",
 		"Do not treat an empty result from an external Codex GitHub app connector as proof",
 		"reconnect the CSGClaw GitHub OAuth connector",
-		"Historical Attachment Recovery",
-		"csgclaw-cli message list --channel <current_channel> --room-id <target_room_id>",
-		"jq '[.[] as $message | ($message.attachments // [])[]",
-		"runtime-local cache copies, not as the durable attachment index",
-		"GET $CSGCLAW_BASE_URL/api/v1/attachments/<attachment-id>",
-		"curl -fsS -H \"Authorization: Bearer ${CSGCLAW_ACCESS_TOKEN:?}\"",
-		"Use the stable attachment ID for authenticated downloads",
-		"until durable CSGClaw history has been checked",
+		"Cross-Room Historical Attachment Recovery",
+		"the Manager may list rooms and inspect only the relevant candidate rooms",
 	} {
 		if !strings.Contains(manager, want) {
 			t.Fatalf("manager runtime instructions missing %q in %q", want, manager)
@@ -167,7 +191,7 @@ func TestRenderRuntimeAgentsInstructionsBlockAddsManagerConnectorRulesOnlyForMan
 	worker := RenderRuntimeAgentsInstructionsBlock("agent-worker", "Stay concise.")
 	if strings.Contains(worker, "GitHub Connector Access") ||
 		strings.Contains(worker, "GitLab Connector Access") ||
-		strings.Contains(worker, "Historical Attachment Recovery") ||
+		strings.Contains(worker, "Cross-Room Historical Attachment Recovery") ||
 		strings.Contains(worker, "`GITHUB_TOKEN`") {
 		t.Fatalf("worker runtime instructions include manager connector guidance: %q", worker)
 	}

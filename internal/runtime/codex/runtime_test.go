@@ -473,6 +473,12 @@ func TestRefreshCodexHomeAgentsFileCreatesManagedFileWhenMissing(t *testing.T) {
 	if !strings.Contains(text, "Output File Delivery") || !strings.Contains(text, "`csgclaw_publish_file`") {
 		t.Fatalf("AGENTS.md = %q, want shared file publishing instructions", text)
 	}
+	if !strings.Contains(text, "Historical Attachment Recovery") || !strings.Contains(text, "Do not list or inspect other rooms") {
+		t.Fatalf("AGENTS.md = %q, want current-room attachment recovery instructions", text)
+	}
+	if strings.Contains(text, "Cross-Room Historical Attachment Recovery") {
+		t.Fatalf("worker AGENTS.md = %q, want no cross-room attachment recovery instructions", text)
+	}
 	if !strings.Contains(text, "END CSGCLAW-INSTRUCTIONS") {
 		t.Fatalf("AGENTS.md = %q, want instructions block end marker", text)
 	}
@@ -567,11 +573,13 @@ func TestRefreshCodexHomeAgentsFileAddsManagerConnectorRules(t *testing.T) {
 		"external Codex GitHub app connector",
 		"reconnect the CSGClaw GitHub OAuth connector",
 		"Historical Attachment Recovery",
-		"csgclaw-cli message list --channel <current_channel> --room-id <target_room_id>",
+		"csgclaw-cli message list --channel <current_channel> --room-id <current_room_id>",
 		"jq '[.[] as $message | ($message.attachments // [])[]",
 		"/api/v1/attachments/<attachment-id>",
 		"curl -fsS -H \"Authorization: Bearer ${CSGCLAW_ACCESS_TOKEN:?}\"",
-		"until durable CSGClaw history has been checked",
+		"current room's durable CSGClaw history has been checked",
+		"Cross-Room Historical Attachment Recovery",
+		"the Manager may list rooms and inspect only the relevant candidate rooms",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("manager AGENTS.md missing %q in %q", want, text)

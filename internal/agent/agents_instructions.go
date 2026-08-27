@@ -62,9 +62,16 @@ func RenderRuntimeAgentsInstructionsBlock(agentID, instructions string) string {
 }
 
 func RenderRuntimeAgentsInstructionsBlockWithOptions(agentID, instructions string, options RuntimeManagedInstructionsOptions) string {
-	managedInstructions := strings.TrimSpace(runtimeFilePublishingInstructions)
+	managedInstructions := joinManagedInstructions(
+		runtimeFilePublishingInstructions,
+		historicalAttachmentRecoveryInstructions,
+	)
 	if strings.TrimSpace(agentID) == ManagerUserID {
-		managedInstructions = joinManagedInstructions(managedInstructions, managerRuntimeConnectorInstructions)
+		managedInstructions = joinManagedInstructions(
+			managedInstructions,
+			managerRuntimeConnectorInstructions,
+			managerCrossRoomAttachmentRecoveryInstructions,
+		)
 	}
 	if options.FeishuLarkCLI {
 		managedInstructions = joinManagedInstructions(managedInstructions, feishuLarkCLIManagedInstructions)
@@ -103,24 +110,29 @@ const managerRuntimeConnectorInstructions = `### GitHub Connector Access
 
 - The Manager can request CSGClaw-managed GitLab credentials on demand with ` + "`POST $CSGCLAW_BASE_URL/api/v1/agents/agent-manager/connectors/gitlab/credential`" + ` using ` + "`Authorization: Bearer $CSGCLAW_ACCESS_TOKEN`" + ` and ` + "`X-CSGClaw-Connector-Capability: $CSGCLAW_CONNECTOR_CAPABILITY`" + `.
 - Use the lease's ` + "`base_url`" + ` and ` + "`access_token`" + ` only in process memory. Never copy the GitLab token into environment setup, Git credential storage, prompts, messages, files, or logs.
-- If the GitLab credential API returns ` + "`400`" + `, ` + "`401`" + `, or ` + "`403`" + `, tell the user to reconnect GitLab or check connector access policy.
+- If the GitLab credential API returns ` + "`400`" + `, ` + "`401`" + `, or ` + "`403`" + `, tell the user to reconnect GitLab or check connector access policy.`
 
-### Historical Attachment Recovery
+const historicalAttachmentRecoveryInstructions = `### Historical Attachment Recovery
 
 - Treat files under ` + "`.csgclaw/attachments/`" + ` as runtime-local cache copies, not as the durable attachment index.
 - When the user refers to a previously uploaded file that is absent from the current workspace, query CSGClaw message history before claiming the file is unavailable or asking the user to upload it again.
-- Use the current ` + "`channel`" + ` and ` + "`room_id`" + ` from the hidden channel context with ` + "`csgclaw-cli message list --channel <current_channel> --room-id <target_room_id>`" + `.
+- Use only the current ` + "`channel`" + ` and ` + "`room_id`" + ` from the hidden channel context with ` + "`csgclaw-cli message list --channel <current_channel> --room-id <current_room_id>`" + `. Do not list or inspect other rooms.
 - Filter the JSON locally to attachment-bearing messages and retain ` + "`id`" + `, ` + "`name`" + `, ` + "`media_type`" + `, ` + "`size_bytes`" + `, ` + "`sha256`" + `, ` + "`created_at`" + `, the originating message ID, and the originating message text.
-- Use a structured pipeline that excludes capability-bearing download URLs, such as ` + "`csgclaw-cli message list --channel <current_channel> --room-id <target_room_id> | jq '[.[] as $message | ($message.attachments // [])[] | {id, name, kind, media_type, size_bytes, sha256, created_at, message_id: $message.id, message_text: $message.content}]'`" + `.
+- Use a structured pipeline that excludes capability-bearing download URLs, such as ` + "`csgclaw-cli message list --channel <current_channel> --room-id <current_room_id> | jq '[.[] as $message | ($message.attachments // [])[] | {id, name, kind, media_type, size_bytes, sha256, created_at, message_id: $message.id, message_text: $message.content}]'`" + `.
 - Match candidates using the filename, the originating message text, and recency.
 - If exactly one candidate matches, download it by stable attachment ID into ` + "`.csgclaw/retrieved/<attachment-id>-<safe-name>`" + ` with ` + "`GET $CSGCLAW_BASE_URL/api/v1/attachments/<attachment-id>`" + ` and ` + "`Authorization: Bearer $CSGCLAW_ACCESS_TOKEN`" + `.
 - A safe download command is ` + "`curl -fsS -H \"Authorization: Bearer ${CSGCLAW_ACCESS_TOKEN:?}\" \"$CSGCLAW_BASE_URL/api/v1/attachments/<attachment-id>\" --output \".csgclaw/retrieved/<attachment-id>-<safe-name>\"`" + `.
 - Use the stable attachment ID for authenticated downloads instead of copying a capability-bearing ` + "`download_url`" + ` into commands, logs, or responses.
 - Verify the downloaded file against its ` + "`sha256`" + ` before reading it.
 - If multiple candidates plausibly match, show the user a concise candidate list instead of guessing.
-- If the current room has no match and the user clearly refers to an upload from another conversation, list rooms and inspect only the relevant candidate rooms.
-- Do not search the web for a referenced upload, rely only on ` + "`find`" + ` in the current workspace, or request a re-upload until durable CSGClaw history has been checked.
+- If the current room has no match, tell the user that no matching attachment was found in the current conversation and ask them to identify the conversation, or delegate cross-room recovery to the Manager.
+- Do not search the web for a referenced upload, rely only on ` + "`find`" + ` in the current workspace, or request a re-upload until the current room's durable CSGClaw history has been checked.
 - Never print, echo, or include ` + "`CSGCLAW_ACCESS_TOKEN`" + ` or a capability token in tool output, logs, prompts, or responses.`
+
+const managerCrossRoomAttachmentRecoveryInstructions = `### Cross-Room Historical Attachment Recovery
+
+- If the current room has no match and the user clearly refers to an upload from another conversation, the Manager may list rooms and inspect only the relevant candidate rooms.
+- Keep the search constrained to the user's description and ask for clarification when multiple rooms or attachments plausibly match.`
 
 const feishuLarkCLIManagedInstructions = `### Feishu lark-cli Access
 
