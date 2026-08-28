@@ -15,6 +15,7 @@ import (
 
 	"csgclaw/internal/agent"
 	"csgclaw/internal/apitypes"
+	"csgclaw/internal/config"
 	"csgclaw/internal/participant"
 	agentruntime "csgclaw/internal/runtime"
 )
@@ -172,6 +173,17 @@ func TestInitAgentLarkCLIReturnsConflictWhenFeishuBotMissing(t *testing.T) {
 	srv.Routes().ServeHTTP(rec, req)
 
 	assertAPIErrorCode(t, rec, http.StatusConflict, feishuBotNotConfiguredCode)
+}
+
+func TestInternalSourceBaseURLUsesOnlyConfiguredOrDefaultAddress(t *testing.T) {
+	configured := (&Handler{advertiseBaseURL: "http://csgclaw.test/"}).internalSourceBaseURL()
+	if configured != "http://csgclaw.test" {
+		t.Fatalf("configured source base URL = %q, want %q", configured, "http://csgclaw.test")
+	}
+
+	if got, want := (&Handler{}).internalSourceBaseURL(), strings.TrimRight(config.DefaultAPIBaseURL(), "/"); got != want {
+		t.Fatalf("default source base URL = %q, want %q", got, want)
+	}
 }
 
 func TestInitAgentLarkCLIReturnsUnavailableWhenLarkCLIMissing(t *testing.T) {

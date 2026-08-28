@@ -229,7 +229,7 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 	var larkCLIStatus string
 	var larkCLIError *feishuRegistrationLarkCLIError
 	if strings.EqualFold(strings.TrimSpace(target.RuntimeKind), agent.RuntimeKindCodex) {
-		if _, err := h.configureAgentLarkCLI(r.Context(), target, h.internalSourceBaseURL(r), false); err != nil {
+		if _, err := h.configureAgentLarkCLI(r.Context(), target, h.internalSourceBaseURL(), false); err != nil {
 			larkCLIStatus, larkCLIError = feishuRegistrationLarkCLIWarning(err)
 			result.Warnings = append(result.Warnings, larkCLIError.Message)
 			slog.Warn("configure lark-cli after Feishu connection failed", "agent_id", target.ID, "error", err)

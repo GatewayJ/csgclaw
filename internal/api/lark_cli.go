@@ -124,7 +124,7 @@ func (h *Handler) initAgentLarkCLI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.configureAgentLarkCLI(r.Context(), target, h.internalSourceBaseURL(r), true)
+	result, err := h.configureAgentLarkCLI(r.Context(), target, h.internalSourceBaseURL(), true)
 	if err != nil {
 		h.writeLarkCLIConfigureError(w, err)
 		return
@@ -1015,18 +1015,9 @@ func signLarkCLISourceToken(encodedPayload, secret string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (h *Handler) internalSourceBaseURL(r *http.Request) string {
+func (h *Handler) internalSourceBaseURL() string {
 	if h != nil && strings.TrimSpace(h.advertiseBaseURL) != "" {
 		return strings.TrimRight(strings.TrimSpace(h.advertiseBaseURL), "/")
-	}
-	if r != nil && strings.TrimSpace(r.Host) != "" {
-		scheme := "http"
-		if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto == "http" || proto == "https" {
-			scheme = proto
-		} else if r.TLS != nil {
-			scheme = "https"
-		}
-		return scheme + "://" + strings.TrimSpace(r.Host)
 	}
 	return strings.TrimRight(config.DefaultAPIBaseURL(), "/")
 }
