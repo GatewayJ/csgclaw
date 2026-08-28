@@ -8037,6 +8037,12 @@ func TestResolveCodexTemplateCreateSpecSeparatesBaseFromProfileInstructions(t *t
 	if _, err := os.Stat(filepath.Join(resolved.FromTemplate, "AGENTS.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("workspace AGENTS.md stat error = %v, want template instructions separated from overlay", err)
 	}
+	if !resolved.TemplateMemorySet || resolved.TemplateMemory != "# Template memory\n" {
+		t.Fatalf("TemplateMemory = %q (set=%v), want restored template memory", resolved.TemplateMemory, resolved.TemplateMemorySet)
+	}
+	if _, err := os.Stat(filepath.Join(resolved.FromTemplate, ".csgclaw-template-memory")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staged template memory leaked into workspace overlay, stat error = %v", err)
+	}
 }
 
 func TestApplyTemplateDefaultsMergesExplicitRuntimeOptions(t *testing.T) {
@@ -8220,6 +8226,15 @@ func TestCreateOpenClawWorkerFromTemplateOverlaysOpenClawWorkspace(t *testing.T)
 	openclawWorkspace := filepath.Join(openclawsandbox.Root(agentHome), openclawsandbox.HostWorkspaceDir)
 	if _, err := os.Stat(filepath.Join(openclawWorkspace, "skills", "custom", "SKILL.md")); err != nil {
 		t.Fatalf("template skill missing from OpenClaw workspace after overlay: %v", err)
+	}
+	for path, want := range map[string]string{
+		"MEMORY.md":            "# OpenClaw template memory\n",
+		"memory/2026-08-28.md": "OpenClaw dated memory\n",
+	} {
+		data, readErr := os.ReadFile(filepath.Join(openclawWorkspace, filepath.FromSlash(path)))
+		if readErr != nil || string(data) != want {
+			t.Fatalf("restored OpenClaw memory %s = %q, error = %v, want %q", path, data, readErr, want)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(agentHome, hostWorkspaceDir, "skills", "custom", "SKILL.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("template skill should not be written to legacy workspace path for OpenClaw, stat error = %v", err)
@@ -9158,7 +9173,7 @@ func TestHubPublishSpecUsesAgentWorkspaceSnapshot(t *testing.T) {
 		t.Fatalf("WriteFile(PLAYBOOK.md) error = %v", err)
 	}
 
-	spec, err := svc.HubPublishSpec(created.ID)
+	spec, err := svc.HubPublishSpec(created.ID, false)
 	if err != nil {
 		t.Fatalf("HubPublishSpec() error = %v", err)
 	}
@@ -9214,7 +9229,7 @@ func TestHubPublishSpecUsesOpenClawWorkspaceSnapshot(t *testing.T) {
 		t.Fatalf("WriteFile(PLAYBOOK.md) error = %v", err)
 	}
 
-	spec, err := svc.HubPublishSpec(created.ID)
+	spec, err := svc.HubPublishSpec(created.ID, false)
 	if err != nil {
 		t.Fatalf("HubPublishSpec() error = %v", err)
 	}
@@ -9256,8 +9271,15 @@ func TestHubPublishSpecUsesCodexHomeAssets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(layout.SkillsRoot, "custom", "SKILL.md"), []byte("custom skill\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
 	}
+	memoryPath := filepath.Join(filepath.Dir(layout.SkillsRoot), "memories", "memory_summary.md")
+	if err := os.MkdirAll(filepath.Dir(memoryPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(memories) error = %v", err)
+	}
+	if err := os.WriteFile(memoryPath, []byte("remember this\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(memory_summary.md) error = %v", err)
+	}
 
-	spec, err := svc.HubPublishSpec("u-alice")
+	spec, err := svc.HubPublishSpec("u-alice", true)
 	if err != nil {
 		t.Fatalf("HubPublishSpec() error = %v", err)
 	}
@@ -9266,6 +9288,9 @@ func TestHubPublishSpecUsesCodexHomeAssets(t *testing.T) {
 	}
 	if got, want := spec.WorkspaceRef.SkillsPath, layout.SkillsRoot; got != want {
 		t.Fatalf("SkillsPath = %q, want %q", got, want)
+	}
+	if got := spec.WorkspaceRef.MemoryPath; got != "" {
+		t.Fatalf("MemoryPath = %q, want empty when memory is disabled", got)
 	}
 	if got, want := spec.RuntimeOptions["execution_mode"], "read_only"; got != want {
 		t.Fatalf("RuntimeOptions[execution_mode] = %v, want %q", got, want)
@@ -9279,6 +9304,58 @@ func TestHubPublishSpecUsesCodexHomeAssets(t *testing.T) {
 	remote := spec.MCPServers["remote"].(map[string]any)
 	if _, ok := remote["headers"]; ok {
 		t.Fatalf("published MCP config leaked runtime headers: %#v", remote)
+	}
+}
+
+func TestHubPublishSpecIncludesCodexMemoryWhenEnabled(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	svc, err := NewService(testModelConfig(), config.ServerConfig{}, "manager-image:1", "")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.agents["u-alice"] = Agent{ID: "u-alice", Name: "alice", Role: RoleWorker, RuntimeKind: RuntimeKindCodex}
+	layout, err := svc.agentLayout("u-alice", RuntimeKindCodex)
+	if err != nil {
+		t.Fatalf("agentLayout() error = %v", err)
+	}
+	memoryPath := filepath.Join(filepath.Dir(layout.SkillsRoot), "memories", "memory_summary.md")
+	if err := os.MkdirAll(filepath.Dir(memoryPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(memoryPath, []byte("remember this\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := svc.HubPublishSpec("u-alice", false)
+	if err != nil {
+		t.Fatalf("HubPublishSpec() error = %v", err)
+	}
+	if got := spec.WorkspaceRef.MemoryPath; got != "" {
+		t.Fatalf("MemoryPath = %q, want empty without explicit opt-in", got)
+	}
+	spec, err = svc.HubPublishSpec("u-alice", true)
+	if err != nil {
+		t.Fatalf("HubPublishSpec(include memory) error = %v", err)
+	}
+	if got := spec.WorkspaceRef.MemoryPath; got != memoryPath {
+		t.Fatalf("MemoryPath = %q, want %q", got, memoryPath)
+	}
+}
+
+func TestValidatedCodexTemplateMemoryPathRejectsPathsOutsideStagingDirectory(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	valid := filepath.Join(workspaceRoot, ".csgclaw-template-memory", "memory_summary.md")
+	if got, err := validatedCodexTemplateMemoryPath(workspaceRoot, valid); err != nil || got != valid {
+		t.Fatalf("valid path = %q, error = %v", got, err)
+	}
+	for _, path := range []string{
+		filepath.Join(t.TempDir(), ".csgclaw-template-memory", "memory_summary.md"),
+		filepath.Join(workspaceRoot, "other", "memory_summary.md"),
+		filepath.Join(workspaceRoot, ".csgclaw-template-memory", "other.md"),
+	} {
+		if _, err := validatedCodexTemplateMemoryPath(workspaceRoot, path); err == nil {
+			t.Fatalf("validatedCodexTemplateMemoryPath(%q) error = nil, want rejection", path)
+		}
 	}
 }
 
@@ -10716,16 +10793,16 @@ func TestEnsureBootstrapStateRecreatesManagerWithLegacyPicoClawBridgeConfig(t *t
 			t.Fatalf("createGatewayBox() got image=%q name=%q botID=%q", image, name, botID)
 		}
 		return &fakeInfoInstance{info: sandbox.Info{
-			ID:        "box-new",
-			Name:      ManagerName,
-			State:     sandbox.StateRunning,
-			CreatedAt: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
-		}}, sandbox.Info{
-			ID:        "box-new",
-			Name:      ManagerName,
-			State:     sandbox.StateRunning,
-			CreatedAt: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
-		}, nil
+				ID:        "box-new",
+				Name:      ManagerName,
+				State:     sandbox.StateRunning,
+				CreatedAt: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+			}}, sandbox.Info{
+				ID:        "box-new",
+				Name:      ManagerName,
+				State:     sandbox.StateRunning,
+				CreatedAt: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+			}, nil
 	}
 
 	managerHome, err := seedSvc.agentHomeDir(ManagerUserID)
@@ -11478,15 +11555,37 @@ func mustNewLocalTemplateHubService(t *testing.T, id string, item hub.Template) 
 	}
 
 	store := hub.NewLocalStore(registryRoot)
+	workspaceRef := hub.WorkspaceRef{Kind: hub.WorkspaceKindDir, Path: workspaceRoot}
+	includeMemory := false
+	if agentruntime.RuntimeConfigForKind(item.RuntimeKind).LegacyKind() == RuntimeKindCodex {
+		memoryPath := filepath.Join(t.TempDir(), "memory_summary.md")
+		if err := os.WriteFile(memoryPath, []byte("# Template memory\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(memory_summary.md) error = %v", err)
+		}
+		workspaceRef.MemoryPath = memoryPath
+		includeMemory = true
+	} else if agentruntime.RuntimeConfigForKind(item.RuntimeKind).LegacyKind() == RuntimeKindOpenClawSandbox {
+		if err := os.WriteFile(filepath.Join(workspaceRoot, "MEMORY.md"), []byte("# OpenClaw template memory\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(MEMORY.md) error = %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(workspaceRoot, "memory"), 0o755); err != nil {
+			t.Fatalf("MkdirAll(memory) error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(workspaceRoot, "memory", "2026-08-28.md"), []byte("OpenClaw dated memory\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(dated memory) error = %v", err)
+		}
+		includeMemory = true
+	}
 	if _, err := store.Publish(context.Background(), hub.PublishSpec{
 		ID:             id,
+		IncludeMemory:  includeMemory,
 		Name:           item.Name,
 		Description:    item.Description,
 		RuntimeKind:    item.RuntimeKind,
 		Version:        item.Version,
 		Image:          item.Image,
 		RuntimeOptions: item.RuntimeOptions,
-		WorkspaceRef:   hub.WorkspaceRef{Kind: hub.WorkspaceKindDir, Path: workspaceRoot},
+		WorkspaceRef:   workspaceRef,
 		MCPServers: map[string]any{
 			"template-docs": map[string]any{"command": "npx", "args": []any{"-y", "template-docs"}},
 		},

@@ -1753,10 +1753,10 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 		var item hub.Template
 		publishingTemplate := strings.TrimSpace(req.TemplateID) != ""
 		if publishingTemplate {
-			item, err = hubSvc.PublishTemplate(r.Context(), req.TemplateID, req.Registry)
+			item, err = hubSvc.PublishTemplate(r.Context(), req.TemplateID, req.Registry, req.IncludeMemory)
 		} else {
 			var spec hub.PublishSpec
-			spec, err = h.svc.HubPublishSpec(req.AgentID)
+			spec, err = h.svc.HubPublishSpec(req.AgentID, req.IncludeMemory)
 			if err == nil {
 				spec.Registry = req.Registry
 				if strings.TrimSpace(req.Name) != "" {
@@ -1779,6 +1779,9 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 			status := http.StatusBadGateway
 			code := hub.RemoteAPIErrorCode(err)
 			if !publishingTemplate {
+				status = http.StatusBadRequest
+			}
+			if code == "SYS-ERR-4" {
 				status = http.StatusBadRequest
 			}
 			if errors.Is(err, hub.ErrTemplateAlreadyExists) {

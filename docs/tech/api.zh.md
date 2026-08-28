@@ -459,13 +459,13 @@ Runtime 尚未生成文档时，`ready` 为 `false`。
 {
   "enabled": true,
   "ready": true,
-  "name": "MEMORY.md",
-  "location": "$CODEX_HOME/memories/MEMORY.md",
+  "name": "memory_summary.md",
+  "location": "$CODEX_HOME/memories/memory_summary.md",
   "content": "# Durable memory\n"
 }
 ```
 
-`location` 是 Runtime 提供、用于展示和诊断的逻辑文件位置；Codex 当前返回 `$CODEX_HOME/memories/MEMORY.md`。
+`location` 是 Runtime 提供、用于展示和诊断的逻辑文件位置；Codex 当前返回 `$CODEX_HOME/memories/memory_summary.md`。
 
 #### `PUT /api/v1/agents/{id}/memory`
 
@@ -680,13 +680,15 @@ catalog key。新远端条目默认写入 `enabled: true`、`startup_timeout_sec
   instructions/AGENTS.md
   skills/<skill>/...
   mcps/mcp.json
-  memories/MEMORY.md         # 非 Codex Runtime 可选
+  memories/memory_summary.md # 可选的 Codex 记忆快照
+  memories/MEMORY.md         # 非 Codex Runtime 可选的根记忆文件
+  memories/memory/*.md       # 非 Codex Runtime 可选的日期记忆文件
 ```
 
 发布时始终生成 `AGENTS.md` 和 `mcp.json`。
 其他 instruction 文件可选。
-Codex 模板不发布也不恢复 workspace memory 文件；模板必须携带的稳定上下文应放在 `instructions/`，Codex 自动管理的 memory 只保存在隔离的 `CODEX_HOME/memories/`。
-非 Codex Runtime 的可选模板 memories 仍按对应 Runtime 的 workspace 约定叠加。
+只有每次发布请求显式设置 `include_memory: true` 时才会包含记忆；仅启用 Runtime memory 并不代表同意在发布时导出记忆。在显式发布 opt-in 且 `memory_mode` 启用时，Codex 模板会快照 `CODEX_HOME/memories/memory_summary.md`，并在创建新 Agent 时恢复到相同位置。`memory_mode = "disabled"` 的模板不会打包或恢复记忆摘要；模板也不会复制 Codex 的 SQLite memory 流水线状态，或把 memory 当作 workspace overlay。
+在同样显式发布 opt-in 的前提下，受支持的非 Codex Runtime 会按对应 Runtime 的 workspace 约定保留并叠加可选模板 memories。
 根据模板创建 Agent 时，skills 会安装到 `skills/`，`mcp.json` 中的 MCP server 会自动应用；如果创建请求显式传入 `mcpServers`，则以请求内容为准。
 
 Codex Worker 模板可在 `agent.toml` 中保存运行模式：
@@ -729,7 +731,8 @@ Codex Worker 目前保存 `execution_mode` 和 `memory_mode`，不会保存 `loc
 ```json
 {
   "agent_id": "u-alice",
-  "registry": "local"
+  "registry": "local",
+  "include_memory": false
 }
 ```
 
@@ -737,6 +740,7 @@ Codex Worker 目前保存 `execution_mode` 和 `memory_mode`，不会保存 `loc
 
 - `agent_id` 必填
 - `registry` 省略时使用默认 publish registry
+- 只有显式设置 `include_memory: true` 才会发布 Codex 记忆摘要，包括通过 `template_id` 再发布已有本地模板时；由于记忆可能包含从对话中提取的隐私信息，该字段默认是 `false`
 - 发布成功返回 `201 Created`
 
 ### `GET /api/v1/hub/templates/{id}`

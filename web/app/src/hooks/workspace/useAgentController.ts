@@ -1731,6 +1731,7 @@ export function useAgentController({
     target: AgentTemplatePublishTarget,
     name: string,
     description: string,
+    includeMemory: boolean,
   ): Promise<boolean> {
     if (!selectedAgentForPage?.id || agentPagePublishBusy) {
       return false;
@@ -1746,7 +1747,13 @@ export function useAgentController({
     setAgentPagePublishError("");
     setAgentPageSaveError("");
     try {
-      const published = await publishAgentTemplateRequest(selectedAgentForPage.id, target, name, description);
+      const published = await publishAgentTemplateRequest(
+        selectedAgentForPage.id,
+        target,
+        name,
+        description,
+        includeMemory,
+      );
       await refreshHubTemplates();
       if (published?.id) {
         setSelectedHubTemplateId(published.id);
@@ -1772,9 +1779,11 @@ export function useAgentController({
               deployReviewPending ? "" : message,
             ),
           );
-        } else {
-          setHubPublishError(message);
         }
+        // Publishing succeeded, but deployment did not. Keep the upstream
+        // result visible after navigating to the newly published template,
+        // including the common case where review is still pending.
+        setHubPublishError(message);
         setSelectedHubTemplateId(publishedTemplateID);
         navigatePane({ type: WorkspacePaneTypes.hub, id: publishedTemplateID, resourceType: "template" }, rooms);
         return true;

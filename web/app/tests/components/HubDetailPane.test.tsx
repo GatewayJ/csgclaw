@@ -15,6 +15,8 @@ function t(key: string, params: Record<string, string | number> = {}) {
     agentPublishLoginRequired: "Sign in first",
     agentPublishTemplateCommunitySubtitle: "Publish remotely",
     agentPublishTemplateTitle: "Publish agent template",
+    agentPublishIncludeMemory: "Include agent memory",
+    agentPublishIncludeMemoryWarning: "Memory may contain private information.",
     agentPublishing: "Publishing",
     resourcesDeleteSkill: "Delete skill",
     resourcesDeleteSkillConfirmAction: "Delete",
@@ -28,6 +30,9 @@ function t(key: string, params: Record<string, string | number> = {}) {
     resourcesTemplateEnvRequired: "Required",
     resourcesTemplateEnvRequiredBadge: "Required",
     resourcesTemplateSkillsDescription: "Template skills.",
+    resourcesTemplateMemoryDescription: "Template memory summary.",
+    resourcesTemplateMemoryEmptyTitle: "No memory summary",
+    resourcesTemplateMemoryEmptyDescription: "Republish from an agent with memory.",
     resourcesTemplateMCPServersTitle: "MCP Servers",
     resourcesTemplateMCPServersDescription: "Template MCP configs.",
     resourcesLoading: "Loading resources",
@@ -75,6 +80,8 @@ function t(key: string, params: Record<string, string | number> = {}) {
       "This template only contains generated defaults. Switch to Advanced to view the full content.",
     resourcesTemplateInstructionsViewAdvancedAction: "View complete AGENTS.md",
     agentProfileSkillsTab: "Skills",
+    agentMemoryTab: "Memory",
+    agentMemoryDocumentLabel: "Read-only memory summary",
     agentProfileMCPTab: "MCP",
     agentProfileSectionNavLabel: "Template sections",
     agentSkillsTitle: "Skills",
@@ -134,9 +141,11 @@ function renderHubDetailPane(
     onPublishTemplate?: (
       item: HubTemplate | null | undefined,
       deploy?: boolean,
+      includeMemory?: boolean,
     ) => Promise<{ status: "success" } | { status: "partial"; message: string } | null>;
     publishDisabled?: boolean;
     publishError?: string;
+    lazyMemory?: boolean;
   } = {},
 ) {
   const selectedTemplate = options.selectedTemplate ?? template;
@@ -167,9 +176,28 @@ function renderHubDetailPane(
       path: "mcps/mcp.json",
       size: 120,
     },
+    "memories/memory_summary.md": {
+      binary: false,
+      content: "# Memory Summary\n\nThe user prefers concise Chinese replies.",
+      path: "memories/memory_summary.md",
+      size: 58,
+    },
   };
   function Harness() {
     const [selectedWorkspacePath, setSelectedWorkspacePath] = useState("instructions/AGENTS.md");
+    const [workspaceEntries, setWorkspaceEntries] = useState([
+      { name: "instructions", path: "instructions", type: "dir" as const, depth: 0 },
+      { name: "AGENTS.md", path: "instructions/AGENTS.md", type: "file" as const, depth: 1 },
+      { name: "memories", path: "memories", type: "dir" as const, depth: 0 },
+      ...(!options.lazyMemory
+        ? [{ name: "memory_summary.md", path: "memories/memory_summary.md", type: "file" as const, depth: 1 }]
+        : []),
+      { name: "skills", path: "skills", type: "dir" as const, depth: 0 },
+      { name: "demo", path: "skills/demo", type: "dir" as const, depth: 1 },
+      { name: "SKILL.md", path: "skills/demo/SKILL.md", type: "file" as const, depth: 2 },
+      { name: "mcps", path: "mcps", type: "dir" as const, depth: 0 },
+      { name: "mcp.json", path: "mcps/mcp.json", type: "file" as const, depth: 1 },
+    ]);
     const workspaceFile = workspaceFiles[selectedWorkspacePath as keyof typeof workspaceFiles] || null;
     return (
       <HubDetailPane
@@ -186,7 +214,23 @@ function renderHubDetailPane(
             onSelectSkillFile: vi.fn(),
             onSelectTemplate: vi.fn(),
             onSelectWorkspaceFile: setSelectedWorkspacePath,
-            onToggleWorkspaceDir: vi.fn(),
+            onToggleWorkspaceDir: (path) => {
+              if (options.lazyMemory && path === "memories") {
+                setWorkspaceEntries((entries) =>
+                  entries.some((entry) => entry.path === "memories/memory_summary.md")
+                    ? entries
+                    : [
+                        ...entries,
+                        {
+                          name: "memory_summary.md",
+                          path: "memories/memory_summary.md",
+                          type: "file" as const,
+                          depth: 1,
+                        },
+                      ],
+                );
+              }
+            },
             mcpServers: [],
             selectedMCPServer: null,
             selectedMCPServerName: "",
@@ -208,15 +252,7 @@ function renderHubDetailPane(
             workspaceFiles,
             workspaceFileError: "",
             workspaceFileLoading: false,
-            workspaceEntries: [
-              { name: "instructions", path: "instructions", type: "dir", depth: 0 },
-              { name: "AGENTS.md", path: "instructions/AGENTS.md", type: "file", depth: 1 },
-              { name: "skills", path: "skills", type: "dir", depth: 0 },
-              { name: "demo", path: "skills/demo", type: "dir", depth: 1 },
-              { name: "SKILL.md", path: "skills/demo/SKILL.md", type: "file", depth: 2 },
-              { name: "mcps", path: "mcps", type: "dir", depth: 0 },
-              { name: "mcp.json", path: "mcps/mcp.json", type: "file", depth: 1 },
-            ],
+            workspaceEntries,
             deleteBusy: false,
             onDeleteTemplate: vi.fn(),
             onPublishTemplate: options.onPublishTemplate,
@@ -436,7 +472,7 @@ describe("HubDetailPane", () => {
     expect(screen.getByRole("button", { name: "Publish and deploy" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Publish template only" }));
 
-    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, false);
+    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, false, false);
     expect(await screen.findByRole("dialog", { name: "Published successfully" })).toBeInTheDocument();
     expect(screen.getByText("The template has been published to the community.")).toBeInTheDocument();
 
@@ -477,9 +513,10 @@ describe("HubDetailPane", () => {
     renderHubDetailPane("template", { selectedTemplate: localTemplate, onPublishTemplate });
 
     await user.click(screen.getByRole("button", { name: "Publish to community" }));
+    await user.click(screen.getByRole("checkbox", { name: "Include agent memory" }));
     await user.click(screen.getByRole("button", { name: "Publish and deploy" }));
 
-    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, true);
+    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, true, true);
   });
 
   it("closes the publish form and shows deployment details after partial success", async () => {
@@ -552,9 +589,11 @@ describe("HubDetailPane", () => {
     expect(screen.queryByRole("button", { name: "Publish to community" })).not.toBeInTheDocument();
   });
 
-  it("groups template details into runtime, instructions, skills, and MCP tabs", async () => {
+  it("groups template details into runtime, instructions, memory, skills, and MCP tabs", async () => {
     const user = userEvent.setup();
-    renderHubDetailPane();
+    const { container } = renderHubDetailPane("template", {
+      selectedTemplate: { ...template, runtime_kind: "codex" },
+    });
 
     expect(screen.getByRole("button", { name: "Profile" })).toHaveAttribute("aria-current", "location");
     expect(screen.getByDisplayValue("demo:latest")).toBeInTheDocument();
@@ -574,9 +613,29 @@ describe("HubDetailPane", () => {
     expect(screen.getByText("demo")).toBeInTheDocument();
     expect(screen.getByText("Demo template skill")).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "Memory" }));
+    expect(screen.getByRole("textbox", { name: "Read-only memory summary" })).toHaveValue(
+      "# Memory Summary\n\nThe user prefers concise Chinese replies.",
+    );
+    expect(container.querySelector(".workspace-file-tree")).not.toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "MCP" }));
     expect(screen.getByText("context7")).toBeInTheDocument();
     expect(screen.getByText("Context lookup")).toBeInTheDocument();
+  });
+
+  it("selects the memory summary after the memories directory is lazily loaded", async () => {
+    const user = userEvent.setup();
+    renderHubDetailPane("template", {
+      selectedTemplate: { ...template, runtime_kind: "codex" },
+      lazyMemory: true,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Memory" }));
+
+    expect(await screen.findByRole("textbox", { name: "Read-only memory summary" })).toHaveValue(
+      "# Memory Summary\n\nThe user prefers concise Chinese replies.",
+    );
   });
 
   it("keeps the MCP empty state visible when templates are available", () => {
