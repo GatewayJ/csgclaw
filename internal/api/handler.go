@@ -71,6 +71,7 @@ type Handler struct {
 	teamPlanJobs               map[string]struct{}
 	configPath                 string
 	advertiseBaseURL           string
+	internalBaseURL            string
 	runtimeDistribution        string
 	serverAccessToken          string
 	desktopSessionToken        string
@@ -946,6 +947,12 @@ func (h *Handler) SetConfigPath(path string) {
 func (h *Handler) SetAdvertiseBaseURL(baseURL string) {
 	if h != nil {
 		h.advertiseBaseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	}
+}
+
+func (h *Handler) SetInternalBaseURL(baseURL string) {
+	if h != nil {
+		h.internalBaseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	}
 }
 

@@ -176,9 +176,14 @@ func TestInitAgentLarkCLIReturnsConflictWhenFeishuBotMissing(t *testing.T) {
 }
 
 func TestInternalSourceBaseURLUsesOnlyConfiguredOrDefaultAddress(t *testing.T) {
-	configured := (&Handler{advertiseBaseURL: "http://csgclaw.test/"}).internalSourceBaseURL()
-	if configured != "http://csgclaw.test" {
-		t.Fatalf("configured source base URL = %q, want %q", configured, "http://csgclaw.test")
+	configured := (&Handler{internalBaseURL: "http://127.0.0.1:19090/"}).internalSourceBaseURL()
+	if configured != "http://127.0.0.1:19090" {
+		t.Fatalf("configured source base URL = %q, want %q", configured, "http://127.0.0.1:19090")
+	}
+
+	configured = (&Handler{advertiseBaseURL: "https://gateway.example.test/sandbox"}).internalSourceBaseURL()
+	if want := strings.TrimRight(config.DefaultAPIBaseURL(), "/"); configured != want {
+		t.Fatalf("source base URL with only advertise URL = %q, want local default %q", configured, want)
 	}
 
 	if got, want := (&Handler{}).internalSourceBaseURL(), strings.TrimRight(config.DefaultAPIBaseURL(), "/"); got != want {
@@ -372,7 +377,7 @@ func TestInitAgentLarkCLIConfiguresWorkerScopedSource(t *testing.T) {
 		svc:               svc,
 		participant:       participantSvc,
 		serverAccessToken: "server-secret",
-		advertiseBaseURL:  "http://csgclaw.test",
+		internalBaseURL:   "http://csgclaw.test",
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/u-dev/lark-cli:init", strings.NewReader(`{}`))
@@ -750,7 +755,7 @@ func TestInitAgentLarkCLIPreservesLiveStateWhenBindFails(t *testing.T) {
 		svc:               svc,
 		participant:       participantSvc,
 		serverAccessToken: "server-secret",
-		advertiseBaseURL:  "http://csgclaw.test",
+		internalBaseURL:   "http://csgclaw.test",
 	}
 	layout, err := svc.AgentLayout("agent-dev")
 	if err != nil {

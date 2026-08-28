@@ -792,6 +792,7 @@ func startServerWithConfigPath(ctx context.Context, run *command.Context, cfg co
 		AccessToken:        cfg.Server.AccessToken,
 		NoAuth:             cfg.Server.NoAuth,
 		AdvertiseBaseURL:   apiURL,
+		InternalBaseURL:    serveInternalBaseURL(cfg.Server, serveOpts),
 		Desktop:            serveOpts.Desktop,
 		Context:            ctx,
 		BeforeShutdown:     beforeShutdown,
@@ -1050,6 +1051,18 @@ func serveAPIBaseURL(serverConfig config.ServerConfig, opts serveOptions) string
 		}
 	}
 	return apiBaseURL(serverConfig)
+}
+
+func serveInternalBaseURL(serverConfig config.ServerConfig, opts serveOptions) string {
+	if opts.Desktop != nil {
+		if baseURL := strings.TrimRight(strings.TrimSpace(opts.Desktop.BaseURL), "/"); baseURL != "" {
+			return baseURL
+		}
+	}
+	if opts.Listener != nil {
+		serverConfig.ListenAddr = opts.Listener.Addr().String()
+	}
+	return config.ResolveLocalBaseURL(serverConfig)
 }
 
 func printEffectiveConfig(run *command.Context, cfg config.Config, output string) {
