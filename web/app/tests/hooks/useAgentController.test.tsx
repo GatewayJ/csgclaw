@@ -1160,7 +1160,7 @@ describe("useAgentController", () => {
     expect(result.current.agentViewProps.saveBillingURL).toBe("https://opencsg-stg.com/settings/billing");
 
     await act(async () => {
-      await result.current.agentViewProps.onPublish?.("official", "manager", "manager template");
+      await result.current.agentViewProps.onPublish?.("official", "manager", "manager template", false);
     });
 
     expect(result.current.agentViewProps.saveError).toBe("agentPublishLoginRequired");
@@ -1168,6 +1168,7 @@ describe("useAgentController", () => {
   });
 
   it("opens the published template when community deployment is waiting for review", async () => {
+    const setHubPublishError = vi.fn();
     const worker: AgentLike = {
       ...oldAgent,
       id: "u-worker",
@@ -1187,6 +1188,7 @@ describe("useAgentController", () => {
           activePane: { type: WorkspacePaneTypes.agent, id: "u-worker" },
           agents: [worker],
           openCSGAuthenticated: true,
+          setHubPublishError,
         }),
       { wrapper: createWrapper() },
     );
@@ -1198,12 +1200,14 @@ describe("useAgentController", () => {
           "official_deploy",
           "reviewer",
           "Reviews changes",
+          false,
         )) ?? false;
     });
 
     expect(published).toBe(true);
     expect(result.current.refreshHubTemplates).toHaveBeenCalledOnce();
     expect(result.current.setSelectedHubTemplateId).toHaveBeenCalledWith("alice/reviewer");
+    expect(setHubPublishError).toHaveBeenCalledWith("sensitive-content review is still pending");
     expect(result.current.navigatePane).toHaveBeenCalledWith(
       { type: WorkspacePaneTypes.hub, id: "alice/reviewer", resourceType: "template" },
       [],
@@ -1246,6 +1250,7 @@ describe("useAgentController", () => {
           "official_deploy",
           "reviewer",
           "Reviews changes",
+          false,
         )) ?? false;
     });
 

@@ -83,7 +83,7 @@ func (h *Handler) createFeishuRegistration(w http.ResponseWriter, r *http.Reques
 		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 		return
 	}
-	target, err := feishubind.ResolveAgent(h.svc, req.AgentID)
+	target, err := feishubind.ResolveAgent(h.agentEngine, req.AgentID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -194,7 +194,7 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	target, err := feishubind.ResolveAgent(h.svc, state.AgentID)
+	target, err := feishubind.ResolveAgent(h.agentEngine, state.AgentID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -217,7 +217,7 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	result, err := feishubind.BindBot(r.Context(), h.svc, h.participant, state.AgentID, appID, appSecret, false)
+	result, err := feishubind.BindBot(r.Context(), h.agentEngine, h.participant, state.AgentID, appID, appSecret, false)
 	if err != nil {
 		if errors.Is(err, errFeishuBotAppIDConflict) {
 			h.writeFeishuBotAppInfoError(w, err)

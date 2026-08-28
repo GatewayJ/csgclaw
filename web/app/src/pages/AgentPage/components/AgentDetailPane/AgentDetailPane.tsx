@@ -90,6 +90,7 @@ import { localizeTemplateSourceTag } from "@/shared/i18n";
 import type { AgentTemplatePublishTarget } from "@/api/hub";
 import {
   Button,
+  Checkbox,
   DialogBody,
   DialogCloseButton,
   DialogContent,
@@ -163,7 +164,12 @@ export type AgentDetailPaneProps = {
   onOpenDM: AgentActionHandler;
   onRetryModels?: () => void | Promise<unknown>;
   onProviderLogin?: (provider: string) => VoidOrPromise;
-  onPublish?: (target: AgentTemplatePublishTarget, name: string, description: string) => boolean | Promise<boolean>;
+  onPublish?: (
+    target: AgentTemplatePublishTarget,
+    name: string,
+    description: string,
+    includeMemory: boolean,
+  ) => boolean | Promise<boolean>;
   onRecreate: AgentActionHandler;
   onSave?: () => VoidOrPromise;
   onMetadataSave?: (patch: AgentMetadataSavePatch) => VoidOrPromise;
@@ -308,6 +314,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
   const [publishTarget, setPublishTarget] = useState<AgentTemplatePublishTarget | null>(null);
   const [publishTemplateName, setPublishTemplateName] = useState("");
   const [publishTemplateDescription, setPublishTemplateDescription] = useState("");
+  const [publishTemplateIncludeMemory, setPublishTemplateIncludeMemory] = useState(false);
   const [publishTemplateNameError, setPublishTemplateNameError] = useState("");
   const [publishAttempted, setPublishAttempted] = useState(false);
   const [isProfileScrolling, setIsProfileScrolling] = useState(false);
@@ -332,6 +339,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
   const runtimeKind = agentRuntimeKind(item);
   const canPublishLocal = !isManager && (runtimeKind === "codex" || runtimeKind === "openclaw_sandbox");
   const canPublishCommunity = !isManager && runtimeKind === "codex";
+  const supportsTemplateMemory = runtimeKind === "codex" || runtimeKind === "openclaw_sandbox";
   const hasUnsavedChanges =
     hasUnsavedChangesProp ?? Boolean(draft && savedDraft && JSON.stringify(draft) !== JSON.stringify(savedDraft));
   const saveDisabled = agentProfilePageSaveDisabled(draft, item, { saving, savedDraft });
@@ -344,6 +352,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
       setPublishTarget(target);
       setPublishTemplateName(String(item.name || "").trim());
       setPublishTemplateDescription(String(item.description || "").trim());
+      setPublishTemplateIncludeMemory(false);
       setPublishTemplateNameError("");
       setPublishAttempted(false);
     },
@@ -361,12 +370,12 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
       }
       setPublishTemplateNameError("");
       setPublishAttempted(true);
-      const published = await onPublish(target, name, publishTemplateDescription.trim());
+      const published = await onPublish(target, name, publishTemplateDescription.trim(), publishTemplateIncludeMemory);
       if (published) {
         setPublishTarget(null);
       }
     },
-    [onPublish, publishTarget, publishTemplateDescription, publishTemplateName, t],
+    [onPublish, publishTarget, publishTemplateDescription, publishTemplateIncludeMemory, publishTemplateName, t],
   );
   const saveMetadataField = useCallback(
     <K extends keyof AgentMetadataSavePatch>(field: K, value: AgentMetadataSavePatch[K]): boolean => {
@@ -1345,6 +1354,19 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 onChange={(event) => setPublishTemplateDescription(event.target.value)}
               />
             </label>
+            {supportsTemplateMemory ? (
+              <label className="agent-publish-memory-option">
+                <Checkbox
+                  aria-label={t("agentPublishIncludeMemory")}
+                  checked={publishTemplateIncludeMemory}
+                  onCheckedChange={(checked) => setPublishTemplateIncludeMemory(checked === true)}
+                />
+                <span>
+                  <strong>{t("agentPublishIncludeMemory")}</strong>
+                  <small>{t("agentPublishIncludeMemoryWarning")}</small>
+                </span>
+              </label>
+            ) : null}
             {publishAttempted && publishError ? <div className="form-error">{publishError}</div> : null}
           </DialogBody>
           <DialogFooter>

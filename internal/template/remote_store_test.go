@@ -111,11 +111,67 @@ func TestRemoteStorePostJSONPreservesNonstandardJSONErrorBody(t *testing.T) {
 	}
 }
 
+func TestRemoteStorePostJSONPreservesRepositoryPathConflictCode(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":"SYS-ERR-4","msg":"repository path already exists"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	store := NewRemoteStore(srv.URL, "token")
+	err := store.postJSON(context.Background(), srv.URL, nil, nil)
+	if got, want := RemoteAPIErrorCode(err), "SYS-ERR-4"; got != want {
+		t.Fatalf("RemoteAPIErrorCode() = %q, want %q", got, want)
+	}
+}
+
+func TestRemoteStorePostJSONDoesNotInferConflictWithoutCode(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`ERROR: duplicate key value violates unique constraint "idx_repositories_git_path" (SQLSTATE 23505)`))
+	}))
+	t.Cleanup(srv.Close)
+
+	store := NewRemoteStore(srv.URL, "token")
+	err := store.postJSON(context.Background(), srv.URL, nil, nil)
+	if errors.Is(err, ErrTemplateAlreadyExists) {
+		t.Fatalf("postJSON() error = %v, must not infer a name conflict without an upstream code", err)
+	}
+}
+
 func TestRemoteStorePublishUploadsArchiveAndCreatesTemplateCode(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "AGENTS.md"), []byte("publish me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	memoryPath := filepath.Join(t.TempDir(), "memory_summary.md")
+	if err := os.WriteFile(memoryPath, []byte("must not upload\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stagedMemoryDir := filepath.Join(workspace, codexTemplateMemoryStagingDir)
+	if err := os.MkdirAll(stagedMemoryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stagedMemoryDir, "memory_summary.md"), []byte("staged memory must not upload\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "skills", "custom"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "skills", ".system", "openai-docs", "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "skills", "custom", "SKILL.md"), []byte("custom skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "skills", ".system", "openai-docs", "references", "internal.md"), []byte("system skill\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -179,10 +235,11 @@ func TestRemoteStorePublishUploadsArchiveAndCreatesTemplateCode(t *testing.T) {
 		Name:           "ReviewBot_2",
 		Description:    "Reviews changes",
 		RuntimeKind:    "codex",
-		RuntimeOptions: map[string]any{"execution_mode": "read_only"},
+		RuntimeOptions: map[string]any{"execution_mode": "read_only", "memory_mode": "disabled"},
 		WorkspaceRef: WorkspaceRef{
 			Kind:             WorkspaceKindDir,
 			Path:             workspace,
+			MemoryPath:       memoryPath,
 			InstructionsPath: filepath.Join(workspace, "AGENTS.md"),
 		},
 	})
@@ -194,6 +251,9 @@ func TestRemoteStorePublishUploadsArchiveAndCreatesTemplateCode(t *testing.T) {
 	}
 	if got, want := item.RuntimeOptions["execution_mode"], "read_only"; got != want {
 		t.Fatalf("Publish().RuntimeOptions[execution_mode] = %v, want %q", got, want)
+	}
+	if got, want := item.RuntimeOptions["memory_mode"], "disabled"; got != want {
+		t.Fatalf("Publish().RuntimeOptions[memory_mode] = %v, want %q", got, want)
 	}
 	if got, want := created.CodeFile, "package-uuid"; got != want {
 		t.Fatalf("create code_file = %q, want %q", got, want)
@@ -224,16 +284,20 @@ func TestRemoteStorePublishUploadsArchiveAndCreatesTemplateCode(t *testing.T) {
 	names := make(map[string]bool, len(archive.File))
 	for _, file := range archive.File {
 		names[file.Name] = true
+		reader, openErr := file.Open()
+		if openErr != nil {
+			t.Fatalf("Open(%s) error = %v", file.Name, openErr)
+		}
+		content, readErr := io.ReadAll(reader)
+		_ = reader.Close()
+		if readErr != nil {
+			t.Fatalf("ReadAll(%s) error = %v", file.Name, readErr)
+		}
+		if bytes.Contains(content, []byte("staged memory must not upload")) {
+			t.Errorf("uploaded archive leaked staged memory through %q", file.Name)
+		}
 		if file.Name == "agent.toml" {
-			reader, err := file.Open()
-			if err != nil {
-				t.Fatalf("Open(agent.toml) error = %v", err)
-			}
-			manifest, err := io.ReadAll(reader)
-			_ = reader.Close()
-			if err != nil {
-				t.Fatalf("ReadAll(agent.toml) error = %v", err)
-			}
+			manifest := content
 			if !strings.Contains(string(manifest), `schema_version = "agentfile/v1"`) {
 				t.Errorf("agent.toml missing schema_version: %s", manifest)
 			}
@@ -243,14 +307,30 @@ func TestRemoteStorePublishUploadsArchiveAndCreatesTemplateCode(t *testing.T) {
 			if !strings.Contains(string(manifest), `description = 'Reviews changes'`) {
 				t.Errorf("agent.toml missing template description: %s", manifest)
 			}
-			if !strings.Contains(string(manifest), "[runtime_options]") || !strings.Contains(string(manifest), "execution_mode = 'read_only'") {
-				t.Errorf("agent.toml missing read-only runtime options: %s", manifest)
+			if !strings.Contains(string(manifest), "[runtime_options]") ||
+				!strings.Contains(string(manifest), "execution_mode = 'read_only'") ||
+				!strings.Contains(string(manifest), "memory_mode = 'disabled'") {
+				t.Errorf("agent.toml missing runtime options: %s", manifest)
 			}
 		}
 	}
 	for _, want := range []string{"agent.toml", "instructions/AGENTS.md"} {
 		if !names[want] {
 			t.Errorf("uploaded archive missing %q; names = %#v", want, names)
+		}
+	}
+	if !names["skills/custom/SKILL.md"] {
+		t.Errorf("uploaded archive missing custom skill; names = %#v", names)
+	}
+	for name := range names {
+		if strings.HasPrefix(name, "skills/.system/") {
+			t.Errorf("uploaded archive contains Codex system skill %q", name)
+		}
+		if name == "memories/memory_summary.md" {
+			t.Errorf("uploaded archive contains disabled Codex memory summary")
+		}
+		if strings.Contains(name, codexTemplateMemoryStagingDir) {
+			t.Errorf("uploaded archive contains reserved memory staging path %q", name)
 		}
 	}
 }
@@ -625,6 +705,41 @@ func TestRemoteStoreFetchWorkspaceSupportsLegacyLayoutAndEmptyMissingTree(t *tes
 		if got := string(data); got != want {
 			t.Fatalf("%s = %q, want %q", name, got, want)
 		}
+	}
+}
+
+func TestRemoteStoreFetchWorkspaceRestoresCodexMemorySummary(t *testing.T) {
+	t.Parallel()
+	const manifest = "name = 'codex-memory'\nruntime_kind = 'codex'\n[runtime_options]\nmemory_mode = 'enabled'\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/codes/Agentic/codex-memory":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"default_branch": "main"}})
+		case "/api/v1/codes/Agentic/codex-memory/download_archive/refs/main":
+			writeRemoteArchive(t, w, "codex-memory-main/", map[string]string{
+				"agent.toml":                 manifest,
+				"instructions/AGENTS.md":     "# Instructions\n",
+				"memories/memory_summary.md": "# Remote memory\n",
+				"skills/custom/SKILL.md":     "# Custom\n",
+				"mcps/mcp.json":              "{}\n",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	workspace, err := NewRemoteStore(srv.URL, "").FetchWorkspace(context.Background(), "Agentic/codex-memory")
+	if err != nil {
+		t.Fatalf("FetchWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(workspace.Path) })
+	data, err := os.ReadFile(workspace.MemoryPath)
+	if err != nil {
+		t.Fatalf("ReadFile(MemoryPath) error = %v", err)
+	}
+	if got, want := string(data), "# Remote memory\n"; got != want {
+		t.Fatalf("memory summary = %q, want %q", got, want)
 	}
 }
 

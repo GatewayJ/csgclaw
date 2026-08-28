@@ -12,6 +12,7 @@ type PublishAgentTemplatePayload = {
   registry: AgentTemplatePublishTarget;
   name: string;
   description: string;
+  include_memory?: boolean;
   deploy?: boolean;
 };
 
@@ -47,21 +48,28 @@ export function publishAgentTemplateRequest(
   registry: AgentTemplatePublishTarget,
   name: string,
   description: string,
+  includeMemory = false,
 ): Promise<HubTemplate> {
   const payload: PublishAgentTemplatePayload = {
     agent_id: agentID,
     registry: registry === "official_deploy" ? "official" : registry,
     name,
     description,
+    ...(includeMemory ? { include_memory: true } : {}),
     ...(registry === "official_deploy" ? { deploy: true } : {}),
   };
   return post<HubTemplate>(HUB_TEMPLATES_PATH, payload);
 }
 
-export function publishHubTemplateToCommunityRequest(templateID: string, deploy = false): Promise<HubTemplate> {
+export function publishHubTemplateToCommunityRequest(
+  templateID: string,
+  deploy = false,
+  includeMemory = false,
+): Promise<HubTemplate> {
   return post<HubTemplate>(HUB_TEMPLATES_PATH, {
     template_id: templateID,
     registry: "official",
+    ...(includeMemory ? { include_memory: true } : {}),
     ...(deploy ? { deploy: true } : {}),
   });
 }

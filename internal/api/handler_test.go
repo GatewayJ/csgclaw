@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"csgclaw/internal/agent"
+	"csgclaw/internal/agentengine"
+	"csgclaw/internal/agentengine/enginetest"
 	"csgclaw/internal/apitypes"
 	"csgclaw/internal/app/runtimewiring"
 	"csgclaw/internal/auth"
@@ -55,6 +57,22 @@ type fakeCompatRuntime struct {
 type fakeReadinessCompatRuntime struct {
 	fakeCompatRuntime
 	readiness func(context.Context, agentruntime.Handle) error
+}
+
+type getErrorEngine struct {
+	agentengine.Interface
+	agents agentengine.AgentInterface
+}
+
+func (e getErrorEngine) Agents() agentengine.AgentInterface { return e.agents }
+
+type getErrorAgents struct {
+	agentengine.AgentInterface
+	err error
+}
+
+func (a getErrorAgents) Get(context.Context, string, agentengine.AgentGetOptions) (agentengine.Agent, error) {
+	return agentengine.Agent{}, a.err
 }
 
 type fakeSandboxAvailabilityProvider struct {
@@ -211,6 +229,30 @@ func (f fakeReadinessCompatRuntime) CheckReadiness(ctx context.Context, h agentr
 type failingMCPServersListRuntime struct {
 	fakeCompatRuntime
 	err error
+}
+
+type snapshotMCPServersRuntime struct {
+	fakeCompatRuntime
+	servers   map[string]any
+	listCalls int
+}
+
+func (f *snapshotMCPServersRuntime) ListMCPServers(context.Context, agentruntime.Handle, agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error) {
+	f.listCalls++
+	return agentruntime.MCPServersSnapshot{Servers: f.servers}, nil
+}
+
+func (*snapshotMCPServersRuntime) ValidateMCPServers(context.Context, agentruntime.MCPServersSnapshot) error {
+	return nil
+}
+
+func (*snapshotMCPServersRuntime) MCPServersRestartRequired(agentruntime.MCPServersChange) (bool, error) {
+	return false, nil
+}
+
+func (f *snapshotMCPServersRuntime) ReconcileMCPServers(_ context.Context, _ agentruntime.Handle, change agentruntime.MCPServersChange) error {
+	f.servers = change.Current.Servers
+	return nil
 }
 
 func (f failingMCPServersListRuntime) ListMCPServers(context.Context, agentruntime.Handle, agentruntime.MCPServersSnapshot) (agentruntime.MCPServersSnapshot, error) {
@@ -1352,6 +1394,47 @@ func TestHandleAgentsGetByIDReturnsAgent(t *testing.T) {
 	}
 	if got.ID != "agent-alice" || got.Name != "alice" || got.Role != agent.RoleWorker {
 		t.Fatalf("agent = %+v, want agent-alice/alice/worker", got)
+	}
+}
+
+func TestHandleAgentGetDistinguishesNotFoundFromEngineFailure(t *testing.T) {
+	base := enginetest.NewMemoryClient()
+	for _, test := range []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "not found",
+			err:        &agentengine.TurnError{Code: agentengine.ErrorAgentNotFound, Message: "agent missing"},
+			wantStatus: http.StatusNotFound,
+			wantBody:   "agent not found",
+		},
+		{
+			name:       "engine unavailable",
+			err:        &agentengine.TurnError{Code: agentengine.ErrorAgentUnavailable, Message: "agent service is unavailable"},
+			wantStatus: http.StatusInternalServerError,
+			wantBody:   "agent service is unavailable",
+		},
+		{
+			name:       "reload failure",
+			err:        errors.New("reload agent state: storage unavailable"),
+			wantStatus: http.StatusInternalServerError,
+			wantBody:   "storage unavailable",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := &Handler{agentEngine: getErrorEngine{
+				Interface: base,
+				agents:    getErrorAgents{AgentInterface: base.Agents(), err: test.err},
+			}}
+			recorder := httptest.NewRecorder()
+			handler.Routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/agents/agent-a", nil))
+			if recorder.Code != test.wantStatus || !strings.Contains(recorder.Body.String(), test.wantBody) {
+				t.Fatalf("response = %d %q, want %d containing %q", recorder.Code, recorder.Body.String(), test.wantStatus, test.wantBody)
+			}
+		})
 	}
 }
 
@@ -2577,6 +2660,103 @@ func TestHandleAgentsDeleteNotFound(t *testing.T) {
 	}
 }
 
+func TestAgentAdministrationRoutesUseInjectedEngineWithoutHandlerService(t *testing.T) {
+	svc := mustNewSeededService(t, []agent.Agent{{
+		ID:          "agent-engine-admin",
+		Name:        "engine-admin",
+		Description: "before",
+		Role:        agent.RoleWorker,
+		Status:      string(agentruntime.StateStopped),
+		CreatedAt:   time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC),
+	}})
+	handler := &Handler{agentEngine: agentengine.New(svc)}
+
+	list := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("GET /agents status = %d, want 200; body=%s", list.Code, list.Body.String())
+	}
+
+	patch := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, "/api/v1/agents/agent-engine-admin", strings.NewReader(`{"description":"after"}`)))
+	if patch.Code != http.StatusOK {
+		t.Fatalf("PATCH /agents status = %d, want 200; body=%s", patch.Code, patch.Body.String())
+	}
+	updated, ok := svc.Agent("agent-engine-admin")
+	if !ok || updated.Description != "after" {
+		t.Fatalf("persisted Agent = %+v, found=%v, want description after", updated, ok)
+	}
+
+	deleted := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(deleted, httptest.NewRequest(http.MethodDelete, "/api/v1/agents/agent-engine-admin", nil))
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("DELETE /agents status = %d, want 204; body=%s", deleted.Code, deleted.Body.String())
+	}
+	if _, ok := svc.Agent("agent-engine-admin"); ok {
+		t.Fatal("Agent still exists after Engine-routed delete")
+	}
+}
+
+func TestAgentSubresourceAdministrationUsesOnlyResourceCRUD(t *testing.T) {
+	seed := agentengine.Agent{
+		ID: "agent-resource-admin", ResourceVersion: "1",
+		Spec: agentengine.AgentSpec{
+			Name: "resource-admin", Description: "before", Role: agentengine.AgentRoleWorker,
+			Runtime:    agentengine.RuntimeSpec{Adapter: agent.RuntimeNameCodex},
+			Model:      agentengine.ModelSpec{ProviderID: "provider-a", ModelID: "model-a"},
+			Skills:     []string{"old-skill"},
+			MCPServers: map[string]agentengine.MCPServerConfig{"legacy": {"command": "legacy-server"}},
+			Memory:     &agentengine.MemorySpec{Enabled: true}, DesiredState: agentengine.AgentDesiredStateStopped,
+		},
+		Status: agentengine.AgentStatus{
+			State:        agentengine.AgentStateStopped,
+			Capabilities: agentengine.AgentCapabilities{Memory: true},
+			Instructions: &agentengine.InstructionsStatus{Effective: agent.RenderAgentsInstructionsBlock("before")},
+			Memory:       &agentengine.MemoryStatus{Enabled: true, Ready: true, Name: "MEMORY.md", Content: "memory"},
+		},
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	client := enginetest.NewMemoryClient(seed)
+	handler := &Handler{agentEngine: client}
+	routes := handler.Routes()
+
+	request := func(method, path, body string, want int) {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		routes.ServeHTTP(recorder, httptest.NewRequest(method, path, strings.NewReader(body)))
+		if recorder.Code != want {
+			t.Fatalf("%s %s status = %d, want %d; body=%s", method, path, recorder.Code, want, recorder.Body.String())
+		}
+	}
+
+	request(http.MethodPatch, "/api/v1/agents/agent-resource-admin", `{"description":"after"}`, http.StatusOK)
+	request(http.MethodPut, "/api/v1/agents/agent-resource-admin/profile", `{"model_provider_id":"provider-b","model_id":"model-b"}`, http.StatusOK)
+	request(http.MethodPost, "/api/v1/agents/agent-resource-admin/skills:batchAdd", `{"names":["new-skill"]}`, http.StatusNoContent)
+	request(http.MethodDelete, "/api/v1/agents/agent-resource-admin/skills/old-skill", "", http.StatusNoContent)
+	request(http.MethodPost, "/api/v1/agents/agent-resource-admin/mcp-servers:batchDelete", `{"names":["legacy"]}`, http.StatusOK)
+	effective, err := json.Marshal(map[string]string{"effective": agent.RenderAgentsInstructionsBlock("after instructions")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request(http.MethodPut, "/api/v1/agents/agent-resource-admin/instructions", string(effective), http.StatusOK)
+	request(http.MethodPut, "/api/v1/agents/agent-resource-admin/memory", `{"enabled":false}`, http.StatusOK)
+	request(http.MethodPost, "/api/v1/agents/agent-resource-admin/start", "", http.StatusOK)
+	request(http.MethodPost, "/api/v1/agents/agent-resource-admin/stop", "", http.StatusOK)
+	request(http.MethodPost, "/api/v1/agents/agent-resource-admin/recreate", "", http.StatusOK)
+	request(http.MethodPost, "/api/v1/agents/agent-resource-admin/upgrade", "", http.StatusOK)
+
+	got, err := client.Agents().Get(context.Background(), seed.ID, agentengine.AgentGetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.Description != "after" || got.Spec.Model.ProviderID != "provider-b" ||
+		!slices.Equal(got.Spec.Skills, []string{"new-skill"}) || len(got.Spec.MCPServers) != 0 ||
+		got.Spec.Instructions != "after instructions" || got.Spec.Memory == nil || got.Spec.Memory.Enabled {
+		t.Fatalf("final Agent resource = %+v", got)
+	}
+	request(http.MethodDelete, "/api/v1/agents/agent-resource-admin", "", http.StatusNoContent)
+}
+
 func TestHandleAgentsCreateDoesNotProvisionIMUser(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Cleanup(agent.TestOnlySetSandboxProvider(sandboxtest.NewProvider()))
@@ -3529,6 +3709,66 @@ func TestHandleAgentsCreateReplaceFieldMaskMergesInService(t *testing.T) {
 	if got.ID != "agent-alice" || got.Name != "alice-v2" || got.Description != "worker" || got.Image != "agent-image:v1" {
 		t.Fatalf("agent = %+v, want masked replace preserving unmasked fields", got)
 	}
+
+	descriptionOnly := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(`{"id":"u-alice","description":"updated by CLI replace","replace":true,"field_mask":["id","description"]}`))
+	descriptionRecorder := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(descriptionRecorder, descriptionOnly)
+	if descriptionRecorder.Code != http.StatusCreated {
+		t.Fatalf("description-only replace status = %d, want %d; body=%s", descriptionRecorder.Code, http.StatusCreated, descriptionRecorder.Body.String())
+	}
+	var descriptionResult agent.Agent
+	if err := json.NewDecoder(descriptionRecorder.Body).Decode(&descriptionResult); err != nil {
+		t.Fatalf("decode description-only replace response: %v", err)
+	}
+	if descriptionResult.Name != "alice-v2" || descriptionResult.Description != "updated by CLI replace" {
+		t.Fatalf("description-only replace Agent = %+v, want preserved name and updated description", descriptionResult)
+	}
+}
+
+func TestHandleAgentsCreateReplaceIDOnlyRecreatesWithoutClearingSpec(t *testing.T) {
+	createCalls := 0
+	created := agent.Agent{
+		ID: "agent-alice", Name: "alice", Description: "keep description", Instructions: "keep instructions",
+		Image: "agent-image:v1", Role: agent.RoleWorker, RuntimeKind: agent.RuntimeKindPicoClawSandbox,
+		RuntimeID: "rt-agent-alice", BoxID: "box-alice-existing", Status: string(agentruntime.StateRunning),
+		AgentProfile: agent.AgentProfile{
+			Provider: agent.ProviderAPI, BaseURL: "http://127.0.0.1:4000", APIKey: "secret", ModelID: "model-a", ProfileComplete: true,
+		},
+		ProfileComplete: true, CreatedAt: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC),
+	}
+	svc := mustNewSeededServiceWithOptions(t, []agent.Agent{created}, agent.WithRuntime(fakeCompatRuntime{
+		kind: agent.RuntimeKindPicoClawSandbox,
+		new: func(_ context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
+			createCalls++
+			return agentruntime.Handle{RuntimeID: spec.RuntimeID, HandleID: fmt.Sprintf("box-alice-%d", createCalls)}, nil
+		},
+	}))
+	beforeCreates := createCalls
+
+	handler := &Handler{
+		svc: svc,
+		hub: mustNewLocalTemplateHubServiceWithoutWorkspace(t, "unused", hub.Template{
+			Name: "unused", Role: hub.TemplateRoleWorker, RuntimeKind: agent.RuntimeNamePicoClaw, Image: "unused:test",
+		}),
+	}
+	recorder := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(
+		`{"id":"agent-alice","replace":true,"field_mask":["id"]}`,
+	)))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+	}
+	var replaced agent.Agent
+	if err := json.NewDecoder(recorder.Body).Decode(&replaced); err != nil {
+		t.Fatal(err)
+	}
+	if replaced.ID != created.ID || replaced.Name != created.Name || replaced.Description != created.Description ||
+		replaced.Instructions != created.Instructions || replaced.Image != created.Image {
+		t.Fatalf("id-only replace changed Agent spec: before=%+v after=%+v", created, replaced)
+	}
+	if got := createCalls; got != beforeCreates+1 {
+		t.Fatalf("Runtime create calls = %d, want %d after id-only recreate", got, beforeCreates+1)
+	}
 }
 
 func TestAgentCreateRequestFromAPIIncludesFromTemplate(t *testing.T) {
@@ -3554,6 +3794,53 @@ func TestAgentCreateRequestFromAPIIncludesFromTemplate(t *testing.T) {
 	}
 	if got.Spec.Instructions != "follow AGENTS" {
 		t.Fatalf("Spec.Instructions = %q, want %q", got.Spec.Instructions, "follow AGENTS")
+	}
+}
+
+func TestAgentEngineAdministrationPreservesModelSelector(t *testing.T) {
+	selector := "opencsg.qwen3.6-plus"
+	created := engineCreateRequest(agent.CreateRequest{Spec: agent.CreateAgentSpec{
+		Name:    "selector-test",
+		Profile: selector,
+	}})
+	if created.Spec.Model.Selector != selector {
+		t.Fatalf("create model selector = %q, want %q", created.Spec.Model.Selector, selector)
+	}
+	patched := engineUpdateRequest(agent.UpdateRequest{Profile: &selector}, "version-1")
+	if patched.Spec.Model.Selector != selector || !agentUpdateIncludes(patched, "model.selector") {
+		t.Fatalf("patch model selector = %q with mask %v, want %q", patched.Spec.Model.Selector, patched.FieldMask, selector)
+	}
+}
+
+func TestHandleAgentsPatchSelectorPreservesModelConfiguration(t *testing.T) {
+	profile := agent.AgentProfile{
+		Provider: agent.ProviderAPI, BaseURL: "https://models.example/v1", APIKey: "secret",
+		Headers: map[string]string{"X-Test": "keep"}, ModelID: "model-a", ReasoningEffort: "high",
+		RequestOptions: map[string]any{"temperature": 0.2}, Env: map[string]string{"KEEP": "yes"}, ProfileComplete: true,
+	}
+	svc := mustNewSeededService(t, []agent.Agent{{
+		ID: "agent-selector", Name: "selector", Role: agent.RoleWorker, RuntimeKind: agent.RuntimeKindCodex,
+		Status: string(agentruntime.StateStopped), Profile: "old-selector", AgentProfile: profile, ProfileComplete: true,
+	}})
+	handler := &Handler{svc: svc}
+	recorder := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/api/v1/agents/agent-selector", strings.NewReader(
+		`{"profile":"new-selector"}`,
+	)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	updated, ok := svc.Agent("agent-selector")
+	if !ok {
+		t.Fatal("updated Agent not found")
+	}
+	if updated.Profile != "new-selector" || updated.AgentProfile.Provider != profile.Provider ||
+		updated.AgentProfile.ModelProviderID != profile.ModelProviderID || updated.AgentProfile.BaseURL != profile.BaseURL ||
+		updated.AgentProfile.APIKey != profile.APIKey || updated.AgentProfile.ModelID != profile.ModelID ||
+		updated.AgentProfile.ReasoningEffort != profile.ReasoningEffort ||
+		updated.AgentProfile.Headers["X-Test"] != "keep" || updated.AgentProfile.Env["KEEP"] != "yes" ||
+		updated.AgentProfile.RequestOptions["temperature"] != 0.2 {
+		t.Fatalf("selector PATCH changed model configuration: selector=%q profile=%+v", updated.Profile, updated.AgentProfile)
 	}
 }
 
@@ -4264,6 +4551,122 @@ func TestHandleBatchDeleteAgentMCPServersUsesBackendManagedState(t *testing.T) {
 		t.Fatalf("saved MCPServers = %#v, retained deleted MCP server", saved.MCPServers)
 	}
 	mcpServerForTest(t, saved.MCPServers, "native")
+}
+
+func TestAgentMCPServersAdoptsUnmanagedRuntimeStateBeforeMutation(t *testing.T) {
+	runtimeImpl := &snapshotMCPServersRuntime{
+		fakeCompatRuntime: fakeCompatRuntime{kind: agent.RuntimeKindCodex},
+		servers: map[string]any{
+			"native": map[string]any{"command": "native-server"},
+		},
+	}
+	svc := mustNewSeededServiceWithOptions(t, []agent.Agent{{
+		ID: "agent-mcp-adopt", Name: "mcp-adopt", Role: agent.RoleWorker,
+		RuntimeID: "rt-agent-mcp-adopt", RuntimeKind: agent.RuntimeKindCodex, RuntimeName: agent.RuntimeNameCodex,
+		Status: string(agentruntime.StateStopped), AgentProfile: agent.AgentProfile{ProfileComplete: true}, ProfileComplete: true,
+	}}, agent.WithRuntime(runtimeImpl))
+	mcpSvc := mcp.NewService()
+	if _, err := mcpSvc.CreateServer(context.Background(), "catalog", map[string]any{"command": "catalog-server"}); err != nil {
+		t.Fatal(err)
+	}
+	handler := &Handler{svc: svc, mcp: mcpSvc}
+	engine := agentengine.New(svc)
+	ordinary, err := engine.Agents().Get(context.Background(), "agent-mcp-adopt", agentengine.AgentGetOptions{})
+	if err != nil {
+		t.Fatalf("ordinary Agent Get() error = %v", err)
+	}
+	if ordinary.Spec.MCPServers != nil {
+		t.Fatalf("ordinary Agent Get() MCP servers = %#v, want unmanaged desired state", ordinary.Spec.MCPServers)
+	}
+	if runtimeImpl.listCalls != 0 {
+		t.Fatalf("ordinary Agent Get() performed %d Runtime MCP reads, want 0", runtimeImpl.listCalls)
+	}
+
+	getRecorder := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/agents/agent-mcp-adopt/mcp-servers", nil))
+	if getRecorder.Code != http.StatusOK || !strings.Contains(getRecorder.Body.String(), `"native"`) {
+		t.Fatalf("GET unmanaged MCP servers = %d %s", getRecorder.Code, getRecorder.Body.String())
+	}
+
+	addRecorder := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(addRecorder, httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-mcp-adopt/mcp-servers:batchAdd", strings.NewReader(`{"names":["catalog"]}`)))
+	if addRecorder.Code != http.StatusOK {
+		t.Fatalf("batch add status = %d; body=%s", addRecorder.Code, addRecorder.Body.String())
+	}
+	var added agent.MCPServersView
+	if err := json.NewDecoder(addRecorder.Body).Decode(&added); err != nil {
+		t.Fatal(err)
+	}
+	mcpServerForTest(t, added.Servers, "native")
+	mcpServerForTest(t, added.Servers, "catalog")
+	saved, ok := svc.Agent("agent-mcp-adopt")
+	if !ok {
+		t.Fatal("Agent missing after MCP adoption")
+	}
+	mcpServerForTest(t, saved.MCPServers, "native")
+	mcpServerForTest(t, saved.MCPServers, "catalog")
+	listCallsAfterAdoption := runtimeImpl.listCalls
+
+	deleteRecorder := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(deleteRecorder, httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-mcp-adopt/mcp-servers:batchDelete", strings.NewReader(`{"names":["native"]}`)))
+	if deleteRecorder.Code != http.StatusOK {
+		t.Fatalf("batch delete status = %d; body=%s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+	var deleted agent.MCPServersView
+	if err := json.NewDecoder(deleteRecorder.Body).Decode(&deleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := deleted.Servers["native"]; exists {
+		t.Fatalf("batch delete retained adopted native server: %#v", deleted.Servers)
+	}
+	mcpServerForTest(t, deleted.Servers, "catalog")
+	if runtimeImpl.listCalls != listCallsAfterAdoption {
+		t.Fatalf("Runtime MCP servers were re-imported after persistence: before=%d after=%d", listCallsAfterAdoption, runtimeImpl.listCalls)
+	}
+}
+
+func TestAgentMCPServersMutationAbortsWhenInitialRuntimeAdoptionFails(t *testing.T) {
+	readErr := errors.New("native MCP config is unreadable")
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "add", path: "/api/v1/agents/agent-mcp-unreadable/mcp-servers:batchAdd"},
+		{name: "delete", path: "/api/v1/agents/agent-mcp-unreadable/mcp-servers:batchDelete"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc := mustNewSeededServiceWithOptions(t, []agent.Agent{{
+				ID: "agent-mcp-unreadable", Name: "mcp-unreadable", Role: agent.RoleWorker,
+				RuntimeID: "rt-agent-mcp-unreadable", RuntimeKind: agent.RuntimeKindCodex, RuntimeName: agent.RuntimeNameCodex,
+				Status: string(agentruntime.StateStopped), AgentProfile: agent.AgentProfile{ProfileComplete: true}, ProfileComplete: true,
+			}}, agent.WithRuntime(failingMCPServersListRuntime{
+				fakeCompatRuntime: fakeCompatRuntime{kind: agent.RuntimeKindCodex},
+				err:               readErr,
+			}))
+			mcpSvc := mcp.NewService()
+			if _, err := mcpSvc.CreateServer(context.Background(), "catalog", map[string]any{"command": "catalog-server"}); err != nil {
+				t.Fatal(err)
+			}
+			handler := &Handler{svc: svc, mcp: mcpSvc}
+
+			recorder := httptest.NewRecorder()
+			handler.Routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(`{"names":["catalog"]}`)))
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), readErr.Error()) {
+				t.Fatalf("body = %q, want Runtime read failure", recorder.Body.String())
+			}
+			saved, ok := svc.Agent("agent-mcp-unreadable")
+			if !ok {
+				t.Fatal("Agent missing after failed MCP adoption")
+			}
+			if saved.MCPServers != nil {
+				t.Fatalf("saved MCPServers = %#v, want unmanaged state preserved", saved.MCPServers)
+			}
+		})
+	}
 }
 
 func newAgentMCPManagementTestServer(t *testing.T) (*Handler, *agent.Service, agent.Agent) {
@@ -5191,7 +5594,7 @@ func TestHandleHubTemplatesPublishesAgentSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	spec, err := svc.HubPublishSpec(created.ID)
+	spec, err := svc.HubPublishSpec(created.ID, false)
 	if err != nil {
 		t.Fatalf("HubPublishSpec() error = %v", err)
 	}
@@ -5268,7 +5671,7 @@ func TestHandleHubTemplatesPublishesCodexRuntimeOptions(t *testing.T) {
 		},
 	}
 	svc := mustNewSeededService(t, []agent.Agent{created})
-	publishSpec, err := svc.HubPublishSpec(created.ID)
+	publishSpec, err := svc.HubPublishSpec(created.ID, false)
 	if err != nil {
 		t.Fatalf("HubPublishSpec() error = %v", err)
 	}
@@ -5314,6 +5717,66 @@ func TestHandleHubTemplatesPublishesCodexRuntimeOptions(t *testing.T) {
 	manifest := string(manifestData)
 	if !strings.Contains(manifest, "execution_mode = 'read_only'") || !strings.Contains(manifest, "memory_mode = 'disabled'") {
 		t.Fatalf("agent.toml missing Codex runtime options:\n%s", manifest)
+	}
+}
+
+func TestHandleHubTemplatesRequiresExplicitMemoryOptIn(t *testing.T) {
+	created := agent.Agent{
+		ID: "u-codex-memory", Name: "codex-memory", Role: agent.RoleWorker, RuntimeKind: agent.RuntimeKindCodex,
+	}
+	svc := mustNewSeededService(t, []agent.Agent{created})
+	publishSpec, err := svc.HubPublishSpec(created.ID, true)
+	if err != nil {
+		t.Fatalf("HubPublishSpec() error = %v", err)
+	}
+	if err := os.MkdirAll(publishSpec.WorkspaceRef.Path, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workspace) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(publishSpec.WorkspaceRef.Path, "AGENTS.md"), []byte("instructions\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(AGENTS.md) error = %v", err)
+	}
+	memoryPath := filepath.Join(filepath.Dir(publishSpec.WorkspaceRef.SkillsPath), "memories", "memory_summary.md")
+	if err := os.MkdirAll(filepath.Dir(memoryPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(memory) error = %v", err)
+	}
+	if err := os.WriteFile(memoryPath, []byte("private memory\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(memory_summary.md) error = %v", err)
+	}
+
+	registryRoot := t.TempDir()
+	hubSvc, err := hub.NewService(config.HubConfig{
+		DefaultRegistry: "local", DefaultPublishRegistry: "local",
+		Registries: []config.HubRegistryConfig{{Name: "local", Kind: hub.RegistryKindLocal, Path: registryRoot, Enabled: true}},
+	}, hub.DefaultStoreFactory)
+	if err != nil {
+		t.Fatalf("hub.NewService() error = %v", err)
+	}
+	srv := &Handler{svc: svc}
+	srv.SetHubService(hubSvc)
+
+	for _, test := range []struct {
+		name          string
+		includeMemory bool
+		wantMemory    bool
+	}{
+		{name: "WithoutMemory", includeMemory: false, wantMemory: false},
+		{name: "WithMemory", includeMemory: true, wantMemory: true},
+	} {
+		body := fmt.Sprintf(`{"agent_id":%q,"registry":"local","name":%q,"include_memory":%t}`,
+			created.ID, test.name, test.includeMemory)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/hub/templates", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		srv.Routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("%s status = %d, want %d; body=%s", test.name, rec.Code, http.StatusCreated, rec.Body.String())
+		}
+		_, statErr := os.Stat(filepath.Join(registryRoot, "templates", test.name, "memories", "memory_summary.md"))
+		if test.wantMemory && statErr != nil {
+			t.Fatalf("%s memory missing: %v", test.name, statErr)
+		}
+		if !test.wantMemory && !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("%s memory was published without opt-in: %v", test.name, statErr)
+		}
 	}
 }
 
@@ -5424,7 +5887,7 @@ func TestHandleHubTemplatesPublishesAgentSnapshotToDefaultRegistryWhenOmitted(t 
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	spec, err := svc.HubPublishSpec(created.ID)
+	spec, err := svc.HubPublishSpec(created.ID, false)
 	if err != nil {
 		t.Fatalf("HubPublishSpec() error = %v", err)
 	}

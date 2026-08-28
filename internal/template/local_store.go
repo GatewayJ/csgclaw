@@ -13,6 +13,7 @@ import (
 
 	"csgclaw/internal/agentworkspace"
 	"csgclaw/internal/apitypes"
+	"csgclaw/internal/runtime"
 	toml "github.com/pelletier/go-toml/v2"
 )
 
@@ -182,7 +183,7 @@ func (s *LocalStore) Publish(_ context.Context, spec PublishSpec) (Template, err
 		return Template{}, err
 	}
 	if normalized.WorkspaceRef.Kind == WorkspaceKindDir {
-		if err := writeTemplateLayout(normalized.WorkspaceRef, tmpDir, normalized.RuntimeKind, normalized.MCPServers); err != nil {
+		if err := writeTemplateLayout(normalized.WorkspaceRef, tmpDir, normalized.RuntimeKind, normalized.MCPServers, normalized.IncludeMemory); err != nil {
 			return Template{}, err
 		}
 	}
@@ -304,6 +305,9 @@ func normalizePublishSpec(spec PublishSpec) (PublishSpec, error) {
 		return PublishSpec{}, err
 	}
 	spec.RuntimeOptions = runtimeOptions
+	if !spec.IncludeMemory || (spec.RuntimeKind == runtime.KindCodex && spec.RuntimeOptions["memory_mode"] == "disabled") {
+		spec.WorkspaceRef.MemoryPath = ""
+	}
 	if spec.RuntimeKind == "" {
 		return PublishSpec{}, ErrRuntimeKindRequired
 	}

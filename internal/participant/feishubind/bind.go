@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"csgclaw/internal/agent"
+	"csgclaw/internal/agentengine"
 	"csgclaw/internal/participant"
 )
 
@@ -56,10 +57,11 @@ func BindAdminHuman(ctx context.Context, participantSvc *participant.Service, op
 	}, nil
 }
 
-func BindBot(ctx context.Context, agentSvc *agent.Service, participantSvc *participant.Service, agentRef, appID, appSecret string, restart bool) (Result, error) {
-	if agentSvc == nil {
+func BindBot(ctx context.Context, engine agentengine.Interface, participantSvc *participant.Service, agentRef, appID, appSecret string, restart bool) (Result, error) {
+	if engine == nil {
 		return Result{}, fmt.Errorf("agent service is required")
 	}
+	agents := engine.Agents()
 	if participantSvc == nil {
 		return Result{}, fmt.Errorf("participant service is required")
 	}
@@ -75,7 +77,7 @@ func BindBot(ctx context.Context, agentSvc *agent.Service, participantSvc *parti
 	if appSecret == "" {
 		return Result{}, fmt.Errorf("app_secret is required")
 	}
-	target, err := ResolveAgent(agentSvc, agentRef)
+	target, err := ResolveAgent(engine, agentRef)
 	if err != nil {
 		return Result{}, fmt.Errorf("resolve agent %q: %w", agentRef, err)
 	}
@@ -104,7 +106,7 @@ func BindBot(ctx context.Context, agentSvc *agent.Service, participantSvc *parti
 		if strings.EqualFold(target.ID, agent.ManagerUserID) || strings.EqualFold(target.Role, agent.RoleManager) {
 			restartStatus = "manager_recreated"
 		}
-		if _, err := agentSvc.Recreate(ctx, target.ID); err != nil {
+		if _, err := agents.Recreate(ctx, target.ID, agentengine.AgentRecreateOptions{}); err != nil {
 			result.Status = "partial"
 			result.RestartStatus = "recreate_failed"
 			result.RestartError = err.Error()
@@ -141,20 +143,25 @@ func ValidateBotAppIDExclusive(participantSvc *participant.Service, agentID, app
 	return nil
 }
 
-func ResolveAgent(agentSvc *agent.Service, ref string) (agent.Agent, error) {
-	if agentSvc == nil {
+func ResolveAgent(engine agentengine.Interface, ref string) (agent.Agent, error) {
+	if engine == nil {
 		return agent.Agent{}, fmt.Errorf("agent service is required")
 	}
+	agents := engine.Agents()
 	ref = strings.TrimSpace(ref)
 	for _, candidate := range agentIDCandidates(ref) {
-		if got, ok := agentSvc.Agent(candidate); ok {
-			return got, nil
+		if got, err := agents.Get(context.Background(), candidate, agentengine.AgentGetOptions{}); err == nil {
+			return bindingAgentFromEngine(got), nil
 		}
 	}
 	var matches []agent.Agent
-	for _, item := range agentSvc.List() {
-		if strings.EqualFold(strings.TrimSpace(item.Name), ref) {
-			matches = append(matches, item)
+	items, err := agents.List(context.Background(), agentengine.AgentListOptions{})
+	if err != nil {
+		return agent.Agent{}, err
+	}
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.Spec.Name), ref) {
+			matches = append(matches, bindingAgentFromEngine(item))
 		}
 	}
 	if len(matches) == 1 {
@@ -164,6 +171,20 @@ func ResolveAgent(agentSvc *agent.Service, ref string) (agent.Agent, error) {
 		return agent.Agent{}, fmt.Errorf("agent name %q matched multiple agents", ref)
 	}
 	return agent.Agent{}, fmt.Errorf("agent %q not found", ref)
+}
+
+func bindingAgentFromEngine(item agentengine.Agent) agent.Agent {
+	return agent.Agent{
+		ID:           item.ID,
+		Name:         item.Spec.Name,
+		Description:  item.Spec.Description,
+		Instructions: item.Spec.Instructions,
+		Role:         string(item.Spec.Role),
+		RuntimeKind:  item.Status.RuntimeKind,
+		Status:       string(item.Status.State),
+		CreatedAt:    item.CreatedAt,
+		UpdatedAt:    item.UpdatedAt,
+	}
 }
 
 func CanonicalParticipantID(target agent.Agent) string {

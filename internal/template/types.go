@@ -57,12 +57,14 @@ type WorkspaceRef struct {
 	Path             string
 	InstructionsPath string
 	SkillsPath       string
+	MemoryPath       string
 	MCPServersJSON   string
 	Temporary        bool
 }
 
 type PublishSpec struct {
 	Registry       string
+	IncludeMemory  bool
 	ID             string
 	Name           string
 	Description    string

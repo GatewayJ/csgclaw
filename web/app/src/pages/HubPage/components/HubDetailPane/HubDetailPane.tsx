@@ -17,6 +17,7 @@ import {
   hubTemplateFullName,
   hubTemplateReviewState,
   isDeletableHubTemplate,
+  isHubTemplateMemoryEnabled,
 } from "@/models/hubWorkspace";
 import {
   formatMCPServerDocument,
@@ -30,6 +31,7 @@ import { localizeTemplateSourceTag } from "@/shared/i18n";
 import { ModelsIcon } from "@/components/ui/Icons";
 import {
   Button,
+  Checkbox,
   DialogBody,
   DialogCloseButton,
   DialogContent,
@@ -48,7 +50,7 @@ import type { WorkspaceEntry, WorkspaceFile } from "@/models/workspace";
 import { RemoteMCPList } from "./RemoteMCPList";
 
 const EMPTY_WORKSPACE_ENTRIES: readonly WorkspaceEntry[] = [];
-type TemplateDetailTabID = "profile" | "instructions" | "skills" | "mcp";
+type TemplateDetailTabID = "profile" | "instructions" | "memory" | "skills" | "mcp";
 type MCPCreateMode = "manual" | "remote";
 
 type TemplateSkillSummary = {
@@ -58,7 +60,7 @@ type TemplateSkillSummary = {
 
 function templateSectionEntries(
   entries: readonly WorkspaceEntry[],
-  section: "instructions" | "skills" | "mcps",
+  section: "instructions" | "memories" | "skills" | "mcps",
 ): WorkspaceEntry[] {
   const prefix = `${section}/`;
   return entries
@@ -70,14 +72,14 @@ function templateSectionEntries(
     }));
 }
 
-function templateSectionPath(path: string, section: "instructions" | "skills" | "mcps"): string {
+function templateSectionPath(path: string, section: "instructions" | "memories" | "skills" | "mcps"): string {
   const prefix = `${section}/`;
   return path.startsWith(prefix) ? path.slice(prefix.length) : "";
 }
 
 function firstTemplateSectionFile(
   entries: readonly WorkspaceEntry[],
-  section: "instructions" | "skills" | "mcps",
+  section: "instructions" | "memories" | "skills" | "mcps",
   preferredName?: string,
 ): string {
   const prefix = `${section}/`;
@@ -213,6 +215,7 @@ type HubDetailPaneHub = {
     onPublishTemplate?: (
       item: HubTemplate | null | undefined,
       deploy?: boolean,
+      includeMemory?: boolean,
     ) =>
       | Promise<{ status: "success" } | { status: "partial"; message: string } | null>
       | { status: "success" }
@@ -680,6 +683,7 @@ export function HubDetailPane({
   const [publishSuccessDialogOpen, setPublishSuccessDialogOpen] = useState(false);
   const [publishPartialMessage, setPublishPartialMessage] = useState("");
   const [publishChoiceDialogOpen, setPublishChoiceDialogOpen] = useState(false);
+  const [publishTemplateIncludeMemory, setPublishTemplateIncludeMemory] = useState(false);
   const [mcpDeleteDialogOpen, setMCPDeleteDialogOpen] = useState(false);
   const [mcpDraftDocument, setMCPDraftDocument] = useState(DEFAULT_MCP_SERVER_DOCUMENT);
   const [mcpDetailDocument, setMCPDetailDocument] = useState("");
@@ -690,11 +694,15 @@ export function HubDetailPane({
   const [templateInstructionsMode, setTemplateInstructionsMode] = useState<"default" | "advanced">("default");
   const [templateInstructionsDraft, setTemplateInstructionsDraft] = useState("");
   const [templateInstructionsSaving, setTemplateInstructionsSaving] = useState(false);
-  const templateSection = activeTemplateTab === "mcp" ? "mcps" : activeTemplateTab;
+  const templateSection =
+    activeTemplateTab === "mcp" ? "mcps" : activeTemplateTab === "memory" ? "memories" : activeTemplateTab;
   const templateImageEnv = selectedTemplate?.image_env || [];
   const templateSectionWorkspaceEntries = useMemo(
     () =>
-      templateSection === "instructions" || templateSection === "skills" || templateSection === "mcps"
+      templateSection === "instructions" ||
+      templateSection === "memories" ||
+      templateSection === "skills" ||
+      templateSection === "mcps"
         ? templateSectionEntries(workspaceEntries, templateSection)
         : [],
     [templateSection, workspaceEntries],
@@ -719,6 +727,9 @@ export function HubDetailPane({
   const templateInstructionsFile =
     workspaceFiles["instructions/AGENTS.md"] ||
     (workspaceFile?.path === "instructions/AGENTS.md" ? workspaceFile : null);
+  const templateMemoryFile =
+    workspaceFiles["memories/memory_summary.md"] ||
+    (workspaceFile?.path === "memories/memory_summary.md" ? workspaceFile : null);
   const templateInstructions = templateInstructionsFile?.content || "";
   useEffect(() => {
     setTemplateInstructionsDraft(templateInstructions);
@@ -727,10 +738,12 @@ export function HubDetailPane({
   const templateInstructionsValue =
     templateInstructionsMode === "advanced" ? templateInstructionsDraft : templateCustomInstructions;
   const templateInstructionsReadonly = selectedTemplate?.source?.kind !== "local";
+  const templateMemoryEnabled = isHubTemplateMemoryEnabled(selectedTemplate);
   const templateTabs = useMemo(
     () => [
       { id: "profile" as const, label: t("agentProfileTab") },
       { id: "instructions" as const, label: t("agentInstructions") },
+      ...(templateMemoryEnabled ? [{ id: "memory" as const, label: t("agentMemoryTab") }] : []),
       {
         id: "skills" as const,
         label: t("agentProfileSkillsTab"),
@@ -738,7 +751,7 @@ export function HubDetailPane({
       },
       { id: "mcp" as const, label: t("agentProfileMCPTab") },
     ],
-    [t, templateSkillCount],
+    [t, templateMemoryEnabled, templateSkillCount],
   );
   useEffect(() => {
     setActiveTemplateTab("profile");
@@ -746,7 +759,9 @@ export function HubDetailPane({
   useEffect(() => {
     const directories = new Set<string>(["skills"]);
     if (activeTemplateTab !== "profile") {
-      directories.add(activeTemplateTab === "mcp" ? "mcps" : activeTemplateTab);
+      directories.add(
+        activeTemplateTab === "mcp" ? "mcps" : activeTemplateTab === "memory" ? "memories" : activeTemplateTab,
+      );
     }
     if (activeTemplateTab === "skills") {
       templateSkills.forEach((skill) => directories.add(`skills/${skill.name}`));
@@ -757,6 +772,15 @@ export function HubDetailPane({
       }
     }
   }, [activeTemplateTab, onToggleWorkspaceDir, templateSkills, workspaceEntries]);
+  useEffect(() => {
+    if (activeTemplateTab !== "memory" || selectedWorkspacePath === "memories/memory_summary.md") {
+      return;
+    }
+    const memoryFile = firstTemplateSectionFile(workspaceEntries, "memories", "memory_summary.md");
+    if (memoryFile) {
+      onSelectWorkspaceFile(memoryFile);
+    }
+  }, [activeTemplateTab, onSelectWorkspaceFile, selectedWorkspacePath, workspaceEntries]);
   useEffect(() => {
     if (mcpCreateDialogOpen) {
       setMCPDraftDocument(DEFAULT_MCP_SERVER_DOCUMENT);
@@ -815,7 +839,7 @@ export function HubDetailPane({
   }
 
   async function handlePublishTemplate(deploy = false) {
-    const result = await onPublishTemplate?.(selectedTemplate, deploy);
+    const result = await onPublishTemplate?.(selectedTemplate, deploy, publishTemplateIncludeMemory);
     if (result?.status === "success") {
       setPublishPartialMessage("");
       setPublishChoiceDialogOpen(false);
@@ -853,7 +877,9 @@ export function HubDetailPane({
           ? firstTemplateSectionFile(workspaceEntries, "skills", "SKILL.md")
           : tab === "mcp"
             ? firstTemplateSectionFile(workspaceEntries, "mcps", "mcp.json")
-            : firstTemplateSectionFile(workspaceEntries, "instructions", "AGENTS.md");
+            : tab === "memory"
+              ? firstTemplateSectionFile(workspaceEntries, "memories", "memory_summary.md")
+              : firstTemplateSectionFile(workspaceEntries, "instructions", "AGENTS.md");
       onSelectWorkspaceFile(selectedFile);
     }
   }
@@ -925,7 +951,10 @@ export function HubDetailPane({
                         loading={publishBusy}
                         disabled={publishBusy || publishDisabled}
                         title={publishDisabled ? t("agentPublishLoginRequired") : undefined}
-                        onClick={() => setPublishChoiceDialogOpen(true)}
+                        onClick={() => {
+                          setPublishTemplateIncludeMemory(false);
+                          setPublishChoiceDialogOpen(true);
+                        }}
                       >
                         {t("agentPublishCommunity")}
                       </Button>
@@ -1144,6 +1173,36 @@ export function HubDetailPane({
                     </div>
                   ) : null}
                 </section>
+              ) : activeTemplateTab === "memory" ? (
+                <section className="profile-section hub-template-memory-panel">
+                  <div className="hub-template-memory-heading">
+                    <div className="profile-section-heading">
+                      <div className="profile-section-title">memory_summary.md</div>
+                      <p className="profile-section-description">{t("resourcesTemplateMemoryDescription")}</p>
+                      <code className="hub-template-memory-location">memories/memory_summary.md</code>
+                    </div>
+                  </div>
+                  {workspaceFileError ? <div className="form-error">{workspaceFileError}</div> : null}
+                  {workspaceFileLoading ? (
+                    <div className="hub-template-memory-empty" role="status">
+                      <strong>{t("resourcesWorkspaceFileLoading")}</strong>
+                    </div>
+                  ) : templateMemoryFile && !templateMemoryFile.binary ? (
+                    <div className="agent-section-form hub-template-memory-document-shell">
+                      <textarea
+                        className="compact-textarea hub-template-memory-document"
+                        value={templateMemoryFile.content || ""}
+                        readOnly
+                        aria-label={t("agentMemoryDocumentLabel")}
+                      />
+                    </div>
+                  ) : (
+                    <div className="hub-template-memory-empty">
+                      <strong>{t("resourcesTemplateMemoryEmptyTitle")}</strong>
+                      <p>{t("resourcesTemplateMemoryEmptyDescription")}</p>
+                    </div>
+                  )}
+                </section>
               ) : activeTemplateTab === "skills" ? (
                 <section className="profile-section hub-template-summary-panel hub-template-skills-panel">
                   <div className="hub-template-summary-heading">
@@ -1239,7 +1298,7 @@ export function HubDetailPane({
                       emptyText={t("resourcesWorkspacePreviewHint")}
                       selectedPath={templateSectionPath(
                         selectedWorkspacePath,
-                        templateSection as "instructions" | "skills" | "mcps",
+                        templateSection as "instructions" | "memories" | "skills" | "mcps",
                       )}
                       onSelectFile={(path) => onSelectWorkspaceFile(`${templateSection}/${path}`)}
                     />
@@ -1444,7 +1503,15 @@ export function HubDetailPane({
           </DialogFooter>
         </DialogContent>
       </DialogRoot>
-      <DialogRoot open={publishChoiceDialogOpen} onOpenChange={setPublishChoiceDialogOpen}>
+      <DialogRoot
+        open={publishChoiceDialogOpen}
+        onOpenChange={(open) => {
+          setPublishChoiceDialogOpen(open);
+          if (!open) {
+            setPublishTemplateIncludeMemory(false);
+          }
+        }}
+      >
         <DialogContent className="agent-publish-dialog">
           <DialogHeader>
             <div>
@@ -1453,6 +1520,21 @@ export function HubDetailPane({
             </div>
             <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
           </DialogHeader>
+          {templateMemoryEnabled ? (
+            <DialogBody>
+              <label className="hub-template-publish-memory-option">
+                <Checkbox
+                  aria-label={t("agentPublishIncludeMemory")}
+                  checked={publishTemplateIncludeMemory}
+                  onCheckedChange={(checked) => setPublishTemplateIncludeMemory(checked === true)}
+                />
+                <span>
+                  <strong>{t("agentPublishIncludeMemory")}</strong>
+                  <small>{t("agentPublishIncludeMemoryWarning")}</small>
+                </span>
+              </label>
+            </DialogBody>
+          ) : null}
           {publishError ? <div className="form-error">{publishError}</div> : null}
           <DialogFooter>
             <Button

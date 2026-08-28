@@ -245,9 +245,9 @@ func (h *Handler) resolveSessionAgent(selector string) (agentengine.Agent, error
 	if selector == "" || h.agentEngine == nil {
 		return agentengine.Agent{}, fmt.Errorf("agent not found")
 	}
-	selected, err := h.agentEngine.Agents().Get(context.Background(), selector)
+	selected, err := h.agentEngine.Agents().Get(context.Background(), selector, agentengine.AgentGetOptions{})
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+		if agentengine.ErrorCodeOf(err) == agentengine.ErrorAgentNotFound {
 			return agentengine.Agent{}, err
 		}
 		return agentengine.Agent{}, fmt.Errorf("%w: %v", errSessionAgentUnavailable, err)

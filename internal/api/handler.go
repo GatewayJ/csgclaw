@@ -797,6 +797,9 @@ func NewHandlerWithAuth(svc *agent.Service, imSvc *im.Service, imBus *im.Bus, pa
 		serverNoAuth:      serverNoAuth,
 		upgradeApply:      upgrade.StartApplyHelper,
 	}
+	if svc != nil {
+		h.agentEngine = agentengine.New(svc)
+	}
 	return h
 }
 
@@ -1108,19 +1111,21 @@ func (h *Handler) handleUpgradeApply(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
-	if h.svc == nil {
+	if h.agentEngine == nil {
 		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
+	agents := h.agentEngine.Agents()
 	switch r.Method {
 	case http.MethodGet:
-		if err := h.svc.Reload(); err != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), agentRuntimeStatusTimeout)
+		defer cancel()
+		items, err := agents.List(ctx, agentengine.AgentListOptions{Reload: true, ProbeRuntime: true})
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), agentRuntimeStatusTimeout)
-		defer cancel()
-		writeJSON(w, http.StatusOK, h.presentAgentsForRequest(r, h.svc.ListContext(ctx)))
+		writeJSON(w, http.StatusOK, h.presentEngineAgentsForRequest(r, items))
 	case http.MethodPost:
 		h.handleCreateAgentWorker(w, r)
 	default:
@@ -1129,10 +1134,11 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAgentByID(w http.ResponseWriter, r *http.Request) {
-	if h.svc == nil {
+	if h.agentEngine == nil {
 		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
+	agents := h.agentEngine.Agents()
 
 	id := pathValue(r, "id")
 	if id == "" {
@@ -1142,29 +1148,35 @@ func (h *Handler) handleAgentByID(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		if err := h.svc.Reload(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
 		// A detail request is an explicit inspection point. Unlike the roster
 		// path, it may make the bounded optional readiness probe needed to tell
 		// whether a running gateway can accept work.
 		ctx, cancel := context.WithTimeout(r.Context(), agentRuntimeStatusTimeout)
 		defer cancel()
-		a, ok := h.svc.Inspect(ctx, id)
-		if !ok {
-			http.Error(w, "agent not found", http.StatusNotFound)
+		item, err := agents.Get(ctx, id, agentengine.AgentGetOptions{Reload: true, ProbeRuntime: true})
+		if err != nil {
+			writeAgentGetError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, h.presentAgentForRequest(r, a))
+		writeJSON(w, http.StatusOK, h.presentEngineAgentForRequest(r, item))
 	case http.MethodPatch:
 		var req agent.UpdateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 			return
 		}
-		billingProfile, _ := h.svc.EffectiveAgentProfileForUpdate(id, req)
-		updated, err := h.svc.Update(r.Context(), id, req)
+		current, err := agents.Get(r.Context(), id, agentengine.AgentGetOptions{})
+		if err != nil {
+			http.Error(w, "agent not found", http.StatusNotFound)
+			return
+		}
+		update := engineUpdateRequest(req, current.ResourceVersion)
+		billingModel := current.Spec.Model
+		if agentUpdateIncludes(update, "model") {
+			billingModel = update.Spec.Model
+		}
+		billingProfile := serviceProfileFromEngine(agentengine.ModelView{ModelSpec: billingModel})
+		updated, err := agents.Update(r.Context(), id, update)
 		if err != nil {
 			writeAgentOperationErrorWithBillingURL(
 				w,
@@ -1174,14 +1186,15 @@ func (h *Handler) handleAgentByID(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		h.publishUpdatedAgentUser(updated)
-		writeJSON(w, http.StatusOK, h.presentAgentForRequest(r, updated))
+		serviceUpdated := serviceAgentFromEngine(updated)
+		h.publishUpdatedAgentUser(serviceUpdated)
+		writeJSON(w, http.StatusOK, h.presentEngineAgentForRequest(r, updated))
 	case http.MethodDelete:
 		var err error
 		if h.participant != nil {
 			_, err = h.participant.DeleteAgent(r.Context(), id)
 		} else {
-			err = h.svc.Delete(r.Context(), id)
+			err = agents.Delete(r.Context(), id)
 		}
 		if err != nil {
 			writeAgentOperationError(w, err, http.StatusBadRequest)
@@ -1232,22 +1245,16 @@ func (h *Handler) handleAgentProfileByID(w http.ResponseWriter, r *http.Request)
 		http.NotFound(w, r)
 		return
 	}
-	if h.svc == nil {
+	if h.agentEngine == nil {
 		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	if r.Method == http.MethodGet {
-		if err := h.svc.Reload(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-	canonicalID, ok := h.svc.ResolveAgentID(selector)
-	if !ok {
+	selected, err := h.agentEngine.Agents().Get(r.Context(), selector, agentengine.AgentGetOptions{Reload: r.Method == http.MethodGet})
+	if err != nil {
 		http.Error(w, "agent not found", http.StatusNotFound)
 		return
 	}
-	h.handleAgentProfile(w, r, canonicalID)
+	h.handleAgentProfile(w, r, selected.ID)
 }
 
 func (h *Handler) handleAgentRecreateByID(w http.ResponseWriter, r *http.Request) {
@@ -1269,30 +1276,34 @@ func (h *Handler) handleAgentUpgradeByID(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) handleAgentProfile(w http.ResponseWriter, r *http.Request, id string) {
-	if h.svc == nil {
+	if h.agentEngine == nil {
 		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
+	agents := h.agentEngine.Agents()
 	switch r.Method {
 	case http.MethodGet:
-		if err := h.svc.Reload(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		profile, err := h.svc.AgentProfileView(id)
+		selected, err := agents.Get(r.Context(), id, agentengine.AgentGetOptions{Reload: true})
 		if err != nil {
 			http.Error(w, "agent not found", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, profileResponseFromAgentView(profile))
+		writeJSON(w, http.StatusOK, profileResponseFromAgentView(serviceProfileViewFromEngine(selected.Status.Model)))
 	case http.MethodPut:
 		var req agent.AgentProfile
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
 			return
 		}
-		billingProfile, _ := h.svc.EffectiveAgentProfileForUpdate(id, agent.UpdateRequest{AgentProfile: &req})
-		profile, err := h.svc.UpdateAgentProfile(id, req)
+		selected, err := agents.Get(r.Context(), id, agentengine.AgentGetOptions{})
+		if err != nil {
+			http.Error(w, "agent not found", http.StatusNotFound)
+			return
+		}
+		model := engineModelFromProfile(req)
+		billingProfile := serviceProfileFromEngine(agentengine.ModelView{ModelSpec: model})
+		selected.Spec.Model = model
+		updated, err := agents.Update(r.Context(), id, agentengine.AgentUpdateRequest{Spec: selected.Spec, FieldMask: []string{"model"}, ResourceVersion: selected.ResourceVersion})
 		if err != nil {
 			writeAgentOperationErrorWithBillingURL(
 				w,
@@ -1302,7 +1313,7 @@ func (h *Handler) handleAgentProfile(w http.ResponseWriter, r *http.Request, id 
 			)
 			return
 		}
-		writeJSON(w, http.StatusOK, profileResponseFromAgentView(profile))
+		writeJSON(w, http.StatusOK, profileResponseFromAgentView(serviceProfileViewFromEngine(updated.Status.Model)))
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -1313,16 +1324,16 @@ func (h *Handler) handleAgentRecreate(w http.ResponseWriter, r *http.Request, id
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.svc == nil {
+	if h.agentEngine == nil {
 		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	recreated, err := h.svc.Recreate(r.Context(), id)
+	recreated, err := h.agentEngine.Agents().Recreate(r.Context(), id, agentengine.AgentRecreateOptions{})
 	if err != nil {
 		writeAgentOperationError(w, err, http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.presentAgentResponse(recreated))
+	writeJSON(w, http.StatusOK, h.presentEngineAgentForRequest(r, recreated))
 }
 
 func (h *Handler) handleAgentUpgrade(w http.ResponseWriter, r *http.Request, id string) {
@@ -1330,16 +1341,16 @@ func (h *Handler) handleAgentUpgrade(w http.ResponseWriter, r *http.Request, id 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.svc == nil {
+	if h.agentEngine == nil {
 		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	recreated, err := h.svc.Upgrade(r.Context(), id)
+	recreated, err := h.agentEngine.Agents().Recreate(r.Context(), id, agentengine.AgentRecreateOptions{UpgradeImage: true})
 	if err != nil {
 		writeAgentOperationError(w, err, http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.presentAgentResponse(recreated))
+	writeJSON(w, http.StatusOK, h.presentEngineAgentForRequest(r, recreated))
 }
 
 func (h *Handler) handleAgentProfileModels(w http.ResponseWriter, r *http.Request) {
@@ -1384,16 +1395,23 @@ func (h *Handler) handleAgentStart(w http.ResponseWriter, r *http.Request, id st
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := h.svc.Reload(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if h.agentEngine == nil {
+		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	started, err := h.svc.Start(r.Context(), id)
+	agents := h.agentEngine.Agents()
+	current, err := agents.Get(r.Context(), id, agentengine.AgentGetOptions{Reload: true})
 	if err != nil {
 		writeAgentOperationError(w, err, http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.presentAgentResponse(started))
+	current.Spec.DesiredState = agentengine.AgentDesiredStateRunning
+	started, err := agents.Update(r.Context(), id, agentengine.AgentUpdateRequest{Spec: current.Spec, FieldMask: []string{"desired_state"}, ResourceVersion: current.ResourceVersion})
+	if err != nil {
+		writeAgentOperationError(w, err, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.presentEngineAgentForRequest(r, started))
 }
 
 func (h *Handler) handleAgentStartByID(w http.ResponseWriter, r *http.Request) {
@@ -1410,16 +1428,23 @@ func (h *Handler) handleAgentStop(w http.ResponseWriter, r *http.Request, id str
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := h.svc.Reload(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if h.agentEngine == nil {
+		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	stopped, err := h.svc.Stop(r.Context(), id)
+	agents := h.agentEngine.Agents()
+	current, err := agents.Get(r.Context(), id, agentengine.AgentGetOptions{Reload: true})
 	if err != nil {
 		writeAgentOperationError(w, err, http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.presentAgentResponse(stopped))
+	current.Spec.DesiredState = agentengine.AgentDesiredStateStopped
+	stopped, err := agents.Update(r.Context(), id, agentengine.AgentUpdateRequest{Spec: current.Spec, FieldMask: []string{"desired_state"}, ResourceVersion: current.ResourceVersion})
+	if err != nil {
+		writeAgentOperationError(w, err, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.presentEngineAgentForRequest(r, stopped))
 }
 
 func (h *Handler) handleAgentStopByID(w http.ResponseWriter, r *http.Request) {
@@ -1590,17 +1615,41 @@ func (h *Handler) handleCreateAgentWorker(w http.ResponseWriter, r *http.Request
 		return
 	}
 	createReq := agentCreateRequestFromAPI(req)
-	createReq.HubService = hubSvc
-	created, err := h.svc.Create(r.Context(), createReq)
+	if h.agentEngine == nil {
+		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	ctx := agentengine.WithLocalTemplateService(r.Context(), hubSvc)
+	agents := h.agentEngine.Agents()
+	var created agentengine.Agent
+	if createReq.Replace {
+		current, getErr := agents.Get(ctx, createReq.Spec.ID, agentengine.AgentGetOptions{})
+		if getErr != nil {
+			writeAgentOperationErrorWithBillingURL(w, getErr, http.StatusBadRequest, llm.OpenCSGBillingURL(createReq.Spec.AgentProfile))
+			return
+		}
+		update := engineReplaceRequest(createReq, current)
+		created, err = agents.Recreate(ctx, current.ID, agentengine.AgentRecreateOptions{Update: &update})
+	} else {
+		created, err = agents.Create(ctx, engineCreateRequest(createReq))
+	}
 	if err != nil {
 		writeAgentOperationErrorWithBillingURL(w, err, http.StatusBadRequest, llm.OpenCSGBillingURL(createReq.Spec.AgentProfile))
 		return
 	}
-	writeJSON(w, http.StatusCreated, h.presentAgentResponse(created))
+	writeJSON(w, http.StatusCreated, h.presentEngineAgentForRequest(r, created))
 }
 
 func writeAgentOperationError(w http.ResponseWriter, err error, defaultStatus int) {
 	writeAgentOperationErrorWithBillingURL(w, err, defaultStatus, "")
+}
+
+func writeAgentGetError(w http.ResponseWriter, err error) {
+	if agentengine.ErrorCodeOf(err) == agentengine.ErrorAgentNotFound {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusInternalServerError)
 }
 
 func writeAgentOperationErrorWithBillingURL(w http.ResponseWriter, err error, defaultStatus int, billingURL string) {
@@ -1759,10 +1808,10 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 		var item hub.Template
 		publishingTemplate := strings.TrimSpace(req.TemplateID) != ""
 		if publishingTemplate {
-			item, err = hubSvc.PublishTemplate(r.Context(), req.TemplateID, req.Registry)
+			item, err = hubSvc.PublishTemplate(r.Context(), req.TemplateID, req.Registry, req.IncludeMemory)
 		} else {
 			var spec hub.PublishSpec
-			spec, err = h.svc.HubPublishSpec(req.AgentID)
+			spec, err = h.svc.HubPublishSpec(req.AgentID, req.IncludeMemory)
 			if err == nil {
 				spec.Registry = req.Registry
 				if strings.TrimSpace(req.Name) != "" {
@@ -1785,6 +1834,9 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 			status := http.StatusBadGateway
 			code := hub.RemoteAPIErrorCode(err)
 			if !publishingTemplate {
+				status = http.StatusBadRequest
+			}
+			if code == "SYS-ERR-4" {
 				status = http.StatusBadRequest
 			}
 			if errors.Is(err, hub.ErrTemplateAlreadyExists) {
@@ -3051,6 +3103,24 @@ func (h *Handler) presentAgentsForRequest(r *http.Request, items []agent.Agent) 
 		h.backfillAgentLocalUser(&out[i])
 	}
 	return out
+}
+
+func (h *Handler) presentEngineAgentsForRequest(r *http.Request, items []agentengine.Agent) []agentResponse {
+	presented := make([]agent.Agent, 0, len(items))
+	for _, item := range items {
+		presented = append(presented, serviceAgentFromEngine(item))
+	}
+	responses := h.presentAgentsForRequest(r, presented)
+	for index := range responses {
+		responses[index].MemorySupported = items[index].Status.Capabilities.Memory
+	}
+	return responses
+}
+
+func (h *Handler) presentEngineAgentForRequest(r *http.Request, item agentengine.Agent) agentResponse {
+	response := h.presentAgentForRequest(r, serviceAgentFromEngine(item))
+	response.MemorySupported = item.Status.Capabilities.Memory
+	return response
 }
 
 func (h *Handler) presentAgentForRequest(r *http.Request, item agent.Agent) agentResponse {
