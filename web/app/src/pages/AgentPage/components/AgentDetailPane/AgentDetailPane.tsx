@@ -36,6 +36,7 @@ import { localizeAPIError } from "@/shared/i18n";
 import {
   EnvKeyValueEditor,
   FieldHelpTooltip,
+  ClipboardCopyButton,
   ModelOptionLabel,
   NotifierControls,
   ReasoningControls,
@@ -109,10 +110,15 @@ type VoidOrPromise = void | Promise<void>;
 type AgentActionHandler = (item: AgentLike) => VoidOrPromise;
 type AgentMetadataSavePatch = Pick<Partial<AgentDraft>, "description" | "name">;
 type AgentNoticeTone = "info" | "warning" | "success";
-type AgentPageDialogView = {
+type LarkCLIDialogView = {
+  kind: "message" | "install";
   message?: string;
   title?: string;
 } | null;
+const LARK_CLI_INSTALL_COMMAND = "npm install -g @larksuite/cli@latest";
+const LARK_CLI_INSTALL_DOCS_URL = "https://github.com/larksuite/cli#installation--quick-start";
+const LARK_CLI_RELEASES_URL = "https://github.com/larksuite/cli/releases/latest";
+const NODEJS_DOWNLOAD_URL = "https://nodejs.org/en/download";
 const AGENT_PROFILE_TAB_IDS = ["profile", "channels", "instructions", "memory", "skills", "mcp"] as const;
 type AgentProfileTabID = (typeof AGENT_PROFILE_TAB_IDS)[number];
 type UpdateAgentDraft = (patch: Partial<AgentDraft>) => void;
@@ -141,7 +147,7 @@ export type AgentDetailPaneProps = {
   feishuPendingRegistration?: FeishuPendingRegistrationView;
   hasUnsavedChanges?: boolean;
   item: AgentLike;
-  larkCLIErrorDialog?: AgentPageDialogView;
+  larkCLIDialog?: LarkCLIDialogView;
   modelBusy?: boolean;
   modelError?: unknown;
   modelOptions?: ModelProviderOption[];
@@ -167,8 +173,9 @@ export type AgentDetailPaneProps = {
   onStop: AgentActionHandler;
   onFinalizeFeishuConnect?: AgentActionHandler;
   onDisconnectFeishu?: AgentActionHandler;
-  onDismissLarkCLIErrorDialog?: () => void;
+  onDismissLarkCLIDialog?: () => void;
   onInitLarkCLI?: AgentActionHandler;
+  onShowLarkCLIInstall?: AgentActionHandler;
   onUpgrade?: AgentActionHandler;
   publishBusy?: boolean;
   publishDisabled?: boolean;
@@ -221,7 +228,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     error = "",
     feishuConnectBusy = "",
     feishuPendingRegistration = null,
-    larkCLIErrorDialog = null,
+    larkCLIDialog = null,
     draft,
     savedDraft = null,
     hasUnsavedChanges: hasUnsavedChangesProp = undefined,
@@ -271,8 +278,9 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     onMemoryChange,
     onStartFeishuConnect,
     onDisconnectFeishu,
-    onDismissLarkCLIErrorDialog,
+    onDismissLarkCLIDialog,
     onInitLarkCLI,
+    onShowLarkCLIInstall,
     onUpgrade,
     onDelete,
     onInvite,
@@ -920,6 +928,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 onStartFeishuConnect={onStartFeishuConnect}
                 onDisconnectFeishu={onDisconnectFeishu}
                 onInitLarkCLI={onInitLarkCLI}
+                onShowLarkCLIInstall={onShowLarkCLIInstall}
               />
             ) : null}
 
@@ -969,23 +978,85 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
         ) : null}
       </div>
       <DialogRoot
-        open={Boolean(larkCLIErrorDialog?.message)}
+        open={Boolean(larkCLIDialog?.message)}
         onOpenChange={(open) => {
           if (!open) {
-            onDismissLarkCLIErrorDialog?.();
+            onDismissLarkCLIDialog?.();
           }
         }}
       >
-        <DialogContent portalContainer={dialogPortalContainer}>
+        <DialogContent
+          className={larkCLIDialog?.kind === "install" ? "lark-cli-install-dialog" : undefined}
+          portalContainer={dialogPortalContainer}
+        >
           <DialogHeader>
-            <DialogTitle>{larkCLIErrorDialog?.title || t("larkCLIInitFailed")}</DialogTitle>
-            <DialogDescription>{larkCLIErrorDialog?.message || ""}</DialogDescription>
+            <div className="lark-cli-dialog-copy">
+              <DialogTitle>{larkCLIDialog?.title || t("larkCLIInitFailed")}</DialogTitle>
+              <DialogDescription>{larkCLIDialog?.message || ""}</DialogDescription>
+            </div>
             <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
           </DialogHeader>
+          {larkCLIDialog?.kind === "install" ? (
+            <DialogBody className="lark-cli-install-dialog-body">
+              <div className="lark-cli-install-step">
+                <strong>{t("larkCLIInstallNodeTitle")}</strong>
+                <span>{t("larkCLIInstallNodeDescription")}</span>
+                <a href={NODEJS_DOWNLOAD_URL} target="_blank" rel="noreferrer">
+                  {t("larkCLIInstallNodeLink")}
+                  <ExternalLink aria-hidden="true" size={14} strokeWidth={2} />
+                </a>
+              </div>
+              <div className="lark-cli-install-step">
+                <strong>{t("larkCLIInstallCommandTitle")}</strong>
+                <div className="lark-cli-install-command">
+                  <code>{LARK_CLI_INSTALL_COMMAND}</code>
+                  <ClipboardCopyButton
+                    className="lark-cli-install-copy"
+                    label={t("larkCLIInstallCopyCommand")}
+                    text={LARK_CLI_INSTALL_COMMAND}
+                  />
+                </div>
+                <span>{t("larkCLIInstallCommandHint")}</span>
+              </div>
+              <div className="lark-cli-install-alternative">
+                <span>{t("larkCLIInstallNativeDescription")}</span>
+                <a href={LARK_CLI_RELEASES_URL} target="_blank" rel="noreferrer">
+                  {t("larkCLIInstallReleasesLink")}
+                  <ExternalLink aria-hidden="true" size={14} strokeWidth={2} />
+                </a>
+              </div>
+              <p className="lark-cli-install-retry-hint">{t("larkCLIInstallRetryHint")}</p>
+            </DialogBody>
+          ) : null}
           <DialogFooter>
-            <Button variant="primary" size="sm" onClick={() => onDismissLarkCLIErrorDialog?.()}>
-              {t("confirm")}
-            </Button>
+            {larkCLIDialog?.kind === "install" ? (
+              <>
+                <a
+                  className="lark-cli-install-docs-link"
+                  href={LARK_CLI_INSTALL_DOCS_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t("larkCLIInstallDocsLink")}
+                  <ExternalLink aria-hidden="true" size={14} strokeWidth={2} />
+                </a>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    onDismissLarkCLIDialog?.();
+                    void onInitLarkCLI?.(item);
+                  }}
+                >
+                  <RefreshCw aria-hidden="true" size={15} strokeWidth={2} />
+                  {t("larkCLIRetryConfigure")}
+                </Button>
+              </>
+            ) : (
+              <Button variant="primary" size="sm" onClick={() => onDismissLarkCLIDialog?.()}>
+                {t("confirm")}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </DialogRoot>
@@ -2100,6 +2171,7 @@ type AgentChannelsSectionProps = {
   item: AgentLike;
   onDisconnectFeishu?: AgentActionHandler;
   onInitLarkCLI?: AgentActionHandler;
+  onShowLarkCLIInstall?: AgentActionHandler;
   onStartFeishuConnect?: AgentActionHandler;
   pendingRegistration?: FeishuPendingRegistrationView;
   t: TranslateFn;
@@ -2112,6 +2184,7 @@ function AgentChannelsSection({
   pendingRegistration = null,
   onDisconnectFeishu,
   onInitLarkCLI,
+  onShowLarkCLIInstall,
   onStartFeishuConnect,
 }: AgentChannelsSectionProps) {
   const connected = hasConnectedAgentChannel(item, "feishu");
@@ -2131,7 +2204,6 @@ function AgentChannelsSection({
   const connectLabel = connected ? t("feishuReconnect") : t("feishuConnect");
   const canStart = Boolean(onStartFeishuConnect);
   const canDisconnect = connected && Boolean(onDisconnectFeishu);
-  const canInitLarkCLI = Boolean(onInitLarkCLI);
   const connectURL = String(pendingRegistration?.connect_url || "").trim();
   const larkCLIState = String(item.lark_cli?.state || "")
     .trim()
@@ -2139,6 +2211,7 @@ function AgentChannelsSection({
   const larkCLIUnavailable = larkCLIState === "unavailable";
   const larkCLIMismatch = larkCLIState === "mismatch";
   const larkCLIBound = Boolean(item.lark_cli?.bound) && !larkCLIUnavailable && !larkCLIMismatch;
+  const canInitLarkCLI = larkCLIUnavailable ? Boolean(onShowLarkCLIInstall) : Boolean(onInitLarkCLI);
   const larkCLIButtonLabel = larkCLIUnavailable
     ? t("larkCLIInstallRequiredAction")
     : larkCLIMismatch
@@ -2208,7 +2281,7 @@ function AgentChannelsSection({
               loading={larkCLIInitBusy}
               loadingLabel={larkCLIButtonLabel}
               disabled={!canInitLarkCLI || actionBusy}
-              onClick={() => onInitLarkCLI?.(item)}
+              onClick={() => (larkCLIUnavailable ? onShowLarkCLIInstall?.(item) : onInitLarkCLI?.(item))}
             >
               {larkCLIUnavailable ? (
                 <AlertCircle aria-hidden="true" size={15} strokeWidth={2} />

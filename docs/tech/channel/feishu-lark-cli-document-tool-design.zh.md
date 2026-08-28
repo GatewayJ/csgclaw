@@ -13,8 +13,8 @@ Channel Transport 直接调用文档 API。
 - `lark-cli` 是 Codex worker 运行时工具，不是飞书 Channel Transport 的依赖。
 - 飞书 Bot 的 `app_id/app_secret` 继续放在 Feishu Agent Participant 的
   `channel_app_config`，不放入 Agent profile、prompt 或普通环境变量。
-- worker profile 的 Feishu Channel 页面提供“初始化 lark-cli”按钮。
-- 初始化按钮调用 `POST /api/v1/agents/{id}/lark-cli:init`。
+- worker profile 的 Feishu Channel 页面按检测状态提供“查看安装方法”或“配置渠道工具”按钮。
+- “配置渠道工具”和安装引导中的“重新检测并配置”调用 `POST /api/v1/agents/{id}/lark-cli:init`。
 - 如果宿主机已有 `lark-cli`，直接执行绑定；如果没有，则提示用户先在宿主机安装 `lark-cli`。
 - 每个 worker 使用自己的 `<CODEX_HOME>/lark-cli` 作为 `LARKSUITE_CLI_CONFIG_DIR`。
 - 每个 worker 使用自己的 `<CODEX_HOME>/lark-cli-source/config.json` 作为 `LARK_CHANNEL_CONFIG`。
@@ -46,13 +46,33 @@ worker 运行时直接执行 `lark-cli ...` 命令。
 2. 找到则复用现有二进制并继续绑定；
 3. 找不到则返回 `lark_cli_unavailable`，提示用户在宿主机安装 `lark-cli` 后重试。
 
-因此当前代码不需要 JVM，也不要求 CSGClaw 进程具备 Node.js/npm。Node.js/npm/npx 只是官方
-`lark-cli` 安装方式的一种依赖；CSGClaw 自己不会执行 npm、npx、下载或全局安装动作。
+因此当前代码不需要 JVM，也没有把 Node.js/npm 声明为 CSGClaw 自身依赖。`lark-cli` 由用户或部署方
+安装、升级和移除；CSGClaw 自己不会执行 npm、npx、下载或全局安装动作。
 
-## 3. 当前初始化不是 config init
+Profile 页面在检测不到命令时显示“查看安装方法”，推荐在运行 CSGClaw 的账号可用的终端中执行：
 
-当前按钮名叫“初始化 lark-cli”，但实际没有执行 `lark-cli config init`。当前实现使用的是
-`lark-channel` source projection：
+```bash
+npm install -g @larksuite/cli@latest
+```
+
+这条命令只安装 npm 分发的 `lark-cli` 命令，不执行 CSGClaw 的 worker 绑定，也不替 worker 执行
+`config init`、OAuth 登录或全量 Skills 安装。通过 npm 安装时，宿主机需要先安装并保留 Node.js/npm，
+`PATH` 中的 `lark-cli` 可能是 npm 生成的启动 shim；CSGClaw 对 shim 和原生可执行文件一视同仁，只要求
+该命令能够被当前 CSGClaw 进程找到并成功执行。
+
+没有 Node.js 的主机可以从 lark-cli 官方 Releases 下载与操作系统、CPU 架构匹配的原生二进制，将它
+命名为 `lark-cli`、授予执行权限并放入 CSGClaw 进程的 `PATH`。macOS、Linux、Windows 都遵循同一
+检测规则。安装后若页面仍检测不到命令，应重启 CSGClaw 以刷新进程继承的 `PATH`，然后点击
+“重新检测并配置”。不建议使用 `sudo npm install -g` 绕过 npm 权限问题，应配置当前账号可写的 npm
+全局目录。
+
+这里不推荐 `npx @larksuite/cli@latest install` 作为 CSGClaw 的标准引导，因为该交互式安装器还可能
+继续安装 Skills、初始化默认 profile 和引导用户 OAuth；这些动作与 CSGClaw 的 worker 私有绑定不是
+同一流程。
+
+## 3. 当前“配置渠道工具”不是 config init
+
+页面的配置动作没有执行 `lark-cli config init`。当前实现使用的是 `lark-channel` source projection：
 
 ```bash
 LARKSUITE_CLI_CONFIG_DIR=<worker CODEX_HOME>/lark-cli \
@@ -63,14 +83,14 @@ LARK_CHANNEL_CONFIG=<worker CODEX_HOME>/lark-cli-source/config.json \
 lark-cli config bind --source lark-channel --identity bot-only --force --lang zh
 ```
 
-也就是说，初始化阶段做的是“把 worker 的 Feishu App 信息绑定进这个 worker 自己的 lark-cli
+也就是说，配置阶段做的是“把 worker 的 Feishu App 信息绑定进这个 worker 自己的 lark-cli
 配置抽屉”。App Secret 不通过命令行参数或 stdin 传给 `lark-cli`，而是由 source config 中的
 exec provider 按需读取。
 
 配置有两个入口，但复用同一个幂等后端流程：
 
 - Codex worker 完成飞书连接时，如果宿主机 `PATH` 中存在 `lark-cli`，自动完成配置；
-- Profile 的 Feishu Channel 页面保留初始化按钮，供安装二进制后初始化、失败重试或主动刷新绑定。
+- Profile 的 Feishu Channel 页面保留配置入口，供安装二进制后绑定、失败重试或主动刷新绑定。
 
 完整步骤如下：
 
@@ -87,12 +107,12 @@ exec provider 按需读取。
 11. 在 staging source 中写入 `bound.json`，权限为 `0600`；
 12. bind 成功后用 staging 目录覆盖正式 `<CODEX_HOME>/lark-cli` 和 `<CODEX_HOME>/lark-cli-source`；
 13. 刷新 worker 的 managed instructions；
-14. 手动初始化时，如果 Codex worker 当前正在运行，则重启 worker 以加载新环境；飞书连接流程中的自动配置
+14. 手动配置时，如果 Codex worker 当前正在运行，则重启 worker 以加载新环境；飞书连接流程中的自动配置
     由紧随其后的渠道激活动作一次性加载，不额外重启。
 
 正式目录不做备份。bind 失败时失败发生在 staging 中，旧的正式目录不会被改写；bind 成功后以本次
-staging 结果为准直接覆盖旧目录，因此同一个 worker 可以重复点击初始化来重试或刷新绑定。后端按
-Agent ID 串行化配置，避免飞书自动配置和用户点击初始化同时改写同一 worker 的目录。
+staging 结果为准直接覆盖旧目录，因此同一个 worker 可以重复配置来重试或刷新绑定。后端按 Agent ID
+串行化配置，避免飞书自动配置和用户手动配置同时改写同一 worker 的目录。
 
 ## 4. Bot 信息放在哪里
 
@@ -245,10 +265,10 @@ LARK_CHANNEL_PROFILE=agent-b
 当前用户入口在 Agent profile 的 Feishu Channel 页面：
 
 - 连接/重新连接 Feishu；
-- 初始化 lark-cli；
+- 查看安装方法或配置渠道工具；
 - 断开 Feishu。
 
-初始化按钮调用：
+配置动作调用：
 
 ```text
 POST /api/v1/agents/{id}/lark-cli:init
@@ -290,10 +310,11 @@ Agent API 会由后端读取 worker 的 `bound.json` 和 source config，并返�
 }
 ```
 
-`state=bound` 时按钮显示“已配置”；`state=mismatch` 时显示“重新初始化 lark-cli”；二进制可用但没有
-marker 或 source config 时显示“初始化 lark-cli”；宿主机找不到二进制时返回 `state=unavailable`，按钮
-显示“安装后初始化 lark-cli”。这个按钮仍然调用同一个幂等 init API，因此用户完成手动安装后可以直接
-点击，不要求先刷新页面。
+`state=bound` 时按钮显示“已配置渠道工具”；`state=mismatch` 时显示“重新配置渠道工具”；二进制可用
+但没有 marker 或 source config 时显示“配置渠道工具”。宿主机找不到二进制时返回
+`state=unavailable`，按钮显示“查看安装方法”；点击只打开安装引导，不发起一个必然失败的 init 请求。
+用户完成手动安装后，在引导弹窗点击“重新检测并配置”才调用同一个幂等 init API，不要求先刷新页面。
+若新安装位置尚未进入 CSGClaw 进程的 `PATH`，页面提示用户重启 CSGClaw 后再检测。
 
 飞书连接本身不依赖 lark-cli 自动配置成功。宿主机未安装或 bind 失败时，Feishu Bot 连接仍然成功，
 后端记录 warning，Agent API 则返回对应的 `unavailable` 或 `unbound/mismatch` 状态供页面提示和重试。
@@ -303,10 +324,10 @@ marker 或 source config 时显示“初始化 lark-cli”；宿主机找不到�
 | 错误码 | 含义 | UI 行为 |
 | --- | --- | --- |
 | `feishu_bot_not_configured` | 该 worker 没有 Feishu Bot app info | 弹窗提示先连接飞书并完成 Bot 配置 |
-| `feishu_bot_app_id_conflict` | 该 AppID 已被其他 worker 使用 | 显示初始化失败 |
-| `lark_cli_unavailable` | 宿主机没有 `lark-cli` 或不在 `PATH` 中 | 弹窗提示用户先在宿主机安装 |
-| `lark_cli_bind_failed` | `lark-cli config bind` 失败 | 显示初始化失败；正式 source/marker 不会被改写 |
-| `unsupported_runtime` | 目标不是 Codex worker | 显示初始化失败 |
+| `feishu_bot_app_id_conflict` | 该 AppID 已被其他 worker 使用 | 显示配置失败 |
+| `lark_cli_unavailable` | 宿主机没有 `lark-cli` 或不在 `PATH` 中 | 展示安装命令、官方文档、原生 Releases 和重新检测动作 |
+| `lark_cli_bind_failed` | `lark-cli config bind` 失败 | 显示配置失败；正式 source/marker 不会被改写 |
+| `unsupported_runtime` | 目标不是 Codex worker | 显示配置失败 |
 
 如果 bind 成功但 worker 重启失败，接口仍返回 `status=configured`，并带
 `restart_status=restart_failed` 和 `restart_error`。前端会提示 lark-cli 已绑定，但需要手动重启
@@ -329,7 +350,7 @@ worker。
 5. 如果 Codex worker 正在运行，则重启 worker。
 
 这意味着用户断开飞书并选择新机器人后，旧机器人的 lark-cli 本地配置会被清掉。下一次点击
-“初始化 lark-cli”会按新 Participant 的 `app_id/app_secret` 重新写 source config 并 bind。
+“配置渠道工具”会按新 Participant 的 `app_id/app_secret` 重新写 source config 并 bind。
 
 ## 10. 飞书评论如何使用 lark-cli
 
@@ -375,7 +396,7 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 - 不要切到宿主默认 lark-cli profile；
 - 不要读取或打印 lark-cli config、app secret、access token、refresh token、OAuth device code 或
   CSGClaw API token；
-- 如果 lark-cli 提示当前上下文未绑定，则让用户在 Feishu channel profile 页面初始化或重启 worker；
+- 如果 lark-cli 提示当前上下文未绑定，则让用户在 Feishu channel profile 页面配置渠道工具或重启 worker；
 - Doc/Docx 优先使用 `lark-cli docs +fetch --api-version v2 --doc <file_token> --doc-format markdown`；
 - 用户提到当前飞书会话中以前上传的附件时，只使用隐藏上下文中的当前 `chat_id`，先以 Bot 身份执行
   `lark-cli im +chat-messages-list` 查询消息元数据，再按唯一匹配的 `message_id + file_key` 执行
@@ -429,8 +450,8 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 | `internal/agent/agents_instructions.go` | `Feishu lark-cli Access` managed instructions |
 | `internal/api/participant.go` | 断开 Feishu participant 后清理 worker lark-cli 状态 |
 | `internal/channel/feishu/ingress/comment.go` | 在评论 prompt 中提示按文件类型使用 lark-cli |
-| `web/app/src/pages/AgentPage/components/AgentDetailPane/AgentDetailPane.tsx` | Feishu Channel 页面按 `lark_cli` status 展示安装后初始化/初始化/已配置/重新初始化按钮 |
-| `web/app/src/hooks/workspace/useAgentController.ts` | 调用 init API、展示成功/错误/缺少 Bot 弹窗 |
+| `web/app/src/pages/AgentPage/components/AgentDetailPane/AgentDetailPane.tsx` | Feishu Channel 页面按 `lark_cli` status 展示安装引导/配置/已配置/重新配置按钮 |
+| `web/app/src/hooks/workspace/useAgentController.ts` | 调用 init API，展示安装引导、成功、错误和缺少 Bot 弹窗 |
 
 ## 14. 后续最佳实践
 
@@ -448,8 +469,8 @@ Channel 不会把 Codex 下载到 workspace 的文件自动上传回飞书。最
 
 - Codex worker 完成飞书连接时，宿主机已有 `lark-cli` 会自动完成 worker 私有绑定；
 - 宿主机没有 `lark-cli` 时飞书连接仍然成功，Agent API 返回 `state=unavailable`；
-- 未配置 Feishu Bot 的 worker 点击初始化会返回 `feishu_bot_not_configured`；
-- 已配置 Feishu Bot 的 Codex worker 点击初始化会生成独立的 `lark-cli` 和 `lark-cli-source` 目录；
+- 未配置 Feishu Bot 的 worker 执行配置会返回 `feishu_bot_not_configured`；
+- 已配置 Feishu Bot 的 Codex worker 执行配置会生成独立的 `lark-cli` 和 `lark-cli-source` 目录；
 - source config 权限为 `0600`，目录权限为 `0700`；
 - `lark-cli config bind` 的环境变量指向当前 worker 的目录；
 - runtime 只在 source config 和 bound marker 同时存在时注入 `LARK*` 环境；
