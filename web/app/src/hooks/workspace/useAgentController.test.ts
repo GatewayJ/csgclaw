@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { WorkspacePaneTypes } from "@/models/routing";
-import { agentSelectionAfterDelete, shouldReturnToAgentOverviewAfterAgentMissing } from "./useAgentController";
+import {
+  agentSelectionAfterDelete,
+  feishuRegistrationFinalizeNotice,
+  shouldReturnToAgentOverviewAfterAgentMissing,
+} from "./useAgentController";
 
 describe("shouldReturnToAgentOverviewAfterAgentMissing", () => {
   it("keeps the workspace on the agent overview when an agent disappears", () => {
@@ -37,5 +41,23 @@ describe("agentSelectionAfterDelete", () => {
 
   it("falls back to Manager when no ordinary agent remains", () => {
     expect(agentSelectionAfterDelete([manager, alpha], alpha.id)?.id).toBe(manager.id);
+  });
+});
+
+describe("feishuRegistrationFinalizeNotice", () => {
+  it("surfaces structured lark-cli failures as warnings", () => {
+    expect(
+      feishuRegistrationFinalizeNotice({
+        lark_cli_status: "error",
+        lark_cli_error: { code: "lark_cli_bind_failed" },
+      }),
+    ).toEqual({ kind: "bind_failed", warnings: [] });
+  });
+
+  it("keeps backward-compatible warnings visible", () => {
+    expect(feishuRegistrationFinalizeNotice({ warnings: [" first ", "", "second"] })).toEqual({
+      kind: "warnings",
+      warnings: ["first", "second"],
+    });
   });
 });

@@ -419,6 +419,14 @@ func participantSpec(name string) CommandSpec {
 					FlagSpec{Name: "restart"},
 				),
 			},
+			{
+				Name:    "app-info",
+				Summary: "Read Feishu bot app info",
+				Flags: append(feishuChannelFlags(),
+					FlagSpec{Name: "agent-id", TakesValue: true},
+					FlagSpec{Name: "exec-provider"},
+				),
+			},
 		},
 	}
 }

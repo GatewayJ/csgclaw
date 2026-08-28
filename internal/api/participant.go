@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -169,10 +170,14 @@ func (h *Handler) deactivateFeishuAgentAfterDisconnect(ctx context.Context, dele
 			}
 		}
 	}
+	var errs []error
 	if _, _, err := h.svc.DeactivateExternalBinding(ctx, agentID, participant.ChannelFeishu); err != nil {
-		return fmt.Errorf("deactivate feishu binding for agent %q after disconnecting participant %q: %w", agentID, deleted.ID, err)
+		errs = append(errs, fmt.Errorf("deactivate feishu binding for agent %q after disconnecting participant %q: %w", agentID, deleted.ID, err))
 	}
-	return nil
+	if err := h.clearAgentLarkCLIState(ctx, agentID); err != nil {
+		errs = append(errs, fmt.Errorf("clear lark-cli state for agent %q after disconnecting participant %q: %w", agentID, deleted.ID, err))
+	}
+	return errors.Join(errs...)
 }
 
 func (h *Handler) handleParticipantEvents(w http.ResponseWriter, r *http.Request) {

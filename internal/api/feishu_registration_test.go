@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,6 +136,286 @@ func TestFinalizeFeishuRegistrationBindsWorkerParticipant(t *testing.T) {
 	srv.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("registration state status after successful finalize = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestFinalizeFeishuRegistrationConfiguresAvailableLarkCLIForCodexWorker(t *testing.T) {
+	originalLookPath := larkCLILookPath
+	originalCommandContext := larkCLICommandContext
+	originalCurrentExe := larkCLICurrentExe
+	t.Cleanup(func() {
+		larkCLILookPath = originalLookPath
+		larkCLICommandContext = originalCommandContext
+		larkCLICurrentExe = originalCurrentExe
+	})
+
+	recordPath := filepath.Join(t.TempDir(), "bind.json")
+	t.Setenv("CSGCLAW_FAKE_LARK_CLI_COMMAND", "1")
+	t.Setenv("CSGCLAW_FAKE_LARK_RECORD_PATH", recordPath)
+	larkCLILookPath = func(name string) (string, error) {
+		if name == "lark-cli" {
+			return "/opt/lark/bin/lark-cli", nil
+		}
+		return "", os.ErrNotExist
+	}
+	larkCLICommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		helperArgs := append([]string{"-test.run=^TestLarkCLIFakeCommand$", "--"}, args...)
+		return exec.CommandContext(ctx, os.Args[0], helperArgs...)
+	}
+	larkCLICurrentExe = func() (string, error) {
+		return "/opt/csgclaw/bin/csgclaw", nil
+	}
+
+	accounts := newFakeFeishuAccountsServer(t, map[string]any{
+		"client_id":     "cli_dev",
+		"client_secret": "dev-secret",
+	})
+	defer accounts.Close()
+	withFeishuRegistrationAccountsBaseURL(t, accounts.URL)
+
+	worker := completeWorkerAgent("u-dev", "dev")
+	worker.RuntimeKind = agent.RuntimeKindCodex
+	bridge := &fakeCodexBridgeController{}
+	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{worker},
+		agent.WithRuntime(fakeCompatRuntime{kind: agent.RuntimeKindCodex}),
+		agent.WithBindingActivator(bridge),
+	)
+	participantSvc := participant.NewService(participant.NewMemoryStore(nil), participant.WithAgentService(agentSvc))
+	srv := &Handler{
+		svc:                        agentSvc,
+		participant:                participantSvc,
+		serverAccessToken:          "server-secret",
+		advertiseBaseURL:           "http://csgclaw.test",
+		feishuRegistrationStateDir: filepath.Join(t.TempDir(), "registrations"),
+	}
+	registrationID := startFeishuRegistrationForTest(t, srv, "u-dev")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/registrations/"+url.PathEscape(registrationID)+":finalize", nil)
+	srv.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var finalizeResult feishuRegistrationFinalizeResponse
+	if err := json.NewDecoder(rec.Body).Decode(&finalizeResult); err != nil {
+		t.Fatalf("decode finalize response: %v", err)
+	}
+	if finalizeResult.LarkCLIStatus != "configured" || finalizeResult.LarkCLIError != nil {
+		t.Fatalf("lark-cli finalize status = %q error=%+v", finalizeResult.LarkCLIStatus, finalizeResult.LarkCLIError)
+	}
+	if len(bridge.refreshCalls) != 1 || bridge.refreshCalls[0].agent.ID != "agent-dev" {
+		t.Fatalf("RefreshAgentChannel() calls = %+v, want agent-dev once", bridge.refreshCalls)
+	}
+
+	recordRaw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read fake bind record: %v", err)
+	}
+	var bind struct {
+		Args []string          `json:"args"`
+		Env  map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(recordRaw, &bind); err != nil {
+		t.Fatalf("decode fake bind record: %v", err)
+	}
+	if got, want := strings.Join(bind.Args, " "), "config bind --source lark-channel --identity bot-only --force --lang zh"; got != want {
+		t.Fatalf("bind args = %q, want %q", got, want)
+	}
+
+	agentReq := httptest.NewRequest(http.MethodGet, "/api/v1/agents/u-dev", nil)
+	agentRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(agentRec, agentReq)
+	if agentRec.Code != http.StatusOK {
+		t.Fatalf("agent status = %d, want %d; body=%s", agentRec.Code, http.StatusOK, agentRec.Body.String())
+	}
+	var agentGot agentResponse
+	if err := json.NewDecoder(agentRec.Body).Decode(&agentGot); err != nil {
+		t.Fatalf("decode agent response: %v", err)
+	}
+	if agentGot.LarkCLI == nil || !agentGot.LarkCLI.Available || !agentGot.LarkCLI.Bound || agentGot.LarkCLI.State != larkCLIStatusBound {
+		t.Fatalf("agent lark_cli status = %#v, want available and bound", agentGot.LarkCLI)
+	}
+}
+
+func TestFinalizeFeishuRegistrationKeepsConnectionWhenLarkCLIUnavailable(t *testing.T) {
+	originalLookPath := larkCLILookPath
+	t.Cleanup(func() {
+		larkCLILookPath = originalLookPath
+	})
+	larkCLILookPath = func(string) (string, error) {
+		return "", os.ErrNotExist
+	}
+
+	accounts := newFakeFeishuAccountsServer(t, map[string]any{
+		"client_id":     "cli_dev",
+		"client_secret": "dev-secret",
+	})
+	defer accounts.Close()
+	withFeishuRegistrationAccountsBaseURL(t, accounts.URL)
+
+	worker := completeWorkerAgent("u-dev", "dev")
+	worker.RuntimeKind = agent.RuntimeKindCodex
+	bridge := &fakeCodexBridgeController{}
+	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{worker},
+		agent.WithRuntime(fakeCompatRuntime{kind: agent.RuntimeKindCodex}),
+		agent.WithBindingActivator(bridge),
+	)
+	participantSvc := participant.NewService(participant.NewMemoryStore(nil), participant.WithAgentService(agentSvc))
+	srv := &Handler{
+		svc:                        agentSvc,
+		participant:                participantSvc,
+		serverAccessToken:          "server-secret",
+		feishuRegistrationStateDir: filepath.Join(t.TempDir(), "registrations"),
+	}
+	registrationID := startFeishuRegistrationForTest(t, srv, "u-dev")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/registrations/"+url.PathEscape(registrationID)+":finalize", nil)
+	srv.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var finalizeResult feishuRegistrationFinalizeResponse
+	if err := json.NewDecoder(rec.Body).Decode(&finalizeResult); err != nil {
+		t.Fatalf("decode finalize response: %v", err)
+	}
+	if finalizeResult.LarkCLIStatus != "unavailable" ||
+		finalizeResult.LarkCLIError == nil ||
+		finalizeResult.LarkCLIError.Code != "lark_cli_unavailable" {
+		t.Fatalf("lark-cli finalize status = %q error=%+v", finalizeResult.LarkCLIStatus, finalizeResult.LarkCLIError)
+	}
+	if !strings.Contains(strings.Join(finalizeResult.Warnings, " "), "lark-cli is not installed") {
+		t.Fatalf("finalize response warnings = %#v, want install warning", finalizeResult.Warnings)
+	}
+	if _, ok := participantSvc.Get(participant.ChannelFeishu, "pt-dev"); !ok {
+		t.Fatal("Feishu participant was not stored when lark-cli was unavailable")
+	}
+
+	agentReq := httptest.NewRequest(http.MethodGet, "/api/v1/agents/u-dev", nil)
+	agentRec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(agentRec, agentReq)
+	var agentGot agentResponse
+	if err := json.NewDecoder(agentRec.Body).Decode(&agentGot); err != nil {
+		t.Fatalf("decode agent response: %v", err)
+	}
+	if agentGot.LarkCLI == nil || agentGot.LarkCLI.Available || agentGot.LarkCLI.State != larkCLIStatusUnavailable {
+		t.Fatalf("agent lark_cli status = %#v, want unavailable", agentGot.LarkCLI)
+	}
+}
+
+func TestFinalizeFeishuRegistrationReportsLarkCLIBindFailure(t *testing.T) {
+	originalLookPath := larkCLILookPath
+	originalCommandContext := larkCLICommandContext
+	originalCurrentExe := larkCLICurrentExe
+	t.Cleanup(func() {
+		larkCLILookPath = originalLookPath
+		larkCLICommandContext = originalCommandContext
+		larkCLICurrentExe = originalCurrentExe
+	})
+
+	t.Setenv("CSGCLAW_FAKE_LARK_CLI_COMMAND", "1")
+	t.Setenv("CSGCLAW_FAKE_LARK_RECORD_PATH", filepath.Join(t.TempDir(), "bind.json"))
+	t.Setenv("CSGCLAW_FAKE_LARK_BIND_EXIT_CODE", "1")
+	larkCLILookPath = func(name string) (string, error) {
+		if name == "lark-cli" {
+			return "/opt/lark/bin/lark-cli", nil
+		}
+		return "", os.ErrNotExist
+	}
+	larkCLICommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		helperArgs := append([]string{"-test.run=^TestLarkCLIFakeCommand$", "--"}, args...)
+		return exec.CommandContext(ctx, os.Args[0], helperArgs...)
+	}
+	larkCLICurrentExe = func() (string, error) {
+		return "/opt/csgclaw/bin/csgclaw", nil
+	}
+
+	accounts := newFakeFeishuAccountsServer(t, map[string]any{
+		"client_id":     "cli_dev",
+		"client_secret": "dev-secret",
+	})
+	defer accounts.Close()
+	withFeishuRegistrationAccountsBaseURL(t, accounts.URL)
+
+	worker := completeWorkerAgent("u-dev", "dev")
+	worker.RuntimeKind = agent.RuntimeKindCodex
+	bridge := &fakeCodexBridgeController{}
+	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{worker},
+		agent.WithRuntime(fakeCompatRuntime{kind: agent.RuntimeKindCodex}),
+		agent.WithBindingActivator(bridge),
+	)
+	participantSvc := participant.NewService(participant.NewMemoryStore(nil), participant.WithAgentService(agentSvc))
+	srv := &Handler{
+		svc:                        agentSvc,
+		participant:                participantSvc,
+		serverAccessToken:          "server-secret",
+		feishuRegistrationStateDir: filepath.Join(t.TempDir(), "registrations"),
+	}
+	registrationID := startFeishuRegistrationForTest(t, srv, "u-dev")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/registrations/"+url.PathEscape(registrationID)+":finalize", nil)
+	srv.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var result feishuRegistrationFinalizeResponse
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decode finalize response: %v", err)
+	}
+	if result.LarkCLIStatus != "error" || result.LarkCLIError == nil || result.LarkCLIError.Code != "lark_cli_bind_failed" {
+		t.Fatalf("lark-cli finalize status = %q error=%+v", result.LarkCLIStatus, result.LarkCLIError)
+	}
+	if _, ok := participantSvc.Get(participant.ChannelFeishu, "pt-dev"); !ok {
+		t.Fatal("Feishu participant was not stored when automatic lark-cli bind failed")
+	}
+}
+
+func TestFinalizeFeishuRegistrationRejectsBotAppIDUsedByAnotherWorker(t *testing.T) {
+	accounts := newFakeFeishuAccountsServer(t, map[string]any{
+		"client_id":     "cli_shared",
+		"client_secret": "qa-secret",
+	})
+	defer accounts.Close()
+	withFeishuRegistrationAccountsBaseURL(t, accounts.URL)
+
+	agentSvc, _ := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{
+		completeWorkerAgent("u-dev", "dev"),
+		completeWorkerAgent("u-qa", "qa"),
+	}, agent.WithRuntime(fakeCompatRuntime{kind: agent.RuntimeKindPicoClawSandbox}))
+	participantSvc := participant.NewService(participant.NewMemoryStore([]apitypes.Participant{{
+		ID:              "pt-dev",
+		Channel:         participant.ChannelFeishu,
+		Type:            participant.TypeAgent,
+		Name:            "dev",
+		ChannelUserKind: participant.ChannelUserKindAppID,
+		ChannelAppConfig: map[string]any{
+			"app_id":     "cli_shared",
+			"app_secret": "dev-secret",
+		},
+		AgentID:         "agent-dev",
+		LifecycleStatus: participant.LifecycleStatusActive,
+		Mentionable:     true,
+	}}), participant.WithAgentService(agentSvc))
+	srv := &Handler{
+		svc:                        agentSvc,
+		participant:                participantSvc,
+		feishuRegistrationStateDir: filepath.Join(t.TempDir(), "registrations"),
+	}
+	registrationID := startFeishuRegistrationForTest(t, srv, "u-qa")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/feishu/registrations/"+url.PathEscape(registrationID)+":finalize", nil)
+	srv.Routes().ServeHTTP(rec, req)
+
+	assertAPIErrorCode(t, rec, http.StatusConflict, feishuBotAppIDConflictCode)
+	if _, ok := participantSvc.Get(participant.ChannelFeishu, "pt-qa"); ok {
+		t.Fatal("conflicting Feishu participant was written before AppID validation")
+	}
+	stored, ok := participantSvc.Get(participant.ChannelFeishu, "pt-dev")
+	if !ok || stored.ChannelAppConfig[participant.ChannelAppConfigAppSecretKey] != "dev-secret" {
+		t.Fatalf("existing participant changed after conflict: %+v", stored)
 	}
 }
 

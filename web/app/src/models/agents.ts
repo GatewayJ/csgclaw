@@ -113,6 +113,19 @@ export type AgentRuntimeAvailabilityLike = {
   reason?: string | null;
 };
 
+export type AgentLarkCLIStatus = {
+  bound?: boolean | null;
+  available?: boolean | null;
+  state?: string | null;
+  error?: string | null;
+  executable_path?: string | null;
+  app_id?: string | null;
+  config_dir?: string | null;
+  config_path?: string | null;
+  source_config_path?: string | null;
+  bound_at?: string | null;
+};
+
 export type AgentLike = AgentProfileLike & {
   agent_profile?: AgentProfileLike | null;
   model_config?: AgentProfileLike | null;
@@ -139,6 +152,7 @@ export type AgentLike = AgentProfileLike & {
   template_name?: string | null;
   user_id?: string | null;
   user_name?: string | null;
+  lark_cli?: AgentLarkCLIStatus | null;
   participants?:
     | {
         agent_id?: string | null;

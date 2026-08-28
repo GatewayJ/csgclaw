@@ -88,6 +88,10 @@ type Handler struct {
 	sessionBindings            *agentsession.Store
 	localDirectoryPicker       func(context.Context) (string, error)
 	feishuRegistrationStateDir string
+	larkCLIBindLocksMu         sync.Mutex
+	larkCLIBindLocks           map[string]*sync.Mutex
+	larkCLIProbeMu             sync.Mutex
+	larkCLIProbe               larkCLIProbeCache
 
 	participantActivityTurnsMu sync.Mutex
 	participantActivityTurns   map[string]participantActivityTurn
@@ -214,6 +218,7 @@ type agentResponse struct {
 	ParticipantIDs       []string                           `json:"participant_ids,omitempty"`
 	ParticipantNames     []string                           `json:"participant_names,omitempty"`
 	Participants         []apitypes.Participant             `json:"participants,omitempty"`
+	LarkCLI              *apitypes.AgentLarkCLIStatus       `json:"lark_cli,omitempty"`
 }
 
 func (r *agentResponse) UnmarshalJSON(data []byte) error {
@@ -247,6 +252,7 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 		ParticipantIDs:   apiAgent.ParticipantIDs,
 		ParticipantNames: apiAgent.ParticipantNames,
 		Participants:     apiAgent.Participants,
+		LarkCLI:          apiAgent.LarkCLI,
 	}
 	if len(apiAgent.Runtime.OptionSchemas) > 0 {
 		data, err := json.Marshal(apiAgent.Runtime.OptionSchemas)
@@ -3159,6 +3165,7 @@ func (h *Handler) presentAgentResponse(item agent.Agent) agentResponse {
 		resp.MemorySupported = h.svc.SupportsMemory(item.RuntimeKind)
 	}
 	resp.Runtime.OptionSchemas = runtimeOptionSchemasForAPI(resp.RuntimeOptionSchemas)
+	resp.LarkCLI = h.agentLarkCLIStatus(item)
 	return resp
 }
 

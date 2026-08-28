@@ -86,6 +86,18 @@ func (c *Client) GetAgent(ctx context.Context, id string) (apitypes.Agent, error
 	return got, nil
 }
 
+func (c *Client) GetAgentFeishuAppInfo(ctx context.Context, id string) (apitypes.FeishuBotAppInfo, error) {
+	var got apitypes.FeishuBotAppInfo
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return apitypes.FeishuBotAppInfo{}, fmt.Errorf("agent id is required")
+	}
+	if err := c.GetJSON(ctx, "/api/v1/agents/"+url.PathEscape(id)+"/feishu/app-info", &got); err != nil {
+		return apitypes.FeishuBotAppInfo{}, err
+	}
+	return got, nil
+}
+
 func (c *Client) CreateParticipant(ctx context.Context, req participant.CreateRequest) (apitypes.Participant, error) {
 	var created apitypes.Participant
 	path, err := participantCollectionPath(req.Channel)

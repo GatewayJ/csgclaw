@@ -52,6 +52,8 @@ func (c cmd) Run(ctx context.Context, run *command.Context, args []string, globa
 		return c.runCreate(ctx, run, args[1:], globals)
 	case "bind":
 		return c.runBind(ctx, run, args[1:], globals)
+	case "app-info":
+		return c.runAppInfo(ctx, run, args[1:], globals)
 	case "delete":
 		return c.runDelete(ctx, run, args[1:], globals)
 	default:
@@ -65,6 +67,7 @@ func (c cmd) usage(run *command.Context) {
 		"list               List participants",
 		"create             Create a participant",
 		"bind               Bind an external channel identity",
+		"app-info           Read Feishu bot app info",
 		"delete <id>        Delete a participant",
 	}
 	run.UsageCommandGroup(c, run.Program+" "+c.Name()+" <subcommand> [flags]", subcommands)

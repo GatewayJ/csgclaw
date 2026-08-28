@@ -21,6 +21,8 @@ var recreatePersistentPathPatterns = []string{
 	filepath.Join(homeDirName, "rules"),
 	filepath.Join(homeDirName, "hooks.json"),
 	filepath.Join(homeDirName, "installation_id"),
+	filepath.Join(homeDirName, larkCLIConfigDirName),
+	filepath.Join(homeDirName, larkCLISourceDirName),
 }
 
 type preservedRuntimeState struct {

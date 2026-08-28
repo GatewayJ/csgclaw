@@ -77,6 +77,14 @@ func (s *Service) agentSkillsRoot(agentID, runtimeKind string) (string, error) {
 	return layout.SkillsRoot, nil
 }
 
+func (s *Service) AgentLayout(agentID string) (agentruntime.Layout, error) {
+	got, ok := s.Agent(agentID)
+	if !ok {
+		return agentruntime.Layout{}, fmt.Errorf("agent %q not found", canonicalAgentID(agentID))
+	}
+	return s.agentLayout(got.ID, got.RuntimeKind)
+}
+
 func (s *Service) agentLayout(agentID, runtimeKind string) (agentruntime.Layout, error) {
 	agentHome, err := s.agentHomeDir(agentID)
 	if err != nil {

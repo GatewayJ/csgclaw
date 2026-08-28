@@ -1348,7 +1348,9 @@ func (r *Runtime) refreshCodexHomeAgentsFile(h agentruntime.Handle, codexHomeDir
 	if IsReadOnlyExecutionMode(agentRef.RuntimeOptions) {
 		instructions = strings.TrimSpace(instructions + "\n\n" + readOnlyRuntimeInstructions)
 	}
-	block := agent.RenderRuntimeAgentsInstructionsBlock(agentRef.ID, instructions)
+	block := agent.RenderRuntimeAgentsInstructionsBlockWithOptions(agentRef.ID, instructions, agent.RuntimeManagedInstructionsOptions{
+		FeishuLarkCLI: r.hasFeishuLarkCLIBinding(codexHomeDir),
+	})
 	current, err := r.readFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read codex home AGENTS.md %s: %w", path, err)
@@ -1361,6 +1363,10 @@ func (r *Runtime) refreshCodexHomeAgentsFile(h agentruntime.Handle, codexHomeDir
 		return fmt.Errorf("write codex home AGENTS.md %s: %w", path, err)
 	}
 	return nil
+}
+
+func (r *Runtime) hasFeishuLarkCLIBinding(codexHomeDir string) bool {
+	return hasFeishuLarkCLIBinding(codexHomeDir, r.stat)
 }
 
 func (r *Runtime) SyncWorkspaceAgentsFile(ctx context.Context, h agentruntime.Handle, previousRuntimeOptions map[string]any) error {

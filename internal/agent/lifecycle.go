@@ -21,6 +21,32 @@ func (s *Service) restartCodexRuntime(ctx context.Context, id string) (Agent, er
 	return s.restartCodexRuntimeLocked(ctx, id)
 }
 
+// RestartCodexRuntimeIfRunning refreshes a live Codex app-server without
+// forcing stopped workers to start.
+func (s *Service) RestartCodexRuntimeIfRunning(ctx context.Context, id string) (Agent, bool, error) {
+	if s == nil {
+		return Agent{}, false, fmt.Errorf("agent service is required")
+	}
+	ctx, release, err := s.acquireAgentLifecycle(ctx, id)
+	if err != nil {
+		return Agent{}, false, err
+	}
+	defer release()
+
+	got, ok := s.Agent(id)
+	if !ok {
+		return Agent{}, false, fmt.Errorf("agent %q not found", strings.TrimSpace(id))
+	}
+	if !strings.EqualFold(strings.TrimSpace(got.RuntimeKind), RuntimeKindCodex) || !isRuntimeRunning(got) {
+		return got, false, nil
+	}
+	restarted, err := s.restartCodexRuntimeLocked(ctx, id)
+	if err != nil {
+		return Agent{}, false, err
+	}
+	return restarted, true, nil
+}
+
 func (s *Service) restartCodexRuntimeLocked(ctx context.Context, id string) (Agent, error) {
 	got, ok := s.Agent(id)
 	if !ok {

@@ -88,11 +88,25 @@ func TestCommentPromptTruncatesQuoteBeforeQuestionAndGuidance(t *testing.T) {
 	}
 	for _, required := range []string{
 		"用户的问题：必须保留的问题",
+		"lark-cli docs +fetch --api-version v2 --doc file-1 --doc-format markdown",
 		"不要调用评论回复接口，渠道会负责回复",
 		"最终答案请直接输出纯文本",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("prompt missing required suffix %q: %q", required, prompt)
 		}
+	}
+}
+
+func TestCommentPromptUsesFileTypeSpecificLarkCLIInstructions(t *testing.T) {
+	docx := commentPrompt("docx-token", "docx", "", "读正文")
+	if !strings.Contains(docx, "lark-cli docs +fetch --api-version v2 --doc docx-token --doc-format markdown") {
+		t.Fatalf("docx prompt missing docs fetch command: %q", docx)
+	}
+
+	sheet := commentPrompt("sheet-token", "sheet", "", "读表格")
+	if !strings.Contains(sheet, "不要使用 `lark-cli docs +fetch`") ||
+		!strings.Contains(sheet, "未读取表格全文") {
+		t.Fatalf("sheet prompt missing sheet guidance: %q", sheet)
 	}
 }
