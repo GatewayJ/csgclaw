@@ -1996,6 +1996,26 @@ func TestServeAPIBaseURLUsesDesktopRendererEndpoint(t *testing.T) {
 	}
 }
 
+func TestServeInternalBaseURLIgnoresAdvertiseBaseURL(t *testing.T) {
+	got := serveInternalBaseURL(config.ServerConfig{
+		ListenAddr:       "0.0.0.0:19090",
+		AdvertiseBaseURL: "https://gateway.example.test/sandbox",
+	}, serveOptions{})
+	if want := "http://127.0.0.1:19090"; got != want {
+		t.Fatalf("serveInternalBaseURL() = %q, want %q", got, want)
+	}
+}
+
+func TestServeInternalBaseURLUsesDesktopRendererEndpoint(t *testing.T) {
+	got := serveInternalBaseURL(
+		config.ServerConfig{ListenAddr: "0.0.0.0:59843"},
+		serveOptions{Desktop: &server.DesktopOptions{BaseURL: "http://127.0.0.1:59842/"}},
+	)
+	if want := "http://127.0.0.1:59842"; got != want {
+		t.Fatalf("serveInternalBaseURL() = %q, want %q", got, want)
+	}
+}
+
 func TestParseServeLogLevel(t *testing.T) {
 	cases := map[string]slog.Level{
 		"":        slog.LevelInfo,

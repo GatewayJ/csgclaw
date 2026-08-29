@@ -185,7 +185,7 @@ func TestFinalizeFeishuRegistrationConfiguresAvailableLarkCLIForCodexWorker(t *t
 		svc:                        agentSvc,
 		participant:                participantSvc,
 		serverAccessToken:          "server-secret",
-		advertiseBaseURL:           "http://csgclaw.test",
+		internalBaseURL:            "http://csgclaw.test",
 		feishuRegistrationStateDir: filepath.Join(t.TempDir(), "registrations"),
 	}
 	registrationID := startFeishuRegistrationForTest(t, srv, "u-dev")

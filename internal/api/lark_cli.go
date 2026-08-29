@@ -1016,8 +1016,8 @@ func signLarkCLISourceToken(encodedPayload, secret string) string {
 }
 
 func (h *Handler) internalSourceBaseURL() string {
-	if h != nil && strings.TrimSpace(h.advertiseBaseURL) != "" {
-		return strings.TrimRight(strings.TrimSpace(h.advertiseBaseURL), "/")
+	if h != nil && strings.TrimSpace(h.internalBaseURL) != "" {
+		return strings.TrimRight(strings.TrimSpace(h.internalBaseURL), "/")
 	}
 	return strings.TrimRight(config.DefaultAPIBaseURL(), "/")
 }

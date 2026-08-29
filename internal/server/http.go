@@ -59,6 +59,7 @@ type Options struct {
 	AccessToken        string
 	NoAuth             bool
 	AdvertiseBaseURL   string
+	InternalBaseURL    string
 	Desktop            *DesktopOptions
 	Context            context.Context
 	OnReady            func(h *api.Handler, router chi.Router)
@@ -85,6 +86,7 @@ func newHandler(opts Options) *api.Handler {
 	handler.SetUpgradeConfigPath(opts.ConfigPath)
 	handler.SetConfigPath(opts.ConfigPath)
 	handler.SetAdvertiseBaseURL(opts.AdvertiseBaseURL)
+	handler.SetInternalBaseURL(opts.InternalBaseURL)
 	if opts.Desktop != nil {
 		handler.SetRuntimeDistribution("electron")
 		handler.SetDesktopSessionToken(opts.Desktop.SessionToken)
