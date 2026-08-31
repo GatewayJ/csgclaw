@@ -723,7 +723,12 @@ export function TasksView({
                 onRefresh={onRefresh}
               />
             </div>
-            <div className={styles.taskContentLayout}>
+            <div
+              className={classNames(
+                styles.taskContentLayout,
+                activeView === "tasks" && styles.taskContentLayoutTaskView,
+              )}
+            >
               <div className={styles.taskContentMain}>
                 {activeView === "tasks" ? (
                   <TaskKanbanBoard

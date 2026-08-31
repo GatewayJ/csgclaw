@@ -1295,6 +1295,10 @@
   border-top: 1px solid var(--line);
 }
 
+.taskContentLayoutTaskView {
+  border-top: 0;
+}
+
 .taskSideList {
   display: flex;
   min-width: 0;
