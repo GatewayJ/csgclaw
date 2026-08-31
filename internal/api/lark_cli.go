@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -849,7 +850,7 @@ func writeLarkChannelSourceConfig(path string, cfg larkChannelSourceConfig) erro
 					"command":             cfg.HelperPath,
 					"args":                []string{"pt", "app-info", "--channel", "feishu", "--agent-id", cfg.AgentID, "--exec-provider"},
 					"env":                 sourceProviderEnv(cfg.BaseURL, cfg.AccessToken),
-					"trustedDirs":         []string{filepath.Dir(cfg.HelperPath)},
+					"trustedDirs":         larkCLIExecProviderTrustedPaths(cfg.HelperPath, runtime.GOOS),
 					"allowInsecurePath":   true,
 					"allowSymlinkCommand": true,
 					"noOutputTimeoutMs":   larkCLIExecProviderTimeoutMS,
@@ -863,6 +864,15 @@ func writeLarkChannelSourceConfig(path string, cfg larkChannelSourceConfig) erro
 		return err
 	}
 	return writeFile0600Atomic(path, append(data, '\n'))
+}
+
+func larkCLIExecProviderTrustedPaths(helperPath, goos string) []string {
+	if goos == "windows" {
+		// lark-cli's descendant check uses a slash separator, so Windows paths
+		// must use its supported exact-path match.
+		return []string{helperPath}
+	}
+	return []string{filepath.Dir(helperPath)}
 }
 
 func writeLarkCLIBindMarker(path string, marker larkCLIBindMarker) error {

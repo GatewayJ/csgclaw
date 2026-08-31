@@ -937,6 +937,25 @@ func TestWriteLarkChannelSourceConfigUsesExecProvider(t *testing.T) {
 	}
 }
 
+func TestLarkCLIExecProviderTrustedPathsUsesExactHelperOnWindows(t *testing.T) {
+	helperPath := `D:\csgclaw-main\bin\csgclaw.exe`
+	got := larkCLIExecProviderTrustedPaths(helperPath, "windows")
+	if len(got) != 1 || got[0] != helperPath {
+		t.Fatalf("trusted paths = %#v, want exact helper path %q", got, helperPath)
+	}
+}
+
+func TestLarkCLIExecProviderTrustedPathsUsesParentDirectoryOnUnix(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			got := larkCLIExecProviderTrustedPaths("/usr/local/bin/csgclaw", goos)
+			if len(got) != 1 || got[0] != "/usr/local/bin" {
+				t.Fatalf("trusted paths = %#v, want parent directory", got)
+			}
+		})
+	}
+}
+
 func TestLarkCLIFakeCommand(t *testing.T) {
 	if os.Getenv("CSGCLAW_FAKE_LARK_CLI_COMMAND") != "1" {
 		return
