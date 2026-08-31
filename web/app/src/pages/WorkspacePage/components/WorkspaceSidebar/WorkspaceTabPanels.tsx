@@ -100,8 +100,6 @@ type WorkspaceTabPanelsProps = Pick<
   | "onSelectThread"
   | "onToggleWorkspaceGroup"
   | "onViewTaskDetails"
-  | "planningTaskID"
-  | "startingTaskID"
   | "t"
   | "taskCount"
   | "scheduledTaskCount"
