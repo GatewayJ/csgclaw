@@ -499,6 +499,7 @@ export function useAgentController({
   modelProviders = null,
   modelProvidersLoaded = false,
   openCSGAuthenticated = false,
+  onAgentDeleted,
   profileDetailAgentID = "",
   refreshMCPServers = async () => null,
   refreshHubTemplates,
@@ -2041,6 +2042,7 @@ export function useAgentController({
       const deletingNotificationBot = action === "delete" && isNotificationBotAgent(item);
       if (action === "delete") {
         await deleteAgentLikeRequest(item);
+        onAgentDeleted?.(item);
         if (activePane.type === WorkspacePaneTypes.agent && activePane.id === item.id) {
           const fallbackAgent = agentSelectionAfterDelete(agentItems, item.id);
           if (fallbackAgent) {
