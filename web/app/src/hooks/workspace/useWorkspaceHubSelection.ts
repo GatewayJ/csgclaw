@@ -8,6 +8,7 @@ import { flattenWorkspaceDirectoryListings } from "@/models/workspace";
 import type { WorkspaceDirectoryListings } from "@/models/workspace";
 import { useWorkspaceUiStore } from "./workspaceUiStore";
 import { useWorkspaceMCPSelection } from "./useWorkspaceMCPSelection";
+import { useWorkspaceKnowledgeBaseSelection } from "./useWorkspaceKnowledgeBaseSelection";
 import {
   workspaceQueryKeys,
   useWorkspaceHubTemplateQuery,
@@ -46,6 +47,7 @@ export function useWorkspaceHubSelection({
   templatesQuery,
   loaded,
   manualError = "",
+  openCSGAuthenticated = false,
   refreshTemplates,
   t,
 }: UseWorkspaceHubSelectionArgs) {
@@ -63,6 +65,8 @@ export function useWorkspaceHubSelection({
   const setSelectedMCPServerName = useWorkspaceUiStore((state) => state.setSelectedMCPServerName);
   const selectedHubResourceType = useWorkspaceUiStore((state) => state.selectedHubResourceType);
   const setSelectedHubResourceType = useWorkspaceUiStore((state) => state.setSelectedHubResourceType);
+  const selectedKnowledgeBaseID = useWorkspaceUiStore((state) => state.selectedKnowledgeBaseID);
+  const setSelectedKnowledgeBaseID = useWorkspaceUiStore((state) => state.setSelectedKnowledgeBaseID);
   const [remoteSkillsEnabled, setRemoteSkillsEnabled] = useState(false);
   const [remoteSkillsSearch, setRemoteSkillsSearch] = useState("");
   const [remoteSkillsSearchQuery, setRemoteSkillsSearchQuery] = useState("");
@@ -352,6 +356,8 @@ export function useWorkspaceHubSelection({
     ? errorMessage(skillFileQuery.error, t("resourcesSkillFileLoadFailed"))
     : "";
   const {
+    clearMCPProbe,
+    checkSelectedMCPServerSource,
     createMCPServer,
     deleteMCPServer,
     installRemoteMCPServer,
@@ -360,8 +366,16 @@ export function useWorkspaceHubSelection({
     mcpServersFetching,
     mcpCreateError,
     mcpCreateDialogOpen,
+    mcpCreateInitialDocument,
     mcpMutationBusy,
     mcpMutationError,
+    mcpProbeBusy,
+    mcpProbeError,
+    mcpProbeResult,
+    mcpSourceBusy,
+    mcpSourceError,
+    mcpSourceStatus,
+    mcpSourceSyncBusy,
     mcpStateError,
     openCreateMCPDialog,
     refetchRemoteMCPServers,
@@ -377,6 +391,8 @@ export function useWorkspaceHubSelection({
     setRemoteMCPServersSearch,
     selectedMCPServer,
     setMCPCreateDialogOpen,
+    syncSelectedMCPServerSource,
+    probeMCPServer,
     updateMCPServer,
   } = useWorkspaceMCPSelection({
     selectedMCPServerName,
@@ -386,6 +402,15 @@ export function useWorkspaceHubSelection({
     skillCount: skills.length,
     t,
     templateCount: resourcesTemplates.length,
+  });
+
+  const knowledgeBases = useWorkspaceKnowledgeBaseSelection({
+    authenticated: openCSGAuthenticated,
+    enabled: selectedHubResourceType === "knowledge",
+    openCreateMCPDialog,
+    selectedKnowledgeBaseID,
+    setSelectedKnowledgeBaseID,
+    t,
   });
 
   const retry = useCallback(async () => {
@@ -434,10 +459,21 @@ export function useWorkspaceHubSelection({
     mcpStateError,
     mcpMutationBusy,
     mcpMutationError,
+    mcpProbeBusy,
+    mcpProbeError,
+    mcpProbeResult,
+    mcpSourceBusy,
+    mcpSourceError,
+    mcpSourceStatus,
+    mcpSourceSyncBusy,
     mcpCreateError,
     mcpCreateDialogOpen,
+    mcpCreateInitialDocument,
     openCreateMCPDialog,
     setMCPCreateDialogOpen,
+    knowledgeBases,
+    selectedKnowledgeBaseID,
+    setSelectedKnowledgeBaseID,
     error:
       listError ||
       detailError ||
@@ -513,8 +549,17 @@ export function useWorkspaceHubSelection({
       selectedMCPServerName,
       mcpMutationBusy,
       mcpMutationError,
+      mcpProbeBusy,
+      mcpProbeError,
+      mcpProbeResult,
+      mcpSourceBusy,
+      mcpSourceError,
+      mcpSourceStatus,
+      mcpSourceSyncBusy,
       mcpCreateError,
       mcpCreateDialogOpen,
+      mcpCreateInitialDocument,
+      knowledgeBases,
       remoteMCPServers,
       remoteMCPServersError,
       remoteMCPServersHasMore,
@@ -523,6 +568,8 @@ export function useWorkspaceHubSelection({
       remoteMCPServersSearch,
       remoteMCPInstallBusy,
       onMCPCreateDialogOpenChange: setMCPCreateDialogOpen,
+      onCheckMCPSource: checkSelectedMCPServerSource,
+      onClearMCPProbe: clearMCPProbe,
       onInstallRemoteMCP: installRemoteMCPServer,
       onLoadMoreRemoteMCPServers: loadMoreRemoteMCPServers,
       onRefreshRemoteMCPServers: refetchRemoteMCPServers,
@@ -576,6 +623,8 @@ export function useWorkspaceHubSelection({
         }
       },
       onCreateMCP: createMCPServer,
+      onProbeMCP: probeMCPServer,
+      onSyncMCPSource: syncSelectedMCPServerSource,
       onUpdateMCP: updateMCPServer,
       onDeleteMCP: deleteMCPServer,
       onSelectWorkspaceFile: selectWorkspaceFile,

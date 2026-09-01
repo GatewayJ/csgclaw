@@ -1,6 +1,8 @@
 import { del, get, post, put } from "@/api/client";
+import type { AgentMCPServersView } from "@/api/agents";
 import type { JSONRecord } from "@/models/agents";
-import type { MCPServerPayload, RemoteMCPServer } from "@/models/mcp";
+import { mcpProbeResultFromResponse } from "@/models/mcp";
+import type { MCPProbeResult, MCPServerPayload, MCPServerSourceStatus, RemoteMCPServer } from "@/models/mcp";
 
 const MCP_SERVERS_PATH = "/api/v1/mcp-servers";
 const REMOTE_MCP_SERVERS_PAGE_SIZE = 12;
@@ -26,6 +28,32 @@ type RemoteMCPServerInstallResponse = {
   name?: unknown;
 };
 
+type MCPServerSourceStatusResponse = {
+  agent_update_available?: unknown;
+  auth_type?: unknown;
+  configured_endpoint_url?: unknown;
+  content_id?: unknown;
+  global_server_name?: unknown;
+  global_update_available?: unknown;
+  kind?: unknown;
+  latest_endpoint_url?: unknown;
+  resource_id?: unknown;
+  source_description?: unknown;
+  source_name?: unknown;
+  update_available?: unknown;
+};
+
+type MCPServerSourceSyncResponse = {
+  source?: unknown;
+  state?: unknown;
+};
+
+type AgentMCPServerSourceSyncResponse = {
+  agent?: unknown;
+  global_state?: unknown;
+  source?: unknown;
+};
+
 export function fetchMCPServers(): Promise<JSONRecord> {
   return get<JSONRecord>(MCP_SERVERS_PATH);
 }
@@ -40,6 +68,51 @@ export function updateMCPServerRequest(name: string, payload: MCPServerPayload):
 
 export function deleteMCPServerRequest(name: string): Promise<JSONRecord> {
   return del<JSONRecord>(mcpServerPath(name));
+}
+
+export async function fetchMCPServerSourceStatus(name: string): Promise<MCPServerSourceStatus> {
+  const payload = await get<MCPServerSourceStatusResponse>(`${mcpServerPath(name)}/source`);
+  return normalizeMCPServerSourceStatus(payload);
+}
+
+export async function syncMCPServerSource(name: string): Promise<{ source: MCPServerSourceStatus; state: JSONRecord }> {
+  const payload = await post<MCPServerSourceSyncResponse>(`${mcpServerPath(name)}/source:sync`);
+  if (!isJSONRecord(payload?.state)) {
+    throw new Error("MCP source sync returned an invalid state");
+  }
+  return {
+    source: normalizeMCPServerSourceStatus(payload.source),
+    state: payload.state,
+  };
+}
+
+export async function fetchAgentMCPServerSourceStatus(agentID: string, name: string): Promise<MCPServerSourceStatus> {
+  const payload = await get<MCPServerSourceStatusResponse>(`${agentMCPServerPath(agentID, name)}/source`);
+  return normalizeMCPServerSourceStatus(payload);
+}
+
+export async function syncAgentMCPServerSource(
+  agentID: string,
+  name: string,
+): Promise<{ agent: AgentMCPServersView; globalState: JSONRecord; source: MCPServerSourceStatus }> {
+  const payload = await post<AgentMCPServerSourceSyncResponse>(`${agentMCPServerPath(agentID, name)}/source:sync`);
+  if (!isJSONRecord(payload?.agent) || !isJSONRecord(payload?.global_state)) {
+    throw new Error("Agent MCP source sync returned an invalid state");
+  }
+  return {
+    agent: payload.agent as AgentMCPServersView,
+    globalState: payload.global_state,
+    source: normalizeMCPServerSourceStatus(payload.source),
+  };
+}
+
+export async function probeMCPServerRequest(payload: MCPServerPayload): Promise<MCPProbeResult> {
+  const response = await post<unknown>(`${MCP_SERVERS_PATH}:probe`, payload);
+  const result = mcpProbeResultFromResponse(response);
+  if (!result) {
+    throw new Error("MCP server probe returned an invalid response");
+  }
+  return result;
 }
 
 export async function installRemoteMCPServerRequest(id: string): Promise<string> {
@@ -83,6 +156,12 @@ function mcpServerPath(name: string): string {
   return `${MCP_SERVERS_PATH}/${encodeURIComponent(String(name || "").trim())}`;
 }
 
+function agentMCPServerPath(agentID: string, name: string): string {
+  return `/api/v1/agents/${encodeURIComponent(String(agentID || "").trim())}/mcp-servers/${encodeURIComponent(
+    String(name || "").trim(),
+  )}`;
+}
+
 function normalizeRemoteMCPServer(record: unknown): RemoteMCPServer | null {
   if (!isJSONRecord(record)) {
     return null;
@@ -99,6 +178,32 @@ function normalizeRemoteMCPServer(record: unknown): RemoteMCPServer | null {
     name,
     protocol: stringFromUnknown(record.protocol) || undefined,
     url,
+  };
+}
+
+export function normalizeMCPServerSourceStatus(record: unknown): MCPServerSourceStatus {
+  if (!isJSONRecord(record)) {
+    throw new Error("MCP source status returned an invalid response");
+  }
+  const resourceID = stringFromUnknown(record.resource_id);
+  const contentID = stringFromUnknown(record.content_id);
+  const kind = stringFromUnknown(record.kind);
+  if (!resourceID || !contentID || !kind) {
+    throw new Error("MCP source status returned incomplete source identity");
+  }
+  return {
+    agentUpdateAvailable: record.agent_update_available === true,
+    authType: stringFromUnknown(record.auth_type),
+    configuredEndpointURL: stringFromUnknown(record.configured_endpoint_url),
+    contentID,
+    globalServerName: stringFromUnknown(record.global_server_name) || undefined,
+    globalUpdateAvailable: record.global_update_available === true,
+    kind,
+    latestEndpointURL: stringFromUnknown(record.latest_endpoint_url),
+    resourceID,
+    sourceDescription: stringFromUnknown(record.source_description) || undefined,
+    sourceName: stringFromUnknown(record.source_name) || undefined,
+    updateAvailable: record.update_available === true,
   };
 }
 
