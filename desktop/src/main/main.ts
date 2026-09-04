@@ -8,14 +8,13 @@ import {
   logDesktopInfo,
 } from "./desktopLogger";
 import { isWindowsDesktop } from "./platform";
+import { windowsAppUserModelID } from "./windowsTaskbar";
 
 app.enableSandbox();
 app.setName("CSGClaw");
 if (!isWindowsDesktop || !process.windowsStore) {
   app.setAppUserModelId(
-    isWindowsDesktop
-      ? "com.squirrel.csgclaw_desktop.CSGClaw"
-      : "com.opencsg.csgclaw.desktop",
+    isWindowsDesktop ? windowsAppUserModelID : "com.opencsg.csgclaw.desktop",
   );
 }
 app.setAppLogsPath();

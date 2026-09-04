@@ -14,7 +14,7 @@ import {
   type DesktopUpdateStatus,
 } from "../shared/desktopBridge.types";
 import { DesktopPlatform } from "../shared/desktopEnvironment";
-import { shouldUseDarkDockIcon } from "../shared/desktopTheme";
+import { shouldUseDarkThemeIcon } from "../shared/desktopTheme";
 import { DeferredRelaunch } from "./deferredRelaunch";
 import { logDesktopError, logDesktopInfo } from "./desktopLogger";
 import { registerIPCHandlers } from "./ipcHandlers";
@@ -309,6 +309,7 @@ export class AppLifecycle {
 
   private updateThemeIcons(): void {
     this.updateDockThemeIcon();
+    this.updateWindowsTaskbarIcon();
     this.updateWindowsTrayIcon();
   }
 
@@ -316,7 +317,7 @@ export class AppLifecycle {
     if (!isMacOSDesktop || !app.dock) {
       return;
     }
-    const useDarkColors = shouldUseDarkDockIcon(
+    const useDarkColors = shouldUseDarkThemeIcon(
       this.desktopThemeSource,
       nativeTheme.shouldUseDarkColors,
     );
@@ -343,6 +344,24 @@ export class AppLifecycle {
       return;
     }
     this.tray.setImage(this.loadWindowsIcon());
+  }
+
+  private updateWindowsTaskbarIcon(): void {
+    if (process.platform !== DesktopPlatform.Windows) {
+      return;
+    }
+    const useDarkColors = shouldUseDarkThemeIcon(
+      this.desktopThemeSource,
+      nativeTheme.shouldUseDarkColors,
+    );
+    const iconName = useDarkColors
+      ? "csgclaw-taskbar-dark.ico"
+      : "csgclaw-taskbar-light.ico";
+    const iconPath = desktopIconResourcePath(iconName);
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) {
+      this.windowManager?.setWindowsIcon(icon, iconPath);
+    }
   }
 
   private loadMacOSTrayIcon(): Electron.NativeImage {
