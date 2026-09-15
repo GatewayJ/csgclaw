@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, PanelLeftOpen, Plus, Search } from "lucide-react";
+import { PanelLeftOpen, Plus, Search } from "lucide-react";
 import {
   SidebarAlertTriangleIcon,
   SidebarBoxIcon,
   SidebarGrid07Icon,
   SidebarLaptopIcon,
   SidebarListUnordered4Icon,
+  SidebarKnowledgeBaseIcon,
   SidebarMcpIcon,
   SidebarMessageIcon,
   SidebarPuzzlePiece02Icon,
@@ -18,6 +19,7 @@ import { SidebarRailControlButton } from "./SidebarRailControlButton";
 import { SidebarUserButton } from "./SidebarUserButton";
 import { KnowledgeBaseDiscoveryDialog } from "./KnowledgeBaseDiscoveryDialog";
 import { LogoMark, LogoWordmark } from "./WorkspaceSidebarBrand";
+import { SkillUploadDialog } from "./SkillUploadDialog";
 import { WorkspacePrimaryNavigation } from "./WorkspacePrimaryNavigation";
 import { WorkspaceTabPanels } from "./WorkspaceTabPanels";
 import { WorkspaceContextSectionIds } from "./types";
@@ -118,15 +120,19 @@ export function WorkspaceSidebar({
   onCollapseSidebar,
   onAuthEnvironmentChange,
   onExpandSidebar,
+  onSkillUploadOpenChange,
   onLogin,
   onLogout,
+  skillUploadOpen,
   taskItems,
   teams,
   planningTaskID = "",
   startingTaskID = "",
 }: WorkspaceSidebarProps) {
   const [contextQuery, setContextQuery] = useState("");
-  const [skillUploadOpen, setSkillUploadOpen] = useState(false);
+  const [internalSkillUploadOpen, setInternalSkillUploadOpen] = useState(false);
+  const resolvedSkillUploadOpen = skillUploadOpen ?? internalSkillUploadOpen;
+  const setResolvedSkillUploadOpen = onSkillUploadOpenChange ?? setInternalSkillUploadOpen;
   const [knowledgeBaseDiscoveryOpen, setKnowledgeBaseDiscoveryOpen] = useState(false);
   const contextNavRef = useRef<HTMLElement | null>(null);
   const currentUser = usersById.get(currentUserID);
@@ -134,11 +140,8 @@ export function WorkspaceSidebar({
   const firstWorkerAgent = workerAgentItems[0] ?? agentItems[0] ?? null;
   const firstNotificationAgent = notificationAgentItems[0] ?? null;
   const firstTeam = teams[0] ?? null;
-  const firstHubTemplate = hub?.templates[0] ?? null;
-  const firstMCPServer = hub?.mcpServers?.[0] ?? null;
-  const firstKnowledgeBase = hub?.knowledgeBases?.items?.[0] ?? null;
-  const firstHubSkill = hub?.skills[0] ?? null;
   const firstModelProvider = modelProviders?.providers[0] ?? null;
+  const resourcesSkills = hub?.skills ?? [];
   const isSettingsPane = activePane.type === WorkspacePaneTypes.settings;
   const isPrimaryNavigationActive = useCallback((active: boolean) => !isSettingsPane && active, [isSettingsPane]);
   const notificationAgentIds = useMemo(
@@ -151,8 +154,9 @@ export function WorkspaceSidebar({
         activePane,
         notificationAgentIds,
         workspaceTab,
+        hubResourceType: hub?.selectedHubResourceType,
       }),
-    [activePane, notificationAgentIds, workspaceTab],
+    [activePane, hub?.selectedHubResourceType, notificationAgentIds, workspaceTab],
   );
   const [activeContextSectionId, setActiveContextSectionId] = useState<WorkspaceContextSectionId>(
     () => routeContextSectionId ?? defaultContextSectionIdForTab(workspaceTab),
@@ -288,13 +292,7 @@ export function WorkspaceSidebar({
             icon: navigationIcon(WORKSPACE_NAVIGATION_ICONS.templates),
             id: "templates",
             label: t("resourcesTemplatesSection"),
-            onSelect: () => {
-              if (firstHubTemplate) {
-                onSelectHubTemplate(firstHubTemplate);
-                return;
-              }
-              onSelectHub();
-            },
+            onSelect: () => onSelectHubTemplate(null),
           },
           {
             active: isPrimaryNavigationActive(activeContextSectionId === WorkspaceContextSectionIds.hubSkills),
@@ -302,21 +300,15 @@ export function WorkspaceSidebar({
             icon: navigationIcon(WORKSPACE_NAVIGATION_ICONS.skills),
             id: "skills",
             label: t("resourcesSkillsLabel"),
-            onSelect: () => {
-              if (firstHubSkill) {
-                onSelectHubSkill(firstHubSkill);
-                return;
-              }
-              onSelectHub();
-            },
+            onSelect: () => onSelectHubSkill(null),
           },
           {
             active: isPrimaryNavigationActive(activeContextSectionId === WorkspaceContextSectionIds.knowledgeBases),
             groupId: WorkspaceContextSectionIds.knowledgeBases,
-            icon: navigationIcon(BookOpen),
+            icon: navigationIcon(SidebarKnowledgeBaseIcon),
             id: "knowledge-bases",
             label: t("resourcesKnowledgeBasesLabel"),
-            onSelect: () => onSelectKnowledgeBase?.(firstKnowledgeBase),
+            onSelect: () => onSelectKnowledgeBase?.(null),
           },
           {
             active: isPrimaryNavigationActive(activeContextSectionId === WorkspaceContextSectionIds.mcpServers),
@@ -324,13 +316,7 @@ export function WorkspaceSidebar({
             icon: navigationIcon(SidebarMcpIcon),
             id: "mcp-servers",
             label: t("resourcesMCPLabel"),
-            onSelect: () => {
-              if (onSelectMCPServer) {
-                onSelectMCPServer(firstMCPServer);
-                return;
-              }
-              onSelectHub();
-            },
+            onSelect: () => onSelectMCPServer?.(null),
           },
           {
             active: isPrimaryNavigationActive(activeContextSectionId === WorkspaceContextSectionIds.models),
@@ -354,10 +340,6 @@ export function WorkspaceSidebar({
       activePane.type,
       activeTaskBoardView,
       currentUser,
-      firstMCPServer,
-      firstKnowledgeBase,
-      firstHubSkill,
-      firstHubTemplate,
       firstModelProvider,
       firstNotificationAgent,
       firstTeam,
@@ -409,7 +391,7 @@ export function WorkspaceSidebar({
         void hub?.knowledgeBases?.discoveryRefetch();
       }
     },
-    setSkillUploadOpen,
+    setSkillUploadOpen: setResolvedSkillUploadOpen,
     t,
     activeTaskBoardView,
   });
@@ -584,12 +566,34 @@ export function WorkspaceSidebar({
               onSelectAgent={onSelectAgent}
               onSelectModelProvider={onSelectModelProvider}
               onSelectComputer={onSelectComputer}
-              skillUploadOpen={skillUploadOpen}
-              onSkillUploadOpenChange={setSkillUploadOpen}
+              skillUploadOpen={resolvedSkillUploadOpen}
+              onSkillUploadOpenChange={setResolvedSkillUploadOpen}
             />
           </nav>
         </aside>
       ) : null}
+      <SkillUploadDialog
+        open={resolvedSkillUploadOpen}
+        onOpenChange={setResolvedSkillUploadOpen}
+        onSubmit={(file) => hub?.uploadSkill?.(file)}
+        busy={Boolean(hub?.uploadBusy)}
+        error={hub?.uploadError || ""}
+        installedSkills={resourcesSkills}
+        onInstallRemoteSkill={hub?.installRemoteSkill}
+        onLoadMoreRemoteSkills={hub?.loadMoreRemoteSkills}
+        remoteInstallBusy={hub?.remoteInstallBusy || ""}
+        remoteInstallError={hub?.remoteInstallError || ""}
+        remoteSkillsHasMore={Boolean(hub?.remoteSkillsHasMore)}
+        remoteSkills={hub?.remoteSkills ?? []}
+        remoteSkillsLoading={Boolean(hub?.remoteSkillsLoading)}
+        remoteSkillsLoadingMore={Boolean(hub?.remoteSkillsLoadingMore)}
+        remoteSkillsSearch={hub?.remoteSkillsSearch || ""}
+        remoteSkillsError={hub?.remoteSkillsError || ""}
+        onRefreshRemoteSkills={hub?.refetchRemoteSkills}
+        onRemoteSkillsSearchChange={hub?.setRemoteSkillsSearch}
+        onRemoteVisibleChange={hub?.setRemoteSkillsEnabled}
+        t={t}
+      />
       {hub?.knowledgeBases ? (
         <KnowledgeBaseDiscoveryDialog
           open={knowledgeBaseDiscoveryOpen}
@@ -623,10 +627,12 @@ function contextSectionIdForPane({
   activePane,
   notificationAgentIds,
   workspaceTab,
+  hubResourceType,
 }: {
   activePane: WorkspaceSidebarProps["activePane"];
   notificationAgentIds: ReadonlySet<string>;
   workspaceTab: WorkspaceSidebarProps["workspaceTab"];
+  hubResourceType?: string;
 }): WorkspaceContextSectionId | null {
   if (activePane.type === WorkspacePaneTypes.settings) {
     return null;
@@ -649,6 +655,15 @@ function contextSectionIdForPane({
     }
     if (activePane.resourceType === "template") {
       return WorkspaceContextSectionIds.hubTemplates;
+    }
+    if (hubResourceType === "skill") {
+      return WorkspaceContextSectionIds.hubSkills;
+    }
+    if (hubResourceType === "mcp") {
+      return WorkspaceContextSectionIds.mcpServers;
+    }
+    if (hubResourceType === "knowledge") {
+      return WorkspaceContextSectionIds.knowledgeBases;
     }
     return null;
   }

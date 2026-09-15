@@ -41,7 +41,10 @@ export function useWorkspaceKnowledgeBaseSelection({
     () => mergeRemoteKnowledgeBasePages(discoveryQuery.data?.pages ?? []),
     [discoveryQuery.data?.pages],
   );
-  const items = useMemo(() => configuredKnowledgeBases(catalogItems), [catalogItems]);
+  const items = useMemo(
+    () => configuredKnowledgeBases(catalogItems),
+    [catalogItems],
+  );
   const selected = useMemo(
     () => resolveHubListSelection(items, selectedKnowledgeBaseID, (item) => item.id),
     [items, selectedKnowledgeBaseID],
@@ -77,7 +80,7 @@ export function useWorkspaceKnowledgeBaseSelection({
       setSelectedKnowledgeBaseID("");
       return;
     }
-    setSelectedKnowledgeBaseID((current) => (items.some((item) => item.id === current) ? current : items[0]?.id || ""));
+    setSelectedKnowledgeBaseID((current) => (items.some((item) => item.id === current) ? current : ""));
   }, [items, setSelectedKnowledgeBaseID]);
 
   const prepareMCPConfig = useCallback(

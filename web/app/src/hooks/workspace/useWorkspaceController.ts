@@ -163,6 +163,7 @@ export function useWorkspaceController() {
   const showToolCalls = useWorkspaceUiStore((state) => state.showToolCalls);
   const setShowToolCalls = useWorkspaceUiStore((state) => state.setShowToolCalls);
   const floatingChatOpen = useWorkspaceUiStore((state) => state.floatingChatOpen);
+  const storedHubResourceType = useWorkspaceUiStore((state) => state.selectedHubResourceType);
   const setFloatingChatOpen = useWorkspaceUiStore((state) => state.setFloatingChatOpen);
   const isSidebarCollapsed = useWorkspaceUiStore((state) => state.isSidebarCollapsed);
   const setIsSidebarCollapsed = useWorkspaceUiStore((state) => state.setIsSidebarCollapsed);
@@ -308,6 +309,7 @@ export function useWorkspaceController() {
     setSelectedHubTemplateId,
     setSelectedKnowledgeBaseID,
   } = hub;
+  const [skillUploadOpen, setSkillUploadOpen] = useState(false);
   const upgrade = useUpgradeController({
     appVersion,
     refreshWorkspaceAppVersion,
@@ -725,6 +727,8 @@ export function useWorkspaceController() {
   const selectHubTemplate = useCallback(
     (item: HubTemplate | null | undefined) => {
       if (!item?.id) {
+        setSelectedHubResourceType("template");
+        setSelectedHubTemplateId("");
         selectHub();
         return;
       }
@@ -738,6 +742,8 @@ export function useWorkspaceController() {
   const selectHubSkill = useCallback(
     (item: SkillSummary | null | undefined) => {
       if (!item?.name) {
+        setSelectedHubResourceType("skill");
+        setSelectedHubSkillName("");
         selectHub();
         return;
       }
@@ -852,17 +858,41 @@ export function useWorkspaceController() {
           selectHubSkill(name ? ({ name, description: "" } as SkillSummary) : null),
         onSelectMCP: (name: string | null | undefined) =>
           selectMCPServer(name ? ({ name, config: {} } as MCPServer) : null),
+        onSelectKnowledgeBase: selectKnowledgeBase,
         onCreateMCP: createMCPServerAndNavigate,
+        onOpenSkillUpload: () => setSkillUploadOpen(true),
+        onTrySkill: conversation.openManagerConversationWithSkill,
         onKnowledgeBaseLogin: () => loginOpenCSG(),
       },
     }),
-    [createMCPServerAndNavigate, hub, loginOpenCSG, selectMCPServer, selectHubSkill, selectHubTemplate],
+    [
+      conversation.openManagerConversationWithSkill,
+      createMCPServerAndNavigate,
+      hub,
+      loginOpenCSG,
+      selectKnowledgeBase,
+      selectMCPServer,
+      selectHubSkill,
+      selectHubTemplate,
+    ],
   );
+
+  const hubResourceType = activePane.type === WorkspacePaneTypes.hub && activePane.resourceType
+    ? activePane.resourceType
+    : storedHubResourceType;
+  const resourceLoadingText =
+    hubResourceType === "skill"
+      ? t("resourcesSkillsLoading")
+      : hubResourceType === "mcp"
+        ? t("resourcesMCPLoading")
+        : hubResourceType === "knowledge"
+          ? t("resourcesKnowledgeBasesLoading")
+          : t("resourcesLoading");
 
   if (!displayData) {
     return {
       ready: false,
-      loadingText: loadingError || t("loading"),
+      loadingText: loadingError || resourceLoadingText,
       activePane,
       mainPanelHasThread: false,
       modelProviders,
@@ -908,6 +938,8 @@ export function useWorkspaceController() {
       isSidebarCollapsed,
       onCollapseSidebar: () => setIsSidebarCollapsed(true),
       onExpandSidebar: () => setIsSidebarCollapsed(false),
+      skillUploadOpen,
+      onSkillUploadOpenChange: setSkillUploadOpen,
       theme,
       onThemeChange: setTheme,
       turnNotificationMode,
