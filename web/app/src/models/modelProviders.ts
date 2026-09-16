@@ -44,6 +44,7 @@ export type ModelProvider = {
   api_key_preview?: string;
   headers?: Record<string, unknown>;
   models: string[];
+  imageModels?: string[];
   reasoning_effort?: string;
   status: ModelProviderStatus;
   message?: string;
@@ -72,6 +73,7 @@ export type ModelProviderSelectOption = {
   displayName: string;
   id: string;
   models: string[];
+  imageModels?: string[];
   value: string;
 };
 
@@ -152,6 +154,7 @@ function normalizeModelProvider(raw: unknown): ModelProvider {
   return {
     id,
     kind,
+    imageModels: normalizeModelIDs(record.image_models),
     display_name: displayName,
     preset: normalizeModelProviderPreset(record.preset ?? inferModelProviderPreset(id, record.base_url)),
     builtin: Boolean(record.builtin) || builtinRank.has(id),
@@ -379,6 +382,7 @@ export function modelProviderSelectOptionsFromCatalog(
         displayName: provider.display_name || provider.id,
         id: provider.id,
         models: [...provider.models],
+        imageModels: provider.imageModels ?? [],
         value: provider.id,
       });
     }
