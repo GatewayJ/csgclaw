@@ -55,6 +55,8 @@ export function useWorkspaceMCPSelection({
   const queryClient = useQueryClient();
   const [mcpCreateDialogOpen, setMCPCreateDialogOpen] = useState(false);
   const [mcpCreateInitialDocument, setMCPCreateInitialDocument] = useState("");
+  const [mcpCreateSource, setMCPCreateSource] = useState<"mcp" | "knowledge">("mcp");
+  const [knowledgeBaseAdded, setKnowledgeBaseAdded] = useState(false);
   const [mcpCreateError, setMCPCreateError] = useState("");
   const [mcpMutationBusy, setMCPMutationBusy] = useState(false);
   const [mcpMutationError, setMCPMutationError] = useState("");
@@ -195,18 +197,23 @@ export function useWorkspaceMCPSelection({
   }, [remoteMCPServersSearch]);
 
   const openCreateMCPDialog = useCallback(
-    (initialDocument = "") => {
-      setSelectedHubResourceType("mcp");
+    (initialDocument = "", source: "mcp" | "knowledge" = "mcp") => {
+      setMCPCreateSource(source);
+      setKnowledgeBaseAdded(false);
+      setSelectedHubResourceType(source);
+      if (source === "knowledge") setSelectedMCPServerName("");
       setMCPCreateInitialDocument(initialDocument);
       setMCPCreateError("");
       setMCPCreateDialogOpen(true);
     },
-    [setSelectedHubResourceType],
+    [setSelectedHubResourceType, setSelectedMCPServerName],
   );
 
   const changeMCPCreateDialogOpen = useCallback((open: boolean) => {
     setMCPCreateError("");
-    if (!open) {
+    if (open) {
+      setMCPCreateSource("mcp");
+    } else {
       setMCPCreateInitialDocument("");
     }
     setMCPCreateDialogOpen(open);
@@ -220,8 +227,12 @@ export function useWorkspaceMCPSelection({
         const state = await createMCPServerRequest(payload);
         queryClient.setQueryData(workspaceQueryKeys.mcpServers(), state);
         await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.knowledgeBasesScope() });
-        setSelectedHubResourceType("mcp");
-        setSelectedMCPServerName(payload.name);
+        setSelectedHubResourceType(mcpCreateSource);
+        if (mcpCreateSource === "knowledge") {
+          setKnowledgeBaseAdded(true);
+        } else {
+          setSelectedMCPServerName(payload.name);
+        }
         setMCPCreateDialogOpen(false);
         return true;
       } catch (error) {
@@ -231,7 +242,7 @@ export function useWorkspaceMCPSelection({
         setMCPMutationBusy(false);
       }
     },
-    [queryClient, setSelectedMCPServerName, setSelectedHubResourceType, t],
+    [mcpCreateSource, queryClient, setSelectedMCPServerName, setSelectedHubResourceType, t],
   );
 
   const updateMCPServer = useCallback(
@@ -269,13 +280,13 @@ export function useWorkspaceMCPSelection({
       setMCPMutationError("");
       setRemoteMCPInstallBusy(id);
       try {
-        const name = await installRemoteMCPServerRequest(id);
+        await installRemoteMCPServerRequest(id);
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.mcpServers() }),
           queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.knowledgeBasesScope() }),
         ]);
         setSelectedHubResourceType("mcp");
-        setSelectedMCPServerName(name);
+        setSelectedMCPServerName("");
         setMCPCreateDialogOpen(false);
         return true;
       } catch (error) {
@@ -459,6 +470,8 @@ export function useWorkspaceMCPSelection({
     mcpServersLoaded: mcpServersQuery.isFetched,
     mcpServers,
     mcpCreateError,
+    mcpCreateSource,
+    knowledgeBaseAdded,
     mcpCreateDialogOpen,
     mcpCreateInitialDocument,
     mcpMutationBusy,

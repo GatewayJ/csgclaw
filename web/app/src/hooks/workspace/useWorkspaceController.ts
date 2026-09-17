@@ -296,12 +296,25 @@ export function useWorkspaceController() {
     },
     [navigatePane, rooms, selectHub],
   );
+  const navigateBeforeTemplateDelete = useCallback(
+    (templateID: string) => {
+      if (
+        activePane.type === WorkspacePaneTypes.hub &&
+        activePane.resourceType === "template" &&
+        activePane.id === templateID
+      ) {
+        navigatePane({ type: WorkspacePaneTypes.hub, id: "", resourceType: "template" }, rooms, { replace: true });
+      }
+    },
+    [activePane, navigatePane, rooms],
+  );
   const { hub, refreshHubTemplates } = useWorkspaceHubController({
     activePane,
     hubLoaded,
     hubTemplates,
     hubTemplatesQuery,
     onSkillDeleted: navigateAfterSkillDelete,
+    onTemplateDeleteStarted: navigateBeforeTemplateDelete,
     openCSGAuthGuard,
     refreshWorkspaceHubTemplates,
     t,
@@ -808,9 +821,14 @@ export function useWorkspaceController() {
   const createMCPServerAndNavigate = useCallback(
     (payload: MCPServerPayload) =>
       saveMCPServerAndSelect(payload, hub.detailPaneProps.onCreateMCP, (name) => {
-        navigatePane({ type: WorkspacePaneTypes.hub, id: name, resourceType: "mcp" }, rooms);
+        if (hub.mcpCreateSource === "knowledge") {
+          setSelectedKnowledgeBaseID("");
+          navigatePane({ type: WorkspacePaneTypes.hub, id: "", resourceType: "knowledge" }, rooms, { replace: true });
+        } else {
+          navigatePane({ type: WorkspacePaneTypes.hub, id: name, resourceType: "mcp" }, rooms);
+        }
       }),
-    [hub.detailPaneProps.onCreateMCP, navigatePane, rooms],
+    [hub.detailPaneProps.onCreateMCP, hub.mcpCreateSource, navigatePane, rooms, setSelectedKnowledgeBaseID],
   );
 
   function openCreateModelProviderModal() {
@@ -896,7 +914,6 @@ export function useWorkspaceController() {
       },
     }),
     [
-      conversation.openManagerConversationWithSkill,
       createMCPServerAndNavigate,
       hub,
       requireOpenCSGAuthentication,

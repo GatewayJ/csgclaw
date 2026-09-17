@@ -475,7 +475,6 @@ export function useConversationController({
   const [threadSlashPickerDismissed, setThreadSlashPickerDismissed] = useState(false);
   const [threadSlashIndex, setThreadSlashIndex] = useState(0);
   const [threadSlashQuery, setThreadSlashQuery] = useState<string | null>(null);
-  const [pendingComposerFocusConversationId, setPendingComposerFocusConversationId] = useState("");
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [newRoomType, setNewRoomType] = useState<RoomType>(RoomTypes.onDemand);
   const roomManagerID = data?.users.find((user) => user.role?.toLowerCase() === "manager")?.id ?? "";
@@ -1106,50 +1105,6 @@ export function useConversationController({
     });
   }, [activeConversationId, showCreateRoom, showInvite]);
 
-  useEffect(() => {
-    if (!pendingComposerFocusConversationId || pendingComposerFocusConversationId !== activeConversationId) {
-      return;
-    }
-    const editor = editorRef.current;
-    if (!editor) {
-      return;
-    }
-    requestAnimationFrame(() => {
-      const activeEditor = editorRef.current;
-      if (activeEditor !== editor) {
-        return;
-      }
-      activeEditor.focus();
-      placeCaretAtEnd(activeEditor);
-      [80, 250].forEach((delay) => {
-        window.setTimeout(() => {
-          const latestEditor = editorRef.current;
-          if (latestEditor !== activeEditor) {
-            return;
-          }
-          latestEditor.focus();
-          placeCaretAtEnd(latestEditor);
-        }, delay);
-      });
-    });
-  }, [activeConversationId, draftSegments, pendingComposerFocusConversationId]);
-
-  useEffect(() => {
-    if (!pendingComposerFocusConversationId || pendingComposerFocusConversationId !== activeConversationId) {
-      return;
-    }
-    const timeout = window.setTimeout(() => {
-      const latestEditor = editorRef.current;
-      if (!latestEditor) {
-        return;
-      }
-      latestEditor.focus();
-      placeCaretAtEnd(latestEditor);
-      setPendingComposerFocusConversationId("");
-    }, 600);
-    return () => window.clearTimeout(timeout);
-  }, [activeConversationId, draftSegments, pendingComposerFocusConversationId]);
-
   async function sendMessage(): Promise<void> {
     if (managerRuntimeUnavailable) {
       setComposerError(managerRuntimeErrorMessage);
@@ -1667,7 +1622,6 @@ export function useConversationController({
     setDraftsByConversationId((current) => updateDrafts(current, conversationID, segments));
     setComposerSlashQuery(null);
     setSlashIndex(0);
-    setPendingComposerFocusConversationId(conversationID);
     navigatePane({ type: WorkspacePaneTypes.conversation, id: conversationID }, rooms);
   }
 
@@ -1927,8 +1881,8 @@ export function useConversationController({
     usersById,
     visibleMessages,
     clearComposerError,
-    openManagerConversationWithSkill,
     openCreateRoomModal,
+    openManagerConversationWithSkill,
     conversationViewProps: {
       conversation: selectedConversation,
       visibleMessages,

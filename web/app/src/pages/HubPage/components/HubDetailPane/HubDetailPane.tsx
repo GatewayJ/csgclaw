@@ -62,7 +62,7 @@ import type { LocaleCode, TranslateFn } from "@/models/conversations";
 import type { HubTemplate } from "@/models/hubWorkspace";
 import type { MCPServer } from "@/models/mcp";
 import type { RemoteKnowledgeBase } from "@/models/knowledgeBases";
-import { skillSourceBadgeName } from "@/models/skillhub";
+import { isReadonlySkill, skillSourceBadgeName } from "@/models/skillhub";
 import type { SkillFile, SkillSummary, SkillTree } from "@/models/skillhub";
 import type { WorkspaceEntry, WorkspaceFile } from "@/models/workspace";
 import { RemoteMCPList } from "./RemoteMCPList";
@@ -559,7 +559,6 @@ type HubDetailPaneHub = {
     onClearMCPProbe?: () => void;
     onDeleteMCP?: (item: MCPServer | null | undefined) => Promise<boolean> | boolean;
     onDeleteTemplate?: (item: HubTemplate | null | undefined) => unknown;
-    onTrySkill?: (name: string | null | undefined) => void;
     onPublishTemplate?: (
       item: HubTemplate | null | undefined,
       deploy?: boolean,
@@ -593,7 +592,9 @@ type HubDetailPaneHub = {
     mcpSourceError?: string;
     mcpSourceStatus?: MCPServerSourceStatus | null;
     mcpSourceSyncBusy?: boolean;
+    knowledgeBaseAdded?: boolean;
     mcpCreateError?: string;
+    mcpCreateSource?: "mcp" | "knowledge";
     mcpCreateDialogOpen?: boolean;
     mcpCreateInitialDocument?: string;
     knowledgeBases?: {
@@ -677,6 +678,7 @@ const EMPTY_HUB_DETAIL_PROPS: HubDetailPaneHub["detailPaneProps"] = {
   mcpProbeError: "",
   mcpProbeResult: null,
   mcpCreateError: "",
+  mcpCreateSource: "mcp",
   mcpCreateDialogOpen: false,
   mcpCreateInitialDocument: "",
   remoteMCPInstallBusy: "",
@@ -1025,8 +1027,10 @@ export function HubDetailPane({
     mcpSourceError = "",
     mcpSourceStatus = null,
     mcpSourceSyncBusy = false,
+    knowledgeBaseAdded = false,
     mcpCreateError = "",
     mcpCreateDialogOpen = false,
+    mcpCreateSource = "mcp",
     mcpCreateInitialDocument = "",
     knowledgeBases,
     remoteMCPInstallBusy = "",
@@ -1052,7 +1056,6 @@ export function HubDetailPane({
     onSelectSkill,
     onSelectSkillFile,
     onSelectTemplate,
-    onTrySkill,
     onMCPCreateDialogOpenChange,
     onKnowledgeBaseLogin,
     onInstallRemoteMCP,
@@ -1106,6 +1109,15 @@ export function HubDetailPane({
   const [mcpDeleteDialogOpen, setMCPDeleteDialogOpen] = useState(false);
   const [knowledgeBaseDeleteDialogOpen, setKnowledgeBaseDeleteDialogOpen] = useState(false);
   const [knowledgeBaseDiscoveryOpen, setKnowledgeBaseDiscoveryOpen] = useState(false);
+  const [showKnowledgeBaseAddedAlert, setShowKnowledgeBaseAddedAlert] = useState(false);
+  useEffect(() => {
+    if (knowledgeBaseAdded) {
+      setShowKnowledgeBaseAddedAlert(true);
+      const timer = window.setTimeout(() => setShowKnowledgeBaseAddedAlert(false), 4000);
+      return () => window.clearTimeout(timer);
+    }
+    setShowKnowledgeBaseAddedAlert(false);
+  }, [knowledgeBaseAdded]);
   function openKnowledgeBaseDiscovery(): void {
     if (knowledgeBases?.loginRequired) {
       void onKnowledgeBaseLogin?.();
@@ -1152,11 +1164,19 @@ export function HubDetailPane({
     () =>
       (["all", "remote", "local"] as const).map((id) => ({
         id,
-        label: skillFilterLabel(id, t),
+        label:
+          id === "remote"
+            ? t("resourcesSkillSystemBadge")
+            : id === "local"
+              ? t("resourcesSkillInstalledTitle")
+              : skillFilterLabel(id, t),
       })),
     [t],
   );
-  const resourceFilterTabs = skillFilterTabs;
+  const resourceFilterTabs = useMemo(
+    () => (["all", "remote", "local"] as const).map((id) => ({ id, label: skillFilterLabel(id, t) })),
+    [t],
+  );
   const templateFilterTabs = useMemo(
     () =>
       (["all", "remote", "local", "builtin"] as const).map((id) => ({
@@ -1457,14 +1477,6 @@ export function HubDetailPane({
     setSkillDetailDialogOpen(true);
   }
 
-  function trySelectedSkill() {
-    if (!selectedSkill) {
-      return;
-    }
-    onTrySkill?.(selectedSkill.name);
-    setSkillDetailDialogOpen(false);
-  }
-
   function openTemplateDetail(template: HubTemplate) {
     onSelectTemplate?.(template);
     setTemplateDetailDialogOpen(true);
@@ -1552,6 +1564,13 @@ export function HubDetailPane({
                     );
                   })}
                 </div>
+
+                {showKnowledgeBaseAddedAlert ? (
+                  <div className={moduleClassNames("kb-added-alert")} aria-live="polite">
+                    <CheckCircle2 size={16} aria-hidden="true" />
+                    <span>{t("resourcesKnowledgeBaseAddSuccess")}</span>
+                  </div>
+                ) : null}
 
                 {error || knowledgeBases?.loadError ? (
                   <DismissibleAlert className={moduleClassNames("mcp-error-notice")} aria-live="polite" messageKey={error || knowledgeBases?.loadError} closeLabel={t("close")}>
@@ -2341,7 +2360,9 @@ export function HubDetailPane({
                           </span>
                           <span className={moduleClassNames("hub-template-source-badge")} aria-hidden="true">
                             <span className={moduleClassNames("hub-template-source-badge-dot")}></span>
-                            {skillSourceBadgeName(skill) === "local" ? t("resourcesSkillLocalFilter") : t("resourcesSkillRemoteFilter")}
+                            {skillSourceBadgeName(skill) === "local"
+                              ? t("resourcesSkillInstalledTitle")
+                              : t("resourcesSkillSystemBadge")}
                           </span>
                         </button>
                       );
@@ -2655,11 +2676,20 @@ export function HubDetailPane({
                   />
                 </div>
               </DialogBody>
-              <DialogFooter>
-                <Button variant="primary" size="md" onClick={trySelectedSkill}>
-                  {t("resourcesSkillTryNow")}
-                </Button>
-              </DialogFooter>
+              {!isReadonlySkill(selectedSkill) && onDeleteSkill ? (
+                <DialogFooter>
+                  <Button
+                    className="mr-auto"
+                    variant="danger"
+                    size="md"
+                    disabled={skillDeleteBusy}
+                    onClick={() => setDeleteSkillDialogOpen(true)}
+                  >
+                    <Trash2 size={16} strokeWidth={2} aria-hidden="true" />
+                    {t("resourcesDeleteSkill")}
+                  </Button>
+                </DialogFooter>
+              ) : null}
             </>
           ) : null}
         </DialogContent>
@@ -2972,7 +3002,7 @@ export function HubDetailPane({
                   </Button>
                 ) : null}
                 {!isBuiltinOpenClawWorkerTemplate(selectedTemplate) ? (
-                  <Button variant="primary" size="md" onClick={() => onCreateFromTemplate?.(selectedTemplate)}>
+                  <Button variant="primary" size="md" onClick={() => { setTemplateDetailDialogOpen(false); void onCreateFromTemplate?.(selectedTemplate); }}>
                     {t("createAgent")}
                   </Button>
                 ) : null}
@@ -3048,7 +3078,7 @@ export function HubDetailPane({
                     </Button>
                     <Button
                       variant="danger"
-                      size="sm"
+                      size="md"
                       disabled={!configuredKnowledgeBaseMCP}
                       onClick={() => setKnowledgeBaseDeleteDialogOpen(true)}
                     >
@@ -3383,36 +3413,36 @@ export function HubDetailPane({
             <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
           </DialogHeader>
           <DialogBody className={moduleClassNames("mcp-form")}>
-            <div className={moduleClassNames("mcp-form-mode")} role="tablist" aria-label={t("resourcesMCPCreateTitle")}>
-              <Button
-                active={mcpCreateMode === "manual"}
-                aria-selected={mcpCreateMode === "manual"}
-                role="tab"
-                size="sm"
-                variant={mcpCreateMode === "manual" ? "primary" : "secondaryGray"}
-                onClick={() => setMCPCreateMode("manual")}
-              >
-                <Server size={15} strokeWidth={2} aria-hidden="true" />
-                {t("resourcesMCPManualTab")}
-              </Button>
-              <Button
-                active={mcpCreateMode === "remote"}
-                aria-selected={mcpCreateMode === "remote"}
-                role="tab"
-                size="sm"
-                variant={mcpCreateMode === "remote" ? "primary" : "secondaryGray"}
-                onClick={() => {
-                  if (mcpCreateMode === "remote") {
-                    onRemoteMCPVisibleChange?.(true);
-                    return;
-                  }
-                  setMCPCreateMode("remote");
-                }}
-              >
-                <CloudDownload size={15} strokeWidth={2} aria-hidden="true" />
-                {t("resourcesMCPRemoteInstallTab")}
-              </Button>
-            </div>
+            {mcpCreateSource !== "knowledge" ? (
+              <div className={moduleClassNames("mcp-form-mode")} role="tablist" aria-label={t("resourcesMCPCreateTitle")}>
+                <button
+                  type="button"
+                  className={moduleClassNames("mcp-form-tab", mcpCreateMode === "manual" && "active")}
+                  aria-selected={mcpCreateMode === "manual"}
+                  role="tab"
+                  onClick={() => setMCPCreateMode("manual")}
+                >
+                  <Server size={15} strokeWidth={2} aria-hidden="true" />
+                  {t("resourcesMCPManualTab")}
+                </button>
+                <button
+                  type="button"
+                  className={moduleClassNames("mcp-form-tab", mcpCreateMode === "remote" && "active")}
+                  aria-selected={mcpCreateMode === "remote"}
+                  role="tab"
+                  onClick={() => {
+                    if (mcpCreateMode === "remote") {
+                      onRemoteMCPVisibleChange?.(true);
+                      return;
+                    }
+                    setMCPCreateMode("remote");
+                  }}
+                >
+                  <CloudDownload size={15} strokeWidth={2} aria-hidden="true" />
+                  {t("resourcesMCPRemoteInstallTab")}
+                </button>
+              </div>
+            ) : null}
             {mcpCreateMode === "manual" ? (
               <>
                 <JSONConfigEditor
