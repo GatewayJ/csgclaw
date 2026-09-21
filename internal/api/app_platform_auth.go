@@ -34,21 +34,41 @@ func (h *Handler) authorizesAgentToken(agentID, header string) bool {
 	return ok && strings.HasPrefix(header, "Bearer ") && owner.AuthorizesAgentAccessToken(agentID, strings.TrimPrefix(header, "Bearer "))
 }
 
-func appRequestSameOrigin(r *http.Request) bool {
+func appRequestSameOrigin(r *http.Request, advertiseBaseURL string) bool {
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		return false
 	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		parsed, err := url.Parse(origin)
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-		if err != nil || parsed.Scheme != scheme || !strings.EqualFold(parsed.Host, r.Host) {
-			return false
-		}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
 	}
-	return true
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil || parsedOrigin.Scheme == "" || parsedOrigin.Host == "" || parsedOrigin.User != nil {
+		return false
+	}
+
+	requestScheme := "http"
+	if r.TLS != nil {
+		requestScheme = "https"
+	}
+	if appOriginsMatch(parsedOrigin, requestScheme, r.Host) {
+		return true
+	}
+
+	advertised, err := url.Parse(strings.TrimSpace(advertiseBaseURL))
+	if err != nil || advertised.User != nil {
+		return false
+	}
+	switch strings.ToLower(advertised.Scheme) {
+	case "http", "https":
+		return appOriginsMatch(parsedOrigin, advertised.Scheme, advertised.Host)
+	default:
+		return false
+	}
+}
+
+func appOriginsMatch(origin *url.URL, scheme, host string) bool {
+	return strings.EqualFold(origin.Scheme, scheme) && strings.EqualFold(origin.Host, host)
 }
 
 func isConnectorOAuthCallback(r *http.Request) bool {
@@ -94,7 +114,7 @@ func (h *Handler) authorizeAppPlatformRequests(next http.Handler) http.Handler {
 		}
 		// The personal Web UI has no service-token login. Existing handlers
 		// retain their own API credential checks where those are required.
-		if !appRequestSameOrigin(r) {
+		if !appRequestSameOrigin(r, h.advertiseBaseURL) {
 			writeCodedAPIError(w, http.StatusForbidden, "origin_denied", "Requests must use the same origin")
 			return
 		}
