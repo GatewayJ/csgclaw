@@ -2326,7 +2326,7 @@ func (s *Controller) createWorker(ctx context.Context, spec CreateAgentSpec, rep
 	if err := s.prepareExtensions(ctx, id); err != nil {
 		return Agent{}, err
 	}
-	if strings.EqualFold(runtimeKind, RuntimeKindCodex) {
+	if isHostRuntimeKind(runtimeKind) {
 		if err := s.installDefaultSystemSkills(id, runtimeKind); err != nil {
 			return Agent{}, fmt.Errorf("install worker system skills: %w", err)
 		}
@@ -2526,8 +2526,8 @@ func (s *Controller) provisionRuntime(ctx context.Context, rt agentruntime.Runti
 	if err := s.provisionRuntimeRequest(ctx, rt, runtimeKind, req); err != nil {
 		return err
 	}
-	// Codex 在创建和重建时安装默认技能；普通配置更新保留用户选择的技能列表。
-	if !strings.EqualFold(strings.TrimSpace(runtimeKind), RuntimeKindCodex) {
+	// Host runtime 在创建和重建时安装默认技能；普通配置更新保留用户选择的技能列表。
+	if isGatewayRuntimeKind(strings.TrimSpace(runtimeKind)) {
 		if err := s.installDefaultSystemSkills(req.AgentID, runtimeKind); err != nil {
 			return fmt.Errorf("install default system skills: %w", err)
 		}
