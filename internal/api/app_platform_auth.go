@@ -34,21 +34,62 @@ func (h *Handler) authorizesAgentToken(agentID, header string) bool {
 	return ok && strings.HasPrefix(header, "Bearer ") && owner.AuthorizesAgentAccessToken(agentID, strings.TrimPrefix(header, "Bearer "))
 }
 
-func appRequestSameOrigin(r *http.Request) bool {
+func appRequestSameOrigin(r *http.Request, advertiseBaseURL string) bool {
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		return false
 	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		parsed, err := url.Parse(origin)
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-		if err != nil || parsed.Scheme != scheme || !strings.EqualFold(parsed.Host, r.Host) {
-			return false
-		}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
 	}
-	return true
+	parsedOrigin, ok := parseAppHTTPURL(origin)
+	if !ok {
+		return false
+	}
+
+	requestScheme := "http"
+	if r.TLS != nil {
+		requestScheme = "https"
+	}
+	requestOrigin, requestOriginOK := parseAppHTTPURL(requestScheme + "://" + r.Host)
+	if requestOriginOK && appOriginsMatch(parsedOrigin, requestOrigin) {
+		return true
+	}
+
+	advertised, ok := parseAppHTTPURL(advertiseBaseURL)
+	if !ok {
+		return false
+	}
+	return appOriginsMatch(parsedOrigin, advertised)
+}
+
+func parseAppHTTPURL(rawURL string) (*url.URL, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.User != nil || parsed.Hostname() == "" {
+		return nil, false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		return parsed, true
+	default:
+		return nil, false
+	}
+}
+
+func appOriginsMatch(left, right *url.URL) bool {
+	return strings.EqualFold(left.Scheme, right.Scheme) &&
+		strings.EqualFold(left.Hostname(), right.Hostname()) &&
+		appOriginPort(left) == appOriginPort(right)
+}
+
+func appOriginPort(origin *url.URL) string {
+	if port := origin.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(origin.Scheme, "https") {
+		return "443"
+	}
+	return "80"
 }
 
 func isConnectorOAuthCallback(r *http.Request) bool {
@@ -94,7 +135,7 @@ func (h *Handler) authorizeAppPlatformRequests(next http.Handler) http.Handler {
 		}
 		// The personal Web UI has no service-token login. Existing handlers
 		// retain their own API credential checks where those are required.
-		if !appRequestSameOrigin(r) {
+		if !appRequestSameOrigin(r, h.advertiseBaseURL) {
 			writeCodedAPIError(w, http.StatusForbidden, "origin_denied", "Requests must use the same origin")
 			return
 		}
