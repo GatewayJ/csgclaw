@@ -412,6 +412,7 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 		currentRuntime := previous.RuntimeConfig()
 		desiredRuntime := createAgentSpec(desired).RuntimeConfig()
 		replacesRuntime := change.runtimeSelection || currentRuntime != desiredRuntime
+		skillsChanged := false
 		if replacesRuntime {
 			if err := f.ReplaceSkills(lifecycleCtx, agentID, desired.Skills); err != nil {
 				return err
@@ -438,6 +439,7 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 			}
 		} else if change.skills {
 			added, removed := diffSkillNames(previousSkills, desired.Skills)
+			skillsChanged = len(added) > 0 || len(removed) > 0
 			if len(added) > 0 {
 				if err := f.BatchAddSkills(agentID, added); err != nil {
 					return err
@@ -474,6 +476,14 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 		}
 		if forceRecreate && !replacesRuntime {
 			updated, err = f.RecreateRecord(lifecycleCtx, agentID)
+			if err != nil {
+				return err
+			}
+		}
+		if skillsChanged && !replacesRuntime && !forceRecreate &&
+			strings.EqualFold(updated.RuntimeKind, RuntimeKindCodex) &&
+			isRuntimeRunning(previous) && isRuntimeRunning(updated) && desired.DesiredState == contract.AgentDesiredStateRunning {
+			updated, err = f.restartRuntimeLocked(lifecycleCtx, agentID)
 			if err != nil {
 				return err
 			}

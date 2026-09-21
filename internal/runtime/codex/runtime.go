@@ -402,6 +402,13 @@ func (r *Runtime) New(ctx context.Context, spec agentruntime.Spec) (agentruntime
 	if err := r.ensureRuntimeHome(spec.AgentID); err != nil {
 		return agentruntime.Handle{}, err
 	}
+	// 服务启动时也会调用 New 恢复 manager；已有运行记录保持当前技能集合。
+	copyHostSkills := false
+	if _, err := r.readRuntimeMetadata(strings.TrimSpace(spec.RuntimeID)); errors.Is(err, os.ErrNotExist) {
+		copyHostSkills = true
+	} else if err != nil {
+		return agentruntime.Handle{}, fmt.Errorf("read codex runtime metadata: %w", err)
+	}
 	spec.Profile = spec.Profile.Normalized()
 	var conversationSessions map[string]string
 	var filePublishingConversations map[string]bool
@@ -418,7 +425,7 @@ func (r *Runtime) New(ctx context.Context, spec agentruntime.Spec) (agentruntime
 		Profile:                     spec.Profile,
 		ConversationSessions:        conversationSessions,
 		FilePublishingConversations: filePublishingConversations,
-	})
+	}, copyHostSkills)
 	if err != nil {
 		return agentruntime.Handle{}, err
 	}
@@ -533,7 +540,7 @@ func (r *Runtime) Start(ctx context.Context, h agentruntime.Handle) (agentruntim
 		Profile:                     agentRef.Profile,
 		ConversationSessions:        conversationSessions,
 		FilePublishingConversations: filePublishingConversations,
-	})
+	}, false)
 	if err != nil {
 		if sessionRestoreErr != nil {
 			return agentruntime.StateUnknown, fmt.Errorf("repair codex session after restore failed (%v): %w", sessionRestoreErr, err)
@@ -743,7 +750,7 @@ func (r *Runtime) userInputBroker() UserInputBroker {
 	return r.deps.UserInput
 }
 
-func (r *Runtime) ensureSession(ctx context.Context, spec SessionSpec) (*Session, error) {
+func (r *Runtime) ensureSession(ctx context.Context, spec SessionSpec, copyHostSkills bool) (*Session, error) {
 	runtimeID := strings.TrimSpace(spec.RuntimeID)
 	if runtimeID == "" {
 		return nil, fmt.Errorf("runtime id is required")
@@ -797,8 +804,10 @@ func (r *Runtime) ensureSession(ctx context.Context, spec SessionSpec) (*Session
 	if err := r.seedCodexHomeConfig(spec.CodexHomeDir, spec.WorkspaceDir, spec.Profile, agentRef.RuntimeOptions, spec.MCPServers); err != nil {
 		return nil, err
 	}
-	if err := r.seedCodexHomeSkillsForExecutionMode(spec.CodexHomeDir, spec.ExecutionMode); err != nil {
-		return nil, err
+	if copyHostSkills || spec.ExecutionMode == ExecutionModeReadOnly {
+		if err := r.seedCodexHomeSkillsForExecutionMode(spec.CodexHomeDir, spec.ExecutionMode); err != nil {
+			return nil, err
+		}
 	}
 	if err := r.seedCodexHomeWorkspaceSkills(spec.AgentID, spec.WorkspaceDir, spec.CodexHomeDir); err != nil {
 		return nil, err
@@ -906,8 +915,10 @@ func (r *Runtime) hydratePersistedSession(ctx context.Context, manager *appServe
 	if err := r.seedCodexHomeConfig(spec.CodexHomeDir, spec.WorkspaceDir, spec.Profile, agentRef.RuntimeOptions, spec.MCPServers); err != nil {
 		return nil, err
 	}
-	if err := r.seedCodexHomeSkillsForExecutionMode(spec.CodexHomeDir, spec.ExecutionMode); err != nil {
-		return nil, err
+	if spec.ExecutionMode == ExecutionModeReadOnly {
+		if err := r.seedCodexHomeSkillsForExecutionMode(spec.CodexHomeDir, spec.ExecutionMode); err != nil {
+			return nil, err
+		}
 	}
 	if err := r.seedCodexHomeWorkspaceSkills(spec.AgentID, spec.WorkspaceDir, spec.CodexHomeDir); err != nil {
 		return nil, err
