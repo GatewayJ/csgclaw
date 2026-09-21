@@ -253,6 +253,19 @@ func (s *Controller) recoverWorkspaceSkillsTransactionAt(tempRoot string) error 
 		if len(entries) == 0 {
 			return os.Remove(tempRoot)
 		}
+		if len(entries) == 1 && entries[0].Name() == workspaceSkillsStateFileName+".tmp" {
+			tempStatePath := filepath.Join(tempRoot, entries[0].Name())
+			info, statErr := os.Lstat(tempStatePath)
+			if statErr != nil {
+				return statErr
+			}
+			if info.Mode().IsRegular() {
+				if removeErr := os.Remove(tempStatePath); removeErr != nil {
+					return removeErr
+				}
+				return os.Remove(tempRoot)
+			}
+		}
 		return fmt.Errorf("skills transaction %q has no state file", tempRoot)
 	}
 	if err != nil {

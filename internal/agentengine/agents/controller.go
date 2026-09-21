@@ -623,11 +623,6 @@ func (s *Controller) ensureCodexManager(ctx context.Context, forceRecreate bool)
 			}
 			oldRuntimeDeleted = true
 		}
-		if skillsPreservation != nil {
-			if err := skillsPreservation.Restore(); err != nil {
-				return Agent{}, fmt.Errorf("restore manager runtime skills: %w", err)
-			}
-		}
 	}
 	if _, err := s.persistManagerAgent(ctx, runtimeAgent, false); err != nil {
 		return Agent{}, err
@@ -647,6 +642,11 @@ func (s *Controller) ensureCodexManager(ctx context.Context, forceRecreate bool)
 		return Agent{}, fmt.Errorf("create manager runtime: %w", err)
 	}
 	replacementCreated = true
+	if skillsPreservation != nil {
+		if err := skillsPreservation.Restore(); err != nil {
+			return Agent{}, fmt.Errorf("restore manager runtime skills: %w", err)
+		}
+	}
 	if err := s.observeStartedExtensions(ctx, ManagerUserID); err != nil {
 		return Agent{}, err
 	}

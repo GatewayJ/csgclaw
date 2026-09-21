@@ -1184,16 +1184,16 @@ func (s *Controller) recreate(ctx context.Context, id string, imageFor func(cont
 	if err := s.prepareExtensions(ctx, id); err != nil {
 		return Agent{}, err
 	}
-	if skillsPreservation != nil {
-		if err := skillsPreservation.Restore(); err != nil {
-			return Agent{}, fmt.Errorf("restore runtime skills: %w", err)
-		}
-	}
 	handle, err = runtimeImpl.New(ctx, createSpec)
 	if err != nil {
 		return Agent{}, fmt.Errorf("create agent box: %w", err)
 	}
 	replacementCreated = true
+	if skillsPreservation != nil {
+		if err := skillsPreservation.Restore(); err != nil {
+			return Agent{}, fmt.Errorf("restore runtime skills: %w", err)
+		}
+	}
 	if err := s.observeStartedExtensions(ctx, id); err != nil {
 		return Agent{}, err
 	}

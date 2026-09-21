@@ -22,6 +22,7 @@ import (
 	"csgclaw/internal/config"
 	"csgclaw/internal/mcpschema"
 	agentruntime "csgclaw/internal/runtime"
+	runtimecodex "csgclaw/internal/runtime/codex"
 	runtimeinstructions "csgclaw/internal/runtime/instructions"
 	"csgclaw/internal/runtime/openclawsandbox"
 	"csgclaw/internal/runtime/picoclawsandbox"
@@ -169,6 +170,101 @@ type fakeAgentRuntime struct {
 	state        func(context.Context, agentruntime.Handle) (agentruntime.State, error)
 	info         func(context.Context, agentruntime.Handle) (agentruntime.Info, error)
 	streamLogs   func(context.Context, agentruntime.Handle, agentruntime.LogOptions) error
+}
+
+type recreateCodexBinaryProvider struct{}
+
+func (recreateCodexBinaryProvider) Ensure(context.Context) (string, error) {
+	return "/tmp/codex", nil
+}
+
+type recreateCodexSessionManager struct {
+	mu       sync.Mutex
+	sessions map[string]*runtimecodex.Session
+}
+
+func (m *recreateCodexSessionManager) Start(_ context.Context, spec runtimecodex.SessionSpec) (*runtimecodex.Session, error) {
+	now := time.Now().UTC()
+	session := &runtimecodex.Session{
+		RuntimeID:    spec.RuntimeID,
+		AgentID:      spec.AgentID,
+		AgentName:    spec.AgentName,
+		SessionID:    "session-" + spec.AgentID,
+		BinaryPath:   spec.BinaryPath,
+		WorkspaceDir: spec.WorkspaceDir,
+		HomeDir:      spec.HomeDir,
+		CodexHomeDir: spec.CodexHomeDir,
+		StderrPath:   spec.StderrPath,
+		ProcessID:    os.Getpid(),
+		CreatedAt:    now,
+		StartedAt:    now,
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sessions == nil {
+		m.sessions = make(map[string]*runtimecodex.Session)
+	}
+	m.sessions[spec.RuntimeID] = session
+	return session, nil
+}
+
+func (m *recreateCodexSessionManager) Stop(_ context.Context, handle runtimecodex.SessionHandle) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.sessions, handle.RuntimeID)
+	return nil
+}
+
+func (m *recreateCodexSessionManager) LiveSession(handle runtimecodex.SessionHandle) (*runtimecodex.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[handle.RuntimeID]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return session, nil
+}
+
+func (m *recreateCodexSessionManager) Session(handle runtimecodex.SessionHandle) (*runtimecodex.Session, error) {
+	return m.LiveSession(handle)
+}
+
+func (*recreateCodexSessionManager) Prompt(context.Context, runtimecodex.SessionHandle, runtimecodex.PromptRequest) (runtimecodex.PromptResponse, error) {
+	return runtimecodex.PromptResponse{}, os.ErrNotExist
+}
+
+func newRecreateTestCodexRuntime(controller func() *Controller, agentID string) *runtimecodex.Runtime {
+	return runtimecodex.New(runtimecodex.Dependencies{
+		BinaryProvider: recreateCodexBinaryProvider{},
+		AgentHome: func(agentID string) (string, error) {
+			svc := controller()
+			if svc == nil {
+				return "", errors.New("controller is unavailable")
+			}
+			return svc.agentHomeDir(agentID)
+		},
+		ResolveAgent: func(h agentruntime.Handle) (runtimecodex.AgentRef, error) {
+			svc := controller()
+			if svc == nil {
+				return runtimecodex.AgentRef{}, errors.New("controller is unavailable")
+			}
+			got, ok := svc.agentSnapshot(agentID)
+			if !ok {
+				return runtimecodex.AgentRef{}, fmt.Errorf("agent %q not found", agentID)
+			}
+			return runtimecodex.AgentRef{
+				ID:             got.ID,
+				Name:           got.Name,
+				RuntimeID:      h.RuntimeID,
+				HandleID:       got.BoxID,
+				Instructions:   got.Instructions,
+				RuntimeOptions: utils.CloneAnyMap(got.RuntimeOptions),
+				MCPServers:     cloneMCPServers(got.MCPServers),
+				Profile:        svc.runtimeProfileForAgent(got),
+			}, nil
+		},
+		Manager: &recreateCodexSessionManager{},
+	})
 }
 
 type fakeClosableAgentRuntime struct {
@@ -3173,6 +3269,74 @@ func TestPreserveWorkspaceSkillsMergesIntoReadOnlyDirectoryAndRestoresMode(t *te
 	}
 }
 
+func TestNewControllerCleansInterruptedInitialWorkspaceSkillsJournal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc, err := NewController(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindCodex}),
+	)
+	if err != nil {
+		t.Fatalf("NewController() error = %v", err)
+	}
+	agentHome, err := svc.agentHomeDir("agent-qa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempRoot := workspaceSkillsTransactionRoot(agentHome)
+	if err := os.MkdirAll(tempRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempRoot, workspaceSkillsStateFileName+".tmp"), []byte("{\"version\":"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewController(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindCodex}),
+	); err != nil {
+		t.Fatalf("NewController() recovery error = %v", err)
+	}
+	if _, err := os.Stat(tempRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pre-journal transaction directory remains, err=%v", err)
+	}
+}
+
+func TestWorkspaceSkillsRecoveryRejectsUnknownStateWithoutJournal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc, err := NewController(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
+		"manager-image:test",
+		"",
+		WithRuntime(fakeAgentRuntime{kind: RuntimeKindCodex}),
+	)
+	if err != nil {
+		t.Fatalf("NewController() error = %v", err)
+	}
+	agentHome, err := svc.agentHomeDir("agent-qa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempRoot := workspaceSkillsTransactionRoot(agentHome)
+	if err := os.MkdirAll(filepath.Join(tempRoot, "preserved"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.recoverWorkspaceSkillsTransactionAt(tempRoot)
+	if err == nil || !strings.Contains(err.Error(), "has no state file") {
+		t.Fatalf("recoverWorkspaceSkillsTransactionAt() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tempRoot, "preserved")); err != nil {
+		t.Fatalf("unknown transaction data was removed: %v", err)
+	}
+}
+
 func TestNewControllerRecoversInterruptedWorkspaceSkillsTransaction(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	svc, err := NewController(
@@ -3502,6 +3666,133 @@ func TestRecreateGatewayPreservationFailureKeepsOriginalRuntime(t *testing.T) {
 	}
 	if _, err := os.Lstat(link); err != nil {
 		t.Fatalf("custom skill changed after preservation failure: %v", err)
+	}
+}
+
+func TestRecreateCodexPreservesLocallyEditedHostSkill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(runtimecodex.TestOnlySetResponsesAPIProbe(func(context.Context, string, string, string, map[string]string) error {
+		return nil
+	}))
+	hostCodexHome := filepath.Join(t.TempDir(), "host-codex")
+	t.Setenv("CODEX_HOME", hostCodexHome)
+	hostSkillPath := filepath.Join(hostCodexHome, "skills", "host-custom", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(hostSkillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hostSkillPath, []byte("# Host Original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const agentID = "agent-qa"
+	var svc *Controller
+	runtimeImpl := newRecreateTestCodexRuntime(func() *Controller { return svc }, agentID)
+	var err error
+	svc, err = NewController(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
+		"manager-image:test",
+		"",
+		WithRuntime(runtimeImpl),
+	)
+	if err != nil {
+		t.Fatalf("NewController() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	svc.agents[agentID] = Agent{
+		ID: agentID, Name: "qa", Role: RoleWorker,
+		RuntimeID: runtimeIDForAgentID(agentID), RuntimeKind: RuntimeKindCodex,
+		BoxID: "session-old", Status: string(agentruntime.StateRunning),
+		AgentProfile: AgentProfile{
+			Name: "qa", Provider: ProviderAPI, BaseURL: "https://api.example/v1",
+			APIKey: "api-key", ModelID: "gpt-4.1", ProfileComplete: true,
+		},
+		ProfileComplete: true,
+	}
+	skillsRoot, err := svc.agentSkillsRoot(agentID, RuntimeKindCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentSkillPath := filepath.Join(skillsRoot, "host-custom", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(agentSkillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentSkillPath, []byte("# Agent Edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.RecreateRecord(context.Background(), agentID); err != nil {
+		t.Fatalf("RecreateRecord() error = %v", err)
+	}
+	data, err := os.ReadFile(agentSkillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "# Agent Edited\n"; got != want {
+		t.Fatalf("agent skill after recreate = %q, want %q", got, want)
+	}
+}
+
+func TestRecreateCodexManagerPreservesLocallyEditedHostSkill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(runtimecodex.TestOnlySetResponsesAPIProbe(func(context.Context, string, string, string, map[string]string) error {
+		return nil
+	}))
+	hostCodexHome := filepath.Join(t.TempDir(), "host-codex")
+	t.Setenv("CODEX_HOME", hostCodexHome)
+	hostSkillPath := filepath.Join(hostCodexHome, "skills", "host-custom", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(hostSkillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hostSkillPath, []byte("# Host Original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var svc *Controller
+	runtimeImpl := newRecreateTestCodexRuntime(func() *Controller { return svc }, ManagerUserID)
+	var err error
+	svc, err = NewController(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: ":18080", AccessToken: "shared-token"},
+		"manager-image:test",
+		"",
+		WithRuntime(runtimeImpl),
+	)
+	if err != nil {
+		t.Fatalf("NewController() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	svc.agents[ManagerUserID] = Agent{
+		ID: ManagerUserID, Name: ManagerName, Role: RoleManager,
+		RuntimeID: runtimeIDForAgentID(ManagerUserID), RuntimeKind: RuntimeKindCodex,
+		BoxID: "manager-old", Status: string(agentruntime.StateRunning),
+		AgentProfile: AgentProfile{
+			Name: ManagerName, Provider: ProviderAPI, BaseURL: "https://api.example/v1",
+			APIKey: "api-key", ModelID: "gpt-4.1", ProfileComplete: true,
+		},
+		ProfileComplete: true,
+	}
+	skillsRoot, err := svc.agentSkillsRoot(ManagerUserID, RuntimeKindCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentSkillPath := filepath.Join(skillsRoot, "host-custom", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(agentSkillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentSkillPath, []byte("# Manager Edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.RecreateRecord(context.Background(), ManagerUserID); err != nil {
+		t.Fatalf("RecreateRecord() error = %v", err)
+	}
+	data, err := os.ReadFile(agentSkillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "# Manager Edited\n"; got != want {
+		t.Fatalf("manager skill after recreate = %q, want %q", got, want)
 	}
 }
 
