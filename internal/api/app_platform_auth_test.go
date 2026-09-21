@@ -306,6 +306,42 @@ func TestAppRequestSameOrigin(t *testing.T) {
 			want:             true,
 		},
 		{
+			name:             "advertised HTTPS origin with explicit default port",
+			requestURL:       "http://csghub-runner:8082/api/v1/apps",
+			origin:           "https://aigateway.example.test",
+			secFetchSite:     "same-origin",
+			advertiseBaseURL: "https://aigateway.example.test:443/v1/sandboxes/user-123",
+			want:             true,
+		},
+		{
+			name:             "advertised HTTP origin with explicit default port",
+			requestURL:       "http://csghub-runner:8082/api/v1/apps",
+			origin:           "http://aigateway.example.test",
+			secFetchSite:     "same-origin",
+			advertiseBaseURL: "http://aigateway.example.test:80/v1/sandboxes/user-123",
+			want:             true,
+		},
+		{
+			name:       "direct HTTPS origin with explicit default port",
+			requestURL: "https://csgclaw.example.test:443/api/v1/apps",
+			origin:     "https://csgclaw.example.test",
+			want:       true,
+		},
+		{
+			name:             "advertised non-default port",
+			requestURL:       "http://csghub-runner:8082/api/v1/apps",
+			origin:           "https://aigateway.example.test:8443",
+			advertiseBaseURL: "https://aigateway.example.test:8443/v1/sandboxes/user-123",
+			want:             true,
+		},
+		{
+			name:             "different advertised port",
+			requestURL:       "http://csghub-runner:8082/api/v1/apps",
+			origin:           "https://aigateway.example.test",
+			advertiseBaseURL: "https://aigateway.example.test:8443/v1/sandboxes/user-123",
+			want:             false,
+		},
+		{
 			name:             "direct origin remains available with advertised URL",
 			requestURL:       "http://localhost:18080/api/v1/apps",
 			origin:           "http://localhost:18080",
@@ -359,7 +395,7 @@ func TestAppRequestSameOrigin(t *testing.T) {
 
 func TestAppNoAuthAllowsAdvertisedOriginThroughProxy(t *testing.T) {
 	h, _, _, _, _ := newAppPlatformAuthFixture(t)
-	h.SetAdvertiseBaseURL("https://aigateway.opencsg-stg.com/v1/sandboxes/user-123?jwt=test")
+	h.SetAdvertiseBaseURL("https://aigateway.opencsg-stg.com:443/v1/sandboxes/user-123?jwt=test")
 
 	req := httptest.NewRequest(http.MethodPost, "http://csghub-runner:8082/api/v1/channels/csgclaw/participants", strings.NewReader(`{}`))
 	req.Header.Set("Origin", "https://aigateway.opencsg-stg.com")
@@ -371,6 +407,15 @@ func TestAppNoAuthAllowsAdvertisedOriginThroughProxy(t *testing.T) {
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("advertised origin status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "http://csghub-runner:8082/api/v1/missing", strings.NewReader(`{}`))
+	req.Header.Set("Origin", "https://aigateway.opencsg-stg.com")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec = httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("advertised origin router status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

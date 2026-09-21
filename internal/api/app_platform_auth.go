@@ -42,8 +42,8 @@ func appRequestSameOrigin(r *http.Request, advertiseBaseURL string) bool {
 	if origin == "" {
 		return true
 	}
-	parsedOrigin, err := url.Parse(origin)
-	if err != nil || parsedOrigin.Scheme == "" || parsedOrigin.Host == "" || parsedOrigin.User != nil {
+	parsedOrigin, ok := parseAppHTTPURL(origin)
+	if !ok {
 		return false
 	}
 
@@ -51,24 +51,45 @@ func appRequestSameOrigin(r *http.Request, advertiseBaseURL string) bool {
 	if r.TLS != nil {
 		requestScheme = "https"
 	}
-	if appOriginsMatch(parsedOrigin, requestScheme, r.Host) {
+	requestOrigin, requestOriginOK := parseAppHTTPURL(requestScheme + "://" + r.Host)
+	if requestOriginOK && appOriginsMatch(parsedOrigin, requestOrigin) {
 		return true
 	}
 
-	advertised, err := url.Parse(strings.TrimSpace(advertiseBaseURL))
-	if err != nil || advertised.User != nil {
+	advertised, ok := parseAppHTTPURL(advertiseBaseURL)
+	if !ok {
 		return false
 	}
-	switch strings.ToLower(advertised.Scheme) {
+	return appOriginsMatch(parsedOrigin, advertised)
+}
+
+func parseAppHTTPURL(rawURL string) (*url.URL, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.User != nil || parsed.Hostname() == "" {
+		return nil, false
+	}
+	switch strings.ToLower(parsed.Scheme) {
 	case "http", "https":
-		return appOriginsMatch(parsedOrigin, advertised.Scheme, advertised.Host)
+		return parsed, true
 	default:
-		return false
+		return nil, false
 	}
 }
 
-func appOriginsMatch(origin *url.URL, scheme, host string) bool {
-	return strings.EqualFold(origin.Scheme, scheme) && strings.EqualFold(origin.Host, host)
+func appOriginsMatch(left, right *url.URL) bool {
+	return strings.EqualFold(left.Scheme, right.Scheme) &&
+		strings.EqualFold(left.Hostname(), right.Hostname()) &&
+		appOriginPort(left) == appOriginPort(right)
+}
+
+func appOriginPort(origin *url.URL) string {
+	if port := origin.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(origin.Scheme, "https") {
+		return "443"
+	}
+	return "80"
 }
 
 func isConnectorOAuthCallback(r *http.Request) bool {
