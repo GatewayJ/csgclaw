@@ -163,7 +163,7 @@ func (s *Controller) UpdateAgentProfile(id string, profile AgentProfile) (AgentP
 		return AgentProfileView{}, err
 	}
 	s.mu.Unlock()
-	if restartRequired && runtimeRunning && strings.EqualFold(runtimeKind, RuntimeKindCodex) {
+	if restartRequired && runtimeRunning && isHostRuntimeKind(runtimeKind) {
 		if _, err := s.restartRuntime(context.Background(), id); err != nil {
 			return AgentProfileView{}, err
 		}
@@ -552,7 +552,7 @@ func (s *Controller) updateWithManagedRuntimeOptions(ctx context.Context, id str
 			}
 		}
 	}
-	if restartRequired && runtimeRunning && strings.EqualFold(runtimeKind, RuntimeKindCodex) {
+	if restartRequired && runtimeRunning && isHostRuntimeKind(runtimeKind) {
 		if _, err := s.restartRuntime(ctx, id); err != nil {
 			return Agent{}, err
 		}

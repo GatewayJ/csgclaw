@@ -17,6 +17,7 @@ import (
 	"csgclaw/internal/codexcli"
 	"csgclaw/internal/config"
 	"csgclaw/internal/connectors"
+	"csgclaw/internal/dshcli"
 	"csgclaw/internal/im"
 	"csgclaw/internal/llm"
 	"csgclaw/internal/mcp"
@@ -564,6 +565,7 @@ func bootstrapConfigView(ctx context.Context, cfg config.Config, hubSvc *hub.Ser
 			agentruntime.RuntimeConfigForKind(agent.RuntimeKindPicoClawSandbox).Kind(),
 			agentruntime.RuntimeConfigForKind(agent.RuntimeKindOpenClawSandbox).Kind(),
 			agentruntime.RuntimeConfigForKind(agent.RuntimeKindCodex).Kind(),
+			agentruntime.RuntimeConfigForKind(agent.RuntimeKindDSH).Kind(),
 		},
 		RuntimeDefaultImages: map[string]string{},
 		RuntimeOptionSchemas: runtimeOptionSchemas,
@@ -626,6 +628,11 @@ func workerRuntimeChoices(ctx context.Context, cfg config.Config) []workerRuntim
 			Installed:      true,
 		},
 		{
+			Name:           agent.RuntimeNameDSH,
+			Label:          "DeepSeek Harness",
+			SandboxEnabled: false,
+		},
+		{
 			Name:           agent.RuntimeNameOpenClaw,
 			Label:          "OpenClaw",
 			SandboxEnabled: true,
@@ -646,8 +653,14 @@ func workerRuntimeChoices(ctx context.Context, cfg config.Config) []workerRuntim
 		choices[0].Installed = false
 		choices[0].Message = "Bundled Codex CLI is unavailable"
 	}
+	if _, err := (dshcli.Provider{}).Ensure(ctx); err != nil {
+		choices[1].Installed = false
+		choices[1].Message = "DSH CLI is unavailable; install the current @deepseek-ai/dsh release or set " + dshcli.PathEnv
+	} else {
+		choices[1].Installed = true
+	}
 	if strings.EqualFold(strings.TrimSpace(cfg.Sandbox.Provider), config.CSGHubProvider) {
-		return choices[:1]
+		return choices[:2]
 	}
 	return choices
 }
@@ -1990,9 +2003,10 @@ func writeHubTemplateError(w http.ResponseWriter, status int, code, message, pub
 }
 
 func validateAgentTemplatePublishTarget(spec hub.PublishSpec, registry string) error {
+	runtimeName := agentruntime.NormalizeRuntimeName(spec.RuntimeKind)
 	if strings.TrimSpace(registry) == config.DefaultOfficialHubRegistryName &&
-		agentruntime.NormalizeRuntimeName(spec.RuntimeKind) != agentruntime.NameCodex {
-		return fmt.Errorf("only Codex agents can be published to the community")
+		runtimeName != agentruntime.NameCodex && runtimeName != agentruntime.NameDSH {
+		return fmt.Errorf("only Codex and DSH agents can be published to the community")
 	}
 	return nil
 }
@@ -2013,7 +2027,7 @@ func (h *Handler) filterHubTemplatesForConfiguredProvider(items []hub.Template) 
 	for _, item := range items {
 		runtimeName := agentruntime.NormalizeRuntimeName(item.RuntimeKind)
 		if strings.EqualFold(strings.TrimSpace(item.Role), hub.TemplateRoleWorker) &&
-			runtimeName == agentruntime.NameCodex {
+			(runtimeName == agentruntime.NameCodex || runtimeName == agentruntime.NameDSH) {
 			filtered = append(filtered, item)
 		}
 	}

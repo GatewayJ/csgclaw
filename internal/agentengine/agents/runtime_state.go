@@ -215,7 +215,7 @@ func (s *Controller) runtimeProfileForKind(runtimeKind, agentID, fallbackName, f
 	apiKey := profileAPIKey(profile)
 	env := normalizeStringMap(profile.Env)
 
-	if runtimeKind == RuntimeKindCodex {
+	if isHostRuntimeKind(runtimeKind) {
 		if env == nil {
 			env = make(map[string]string)
 		}
@@ -226,9 +226,8 @@ func (s *Controller) runtimeProfileForKind(runtimeKind, agentID, fallbackName, f
 		managerBaseURL := config.ResolveLocalBaseURL(s.server)
 		if managerBaseURL != "" {
 			baseURL = llmBridgeBaseURL(managerBaseURL, agentID)
-			if env == nil {
-				env = make(map[string]string)
-			}
+		}
+		if managerBaseURL != "" {
 			env["CSGCLAW_BASE_URL"] = managerBaseURL
 		}
 		if token := s.agentAccessToken(agentID); token != "" {

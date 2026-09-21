@@ -1222,6 +1222,7 @@ func newAgentService(cfg config.Config, feishuProvider feishu.AgentCredentialPro
 		runtimewiring.WithPicoClawSandboxRuntime(feishuProvider),
 		runtimewiring.WithOpenClawSandboxRuntime(feishuProvider),
 		runtimewiring.WithCodexRuntime(),
+		runtimewiring.WithDSHRuntime(),
 		agent.WithBootstrapDefaultTemplates(cfg.Bootstrap),
 	)
 	switch bootstrapDefaults.ManagerRuntimeKind {
