@@ -58,7 +58,9 @@ Workspace 浏览、日志、模板发布和模型配置由专门的支持接口�
 Profile 通过 `GET /api/v1/agents/{id}/skill-summaries` 一次获取摘要；完整 Skill 文件仍通过 Workspace 按需读取。
 既有 Skill/Workspace 服务只扫描顶层 `SKILL.md` 的 frontmatter，最多并发读取 8 个文件，元数据上限为 64 KiB。
 
-Codex agent 新建和重建时复制 host 技能。已有 agent 的启动、重启和会话恢复保留当前 host 技能副本，模板与内建技能继续按原流程同步。运行中的 Codex agent 新增或删除 Skill 后执行 `Stop → Provision → Start`，应用更新后的技能集合；停止中的 agent 在后续启动时加载变更。`Provision` 包含已配置的凭据准备和 `InitShell` 执行。
+Codex 和 DSH 的创建与重建会安装系统内建技能 `skill-creator`、`skill-installer`。重建在删除旧运行目录后、启动新进程前补齐内建技能，并保留用户自定义技能。
+
+Codex agent 新建和重建时复制 host 技能。已有 agent 的启动、重启和会话恢复保留当前 host 技能副本，模板技能继续按原流程同步。运行中的 Codex agent 新增或删除 Skill 后执行 `Stop → Provision → Start`，应用更新后的技能集合；停止中的 agent 在后续启动时加载变更。`Provision` 包含已配置的凭据准备和 `InitShell` 执行。
 
 结果按名称稳定排序、支持取消，单文件不可读或格式错误不会影响其他条目，也不返回 Runtime 路径或文件正文。
 

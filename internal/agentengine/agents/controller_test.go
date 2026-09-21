@@ -3786,6 +3786,7 @@ func TestRecreateCodexPreservesLocallyEditedHostSkill(t *testing.T) {
 	if got, want := string(data), "# Agent Edited\n"; got != want {
 		t.Fatalf("agent skill after recreate = %q, want %q", got, want)
 	}
+	assertDefaultSystemSkills(t, skillsRoot)
 }
 
 func TestRecreateCodexManagerPreservesLocallyEditedHostSkill(t *testing.T) {
@@ -3849,6 +3850,7 @@ func TestRecreateCodexManagerPreservesLocallyEditedHostSkill(t *testing.T) {
 	if got, want := string(data), "# Manager Edited\n"; got != want {
 		t.Fatalf("manager skill after recreate = %q, want %q", got, want)
 	}
+	assertDefaultSystemSkills(t, skillsRoot)
 }
 
 func TestRecreateManagerPreservesCustomSkills(t *testing.T) {

@@ -1181,6 +1181,12 @@ func (s *Controller) recreate(ctx context.Context, id string, imageFor func(cont
 		return Agent{}, fmt.Errorf("remove existing agent box: %w", deleteErr)
 	}
 	oldRuntimeDeleted = true
+	// 删除旧运行目录之后、启动新进程之前，重新安装内建技能。
+	if isHostRuntimeKind(runtimeKind) {
+		if err := s.installDefaultSystemSkills(got.ID, runtimeKind); err != nil {
+			return Agent{}, fmt.Errorf("install default system skills after runtime deletion: %w", err)
+		}
+	}
 	if err := s.prepareExtensions(ctx, id); err != nil {
 		return Agent{}, err
 	}

@@ -631,6 +631,9 @@ func (s *Controller) ensureCodexManager(ctx context.Context, forceRecreate bool)
 	if err := s.prepareExtensions(ctx, ManagerUserID); err != nil {
 		return Agent{}, err
 	}
+	if err := s.installDefaultSystemSkills(ManagerUserID, RuntimeKindCodex); err != nil {
+		return Agent{}, fmt.Errorf("install manager system skills: %w", err)
+	}
 	handle, err = runtimeImpl.New(ctx, agentruntime.Spec{
 		RuntimeID: runtimeIDForAgentID(ManagerUserID),
 		AgentID:   ManagerUserID,
@@ -2323,6 +2326,11 @@ func (s *Controller) createWorker(ctx context.Context, spec CreateAgentSpec, rep
 	if err := s.prepareExtensions(ctx, id); err != nil {
 		return Agent{}, err
 	}
+	if strings.EqualFold(runtimeKind, RuntimeKindCodex) {
+		if err := s.installDefaultSystemSkills(id, runtimeKind); err != nil {
+			return Agent{}, fmt.Errorf("install worker system skills: %w", err)
+		}
+	}
 	handle, err := runtimeImpl.New(ctx, agentruntime.Spec{
 		RuntimeID: runtimeIDForAgentID(id),
 		AgentID:   id,
@@ -2518,8 +2526,11 @@ func (s *Controller) provisionRuntime(ctx context.Context, rt agentruntime.Runti
 	if err := s.provisionRuntimeRequest(ctx, rt, runtimeKind, req); err != nil {
 		return err
 	}
-	if err := s.installDefaultSystemSkills(req.AgentID, runtimeKind); err != nil {
-		return fmt.Errorf("install default system skills: %w", err)
+	// Codex 在创建和重建时安装默认技能；普通配置更新保留用户选择的技能列表。
+	if !strings.EqualFold(strings.TrimSpace(runtimeKind), RuntimeKindCodex) {
+		if err := s.installDefaultSystemSkills(req.AgentID, runtimeKind); err != nil {
+			return fmt.Errorf("install default system skills: %w", err)
+		}
 	}
 	return nil
 }
