@@ -931,14 +931,18 @@ func TestPermissionRequestRejectPolicyCancelsTurn(t *testing.T) {
 }
 
 func TestPermissionRequestSkipUserInputAllowsManagedLarkCLISetup(t *testing.T) {
+	trustedExecutable, environment := writeTestLarkCLIExecutable(t)
 	var output bytes.Buffer
 	turn := &activeTurn{
 		request: contract.TurnRequest{ID: "turn-lark", Interaction: contract.InteractionSkipUserInput},
 	}
 	proc := &process{
-		client:           &acpClient{writer: &output},
-		active:           map[string]*activeTurn{"session-1": turn},
-		extensionDigests: map[string]string{larkextension.Name: "digest-1"},
+		client:               &acpClient{writer: &output},
+		workspace:            t.TempDir(),
+		environment:          environment,
+		active:               map[string]*activeTurn{"session-1": turn},
+		extensionDigests:     map[string]string{larkextension.Name: "digest-1"},
+		extensionExecutables: map[string]string{larkextension.Name: trustedExecutable},
 	}
 	runtime := &Runtime{}
 	emitDSHUpdate(t, runtime, proc, map[string]any{
@@ -969,14 +973,83 @@ func TestPermissionRequestSkipUserInputAllowsManagedLarkCLISetup(t *testing.T) {
 	}
 }
 
+func TestUnattendedLarkCLIPermissionSnapshotsConcurrentToolUpdates(t *testing.T) {
+	trustedExecutable, environment := writeTestLarkCLIExecutable(t)
+	turn := &activeTurn{request: contract.TurnRequest{ID: "turn-lark", Interaction: contract.InteractionSkipUserInput}}
+	proc := &process{
+		workspace:            t.TempDir(),
+		environment:          environment,
+		active:               map[string]*activeTurn{"session-1": turn},
+		extensionDigests:     map[string]string{larkextension.Name: "digest-1"},
+		extensionExecutables: map[string]string{larkextension.Name: trustedExecutable},
+	}
+	updateParams, err := json.Marshal(map[string]any{
+		"sessionId": "session-1",
+		"update": map[string]any{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "tool-1",
+			"title":         "bash",
+			"kind":          "other",
+			"rawInput": map[string]any{
+				"command": "lark-cli config strict-mode off",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := permissionRequestParams{SessionID: "session-1", Options: []permissionOption{{OptionID: "allow-once", Kind: "allow_once"}}}
+	request.ToolCall.ToolCallID = "tool-1"
+	rt := &Runtime{}
+	rt.handleNotification(proc, notification{Method: "session/update", Params: updateParams})
+
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		<-start
+		for range 1_000 {
+			rt.handleNotification(proc, notification{Method: "session/update", Params: updateParams})
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		<-start
+		for range 1_000 {
+			_, _ = unattendedLarkCLIPermission(proc, turn, request)
+		}
+	}()
+	close(start)
+	workers.Wait()
+
+	if optionID, ok := unattendedLarkCLIPermission(proc, turn, request); !ok || optionID != "allow-once" {
+		t.Fatalf("unattendedLarkCLIPermission() = %q, %v", optionID, ok)
+	}
+}
+
 func TestPermissionRequestSkipUserInputRejectsUnmanagedCommands(t *testing.T) {
+	trustedExecutable, environment := writeTestLarkCLIExecutable(t)
+	workspace := t.TempDir()
+	untrustedExecutable := filepath.Join(workspace, "lark-cli")
+	if runtime.GOOS == "windows" {
+		untrustedExecutable += ".exe"
+	}
+	if err := os.WriteFile(untrustedExecutable, []byte("untrusted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct {
-		name       string
-		command    string
-		extensions map[string]string
+		name        string
+		command     string
+		environment []string
+		extensions  map[string]string
+		executables map[string]string
 	}{
-		{name: "different command", command: "lark-cli docs +fetch --doc token", extensions: map[string]string{larkextension.Name: "digest-1"}},
+		{name: "different command", command: "lark-cli docs +fetch --doc token", extensions: map[string]string{larkextension.Name: "digest-1"}, executables: map[string]string{larkextension.Name: trustedExecutable}},
 		{name: "extension not loaded", command: "lark-cli config strict-mode off", extensions: map[string]string{}},
+		{name: "workspace executable", command: "." + string(filepath.Separator) + filepath.Base(untrustedExecutable) + " config strict-mode off", extensions: map[string]string{larkextension.Name: "digest-1"}, executables: map[string]string{larkextension.Name: trustedExecutable}},
+		{name: "absolute untrusted executable", command: untrustedExecutable + " auth login --no-wait --json --recommend", extensions: map[string]string{larkextension.Name: "digest-1"}, executables: map[string]string{larkextension.Name: trustedExecutable}},
+		{name: "PATH shadow executable", command: "lark-cli config default-as auto", environment: []string{"PATH=" + workspace + string(os.PathListSeparator) + filepath.Dir(trustedExecutable)}, extensions: map[string]string{larkextension.Name: "digest-1"}, executables: map[string]string{larkextension.Name: trustedExecutable}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
@@ -986,10 +1059,17 @@ func TestPermissionRequestSkipUserInputRejectsUnmanagedCommands(t *testing.T) {
 					"tool-1": {Kind: "exec_command", Payload: map[string]any{"rawInput": map[string]any{"command": test.command}}},
 				},
 			}
+			processEnvironment := test.environment
+			if processEnvironment == nil {
+				processEnvironment = environment
+			}
 			proc := &process{
-				client:           &acpClient{writer: &output},
-				active:           map[string]*activeTurn{"session-1": turn},
-				extensionDigests: test.extensions,
+				client:               &acpClient{writer: &output},
+				workspace:            workspace,
+				environment:          processEnvironment,
+				active:               map[string]*activeTurn{"session-1": turn},
+				extensionDigests:     test.extensions,
+				extensionExecutables: test.executables,
 			}
 			params, err := json.Marshal(map[string]any{
 				"sessionId": "session-1",
@@ -1011,4 +1091,45 @@ func TestPermissionRequestSkipUserInputRejectsUnmanagedCommands(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProcessExecutableMatchesManagedExecutable(t *testing.T) {
+	trustedExecutable, environment := writeTestLarkCLIExecutable(t)
+	workspace := t.TempDir()
+	proc := &process{workspace: workspace, environment: environment}
+	if !processExecutableMatches(proc, "lark-cli", trustedExecutable) {
+		t.Fatal("bare lark-cli did not resolve to the managed executable")
+	}
+	if !processExecutableMatches(proc, trustedExecutable, trustedExecutable) {
+		t.Fatal("absolute managed lark-cli path did not match")
+	}
+	untrusted := filepath.Join(workspace, filepath.Base(trustedExecutable))
+	if err := os.WriteFile(untrusted, []byte("untrusted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if processExecutableMatches(proc, "."+string(filepath.Separator)+filepath.Base(untrusted), trustedExecutable) {
+		t.Fatal("workspace executable matched the managed lark-cli executable")
+	}
+	proc.environment = []string{"PATH=" + workspace + string(os.PathListSeparator) + filepath.Dir(trustedExecutable)}
+	if processExecutableMatches(proc, "lark-cli", trustedExecutable) {
+		t.Fatal("PATH shadow executable matched the managed lark-cli executable")
+	}
+}
+
+func writeTestLarkCLIExecutable(t *testing.T) (string, []string) {
+	t.Helper()
+	directory := t.TempDir()
+	name := "lark-cli"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(directory, name)
+	if err := os.WriteFile(path, []byte("trusted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	environment := []string{"PATH=" + directory}
+	if runtime.GOOS == "windows" {
+		environment = append(environment, "PATHEXT=.EXE;.CMD")
+	}
+	return path, environment
 }

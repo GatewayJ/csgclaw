@@ -71,17 +71,19 @@ type Runtime struct {
 }
 
 type process struct {
-	cmd              *exec.Cmd
-	stdin            io.WriteCloser
-	client           *acpClient
-	stderr           *os.File
-	root             string
-	workspace        string
-	profile          agentruntime.Profile
-	mcp              []acpMCPServer
-	meta             runtimeMetadata
-	extensionDigests map[string]string
-	done             chan struct{}
+	cmd                  *exec.Cmd
+	stdin                io.WriteCloser
+	client               *acpClient
+	stderr               *os.File
+	root                 string
+	workspace            string
+	profile              agentruntime.Profile
+	mcp                  []acpMCPServer
+	meta                 runtimeMetadata
+	environment          []string
+	extensionDigests     map[string]string
+	extensionExecutables map[string]string
+	done                 chan struct{}
 
 	metadataMu sync.Mutex
 	mu         sync.Mutex
@@ -368,11 +370,12 @@ func (r *Runtime) start(ctx context.Context, h agentruntime.Handle, spec *agentr
 	if err != nil {
 		return agentruntime.StateUnknown, err
 	}
-	proc, err := r.launch(ctx, root, layout.WorkspaceRoot, binary.Path, ref.Profile, mcpServers, meta, environment, extensionDigests, true)
+	extensionExecutables := managedExtensionExecutables(projections)
+	proc, err := r.launch(ctx, root, layout.WorkspaceRoot, binary.Path, ref.Profile, mcpServers, meta, environment, extensionDigests, extensionExecutables, true)
 	if err != nil {
 		patchErr := err
 		slog.Warn("DSH present tool overlay unavailable; retrying base ACP profile", "runtime_id", runtimeID, "version", binary.Version, "error", patchErr)
-		proc, err = r.launch(ctx, root, layout.WorkspaceRoot, binary.Path, ref.Profile, mcpServers, meta, environment, extensionDigests, false)
+		proc, err = r.launch(ctx, root, layout.WorkspaceRoot, binary.Path, ref.Profile, mcpServers, meta, environment, extensionDigests, extensionExecutables, false)
 		if err != nil {
 			return agentruntime.StateUnknown, errors.Join(patchErr, err)
 		}
@@ -384,7 +387,7 @@ func (r *Runtime) start(ctx context.Context, h agentruntime.Handle, spec *agentr
 	return agentruntime.StateRunning, nil
 }
 
-func (r *Runtime) launch(ctx context.Context, root, workspace, binary string, profile agentruntime.Profile, mcp []acpMCPServer, meta runtimeMetadata, environment []string, extensionDigests map[string]string, enablePresent bool) (*process, error) {
+func (r *Runtime) launch(ctx context.Context, root, workspace, binary string, profile agentruntime.Profile, mcp []acpMCPServer, meta runtimeMetadata, environment []string, extensionDigests, extensionExecutables map[string]string, enablePresent bool) (*process, error) {
 	stderr, err := os.OpenFile(filepath.Join(root, stderrFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open DSH stderr log: %w", err)
@@ -409,7 +412,7 @@ func (r *Runtime) launch(ctx context.Context, root, workspace, binary string, pr
 		return nil, fmt.Errorf("start DSH ACP process: %w", err)
 	}
 	client := newACPClient(stdout, stdin)
-	proc := &process{cmd: cmd, stdin: stdin, client: client, stderr: stderr, root: root, workspace: workspace, profile: profile.Normalized(), mcp: mcp, meta: meta, extensionDigests: extensionDigests, done: make(chan struct{}), active: map[string]*activeTurn{}, ready: map[string]bool{}}
+	proc := &process{cmd: cmd, stdin: stdin, client: client, stderr: stderr, root: root, workspace: workspace, profile: profile.Normalized(), mcp: mcp, meta: meta, environment: append([]string(nil), environment...), extensionDigests: extensionDigests, extensionExecutables: extensionExecutables, done: make(chan struct{}), active: map[string]*activeTurn{}, ready: map[string]bool{}}
 	client.setHandlers(
 		func(request serverRequest) { r.handleServerRequest(proc, request) },
 		func(note notification) { r.handleNotification(proc, note) },

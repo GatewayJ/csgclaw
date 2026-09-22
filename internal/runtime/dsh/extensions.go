@@ -42,6 +42,16 @@ func managedExtensionInstructions(home string) ([]string, error) {
 	return agentruntime.ExtensionInstructions(items), nil
 }
 
+func managedExtensionExecutables(projections []agentruntime.ExtensionProjection) map[string]string {
+	executables := make(map[string]string, len(projections))
+	for _, projection := range projections {
+		if executable := strings.TrimSpace(projection.Executable); executable != "" {
+			executables[projection.Name] = executable
+		}
+	}
+	return executables
+}
+
 func (r *Runtime) resolveDSHHomeDir(agentID string) (string, error) {
 	if r == nil || r.deps.AgentHome == nil {
 		return "", fmt.Errorf("DSH agent home resolver is required")

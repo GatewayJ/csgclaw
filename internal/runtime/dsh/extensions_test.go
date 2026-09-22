@@ -41,7 +41,7 @@ func TestLarkCLIExtensionProjectsIntoDSHRuntime(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { _ = rt.Close() })
-	if err := rt.Provision(context.Background(), agentruntime.ProvisionRequest{RuntimeID: ref.RuntimeID, AgentID: ref.ID, Instructions: ref.Instructions}); err != nil {
+	if err := rt.Provision(context.Background(), agentruntime.ProvisionRequest{RuntimeID: ref.RuntimeID, AgentID: ref.ID, Instructions: ref.Instructions, Profile: ref.Profile}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
@@ -69,6 +69,9 @@ func TestLarkCLIExtensionProjectsIntoDSHRuntime(t *testing.T) {
 	projections, err := rt.ExtensionProjections(ref.ID)
 	if err != nil || len(projections) != 1 {
 		t.Fatalf("ExtensionProjections() = %+v, %v", projections, err)
+	}
+	if got := projections[0].Executable; got != "/opt/lark-cli" {
+		t.Fatalf("ExtensionProjections()[0].Executable = %q, want /opt/lark-cli", got)
 	}
 	if err := rt.RenderExtensions(context.Background(), ref.ID, projections); err != nil {
 		t.Fatal(err)

@@ -86,7 +86,7 @@ func (d *Driver) PrepareExtension(ctx context.Context, agentID string, desired a
 	result := agentruntime.ExtensionResult{State: agentruntime.ExtensionStateConfigured, Reason: "configured", CheckedAt: checked}
 	if found && current.Kind == desired.Kind && current.SourceRevision == desired.SourceRevision {
 		dir, dirErr := store.Directory(current)
-		if dirErr == nil && validProjection(dir, payload) && maps.Equal(current.Environment, Environment(home, dir, agentID)) && current.Instructions == d.options.Instructions {
+		if dirErr == nil && validProjection(dir, payload) && current.Executable == executable && maps.Equal(current.Environment, Environment(home, dir, agentID)) && current.Instructions == d.options.Instructions {
 			current.Generation = desired.Generation
 			change, reviseErr := store.Revise(current)
 			if reviseErr != nil {
@@ -121,7 +121,7 @@ func (d *Driver) PrepareExtension(ctx context.Context, agentID string, desired a
 	}
 	change.SetProjection(agentruntime.ExtensionProjection{
 		Name: desired.Name, Kind: desired.Kind, Generation: desired.Generation, SourceRevision: desired.SourceRevision,
-		Environment: Environment(home, change.Directory(), agentID), Instructions: d.options.Instructions,
+		Executable: executable, Environment: Environment(home, change.Directory(), agentID), Instructions: d.options.Instructions,
 	})
 	keep = true
 	return change, result, nil
@@ -133,7 +133,8 @@ func (d *Driver) ObserveExtension(ctx context.Context, agentID string, desired a
 	if err != nil {
 		return errorResult("invalid_source", errors.New("The lark-cli source configuration is invalid"), checked), nil
 	}
-	if _, err := d.ensureExecutable(ctx); err != nil {
+	executable, err := d.ensureExecutable(ctx)
+	if err != nil {
 		return agentruntime.ExtensionResult{State: agentruntime.ExtensionStateUnavailable, Reason: "executable_unavailable", Message: "lark-cli is unavailable; install or repair it and retry.", CheckedAt: checked}, nil
 	}
 	_, store, err := d.store(agentID)
@@ -145,7 +146,7 @@ func (d *Driver) ObserveExtension(ctx context.Context, agentID string, desired a
 		return errorResult("binding_missing", errors.New("The managed lark-cli projection is missing"), checked), nil
 	}
 	dir, err := store.Directory(projection)
-	if err != nil || projection.SourceRevision != desired.SourceRevision || projection.Generation != desired.Generation || !validProjection(dir, payload) {
+	if err != nil || projection.SourceRevision != desired.SourceRevision || projection.Generation != desired.Generation || projection.Executable != executable || !validProjection(dir, payload) {
 		return errorResult("binding_mismatch", errors.New("The lark-cli projection does not match its desired configuration"), checked), nil
 	}
 	loaded := d.options.RuntimeLoaded != nil && d.options.RuntimeLoaded(agentID, projection)
@@ -198,6 +199,11 @@ func (d *Driver) ensureExecutable(ctx context.Context) (string, error) {
 	if err != nil || path == "" {
 		return "", errors.New("lark-cli is not installed or not on PATH; install @larksuite/cli or an official native binary, restart CSGClaw if PATH changed, then retry")
 	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve lark-cli executable path: %w", err)
+	}
+	path = filepath.Clean(path)
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	cmd := d.options.CommandContext(probeCtx, path, "-v")

@@ -10,7 +10,6 @@ import (
 
 	"csgclaw/internal/activity"
 	"csgclaw/internal/agentengine/contract"
-	larkextension "csgclaw/internal/runtimeextension/larkcli"
 )
 
 type permissionRequestParams struct {
@@ -363,32 +362,4 @@ func (r *Runtime) handleServerRequest(proc *process, request serverRequest) {
 			_ = proc.client.notify("session/cancel", map[string]any{"sessionId": params.SessionID})
 		}
 	}
-}
-
-func unattendedLarkCLIPermission(proc *process, turn *activeTurn, request permissionRequestParams) (string, bool) {
-	if proc == nil || turn == nil || proc.extensionDigests[larkextension.Name] == "" {
-		return "", false
-	}
-	tool, found := turn.tools[strings.TrimSpace(request.ToolCall.ToolCallID)]
-	if !found || !strings.EqualFold(strings.TrimSpace(tool.Kind), "exec_command") {
-		return "", false
-	}
-	payload, ok := tool.Payload.(map[string]any)
-	if !ok {
-		return "", false
-	}
-	rawInput, ok := payload["rawInput"].(map[string]any)
-	if !ok {
-		return "", false
-	}
-	command, _ := rawInput["command"].(string)
-	if !larkextension.AllowsUnattendedConfigCommand(command) {
-		return "", false
-	}
-	for _, option := range request.Options {
-		if strings.EqualFold(strings.TrimSpace(option.Kind), "allow_once") {
-			return option.OptionID, true
-		}
-	}
-	return "", false
 }

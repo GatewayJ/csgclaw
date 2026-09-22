@@ -42,6 +42,7 @@ type ExtensionProjection struct {
 	SourceRevision string            `json:"source_revision"`
 	Digest         string            `json:"digest"`
 	Root           string            `json:"root"`
+	Executable     string            `json:"executable,omitempty"`
 	Environment    map[string]string `json:"environment,omitempty"`
 	Instructions   string            `json:"instructions,omitempty"`
 }
