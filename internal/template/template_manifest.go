@@ -110,9 +110,7 @@ func validateManifest(manifest templateManifest) error {
 		return ErrTemplateNameRequired
 	}
 	manifest.RuntimeKind = normalizeTemplateRuntimeKind(manifest.RuntimeKind)
-	switch manifest.RuntimeKind {
-	case runtime.NamePicoClaw, runtime.NameOpenClaw, runtime.KindCodex, runtime.KindDSH:
-	default:
+	if !isSupportedTemplateRuntimeKind(manifest.RuntimeKind) {
 		return fmt.Errorf("%w: %s", ErrRuntimeKindRequired, manifest.RuntimeKind)
 	}
 	imageRef := manifestImageRef(manifest.Image)
@@ -129,6 +127,24 @@ func validateManifest(manifest templateManifest) error {
 		return err
 	}
 	return nil
+}
+
+func isSupportedTemplateRuntimeKind(kind string) bool {
+	switch normalizeTemplateRuntimeKind(kind) {
+	case runtime.NamePicoClaw, runtime.NameOpenClaw, runtime.KindCodex, runtime.KindDSH:
+		return true
+	default:
+		return false
+	}
+}
+
+func CanPublishCommunityTemplateRuntime(kind string) bool {
+	switch normalizeTemplateRuntimeKind(kind) {
+	case runtime.KindCodex, runtime.KindDSH:
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeTemplateRuntimeOptions(runtimeKind string, raw map[string]any) (map[string]any, error) {

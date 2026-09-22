@@ -296,6 +296,7 @@ export function useWorkspaceHubController({
                   publishedTemplateID,
                   deployReviewPending ? "Pending" : "Fail",
                   deployReviewPending ? "" : message,
+                  template.runtime_kind || template.workspace?.kind,
                 ),
               );
             }

@@ -889,6 +889,28 @@ describe("HubDetailPane", () => {
     expect(screen.queryByRole("dialog", { name: "Published successfully" })).not.toBeInTheDocument();
   });
 
+  it("publishes a local DSH template to the community", async () => {
+    const user = userEvent.setup();
+    const onPublishTemplate = vi.fn().mockResolvedValue({ status: "success" });
+    const localTemplate = {
+      ...template,
+      id: "local.dsh-template",
+      runtime_kind: "dsh",
+      source: { name: "local", kind: "local" },
+      workspace: { ...template.workspace, kind: "dsh" },
+    };
+    renderHubDetailPane("template", { selectedTemplate: localTemplate, onPublishTemplate });
+
+    await openTemplateDetail(user);
+    await user.click(screen.getByRole("button", { name: "Publish to community" }));
+    expect(screen.getByRole("button", { name: "Publish template only" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish and deploy" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Include agent memory" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Publish and deploy" }));
+
+    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, true, false);
+  });
+
   it("does not show publishing success when publishing fails", async () => {
     const user = userEvent.setup();
     const localTemplate = {

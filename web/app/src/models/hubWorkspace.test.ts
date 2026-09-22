@@ -63,13 +63,14 @@ describe("mergeHubTemplateDetail", () => {
 
 describe("upsertHubTemplateReviewState", () => {
   it("creates a selectable pending template when the refreshed catalog does not contain it yet", () => {
-    const templates = upsertHubTemplateReviewState([], "Agentic/reviewer", "Pending");
+    const templates = upsertHubTemplateReviewState([], "Agentic/reviewer", "Pending", "", "dsh");
 
     expect(templates[0]).toMatchObject({
       id: "Agentic/reviewer",
       namespace: "Agentic",
       name: "reviewer",
       role: "worker",
+      runtime_kind: "dsh",
       source: { kind: "remote", name: "official" },
     });
     expect(hubTemplateReviewState(templates[0])).toEqual({ kind: "pending", paths: [] });
@@ -88,6 +89,18 @@ describe("upsertHubTemplateReviewState", () => {
 
     expect(templates[0]).toMatchObject({ name: "Reviewer", description: "catalog description" });
     expect(hubTemplateReviewState(templates[0])).toEqual({ kind: "exception", paths: [] });
+  });
+
+  it("fills a missing catalog runtime with the published worker runtime", () => {
+    const templates = upsertHubTemplateReviewState(
+      [{ id: "Agentic/reviewer", name: "Reviewer", runtime_kind: "" }],
+      "Agentic/reviewer",
+      "Pending",
+      "",
+      "dsh",
+    );
+
+    expect(templates[0]?.runtime_kind).toBe("dsh");
   });
 
   it("preserves server failure paths when updating review state", () => {

@@ -174,44 +174,53 @@ describe("agent action visibility", () => {
     expect(screen.queryByRole("menuitem", { name: "Publish to community" })).not.toBeInTheDocument();
   });
 
-  it("allows Codex agents to publish locally and to the community", async () => {
-    const user = userEvent.setup();
-    const onPublish = vi.fn().mockResolvedValue(true);
-    render(
-      <AgentDetailPane
-        item={{ ...worker, runtime_kind: "codex" }}
-        t={t}
-        busyKey=""
-        draft={null}
-        models={[]}
-        onDelete={vi.fn()}
-        onDraftChange={vi.fn()}
-        onInvite={vi.fn()}
-        onOpenDM={vi.fn()}
-        onPublish={onPublish}
-        onRecreate={vi.fn()}
-        onStart={vi.fn()}
-        onStop={vi.fn()}
-      />,
-    );
+  it.each(["codex", "dsh"] as const)(
+    "allows %s agents to publish locally and to the community",
+    async (runtimeKind) => {
+      const user = userEvent.setup();
+      const onPublish = vi.fn().mockResolvedValue(true);
+      render(
+        <AgentDetailPane
+          item={{ ...worker, runtime_kind: runtimeKind }}
+          t={t}
+          busyKey=""
+          draft={null}
+          models={[]}
+          onDelete={vi.fn()}
+          onDraftChange={vi.fn()}
+          onInvite={vi.fn()}
+          onOpenDM={vi.fn()}
+          onPublish={onPublish}
+          onRecreate={vi.fn()}
+          onStart={vi.fn()}
+          onStop={vi.fn()}
+        />,
+      );
 
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("menuitem", { name: "Save as local template" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Publish template only" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Publish and deploy" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "Publish to community" }));
-    expect(screen.getByRole("button", { name: "Publish template only" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish and deploy" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Publish template only" }));
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("menuitem", { name: "Save as local template" })).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Publish template only" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Publish and deploy" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("menuitem", { name: "Publish to community" }));
+      expect(screen.getByRole("button", { name: "Publish template only" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Publish and deploy" })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Publish template only" }));
 
-    expect(onPublish).toHaveBeenCalledWith("official", "Worker", "Agent description", false);
+      expect(onPublish).toHaveBeenCalledWith("official", "Worker", "Agent description", false);
 
-    await user.click(screen.getByRole("button", { name: "More" }));
-    await user.click(screen.getByRole("menuitem", { name: "Publish to community" }));
-    await user.click(screen.getByRole("checkbox", { name: "Include agent memory" }));
-    await user.click(screen.getByRole("button", { name: "Publish and deploy" }));
-    expect(onPublish).toHaveBeenCalledWith("official_deploy", "Worker", "Agent description", true);
-  });
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getByRole("menuitem", { name: "Publish to community" }));
+      const includeMemory = screen.queryByRole("checkbox", { name: "Include agent memory" });
+      if (runtimeKind === "codex") {
+        expect(includeMemory).toBeInTheDocument();
+        await user.click(includeMemory!);
+      } else {
+        expect(includeMemory).not.toBeInTheDocument();
+      }
+      await user.click(screen.getByRole("button", { name: "Publish and deploy" }));
+      expect(onPublish).toHaveBeenCalledWith("official_deploy", "Worker", "Agent description", runtimeKind === "codex");
+    },
+  );
 
   it("does not show template publishing actions for the manager", async () => {
     const user = userEvent.setup();

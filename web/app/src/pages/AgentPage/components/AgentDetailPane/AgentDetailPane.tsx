@@ -53,6 +53,7 @@ import {
   agentGatewayUnavailableLabel,
   agentRuntimeStatusDetailLabel,
   agentRuntimeKind,
+  canPublishCommunityTemplateRuntime,
   isAgentGatewayDegraded,
   isAgentAvailable,
   agentModelID,
@@ -367,7 +368,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
   const runtimeKind = agentRuntimeKind(item);
   const canPublishLocal =
     !isManager && (runtimeKind === "codex" || runtimeKind === "dsh" || runtimeKind === "openclaw_sandbox");
-  const canPublishCommunity = !isManager && runtimeKind === "codex";
+  const canPublishCommunity = !isManager && canPublishCommunityTemplateRuntime(runtimeKind);
   const supportsTemplateMemory = runtimeKind === "codex" || runtimeKind === "openclaw_sandbox";
   const hasUnsavedChanges =
     hasUnsavedChangesProp ?? Boolean(draft && savedDraft && JSON.stringify(draft) !== JSON.stringify(savedDraft));

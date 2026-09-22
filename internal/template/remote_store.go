@@ -33,6 +33,7 @@ const (
 	officialTemplateNamespace   = "Agentic"
 	remoteManifestFileName      = "agent.toml"
 	remoteAgentTemplatesPerPage = 20
+	remoteCommunityTemplateType = "csgclaw"
 )
 
 type RemoteStore struct {
@@ -213,7 +214,7 @@ func (s *RemoteStore) List(ctx context.Context) ([]Template, error) {
 		listErrs = append(listErrs, err)
 	}
 	for _, item := range agentTemplates {
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "csgclaw") {
+		if !strings.EqualFold(strings.TrimSpace(item.Type), remoteCommunityTemplateType) {
 			continue
 		}
 		repositories = appendRemoteTemplateRepositories(repositories, seen, []remoteCodeRepository{{
@@ -764,6 +765,9 @@ func (s *RemoteStore) Publish(ctx context.Context, spec PublishSpec) (Template, 
 	if err != nil {
 		return Template{}, err
 	}
+	if !CanPublishCommunityTemplateRuntime(normalized.RuntimeKind) {
+		return Template{}, fmt.Errorf("runtime_kind %q cannot be published to the community", normalized.RuntimeKind)
+	}
 	archive, err := buildRemoteTemplateArchive(normalized)
 	if err != nil {
 		return Template{}, err
@@ -823,7 +827,7 @@ func (s *RemoteStore) templatesURL() string {
 
 func (s *RemoteStore) agentTemplatesURL(page int) string {
 	query := url.Values{}
-	query.Set("type", "csgclaw")
+	query.Set("type", remoteCommunityTemplateType)
 	query.Set("page", strconv.Itoa(page))
 	query.Set("per", strconv.Itoa(remoteAgentTemplatesPerPage))
 	return s.hubBaseURL + "/api/v1/agent/templates?" + query.Encode()
