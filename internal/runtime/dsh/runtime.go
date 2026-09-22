@@ -71,16 +71,17 @@ type Runtime struct {
 }
 
 type process struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	client    *acpClient
-	stderr    *os.File
-	root      string
-	workspace string
-	profile   agentruntime.Profile
-	mcp       []acpMCPServer
-	meta      runtimeMetadata
-	done      chan struct{}
+	cmd              *exec.Cmd
+	stdin            io.WriteCloser
+	client           *acpClient
+	stderr           *os.File
+	root             string
+	workspace        string
+	profile          agentruntime.Profile
+	mcp              []acpMCPServer
+	meta             runtimeMetadata
+	extensionDigests map[string]string
+	done             chan struct{}
 
 	metadataMu sync.Mutex
 	mu         sync.Mutex
@@ -215,12 +216,12 @@ func (r *Runtime) Provision(ctx context.Context, req agentruntime.ProvisionReque
 			base = stripManagedInstructions(string(data))
 		}
 	}
-	block := runtimeinstructions.RenderRuntimeAgentsInstructionsBlock(agentID, req.Instructions)
-	document := strings.TrimSpace(base)
-	if document != "" {
-		document += "\n\n"
+	fragments, err := managedExtensionInstructions(filepath.Join(root, homeDirName))
+	if err != nil {
+		return fmt.Errorf("read DSH Runtime extensions: %w", err)
 	}
-	document += strings.TrimSpace(block) + "\n"
+	block := runtimeinstructions.RenderRuntimeAgentsInstructionsBlockWithOptions(agentID, req.Instructions, runtimeinstructions.RuntimeManagedInstructionsOptions{Extensions: fragments})
+	document := mergeDSHInstructionsDocument(base, block)
 	if err := os.WriteFile(layout.InstructionsPath, []byte(document), 0o644); err != nil {
 		return fmt.Errorf("write DSH AGENTS.md: %w", err)
 	}
@@ -359,11 +360,19 @@ func (r *Runtime) start(ctx context.Context, h agentruntime.Handle, spec *agentr
 	if err := writeRuntimePatch(filepath.Join(root, patchFileName)); err != nil {
 		return agentruntime.StateUnknown, err
 	}
-	proc, err := r.launch(ctx, root, layout.WorkspaceRoot, binary.Path, ref.Profile, mcpServers, meta, true)
+	projections, err := r.ExtensionProjections(ref.ID)
+	if err != nil {
+		return agentruntime.StateUnknown, err
+	}
+	environment, extensionDigests, err := buildEnvironmentWithExtensions(ref.Profile, filepath.Join(root, homeDirName), projections)
+	if err != nil {
+		return agentruntime.StateUnknown, err
+	}
+	proc, err := r.launch(ctx, root, layout.WorkspaceRoot, binary.Path, ref.Profile, mcpServers, meta, environment, extensionDigests, true)
 	if err != nil {
 		patchErr := err
 		slog.Warn("DSH present tool overlay unavailable; retrying base ACP profile", "runtime_id", runtimeID, "version", binary.Version, "error", patchErr)
-		proc, err = r.launch(ctx, root, layout.WorkspaceRoot, binary.Path, ref.Profile, mcpServers, meta, false)
+		proc, err = r.launch(ctx, root, layout.WorkspaceRoot, binary.Path, ref.Profile, mcpServers, meta, environment, extensionDigests, false)
 		if err != nil {
 			return agentruntime.StateUnknown, errors.Join(patchErr, err)
 		}
@@ -375,7 +384,7 @@ func (r *Runtime) start(ctx context.Context, h agentruntime.Handle, spec *agentr
 	return agentruntime.StateRunning, nil
 }
 
-func (r *Runtime) launch(ctx context.Context, root, workspace, binary string, profile agentruntime.Profile, mcp []acpMCPServer, meta runtimeMetadata, enablePresent bool) (*process, error) {
+func (r *Runtime) launch(ctx context.Context, root, workspace, binary string, profile agentruntime.Profile, mcp []acpMCPServer, meta runtimeMetadata, environment []string, extensionDigests map[string]string, enablePresent bool) (*process, error) {
 	stderr, err := os.OpenFile(filepath.Join(root, stderrFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open DSH stderr log: %w", err)
@@ -383,7 +392,7 @@ func (r *Runtime) launch(ctx context.Context, root, workspace, binary string, pr
 	cmd := exec.Command(binary, dshLaunchArgs(root, enablePresent)...)
 	configureProcessGroup(cmd)
 	cmd.Dir = workspace
-	cmd.Env = buildEnvironment(profile, filepath.Join(root, homeDirName))
+	cmd.Env = environment
 	cmd.Stderr = stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -400,7 +409,7 @@ func (r *Runtime) launch(ctx context.Context, root, workspace, binary string, pr
 		return nil, fmt.Errorf("start DSH ACP process: %w", err)
 	}
 	client := newACPClient(stdout, stdin)
-	proc := &process{cmd: cmd, stdin: stdin, client: client, stderr: stderr, root: root, workspace: workspace, profile: profile.Normalized(), mcp: mcp, meta: meta, done: make(chan struct{}), active: map[string]*activeTurn{}, ready: map[string]bool{}}
+	proc := &process{cmd: cmd, stdin: stdin, client: client, stderr: stderr, root: root, workspace: workspace, profile: profile.Normalized(), mcp: mcp, meta: meta, extensionDigests: extensionDigests, done: make(chan struct{}), active: map[string]*activeTurn{}, ready: map[string]bool{}}
 	client.setHandlers(
 		func(request serverRequest) { r.handleServerRequest(proc, request) },
 		func(note notification) { r.handleNotification(proc, note) },
@@ -464,7 +473,11 @@ func requiresHTTPMCP(servers []acpMCPServer) bool {
 }
 
 func buildEnvironment(profile agentruntime.Profile, home string) []string {
-	blocked := map[string]bool{"DSH_HOME": true, "DSH_AGENTS_HOME": true, llmAPIKeyEnvName: true}
+	blocked := map[string]bool{
+		"DSH_HOME": true, "DSH_AGENTS_HOME": true, llmAPIKeyEnvName: true,
+		"LARKSUITE_CLI_CONFIG_DIR": true, "LARK_CHANNEL": true, "LARK_CHANNEL_HOME": true,
+		"LARK_CHANNEL_PROFILE": true, "LARK_CHANNEL_CONFIG": true,
+	}
 	values := make(map[string]string, len(os.Environ())+len(profile.Env)+4)
 	for _, item := range os.Environ() {
 		key, value, found := strings.Cut(item, "=")
@@ -493,6 +506,10 @@ func buildEnvironment(profile agentruntime.Profile, home string) []string {
 		env = append(env, key+"="+values[key])
 	}
 	return env
+}
+
+func buildEnvironmentWithExtensions(profile agentruntime.Profile, home string, projections []agentruntime.ExtensionProjection) ([]string, map[string]string, error) {
+	return agentruntime.MergeExtensionEnvironment(buildEnvironment(profile, home), profile.Env, projections)
 }
 
 func (r *Runtime) waitProcess(proc *process) {

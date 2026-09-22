@@ -12,13 +12,13 @@ lark-cli 配置不再由 API 直接写 Runtime 文件或重启 Codex。
   -> feishubind 校验 AppID 独占并保存 Participant
   -> RuntimeExtensions(agentID).Apply
        -> feishu-participant Source
-       -> Codex lark-cli Driver
+       -> Codex/DSH lark-cli Driver
        -> 托管 generation / environment / instructions
-       -> 必要时 reload 已运行的 Codex
+       -> 必要时 reload 已运行的 Runtime
   -> Channel Binding 对账
 ```
 
-本文的 Codex 托管飞书消息只通过 `Conversations` 执行。
+本文的本地 Runtime 托管飞书消息只通过 `Conversations` 执行。
 Extension 不提供对话执行入口。
 缺少 lark-cli 不阻断飞书连接。
 CSGClaw 不下载、安装或升级 lark-cli。
@@ -47,19 +47,19 @@ failure_policy = optional
 | feishubind | 跨 Agent 的 AppID 独占检查与凭据写入互斥 |
 | Feishu ExtensionSource | 确认 Participant 归属，计算 revision，生成 scoped source token 与语义 payload |
 | Agent Engine | generation、resource version、状态、同 Agent 串行化、投影事务、reload 和恢复 |
-| Codex lark-cli Driver | executable probe、source/config 布局、bind 校验、环境、instructions fragment、loaded/drift 观察 |
+| Codex/DSH lark-cli Driver | executable probe、source/config 布局、bind 校验、环境、instructions fragment、loaded/drift 观察 |
 | Channel Binding Manager | 飞书 Worker 生命周期，与 Runtime 生命周期独立 |
 | API / UI | 固定业务 action、结构化 warning 和 Engine 状态展示 |
 
 Source 实现在 `internal/channel/feishu/larkcli/source.go`。
-Driver 实现在 `internal/runtime/codex/lark_cli_extension.go`。
+共享 Driver 实现在 `internal/runtimeextension/larkcli/driver.go`，Codex 与 DSH Adapter 分别提供 Runtime home、运行说明和加载状态检查。
 事务和隔离目录由 `internal/agentengine/runtime_adapter.go` 与 `internal/runtime/extensionstate` 实现。
 
 ## 托管布局与事务
 
 ```text
-CODEX_HOME/
-  AGENTS.md
+AGENTS.md       # Codex 使用 CODEX_HOME/AGENTS.md，DSH 使用 workspace/AGENTS.md
+RUNTIME_HOME/   # Codex 使用 CODEX_HOME，DSH 使用 DSH_HOME
   runtime-extensions/
     feishu-lark-cli/
       active.json
@@ -103,9 +103,9 @@ Runtime 运行中且尚未加载有效投影时只 reload 一次。
 增量 reload 不重新执行基础 Credentials 或 InitShell。
 同 revision 且有效配置已加载的重试不重复 bind/restart。
 
-Codex 启动时使用所有 active projection 构建进程环境，并记录 projection digest。
+Codex 与 DSH 启动时使用所有 active projection 构建进程环境，并记录 projection digest。
 `runtime_loaded` 必须匹配 live process 的 digest，不能从文件存在推断。
-Recreate 保留托管 root，并在启动前重新解析 Source、Apply 和检查必需 Extension。
+Recreate 保留托管 root；DSH 同时保留原生 `sessions`。Engine 在启动前重新解析 Source、Apply 和检查必需 Extension。
 
 ## Source token 与机器人切换
 
@@ -153,7 +153,7 @@ API 不返回宿主目录、source 文件内容或 resolved payload。
 
 ## 验证
 
-测试覆盖自动配置、缺少 executable、手动重试、机器人切换、AppID 冲突、token 失效、停止状态保持和单次重载。
+测试覆盖 Codex/DSH 自动配置、缺少 executable、手动重试、机器人切换、AppID 冲突、token 失效、停止状态保持和单次重载。
 投影测试覆盖多 Extension 隔离、环境冲突、instructions 排序、staging 回滚、source 变化失效和删除恢复。
 HTTP 回归使用真实 Engine 与隔离事实源，验证 no-auth 仍需 source token，以及部分断开的清理重试。
 进程内测试不代替真实租户权限验证；飞书远端权限或 tenant policy 仍可能导致实际 CLI 调用失败。

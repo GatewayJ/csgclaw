@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -82,4 +85,41 @@ type ExtensionDriver interface {
 // independently reconcilable Runtime extensions.
 type ExtensionDriverProvider interface {
 	RuntimeExtensionDriver(kind string) (ExtensionDriver, bool)
+}
+
+// MergeExtensionEnvironment applies Runtime projections to a base process
+// environment and returns the effective projection digests.
+func MergeExtensionEnvironment(base []string, profile map[string]string, projections []ExtensionProjection) ([]string, map[string]string, error) {
+	values := make(map[string]string, len(base))
+	for _, entry := range base {
+		key, value, found := strings.Cut(entry, "=")
+		if found {
+			values[key] = value
+		}
+	}
+	contributed := make(map[string]string)
+	digests := make(map[string]string, len(projections))
+	for _, projection := range projections {
+		for key, value := range projection.Environment {
+			if previous, ok := contributed[key]; ok && previous != value {
+				return nil, nil, fmt.Errorf("conflicting extension environment key %q", key)
+			}
+			if previous, ok := profile[key]; ok && previous != value {
+				return nil, nil, fmt.Errorf("extension environment key %q conflicts with the Agent profile", key)
+			}
+			contributed[key] = value
+			values[key] = value
+		}
+		digests[projection.Name] = projection.Digest
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	environment := make([]string, 0, len(keys))
+	for _, key := range keys {
+		environment = append(environment, key+"="+values[key])
+	}
+	return environment, digests, nil
 }

@@ -57,7 +57,7 @@ type fakeCompatRuntime struct {
 }
 
 func (f fakeCompatRuntime) RuntimeExtensionDriver(kind string) (agentruntime.ExtensionDriver, bool) {
-	if f.kind != agent.RuntimeKindCodex || kind != larkextension.Kind {
+	if !supportsAgentLarkCLI(f.kind) || kind != larkextension.Kind {
 		return nil, false
 	}
 	return fakeLarkCLIExtensionDriver{}, true

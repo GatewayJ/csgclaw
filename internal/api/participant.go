@@ -215,7 +215,7 @@ func (h *Handler) mutateFeishuBot(ctx context.Context, agentID, appID string, wr
 		if !ok {
 			return fmt.Errorf("agent %q not found", agentID)
 		}
-		if target.RuntimeKind == agent.RuntimeKindCodex && appID != "" {
+		if supportsAgentLarkCLI(target.RuntimeKind) && appID != "" {
 			// Optional tool errors are exposed in Engine status, not as failure
 			// of the successfully saved Channel credentials.
 			_, _ = h.configureAgentLarkCLILocked(ctx, target)

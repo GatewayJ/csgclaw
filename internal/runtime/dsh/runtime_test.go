@@ -257,6 +257,8 @@ func TestBuildEnvironmentSeparatesBridgeAndWebSearchCredentials(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "ambient-search-key")
 	t.Setenv("DEEPSEEK_BASE_URL", "https://ambient-chat.example/v1")
 	t.Setenv("DEEPSEEK_SEARCH_BASE_URL", "https://search.example/anthropic/v1")
+	t.Setenv("LARK_CHANNEL", "1")
+	t.Setenv("LARK_CHANNEL_PROFILE", "host-profile")
 
 	tests := []struct {
 		name          string
@@ -296,6 +298,12 @@ func TestBuildEnvironmentSeparatesBridgeAndWebSearchCredentials(t *testing.T) {
 			}
 			if got := env["DSH_AGENTS_HOME"]; got != "/isolated/dsh-home/agents" {
 				t.Fatalf("DSH_AGENTS_HOME = %q", got)
+			}
+			if _, found := env["LARK_CHANNEL"]; found {
+				t.Fatal("DSH inherited the host LARK_CHANNEL")
+			}
+			if _, found := env["LARK_CHANNEL_PROFILE"]; found {
+				t.Fatal("DSH inherited the host LARK_CHANNEL_PROFILE")
 			}
 		})
 	}
@@ -636,9 +644,11 @@ func TestDeletePreservesDSHRecreateState(t *testing.T) {
 	agentHome := t.TempDir()
 	root := filepath.Join(agentHome, hostStateDirName)
 	preservedFiles := map[string]string{
-		filepath.Join(root, workspaceDirName, "project.txt"):      "workspace state\n",
-		filepath.Join(root, homeDirName, "agents", "session.log"): "session state\n",
-		filepath.Join(root, homeDirName, "skills", "custom.md"):   "skill state\n",
+		filepath.Join(root, workspaceDirName, "project.txt"):                                     "workspace state\n",
+		filepath.Join(root, homeDirName, "agents", "subagent.json"):                              "subagent state\n",
+		filepath.Join(root, homeDirName, "sessions", "session-1", "session.json"):                "session state\n",
+		filepath.Join(root, homeDirName, "skills", "custom.md"):                                  "skill state\n",
+		filepath.Join(root, homeDirName, "runtime-extensions", "feishu-lark-cli", "active.json"): "extension state\n",
 	}
 	ephemeralFiles := map[string]string{
 		filepath.Join(root, homeDirName, settingsFileName): "generated settings\n",

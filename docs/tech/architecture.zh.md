@@ -107,6 +107,7 @@ detached continuation 保留既有的模型输入脱敏行为。
 | Adapter | 生命周期 | Engine Conversation | RuntimeExtension |
 | --- | --- | --- | --- |
 | Local Codex | 支持 | Run、Cancel、Reset、Resolve、文件 | `lark-cli` |
+| Local DSH | 支持 | Run、Cancel、Reset、Resolve、文件 | `lark-cli` |
 | PicoClaw Sandbox | 支持 | 尚无注册的 Engine Conversation 实现 | 不支持 |
 | OpenClaw Sandbox | 支持 | 尚无注册的 Engine Conversation 实现 | 不支持 |
 
@@ -142,7 +143,7 @@ UI 读取 Engine 状态，包括 Runtime 是否实际加载当前 generation。
 | Agent 和 Extension 资源 | 现有本地状态 section，通常为 `~/.csgclaw/state.json` |
 | Participant 凭据 | Participant Store；沙箱原生 Adapter 将必要凭据渲染到 gateway 配置 |
 | Runtime 文件与原生会话 | `~/.csgclaw/agents/<agent-id>` 下的 Adapter 私有布局 |
-| Codex Extension 投影 | `CODEX_HOME/runtime-extensions/<name>/generation-*/` 和原子 active manifest |
+| 本地 Runtime Extension 投影 | `CODEX_HOME/runtime-extensions/<name>/generation-*/` 或 `DSH_HOME/runtime-extensions/<name>/generation-*/`，以及原子 active manifest |
 | 内置 transcript | IM 存储 |
 | 匿名 Session Binding | Agent-scoped Session Binding Store |
 | 活跃 Turn、interaction、重放缓存、文件索引 | 进程内 |

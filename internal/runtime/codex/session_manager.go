@@ -1,14 +1,14 @@
 package codex
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	agentruntime "csgclaw/internal/runtime"
 )
 
 type liveSession struct {
@@ -180,34 +180,5 @@ func buildSessionEnvironment(spec SessionSpec) ([]string, map[string]string, err
 	if err != nil {
 		return nil, nil, err
 	}
-	values := make(map[string]string, len(base))
-	for _, entry := range base {
-		key, value, _ := strings.Cut(entry, "=")
-		values[key] = value
-	}
-	contributed := make(map[string]string)
-	digests := make(map[string]string, len(projections))
-	for _, projection := range projections {
-		for key, value := range projection.Environment {
-			if previous, ok := contributed[key]; ok && previous != value {
-				return nil, nil, fmt.Errorf("conflicting extension environment key %q", key)
-			}
-			if previous, ok := spec.Profile.Env[key]; ok && previous != value {
-				return nil, nil, fmt.Errorf("extension environment key %q conflicts with the Agent profile", key)
-			}
-			contributed[key] = value
-			values[key] = value
-		}
-		digests[projection.Name] = projection.Digest
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, key+"="+values[key])
-	}
-	return out, digests, nil
+	return agentruntime.MergeExtensionEnvironment(base, spec.Profile.Env, projections)
 }

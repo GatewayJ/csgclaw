@@ -12,7 +12,9 @@ var recreatePersistentPathPatterns = []string{
 	workspaceDirName,
 	runtimeFileName,
 	filepath.Join(homeDirName, "agents"),
+	filepath.Join(homeDirName, "sessions"),
 	filepath.Join(homeDirName, "skills"),
+	filepath.Join(homeDirName, "runtime-extensions"),
 }
 
 type preservedRecreateState struct {
