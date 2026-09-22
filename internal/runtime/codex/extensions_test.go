@@ -188,7 +188,7 @@ func TestLarkCLIExtensionHelper(t *testing.T) {
 	if json.Unmarshal(sourceRaw, &source) != nil || source.Accounts.App.ID == "" {
 		os.Exit(5)
 	}
-	path := filepath.Join(os.Getenv("LARKSUITE_CLI_CONFIG_DIR"), larkCLIWorkspaceName, larkCLIConfigFileName)
+	path := filepath.Join(os.Getenv("LARKSUITE_CLI_CONFIG_DIR"), larkextension.WorkspaceName, larkextension.ConfigFileName)
 	if os.MkdirAll(filepath.Dir(path), 0o700) != nil {
 		os.Exit(6)
 	}

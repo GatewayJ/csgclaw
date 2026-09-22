@@ -107,6 +107,7 @@ Detached continuations preserve the existing redacted model-input behavior.
 | Adapter | Lifecycle | Engine conversations | RuntimeExtension |
 | --- | --- | --- | --- |
 | Local Codex | Supported | Run, Cancel, Reset, Resolve and files | `lark-cli` |
+| Local DSH | Supported | Run, Cancel, Reset, Resolve and files | `lark-cli` |
 | PicoClaw Sandbox | Supported | No registered Engine conversation implementation | Unsupported |
 | OpenClaw Sandbox | Supported | No registered Engine conversation implementation | Unsupported |
 
@@ -142,7 +143,7 @@ The product exposes fixed init/cleanup actions, not an arbitrary payload or shel
 | Agent and Extension resources | Existing local state sections, normally `~/.csgclaw/state.json` |
 | Participant credentials | Participant store; sandbox-native adapters render the credentials required by their gateway configuration |
 | Runtime files and native conversation state | Adapter-owned Agent home under `~/.csgclaw/agents/<agent-id>` |
-| Codex Extension projections | `CODEX_HOME/runtime-extensions/<name>/generation-*/` plus an atomic active manifest |
+| Local Runtime Extension projections | `CODEX_HOME/runtime-extensions/<name>/generation-*/` or `DSH_HOME/runtime-extensions/<name>/generation-*/`, plus an atomic active manifest |
 | Built-in transcripts | IM-owned storage |
 | Anonymous Session bindings | Agent-scoped Session Binding Store |
 | Active Turns, interaction state, replay cache and file index | Process-local |

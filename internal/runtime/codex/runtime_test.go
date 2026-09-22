@@ -7,6 +7,7 @@ import (
 	"csgclaw/internal/opencsgmcp"
 	agentruntime "csgclaw/internal/runtime"
 	runtimeinstructions "csgclaw/internal/runtime/instructions"
+	larkextension "csgclaw/internal/runtimeextension/larkcli"
 	"csgclaw/internal/sandbox"
 	"encoding/json"
 	"errors"
@@ -4271,7 +4272,7 @@ func seedManagedLarkProjection(t *testing.T, home, agentID string) agentruntime.
 	if err != nil {
 		t.Fatal(err)
 	}
-	change.SetProjection(agentruntime.ExtensionProjection{Name: "feishu-lark-cli", Kind: "lark-cli", Generation: 1, SourceRevision: "source-v1", Environment: larkEnvironment(home, change.Directory(), agentID), Instructions: feishuLarkCLIManagedInstructions})
+	change.SetProjection(agentruntime.ExtensionProjection{Name: "feishu-lark-cli", Kind: "lark-cli", Generation: 1, SourceRevision: "source-v1", Environment: larkextension.Environment(home, change.Directory(), agentID), Instructions: feishuLarkCLIManagedInstructions})
 	if err := change.Activate(context.Background()); err != nil {
 		t.Fatal(err)
 	}

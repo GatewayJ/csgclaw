@@ -57,13 +57,15 @@ type fakeCompatRuntime struct {
 }
 
 func (f fakeCompatRuntime) RuntimeExtensionDriver(kind string) (agentruntime.ExtensionDriver, bool) {
-	if f.kind != agent.RuntimeKindCodex || kind != larkextension.Kind {
+	if !supportsAgentLarkCLI(f.kind) || kind != larkextension.Kind {
 		return nil, false
 	}
-	return fakeLarkCLIExtensionDriver{}, true
+	return fakeLarkCLIExtensionDriver{runtimeKind: f.Kind()}, true
 }
 
-type fakeLarkCLIExtensionDriver struct{}
+type fakeLarkCLIExtensionDriver struct {
+	runtimeKind string
+}
 
 var larkCLICommandContext = exec.CommandContext
 
@@ -352,6 +354,12 @@ func (f fakeCompatRuntime) Layout(agentHome string) agentruntime.Layout {
 			WorkspaceRoot: filepath.Join(agentHome, ".codex", "workspace"),
 			SkillsRoot:    filepath.Join(agentHome, ".codex", "home", "skills"),
 			HostLogPaths:  []string{filepath.Join(agentHome, ".codex", "home", "stderr.log")},
+		}
+	case agent.RuntimeKindDSH:
+		return agentruntime.Layout{
+			WorkspaceRoot: filepath.Join(agentHome, ".dsh", "workspace"),
+			SkillsRoot:    filepath.Join(agentHome, ".dsh", "home", "skills"),
+			HostLogPaths:  []string{filepath.Join(agentHome, ".dsh", "stderr.log")},
 		}
 	default:
 		return agentruntime.Layout{}

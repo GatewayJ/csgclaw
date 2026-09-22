@@ -1,10 +1,12 @@
-package codex
+package larkcli
 
-const feishuLarkCLIManagedInstructions = `### Feishu lark-cli Access
+import "strings"
+
+const managedInstructionsTemplate = `### Feishu lark-cli Access
 
 - This worker is bound to a Feishu app through lark-cli. Plain ` + "`lark-cli ...`" + ` commands inherit the current worker context from ` + "`LARK_CHANNEL=1`" + `, ` + "`LARK_CHANNEL_HOME`" + `, ` + "`LARK_CHANNEL_PROFILE`" + `, ` + "`LARK_CHANNEL_CONFIG`" + `, and ` + "`LARKSUITE_CLI_CONFIG_DIR`" + `.
-- Run every lark-cli command directly through ` + "`command_execution`" + `. Do not invoke lark-cli through ` + "`mcp_tool_call`" + `, MCP code execution, Node.js or Python subprocesses, or another tool wrapper; those environments may strip the worker's ` + "`LARK*`" + ` variables and read the host default profile instead.
-- Treat a ` + "`not_configured`" + ` result from any non-` + "`command_execution`" + ` environment as invalid. Retry the same read-only status command once through ` + "`command_execution`" + ` before telling the user that lark-cli is not configured.
+- Run every lark-cli command directly through ` + "`{{command_tool}}`" + `. Do not invoke lark-cli through ` + "`mcp_tool_call`" + `, MCP code execution, Node.js or Python subprocesses, or another tool wrapper; those environments may strip the worker's ` + "`LARK*`" + ` variables and read the host default profile instead.
+- Treat a ` + "`not_configured`" + ` result from any non-` + "`{{command_tool}}`" + ` environment as invalid. Retry the same read-only status command once through ` + "`{{command_tool}}`" + ` before telling the user that lark-cli is not configured.
 - Do not unset those variables, do not use the host default lark-cli profile, and do not read or print lark-cli config files, app secrets, access tokens, refresh tokens, OAuth device codes, or CSGClaw API tokens.
 - If lark-cli reports that the lark-channel context is not bound, stop and tell the user to initialize lark-cli for this worker from the Feishu channel profile page or restart the worker after initialization. Do not run bind manually from an ordinary prompt.
 - For Feishu Doc/Docx file tokens, first try ` + "`lark-cli docs +fetch --api-version v2 --doc <file_token> --doc-format markdown`" + `. If this lark-cli version does not support that exact syntax, inspect ` + "`lark-cli docs --help`" + ` once and use the equivalent current read-only command for the same token.
@@ -24,3 +26,12 @@ const feishuLarkCLIManagedInstructions = `### Feishu lark-cli Access
 - Start ` + "`lark-cli auth login`" + ` only in a Feishu private chat with the user who should own the authorization. In group chats, ask the user to open a private chat instead.
 - Prefer the two-step OAuth flow when user authorization is needed: run ` + "`lark-cli auth login --no-wait --json --recommend`" + `, show the verification URL plainly to the user, then wait in the foreground with ` + "`lark-cli auth login --device-code <code>`" + `. Do not background the device-code wait.
 - After user OAuth succeeds, silently converge identity policy with ` + "`lark-cli config strict-mode off`" + ` and ` + "`lark-cli config default-as auto`" + ` before retrying a user-identity read. Do not ask the user to choose those internal settings.`
+
+// ManagedInstructions renders the guidance for a Runtime command tool.
+func ManagedInstructions(commandTool string) string {
+	commandTool = strings.TrimSpace(commandTool)
+	if commandTool == "" {
+		commandTool = "command_execution"
+	}
+	return strings.ReplaceAll(managedInstructionsTemplate, "{{command_tool}}", commandTool)
+}

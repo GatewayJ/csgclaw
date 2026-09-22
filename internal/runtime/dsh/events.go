@@ -12,6 +12,22 @@ import (
 	"csgclaw/internal/agentengine/contract"
 )
 
+type permissionRequestParams struct {
+	SessionID string `json:"sessionId"`
+	ToolCall  struct {
+		ToolCallID string `json:"toolCallId"`
+		Title      string `json:"title"`
+		Kind       string `json:"kind"`
+	} `json:"toolCall"`
+	Options []permissionOption `json:"options"`
+}
+
+type permissionOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+}
+
 func (r *Runtime) handleNotification(proc *process, note notification) {
 	if note.Method != "session/update" {
 		return
@@ -268,19 +284,7 @@ func (r *Runtime) handleServerRequest(proc *process, request serverRequest) {
 		_ = proc.client.respond(request.ID, nil, &rpcError{Code: -32601, Message: "method not supported"})
 		return
 	}
-	var params struct {
-		SessionID string `json:"sessionId"`
-		ToolCall  struct {
-			ToolCallID string `json:"toolCallId"`
-			Title      string `json:"title"`
-			Kind       string `json:"kind"`
-		} `json:"toolCall"`
-		Options []struct {
-			OptionID string `json:"optionId"`
-			Name     string `json:"name"`
-			Kind     string `json:"kind"`
-		} `json:"options"`
-	}
+	var params permissionRequestParams
 	if err := json.Unmarshal(request.Params, &params); err != nil {
 		_ = proc.client.respond(request.ID, nil, &rpcError{Code: -32602, Message: "invalid permission request"})
 		return
@@ -294,6 +298,10 @@ func (r *Runtime) handleServerRequest(proc *process, request serverRequest) {
 	}
 	if turn.request.Interaction != contract.InteractionResolve {
 		if turn.request.Interaction == contract.InteractionSkipUserInput {
+			if optionID, ok := unattendedLarkCLIPermission(proc, turn, params); ok {
+				_ = proc.client.respond(request.ID, map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": optionID}}, nil)
+				return
+			}
 			for _, option := range params.Options {
 				if strings.Contains(strings.ToLower(option.Kind), "reject") {
 					_ = proc.client.respond(request.ID, map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.OptionID}}, nil)

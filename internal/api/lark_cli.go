@@ -97,8 +97,8 @@ func (h *Handler) initAgentLarkCLI(w http.ResponseWriter, r *http.Request) {
 		writeAgentOperationError(w, fmt.Errorf("agent %q not found", agent.CanonicalID(agentID)), http.StatusNotFound)
 		return
 	}
-	if !strings.EqualFold(strings.TrimSpace(target.RuntimeKind), agent.RuntimeKindCodex) {
-		writeCodedAPIError(w, http.StatusBadRequest, "unsupported_runtime", "lark-cli init is supported only for Codex workers")
+	if !supportsAgentLarkCLI(target.RuntimeKind) {
+		writeCodedAPIError(w, http.StatusBadRequest, "unsupported_runtime", "lark-cli init is supported for Codex and DSH workers")
 		return
 	}
 
@@ -216,7 +216,7 @@ func (h *Handler) clearAgentLarkCLIState(ctx context.Context, agentID string) er
 		return nil
 	}
 	if h.svc != nil {
-		if target, ok := h.svc.Agent(agentID); !ok || !strings.EqualFold(strings.TrimSpace(target.RuntimeKind), agent.RuntimeKindCodex) {
+		if target, ok := h.svc.Agent(agentID); !ok || !supportsAgentLarkCLI(target.RuntimeKind) {
 			return nil
 		}
 	}
@@ -264,7 +264,7 @@ func (h *Handler) agentLarkCLIStatus(target agent.Agent) *apitypes.AgentLarkCLIS
 	if h.agentEngine == nil {
 		return nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(target.RuntimeKind), agent.RuntimeKindCodex) {
+	if !supportsAgentLarkCLI(target.RuntimeKind) {
 		return nil
 	}
 	extension, err := h.agentEngine.RuntimeExtensions(target.ID).Get(context.Background(), larkextension.Name)
@@ -300,6 +300,11 @@ func (h *Handler) agentLarkCLIStatus(target agent.Agent) *apitypes.AgentLarkCLIS
 		status.BoundAt = &appliedAt
 	}
 	return status
+}
+
+func supportsAgentLarkCLI(runtimeKind string) bool {
+	runtimeKind = strings.TrimSpace(runtimeKind)
+	return strings.EqualFold(runtimeKind, agent.RuntimeKindCodex) || strings.EqualFold(runtimeKind, agent.RuntimeKindDSH)
 }
 
 func (h *Handler) getAgentFeishuAppInfo(w http.ResponseWriter, r *http.Request) {

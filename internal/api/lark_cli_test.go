@@ -176,6 +176,98 @@ func TestInitAgentLarkCLIReturnsConflictWhenFeishuBotMissing(t *testing.T) {
 	assertAPIErrorCode(t, rec, http.StatusConflict, feishuBotNotConfiguredCode)
 }
 
+func TestInitAgentLarkCLISupportsDSHWorker(t *testing.T) {
+	originalLookPath := larkCLILookPath
+	originalCommandContext := larkCLICommandContext
+	originalCurrentExe := larkCLICurrentExe
+	t.Cleanup(func() {
+		larkCLILookPath = originalLookPath
+		larkCLICommandContext = originalCommandContext
+		larkCLICurrentExe = originalCurrentExe
+	})
+	recordPath := filepath.Join(t.TempDir(), "bind.json")
+	t.Setenv("CSGCLAW_TEST_AGENT_ROOT", t.TempDir())
+	t.Setenv("CSGCLAW_FAKE_LARK_CLI_COMMAND", "1")
+	t.Setenv("CSGCLAW_FAKE_LARK_RECORD_PATH", recordPath)
+	larkCLILookPath = func(name string) (string, error) {
+		if name == "lark-cli" {
+			return "/opt/lark/bin/lark-cli", nil
+		}
+		return "", os.ErrNotExist
+	}
+	larkCLICommandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestLarkCLIFakeCommand$", "--"}, args...)...)
+	}
+	larkCLICurrentExe = func() (string, error) { return "/opt/csgclaw/bin/csgclaw", nil }
+
+	svc := mustNewSeededServiceWithOptions(t, []agent.Agent{{
+		ID:              "u-dev",
+		Name:            "dev",
+		Role:            agent.RoleWorker,
+		RuntimeKind:     agent.RuntimeKindDSH,
+		RuntimeID:       "rt-dev",
+		Status:          string(agentruntime.StateRunning),
+		ProfileComplete: true,
+		CreatedAt:       time.Now().UTC(),
+	}}, agent.WithRuntime(fakeCompatRuntime{
+		kind: agent.RuntimeKindDSH,
+		stop: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+			return agentruntime.StateStopped, nil
+		},
+		start: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+			return agentruntime.StateRunning, nil
+		},
+	}))
+	participantSvc := participant.NewService(participant.NewMemoryStore([]apitypes.Participant{{
+		ID:              "pt-dev",
+		Channel:         participant.ChannelFeishu,
+		Type:            participant.TypeAgent,
+		Name:            "dev",
+		ChannelUserKind: participant.ChannelUserKindAppID,
+		ChannelAppConfig: map[string]any{
+			"app_id":     "cli_dev",
+			"app_secret": "dev-secret",
+		},
+		AgentID:         "agent-dev",
+		LifecycleStatus: participant.LifecycleStatusActive,
+		Mentionable:     true,
+	}}), participant.WithAgentEngine(agentengine.New(svc)))
+	srv := &Handler{
+		svc:               svc,
+		participant:       participantSvc,
+		serverAccessToken: "server-secret",
+		internalBaseURL:   "http://csgclaw.test", agentEngine: agentengine.New(svc), workspace: svc.Workspace(), agentModels: svc.Models(), agentRuntime: svc,
+	}
+
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/agents/u-dev/lark-cli:init", strings.NewReader(`{}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var got apitypes.AgentLarkCLIInitResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.AgentID != "agent-dev" || got.AppID != "cli_dev" || got.Status != "configured" || got.RestartStatus != "runtime_loaded" || !got.RuntimeLoaded {
+		t.Fatalf("init response = %#v", got)
+	}
+	extension, err := srv.agentEngine.RuntimeExtensions("agent-dev").Get(context.Background(), "feishu-lark-cli")
+	if err != nil {
+		t.Fatalf("RuntimeExtensions().Get() error = %v", err)
+	}
+	if extension.Status.State != agentengine.RuntimeExtensionConfigured || extension.Status.Generation == 0 || !extension.Status.RuntimeLoaded {
+		t.Fatalf("DSH RuntimeExtension = %#v", extension)
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("CSGCLAW_TEST_AGENT_ROOT"), "agent-dev", ".dsh", "home", "runtime-extensions", "feishu-lark-cli", "active.json")); err != nil {
+		t.Fatalf("DSH extension state: %v", err)
+	}
+	item, ok := svc.Agent("u-dev")
+	if !ok || srv.agentLarkCLIStatus(item) == nil {
+		t.Fatal("DSH worker did not expose lark-cli status")
+	}
+}
+
 func TestInternalSourceBaseURLUsesOnlyConfiguredOrDefaultAddress(t *testing.T) {
 	configured := (&Handler{internalBaseURL: "http://127.0.0.1:19090/"}).internalSourceBaseURL()
 	if configured != "http://127.0.0.1:19090" {
@@ -206,6 +298,22 @@ func TestClassifyLarkCLIConfigureErrorReturnsActionableCodes(t *testing.T) {
 		status, code := classifyLarkCLIConfigureError(test.message)
 		if status != test.status || code != test.code {
 			t.Fatalf("classify(%q) = (%d, %q), want (%d, %q)", test.message, status, code, test.status, test.code)
+		}
+	}
+}
+
+func TestSupportsAgentLarkCLI(t *testing.T) {
+	for _, test := range []struct {
+		kind string
+		want bool
+	}{
+		{kind: agent.RuntimeKindCodex, want: true},
+		{kind: agent.RuntimeKindDSH, want: true},
+		{kind: agent.RuntimeKindPicoClawSandbox, want: false},
+		{kind: agent.RuntimeKindOpenClawSandbox, want: false},
+	} {
+		if got := supportsAgentLarkCLI(test.kind); got != test.want {
+			t.Fatalf("supportsAgentLarkCLI(%q) = %v, want %v", test.kind, got, test.want)
 		}
 	}
 }

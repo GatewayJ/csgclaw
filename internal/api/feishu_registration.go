@@ -234,7 +234,7 @@ func (h *Handler) finalizeFeishuRegistration(w http.ResponseWriter, r *http.Requ
 		if bindErr != nil {
 			return bindErr
 		}
-		if strings.EqualFold(strings.TrimSpace(target.RuntimeKind), agent.RuntimeKindCodex) {
+		if supportsAgentLarkCLI(target.RuntimeKind) {
 			if _, applyErr := h.configureAgentLarkCLILocked(ctx, target); applyErr != nil {
 				larkCLIStatus, larkCLIError = feishuRegistrationLarkCLIWarning(applyErr)
 				result.Warnings = append(result.Warnings, larkCLIError.Message)

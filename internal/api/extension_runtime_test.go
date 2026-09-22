@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func apiExtensionStore(agentID string) (*extensionstate.Store, error) {
+func apiExtensionStore(agentID, runtimeKind string) (*extensionstate.Store, error) {
 	root := os.Getenv("CSGCLAW_TEST_AGENT_ROOT")
 	if root == "" {
 		var err error
@@ -22,10 +22,14 @@ func apiExtensionStore(agentID string) (*extensionstate.Store, error) {
 			return nil, err
 		}
 	}
-	return extensionstate.New(filepath.Join(root, agent.CanonicalID(agentID), ".codex", "home", "runtime-extensions"))
+	runtimeDir := ".codex"
+	if runtimeKind == agent.RuntimeKindDSH {
+		runtimeDir = ".dsh"
+	}
+	return extensionstate.New(filepath.Join(root, agent.CanonicalID(agentID), runtimeDir, "home", "runtime-extensions"))
 }
-func (fakeCompatRuntime) ExtensionProjections(agentID string) ([]agentruntime.ExtensionProjection, error) {
-	store, err := apiExtensionStore(agentID)
+func (f fakeCompatRuntime) ExtensionProjections(agentID string) ([]agentruntime.ExtensionProjection, error) {
+	store, err := apiExtensionStore(agentID, f.Kind())
 	if err != nil {
 		return nil, err
 	}
@@ -34,20 +38,20 @@ func (fakeCompatRuntime) ExtensionProjections(agentID string) ([]agentruntime.Ex
 func (fakeCompatRuntime) RenderExtensions(context.Context, string, []agentruntime.ExtensionProjection) error {
 	return nil
 }
-func (fakeCompatRuntime) PrepareExtensionDelete(_ context.Context, agentID, name string) (agentruntime.PreparedExtension, error) {
-	store, err := apiExtensionStore(agentID)
+func (f fakeCompatRuntime) PrepareExtensionDelete(_ context.Context, agentID, name string) (agentruntime.PreparedExtension, error) {
+	store, err := apiExtensionStore(agentID, f.Kind())
 	if err != nil {
 		return nil, err
 	}
 	return store.Delete(name)
 }
-func (fakeLarkCLIExtensionDriver) PrepareExtension(ctx context.Context, agentID string, desired agentruntime.ExtensionDesired) (agentruntime.PreparedExtension, agentruntime.ExtensionResult, error) {
+func (f fakeLarkCLIExtensionDriver) PrepareExtension(ctx context.Context, agentID string, desired agentruntime.ExtensionDesired) (agentruntime.PreparedExtension, agentruntime.ExtensionResult, error) {
 	result := agentruntime.ExtensionResult{State: agentruntime.ExtensionStateConfigured, CheckedAt: time.Now().UTC()}
 	path, err := testLarkCLIPath(ctx)
 	if err != nil {
 		return nil, agentruntime.ExtensionResult{State: agentruntime.ExtensionStateUnavailable, Reason: "executable_unavailable", Message: err.Error(), CheckedAt: time.Now().UTC()}, nil
 	}
-	store, err := apiExtensionStore(agentID)
+	store, err := apiExtensionStore(agentID, f.runtimeKind)
 	if err != nil {
 		return nil, result, err
 	}
