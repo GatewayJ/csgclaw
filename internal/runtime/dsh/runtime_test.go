@@ -20,6 +20,7 @@ import (
 	"csgclaw/internal/agentengine/interactionstate"
 	"csgclaw/internal/dshcli"
 	agentruntime "csgclaw/internal/runtime"
+	larkextension "csgclaw/internal/runtimeextension/larkcli"
 )
 
 func TestRuntimeRunsACPConversation(t *testing.T) {
@@ -259,6 +260,7 @@ func TestBuildEnvironmentSeparatesBridgeAndWebSearchCredentials(t *testing.T) {
 	t.Setenv("DEEPSEEK_SEARCH_BASE_URL", "https://search.example/anthropic/v1")
 	t.Setenv("LARK_CHANNEL", "1")
 	t.Setenv("LARK_CHANNEL_PROFILE", "host-profile")
+	t.Setenv("lark_channel_home", "/ambient/lark-home")
 
 	tests := []struct {
 		name          string
@@ -268,7 +270,7 @@ func TestBuildEnvironmentSeparatesBridgeAndWebSearchCredentials(t *testing.T) {
 		{name: "inherits search credential from server environment", wantSearchKey: "ambient-search-key"},
 		{
 			name:          "agent environment overrides search credential",
-			profileEnv:    map[string]string{"DEEPSEEK_API_KEY": "agent-search-key"},
+			profileEnv:    map[string]string{"DEEPSEEK_API_KEY": "agent-search-key", "lark_channel_config": "/profile/lark.json"},
 			wantSearchKey: "agent-search-key",
 		},
 	}
@@ -304,6 +306,12 @@ func TestBuildEnvironmentSeparatesBridgeAndWebSearchCredentials(t *testing.T) {
 			}
 			if _, found := env["LARK_CHANNEL_PROFILE"]; found {
 				t.Fatal("DSH inherited the host LARK_CHANNEL_PROFILE")
+			}
+			for key := range env {
+				switch agentruntime.CanonicalEnvironmentKey(key) {
+				case "LARK_CHANNEL_HOME", "LARK_CHANNEL_CONFIG":
+					t.Fatalf("DSH inherited protected environment key %q", key)
+				}
 			}
 		})
 	}
@@ -380,6 +388,18 @@ func environmentMap(env []string) map[string]string {
 func TestDSHHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_DSH_HELPER_PROCESS") != "1" {
 		return
+	}
+	if recordPath := os.Getenv("DSH_TEST_ENV_RECORD"); recordPath != "" {
+		record, _ := json.Marshal(map[string]string{
+			"LARKSUITE_CLI_CONFIG_DIR": os.Getenv("LARKSUITE_CLI_CONFIG_DIR"),
+			"LARK_CHANNEL":             os.Getenv("LARK_CHANNEL"),
+			"LARK_CHANNEL_HOME":        os.Getenv("LARK_CHANNEL_HOME"),
+			"LARK_CHANNEL_PROFILE":     os.Getenv("LARK_CHANNEL_PROFILE"),
+			"LARK_CHANNEL_CONFIG":      os.Getenv("LARK_CHANNEL_CONFIG"),
+		})
+		if err := os.WriteFile(recordPath, record, 0o600); err != nil {
+			os.Exit(8)
+		}
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)
@@ -907,5 +927,88 @@ func TestPermissionRequestRejectPolicyCancelsTurn(t *testing.T) {
 	frames := strings.TrimSpace(output.String())
 	if !strings.Contains(frames, `"outcome":"cancelled"`) || !strings.Contains(frames, `"method":"session/cancel"`) {
 		t.Fatalf("ACP reject frames = %s", frames)
+	}
+}
+
+func TestPermissionRequestSkipUserInputAllowsManagedLarkCLISetup(t *testing.T) {
+	var output bytes.Buffer
+	turn := &activeTurn{
+		request: contract.TurnRequest{ID: "turn-lark", Interaction: contract.InteractionSkipUserInput},
+	}
+	proc := &process{
+		client:           &acpClient{writer: &output},
+		active:           map[string]*activeTurn{"session-1": turn},
+		extensionDigests: map[string]string{larkextension.Name: "digest-1"},
+	}
+	runtime := &Runtime{}
+	emitDSHUpdate(t, runtime, proc, map[string]any{
+		"sessionUpdate": "tool_call",
+		"toolCallId":    "tool-1",
+		"title":         "bash",
+		"kind":          "other",
+		"rawInput": map[string]any{
+			"command": "lark-cli auth login --no-wait --json --recommend",
+		},
+	})
+	params, err := json.Marshal(map[string]any{
+		"sessionId": "session-1",
+		"toolCall":  map[string]any{"toolCallId": "tool-1", "title": "Run command", "kind": "execute"},
+		"options": []map[string]any{
+			{"optionId": "allow-once", "kind": "allow_once"},
+			{"optionId": "reject", "kind": "reject_once"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runtime.handleServerRequest(proc, serverRequest{ID: json.RawMessage("93"), Method: "session/request_permission", Params: params})
+
+	if got := output.String(); !strings.Contains(got, `"outcome":"selected"`) || !strings.Contains(got, `"optionId":"allow-once"`) {
+		t.Fatalf("ACP permission response = %s", got)
+	}
+}
+
+func TestPermissionRequestSkipUserInputRejectsUnmanagedCommands(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		command    string
+		extensions map[string]string
+	}{
+		{name: "different command", command: "lark-cli docs +fetch --doc token", extensions: map[string]string{larkextension.Name: "digest-1"}},
+		{name: "extension not loaded", command: "lark-cli config strict-mode off", extensions: map[string]string{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			turn := &activeTurn{
+				request: contract.TurnRequest{ID: "turn-lark", Interaction: contract.InteractionSkipUserInput},
+				tools: map[string]contract.ToolActivity{
+					"tool-1": {Kind: "exec_command", Payload: map[string]any{"rawInput": map[string]any{"command": test.command}}},
+				},
+			}
+			proc := &process{
+				client:           &acpClient{writer: &output},
+				active:           map[string]*activeTurn{"session-1": turn},
+				extensionDigests: test.extensions,
+			}
+			params, err := json.Marshal(map[string]any{
+				"sessionId": "session-1",
+				"toolCall":  map[string]any{"toolCallId": "tool-1"},
+				"options": []map[string]any{
+					{"optionId": "allow-once", "kind": "allow_once"},
+					{"optionId": "reject", "kind": "reject_once"},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			(&Runtime{}).handleServerRequest(proc, serverRequest{ID: json.RawMessage("94"), Method: "session/request_permission", Params: params})
+
+			got := output.String()
+			if !strings.Contains(got, `"outcome":"selected"`) || !strings.Contains(got, `"optionId":"reject"`) {
+				t.Fatalf("ACP permission response = %s", got)
+			}
+		})
 	}
 }

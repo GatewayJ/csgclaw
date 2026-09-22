@@ -320,14 +320,25 @@ func trustedPaths(helperPath string) []string {
 
 func mergeCommandEnv(base []string, overrides map[string]string) []string {
 	values := make(map[string]string, len(base)+len(overrides))
+	effectiveKeys := make(map[string]string, len(base)+len(overrides))
 	for _, entry := range base {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok {
+			canonical := agentruntime.CanonicalEnvironmentKey(key)
+			if previous := effectiveKeys[canonical]; previous != "" && previous != key {
+				delete(values, previous)
+			}
 			values[key] = value
+			effectiveKeys[canonical] = key
 		}
 	}
 	for key, value := range overrides {
+		canonical := agentruntime.CanonicalEnvironmentKey(key)
+		if previous := effectiveKeys[canonical]; previous != "" && previous != key {
+			delete(values, previous)
+		}
 		values[key] = value
+		effectiveKeys[canonical] = key
 	}
 	out := make([]string, 0, len(values))
 	for key, value := range values {

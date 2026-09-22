@@ -6,21 +6,41 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"csgclaw/internal/dshcli"
 	agentruntime "csgclaw/internal/runtime"
 	larkextension "csgclaw/internal/runtimeextension/larkcli"
 )
 
 func TestLarkCLIExtensionProjectsIntoDSHRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX launcher")
+	}
 	root := t.TempDir()
+	launcher := filepath.Join(root, "dsh-test")
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\nexec \"$DSH_TEST_BINARY\" -test.run=TestDSHHelperProcess\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GO_WANT_DSH_HELPER_PROCESS", "1")
+	t.Setenv("DSH_TEST_BINARY", os.Args[0])
+	environmentRecord := filepath.Join(root, "environment.json")
+	t.Setenv("DSH_TEST_ENV_RECORD", environmentRecord)
 	agentHome := filepath.Join(root, "agent-dev")
-	ref := AgentRef{ID: "agent-dev", RuntimeID: "rt-agent-dev", Instructions: "Stay concise."}
+	ref := AgentRef{
+		ID: "agent-dev", RuntimeID: "rt-agent-dev", Instructions: "Stay concise.",
+		Profile: agentruntime.Profile{BaseURL: "https://gateway.example/v1", APIKey: "secret-key", ModelID: "test-model"},
+	}
 	rt := New(Dependencies{
 		AgentHome:    func(string) (string, error) { return agentHome, nil },
 		ResolveAgent: func(agentruntime.Handle) (AgentRef, error) { return ref, nil },
+		ResolveBinary: func(context.Context, string) (dshcli.Info, error) {
+			return dshcli.Info{Path: launcher, Version: "0.1.5-rc.2"}, nil
+		},
 	})
+	t.Cleanup(func() { _ = rt.Close() })
 	if err := rt.Provision(context.Background(), agentruntime.ProvisionRequest{RuntimeID: ref.RuntimeID, AgentID: ref.ID, Instructions: ref.Instructions}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
@@ -67,6 +87,23 @@ func TestLarkCLIExtensionProjectsIntoDSHRuntime(t *testing.T) {
 			t.Fatalf("DSH AGENTS.md is missing %q", want)
 		}
 	}
+	ref.Instructions = "Use the updated instructions."
+	if err := rt.ReconcileConfig(context.Background(), agentruntime.Handle{RuntimeID: ref.RuntimeID}, agentruntime.RuntimeConfigChange{
+		Current: agentruntime.RuntimeConfigSnapshot{Profile: agentruntime.RuntimeProfileConfig{
+			BaseURL: ref.Profile.BaseURL, APIKey: ref.Profile.APIKey, ModelID: ref.Profile.ModelID,
+		}},
+	}); err != nil {
+		t.Fatalf("ReconcileConfig() error = %v", err)
+	}
+	instructions, err = os.ReadFile(instructionsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Feishu lark-cli Access", "through `bash`", ref.Instructions} {
+		if !strings.Contains(string(instructions), want) {
+			t.Fatalf("reconciled DSH AGENTS.md is missing %q", want)
+		}
+	}
 
 	home := filepath.Join(agentHome, hostStateDirName, homeDirName)
 	environment, digests, err := buildEnvironmentWithExtensions(agentruntime.Profile{}, home, projections)
@@ -81,13 +118,26 @@ func TestLarkCLIExtensionProjectsIntoDSHRuntime(t *testing.T) {
 	if err != nil || observed.RuntimeLoaded {
 		t.Fatalf("ObserveExtension() before process load = %+v, %v", observed, err)
 	}
-	proc := &process{done: make(chan struct{}), extensionDigests: map[string]string{larkextension.Name: projections[0].Digest}}
-	rt.processes[ref.RuntimeID] = proc
+	if _, err := rt.New(context.Background(), agentruntime.Spec{RuntimeID: ref.RuntimeID, AgentID: ref.ID, Profile: ref.Profile}); err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	var launchedEnvironment map[string]string
+	record, err := os.ReadFile(environmentRecord)
+	if err != nil {
+		t.Fatalf("read launched environment: %v", err)
+	}
+	if err := json.Unmarshal(record, &launchedEnvironment); err != nil {
+		t.Fatalf("decode launched environment: %v", err)
+	}
+	for key, want := range projections[0].Environment {
+		if got := launchedEnvironment[key]; got != want {
+			t.Fatalf("launched environment %s = %q, want %q", key, got, want)
+		}
+	}
 	observed, err = driver.ObserveExtension(context.Background(), ref.ID, desired)
 	if err != nil || !observed.RuntimeLoaded {
 		t.Fatalf("ObserveExtension() after process load = %+v, %v", observed, err)
 	}
-	delete(rt.processes, ref.RuntimeID)
 }
 
 func installFakeDSHLarkCLICommand(t *testing.T) func() {

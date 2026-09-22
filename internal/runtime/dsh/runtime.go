@@ -484,12 +484,13 @@ func buildEnvironment(profile agentruntime.Profile, home string) []string {
 		if !found {
 			continue
 		}
-		if !blocked[key] {
+		if !blocked[agentruntime.CanonicalEnvironmentKey(key)] {
 			values[key] = value
 		}
 	}
 	for key, value := range profile.Env {
-		if !blocked[key] {
+		key = strings.TrimSpace(key)
+		if key != "" && !blocked[agentruntime.CanonicalEnvironmentKey(key)] {
 			values[key] = value
 		}
 	}
@@ -751,7 +752,7 @@ func (r *Runtime) RestartRequired(change agentruntime.RuntimeConfigChange) (bool
 	return !reflect.DeepEqual(change.Previous, change.Current), nil
 }
 
-func (r *Runtime) ReconcileConfig(_ context.Context, h agentruntime.Handle, change agentruntime.RuntimeConfigChange) error {
+func (r *Runtime) ReconcileConfig(ctx context.Context, h agentruntime.Handle, change agentruntime.RuntimeConfigChange) error {
 	root, err := r.rootFor(h)
 	if err != nil {
 		return err
@@ -770,22 +771,12 @@ func (r *Runtime) ReconcileConfig(_ context.Context, h agentruntime.Handle, chan
 	if err != nil {
 		return err
 	}
+	projections, err := r.ExtensionProjections(ref.ID)
+	if err != nil {
+		return err
+	}
 	path := filepath.Join(root, workspaceDirName, "AGENTS.md")
-	current, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read DSH AGENTS.md: %w", err)
-	}
-	base := stripManagedInstructions(string(current))
-	block := runtimeinstructions.RenderRuntimeAgentsInstructionsBlock(ref.ID, ref.Instructions)
-	document := strings.TrimSpace(base)
-	if document != "" {
-		document += "\n\n"
-	}
-	document += strings.TrimSpace(block) + "\n"
-	if err := os.WriteFile(path, []byte(document), 0o644); err != nil {
-		return fmt.Errorf("write DSH AGENTS.md: %w", err)
-	}
-	return nil
+	return r.renderExtensionInstructions(ctx, path, ref.ID, &ref.Instructions, projections)
 }
 
 func (r *Runtime) ValidateMCPServers(_ context.Context, current agentruntime.MCPServersSnapshot) error {

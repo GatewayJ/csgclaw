@@ -10,7 +10,24 @@ import (
 
 	"csgclaw/internal/activity"
 	"csgclaw/internal/agentengine/contract"
+	larkextension "csgclaw/internal/runtimeextension/larkcli"
 )
+
+type permissionRequestParams struct {
+	SessionID string `json:"sessionId"`
+	ToolCall  struct {
+		ToolCallID string `json:"toolCallId"`
+		Title      string `json:"title"`
+		Kind       string `json:"kind"`
+	} `json:"toolCall"`
+	Options []permissionOption `json:"options"`
+}
+
+type permissionOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+}
 
 func (r *Runtime) handleNotification(proc *process, note notification) {
 	if note.Method != "session/update" {
@@ -268,19 +285,7 @@ func (r *Runtime) handleServerRequest(proc *process, request serverRequest) {
 		_ = proc.client.respond(request.ID, nil, &rpcError{Code: -32601, Message: "method not supported"})
 		return
 	}
-	var params struct {
-		SessionID string `json:"sessionId"`
-		ToolCall  struct {
-			ToolCallID string `json:"toolCallId"`
-			Title      string `json:"title"`
-			Kind       string `json:"kind"`
-		} `json:"toolCall"`
-		Options []struct {
-			OptionID string `json:"optionId"`
-			Name     string `json:"name"`
-			Kind     string `json:"kind"`
-		} `json:"options"`
-	}
+	var params permissionRequestParams
 	if err := json.Unmarshal(request.Params, &params); err != nil {
 		_ = proc.client.respond(request.ID, nil, &rpcError{Code: -32602, Message: "invalid permission request"})
 		return
@@ -294,6 +299,10 @@ func (r *Runtime) handleServerRequest(proc *process, request serverRequest) {
 	}
 	if turn.request.Interaction != contract.InteractionResolve {
 		if turn.request.Interaction == contract.InteractionSkipUserInput {
+			if optionID, ok := unattendedLarkCLIPermission(proc, turn, params); ok {
+				_ = proc.client.respond(request.ID, map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": optionID}}, nil)
+				return
+			}
 			for _, option := range params.Options {
 				if strings.Contains(strings.ToLower(option.Kind), "reject") {
 					_ = proc.client.respond(request.ID, map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.OptionID}}, nil)
@@ -354,4 +363,32 @@ func (r *Runtime) handleServerRequest(proc *process, request serverRequest) {
 			_ = proc.client.notify("session/cancel", map[string]any{"sessionId": params.SessionID})
 		}
 	}
+}
+
+func unattendedLarkCLIPermission(proc *process, turn *activeTurn, request permissionRequestParams) (string, bool) {
+	if proc == nil || turn == nil || proc.extensionDigests[larkextension.Name] == "" {
+		return "", false
+	}
+	tool, found := turn.tools[strings.TrimSpace(request.ToolCall.ToolCallID)]
+	if !found || !strings.EqualFold(strings.TrimSpace(tool.Kind), "exec_command") {
+		return "", false
+	}
+	payload, ok := tool.Payload.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	rawInput, ok := payload["rawInput"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	command, _ := rawInput["command"].(string)
+	if !larkextension.AllowsUnattendedConfigCommand(command) {
+		return "", false
+	}
+	for _, option := range request.Options {
+		if strings.EqualFold(strings.TrimSpace(option.Kind), "allow_once") {
+			return option.OptionID, true
+		}
+	}
+	return "", false
 }

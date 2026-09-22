@@ -2,7 +2,7 @@
 
 本文描述 2026-09-04 完成的托管 RuntimeExtension 实现。
 公共架构见 [Agent Engine](../agent-engine-decoupling.zh.md)，消息执行见[托管飞书 Channel](agent-engine-channel-integration.zh.md)。
-lark-cli 配置不再由 API 直接写 Runtime 文件或重启 Codex。
+lark-cli 配置不再由 API 直接写 Runtime 文件或重启 Runtime。
 
 ## 边界
 
@@ -94,9 +94,14 @@ Driver 提供：
 - lark-cli managed instructions fragment。
 
 Engine 检查环境变量冲突，只有值相同才允许共享。
+环境变量名称使用统一的大写形式参与检查，保证 Windows 与类 Unix 系统采用相同规则。
 instructions 按 Extension name 排序，由 Runtime renderer 统一合并。
 Driver 不自行覆盖整个 AGENTS.md。
 用户 instructions 和其他 Extension 保持独立。
+
+DSH 的飞书无人值守回合只允许当前进程已经加载 Extension 时自动确认 lark-cli OAuth 和身份设置命令。
+允许范围包含 OAuth 两步登录、`strict-mode off` 和 `default-as auto`，并且只接受直接调用 lark-cli 的 `allow_once` 请求。
+其他命令继续使用 DSH 原有的拒绝处理。
 
 Runtime 已停止时只保存投影。
 Runtime 运行中且尚未加载有效投影时只 reload 一次。
@@ -153,7 +158,7 @@ API 不返回宿主目录、source 文件内容或 resolved payload。
 
 ## 验证
 
-测试覆盖 Codex/DSH 自动配置、缺少 executable、手动重试、机器人切换、AppID 冲突、token 失效、停止状态保持和单次重载。
+测试覆盖 Codex/DSH 自动配置、缺少 executable、手动重试、机器人切换、AppID 冲突、token 失效、停止状态保持、单次重载和 DSH 权限范围。
 投影测试覆盖多 Extension 隔离、环境冲突、instructions 排序、staging 回滚、source 变化失效和删除恢复。
 HTTP 回归使用真实 Engine 与隔离事实源，验证 no-auth 仍需 source token，以及部分断开的清理重试。
 进程内测试不代替真实租户权限验证；飞书远端权限或 tenant policy 仍可能导致实际 CLI 调用失败。

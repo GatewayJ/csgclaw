@@ -39,13 +39,7 @@ func managedExtensionInstructions(home string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	fragments := make([]string, 0, len(items))
-	for _, item := range items {
-		if item.Instructions != "" {
-			fragments = append(fragments, item.Instructions)
-		}
-	}
-	return fragments, nil
+	return agentruntime.ExtensionInstructions(items), nil
 }
 
 func (r *Runtime) resolveDSHHomeDir(agentID string) (string, error) {
@@ -95,34 +89,37 @@ func (r *Runtime) ExtensionProjections(agentID string) ([]agentruntime.Extension
 }
 
 func (r *Runtime) RenderExtensions(ctx context.Context, agentID string, projections []agentruntime.ExtensionProjection) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	home, err := r.resolveDSHHomeDir(agentID)
 	if err != nil {
 		return err
 	}
 	root := filepath.Dir(home)
 	instructionsPath := filepath.Join(root, workspaceDirName, "AGENTS.md")
-	current, err := os.ReadFile(instructionsPath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read DSH AGENTS.md: %w", err)
-	}
-	instructions := runtimeinstructions.ExtractUserInstructionsFromAgentsDocument(string(current))
+	var instructions *string
 	if r.deps.ResolveAgent != nil {
 		ref, resolveErr := r.deps.ResolveAgent(agentruntime.Handle{RuntimeID: "rt-" + identity.CanonicalAgentID(agentID)})
 		if resolveErr != nil {
 			return resolveErr
 		}
-		instructions = ref.Instructions
+		instructions = &ref.Instructions
 	}
-	fragments := make([]string, 0, len(projections))
-	for _, projection := range projections {
-		if projection.Instructions != "" {
-			fragments = append(fragments, projection.Instructions)
-		}
+	return r.renderExtensionInstructions(ctx, instructionsPath, agentID, instructions, projections)
+}
+
+func (r *Runtime) renderExtensionInstructions(ctx context.Context, instructionsPath, agentID string, instructions *string, projections []agentruntime.ExtensionProjection) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	block := runtimeinstructions.RenderRuntimeAgentsInstructionsBlockWithOptions(agentID, instructions, runtimeinstructions.RuntimeManagedInstructionsOptions{Extensions: fragments})
+	current, err := os.ReadFile(instructionsPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read DSH AGENTS.md: %w", err)
+	}
+	userInstructions := runtimeinstructions.ExtractUserInstructionsFromAgentsDocument(string(current))
+	if instructions != nil {
+		userInstructions = *instructions
+	}
+	fragments := agentruntime.ExtensionInstructions(projections)
+	block := runtimeinstructions.RenderRuntimeAgentsInstructionsBlockWithOptions(agentID, userInstructions, runtimeinstructions.RuntimeManagedInstructionsOptions{Extensions: fragments})
 	document := mergeDSHInstructionsDocument(stripManagedInstructions(string(current)), block)
 	if string(current) == document {
 		return nil
