@@ -32,9 +32,13 @@ func unattendedLarkCLIPermission(proc *process, turn *activeTurn, request permis
 	if !ok {
 		return "", false
 	}
+	workdir, err := resolveProcessWorkdir(proc, rawInput)
+	if err != nil {
+		return "", false
+	}
 	command, _ := rawInput["command"].(string)
 	if !larkextension.AllowsUnattendedConfigCommand(command, func(requested string) bool {
-		return processExecutableMatches(proc, requested, trustedExecutable)
+		return processExecutableMatches(proc, workdir, requested, trustedExecutable)
 	}) {
 		return "", false
 	}
@@ -46,8 +50,36 @@ func unattendedLarkCLIPermission(proc *process, turn *activeTurn, request permis
 	return "", false
 }
 
-func processExecutableMatches(proc *process, requested, trusted string) bool {
-	requestedPath, err := resolveProcessExecutable(proc, requested)
+// resolveProcessWorkdir follows DSH bash semantics: an omitted workdir uses the
+// session workspace, and a relative workdir is resolved from that workspace.
+func resolveProcessWorkdir(proc *process, rawInput map[string]any) (string, error) {
+	if proc == nil {
+		return "", os.ErrNotExist
+	}
+	workspace := strings.TrimSpace(proc.workspace)
+	if workspace == "" {
+		return "", os.ErrNotExist
+	}
+	workspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", err
+	}
+	rawWorkdir, specified := rawInput["workdir"]
+	if !specified {
+		return workspace, nil
+	}
+	workdir, ok := rawWorkdir.(string)
+	if !ok {
+		return "", errors.New("invalid process workdir")
+	}
+	if !filepath.IsAbs(workdir) {
+		workdir = filepath.Join(workspace, workdir)
+	}
+	return filepath.Abs(workdir)
+}
+
+func processExecutableMatches(proc *process, workdir, requested, trusted string) bool {
+	requestedPath, err := resolveProcessExecutable(proc, workdir, requested)
 	if err != nil {
 		return false
 	}
@@ -59,7 +91,7 @@ func processExecutableMatches(proc *process, requested, trusted string) bool {
 	return err == nil && !trustedInfo.IsDir() && os.SameFile(requestedInfo, trustedInfo)
 }
 
-func resolveProcessExecutable(proc *process, requested string) (string, error) {
+func resolveProcessExecutable(proc *process, workdir, requested string) (string, error) {
 	if proc == nil {
 		return "", os.ErrNotExist
 	}
@@ -67,18 +99,17 @@ func resolveProcessExecutable(proc *process, requested string) (string, error) {
 	if requested == "" {
 		return "", os.ErrNotExist
 	}
-	workspace := strings.TrimSpace(proc.workspace)
-	if workspace == "" {
+	if workdir == "" {
 		return "", os.ErrNotExist
 	}
-	workspace, err := filepath.Abs(workspace)
+	workdir, err := filepath.Abs(workdir)
 	if err != nil {
 		return "", err
 	}
 	if filepath.IsAbs(requested) || containsPathSeparator(requested) {
 		candidate := requested
 		if !filepath.IsAbs(candidate) {
-			candidate = filepath.Join(workspace, candidate)
+			candidate = filepath.Join(workdir, candidate)
 		}
 		return executableCandidate(candidate)
 	}
@@ -89,9 +120,9 @@ func resolveProcessExecutable(proc *process, requested string) (string, error) {
 	for _, directory := range filepath.SplitList(pathValue) {
 		directory = strings.Trim(strings.TrimSpace(directory), `"`)
 		if directory == "" {
-			directory = workspace
+			directory = workdir
 		} else if !filepath.IsAbs(directory) {
-			directory = filepath.Join(workspace, directory)
+			directory = filepath.Join(workdir, directory)
 		}
 		for _, name := range processExecutableNames(requested, proc.environment) {
 			candidate, candidateErr := executableCandidate(filepath.Join(directory, name))

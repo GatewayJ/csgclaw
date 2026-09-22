@@ -932,13 +932,17 @@ func TestPermissionRequestRejectPolicyCancelsTurn(t *testing.T) {
 
 func TestPermissionRequestSkipUserInputAllowsManagedLarkCLISetup(t *testing.T) {
 	trustedExecutable, environment := writeTestLarkCLIExecutable(t)
+	workspace := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workspace, "project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	var output bytes.Buffer
 	turn := &activeTurn{
 		request: contract.TurnRequest{ID: "turn-lark", Interaction: contract.InteractionSkipUserInput},
 	}
 	proc := &process{
 		client:               &acpClient{writer: &output},
-		workspace:            t.TempDir(),
+		workspace:            workspace,
 		environment:          environment,
 		active:               map[string]*activeTurn{"session-1": turn},
 		extensionDigests:     map[string]string{larkextension.Name: "digest-1"},
@@ -952,6 +956,7 @@ func TestPermissionRequestSkipUserInputAllowsManagedLarkCLISetup(t *testing.T) {
 		"kind":          "other",
 		"rawInput": map[string]any{
 			"command": "lark-cli auth login --no-wait --json --recommend",
+			"workdir": "project",
 		},
 	})
 	params, err := json.Marshal(map[string]any{
@@ -970,6 +975,50 @@ func TestPermissionRequestSkipUserInputAllowsManagedLarkCLISetup(t *testing.T) {
 
 	if got := output.String(); !strings.Contains(got, `"outcome":"selected"`) || !strings.Contains(got, `"optionId":"allow-once"`) {
 		t.Fatalf("ACP permission response = %s", got)
+	}
+}
+
+func TestUnattendedLarkCLIPermissionRejectsExecutableFromDifferentWorkdir(t *testing.T) {
+	workspace := t.TempDir()
+	project := filepath.Join(workspace, "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "lark-cli"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	trustedExecutable := filepath.Join(workspace, name)
+	if err := os.WriteFile(trustedExecutable, []byte("trusted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, name), []byte("untrusted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	turn := &activeTurn{
+		request: contract.TurnRequest{ID: "turn-lark", Interaction: contract.InteractionSkipUserInput},
+		tools: map[string]contract.ToolActivity{
+			"tool-1": {
+				Kind: "exec_command",
+				Payload: map[string]any{"rawInput": map[string]any{
+					"command": "." + string(filepath.Separator) + name + " config strict-mode off",
+					"workdir": "project",
+				}},
+			},
+		},
+	}
+	proc := &process{
+		workspace:            workspace,
+		environment:          []string{"PATH=" + workspace},
+		active:               map[string]*activeTurn{"session-1": turn},
+		extensionDigests:     map[string]string{larkextension.Name: "digest-1"},
+		extensionExecutables: map[string]string{larkextension.Name: trustedExecutable},
+	}
+	request := permissionRequestParams{SessionID: "session-1", Options: []permissionOption{{OptionID: "allow-once", Kind: "allow_once"}}}
+	request.ToolCall.ToolCallID = "tool-1"
+
+	if optionID, ok := unattendedLarkCLIPermission(proc, turn, request); ok || optionID != "" {
+		t.Fatalf("unattendedLarkCLIPermission() = %q, %v", optionID, ok)
 	}
 }
 
@@ -1097,22 +1146,65 @@ func TestProcessExecutableMatchesManagedExecutable(t *testing.T) {
 	trustedExecutable, environment := writeTestLarkCLIExecutable(t)
 	workspace := t.TempDir()
 	proc := &process{workspace: workspace, environment: environment}
-	if !processExecutableMatches(proc, "lark-cli", trustedExecutable) {
+	if !processExecutableMatches(proc, workspace, "lark-cli", trustedExecutable) {
 		t.Fatal("bare lark-cli did not resolve to the managed executable")
 	}
-	if !processExecutableMatches(proc, trustedExecutable, trustedExecutable) {
+	if !processExecutableMatches(proc, workspace, trustedExecutable, trustedExecutable) {
 		t.Fatal("absolute managed lark-cli path did not match")
 	}
 	untrusted := filepath.Join(workspace, filepath.Base(trustedExecutable))
 	if err := os.WriteFile(untrusted, []byte("untrusted"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if processExecutableMatches(proc, "."+string(filepath.Separator)+filepath.Base(untrusted), trustedExecutable) {
+	if processExecutableMatches(proc, workspace, "."+string(filepath.Separator)+filepath.Base(untrusted), trustedExecutable) {
 		t.Fatal("workspace executable matched the managed lark-cli executable")
 	}
 	proc.environment = []string{"PATH=" + workspace + string(os.PathListSeparator) + filepath.Dir(trustedExecutable)}
-	if processExecutableMatches(proc, "lark-cli", trustedExecutable) {
+	if processExecutableMatches(proc, workspace, "lark-cli", trustedExecutable) {
 		t.Fatal("PATH shadow executable matched the managed lark-cli executable")
+	}
+	project := filepath.Join(workspace, "project")
+	relativeBin := filepath.Join(project, "bin")
+	if err := os.MkdirAll(relativeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	relativeTrusted := filepath.Join(relativeBin, filepath.Base(trustedExecutable))
+	if err := os.WriteFile(relativeTrusted, []byte("trusted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	proc.environment = []string{"PATH=bin"}
+	if !processExecutableMatches(proc, project, "lark-cli", relativeTrusted) {
+		t.Fatal("relative PATH did not resolve from the command workdir")
+	}
+}
+
+func TestResolveProcessWorkdir(t *testing.T) {
+	workspace := t.TempDir()
+	absolute := t.TempDir()
+	proc := &process{workspace: workspace}
+	for _, test := range []struct {
+		name     string
+		rawInput map[string]any
+		want     string
+		wantErr  bool
+	}{
+		{name: "default", rawInput: map[string]any{}, want: workspace},
+		{name: "relative", rawInput: map[string]any{"workdir": "project"}, want: filepath.Join(workspace, "project")},
+		{name: "absolute", rawInput: map[string]any{"workdir": absolute}, want: absolute},
+		{name: "invalid", rawInput: map[string]any{"workdir": 42}, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := resolveProcessWorkdir(proc, test.rawInput)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("resolveProcessWorkdir() = %q, nil", got)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("resolveProcessWorkdir() = %q, %v, want %q", got, err, test.want)
+			}
+		})
 	}
 }
 
