@@ -176,8 +176,11 @@ func TestNewRecreatesRuntimeDirectoriesAfterDelete(t *testing.T) {
 	if data, err := os.ReadFile(workspaceFile); err != nil || string(data) != "keep me\n" {
 		t.Fatalf("workspace after Delete() = %q, %v; want preserved", data, err)
 	}
-	if _, err := os.Stat(filepath.Join(runtimeRoot, homeDirName)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("DSH home after Delete() error = %v, want not exist", err)
+	if _, err := os.Stat(filepath.Join(runtimeRoot, homeDirName, settingsFileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("DSH settings after Delete() error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeRoot, homeDirName, "skills", "agent-teams", "SKILL.md")); err != nil {
+		t.Fatalf("DSH template skill after Delete() error = %v", err)
 	}
 
 	if _, err := rt.New(context.Background(), agentruntime.Spec{RuntimeID: "rt-agent-test", AgentID: "agent-test", Profile: profile}); err != nil {
@@ -295,6 +298,63 @@ func TestBuildEnvironmentSeparatesBridgeAndWebSearchCredentials(t *testing.T) {
 				t.Fatalf("DSH_AGENTS_HOME = %q", got)
 			}
 		})
+	}
+}
+
+func TestValidateConfigAcceptsBridgeManagedProfile(t *testing.T) {
+	var resolvedPath string
+	rt := New(Dependencies{
+		ResolveBinary: func(_ context.Context, explicit string) (dshcli.Info, error) {
+			resolvedPath = explicit
+			return dshcli.Info{Path: "/opt/dsh", Version: "0.1.5-rc.2"}, nil
+		},
+	})
+	err := rt.ValidateConfig(context.Background(), agentruntime.RuntimeConfigSnapshot{
+		Profile: agentruntime.RuntimeProfileConfig{Provider: "csghub", ModelID: "test-model"},
+		Options: map[string]any{executablePathOption: "/opt/dsh"},
+	})
+	if err != nil {
+		t.Fatalf("ValidateConfig() error = %v", err)
+	}
+	if resolvedPath != "/opt/dsh" {
+		t.Fatalf("ResolveBinary() path = %q, want /opt/dsh", resolvedPath)
+	}
+}
+
+func TestProvisionRejectsIncompleteRuntimeProfile(t *testing.T) {
+	rt := New(Dependencies{
+		AgentHome: func(string) (string, error) {
+			t.Fatal("AgentHome() called for an incomplete Runtime profile")
+			return "", nil
+		},
+	})
+	err := rt.Provision(context.Background(), agentruntime.ProvisionRequest{
+		RuntimeID: "rt-agent-test",
+		AgentID:   "agent-test",
+		Profile:   agentruntime.Profile{ModelID: "test-model"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "DSH runtime profile requires") {
+		t.Fatalf("Provision() error = %v", err)
+	}
+}
+
+func TestStartRejectsIncompleteResolvedRuntimeProfile(t *testing.T) {
+	rt := New(Dependencies{
+		ResolveAgent: func(agentruntime.Handle) (AgentRef, error) {
+			return AgentRef{ID: "agent-test", RuntimeID: "rt-agent-test", Profile: agentruntime.Profile{ModelID: "test-model"}}, nil
+		},
+		ResolveBinary: func(context.Context, string) (dshcli.Info, error) {
+			t.Fatal("ResolveBinary() called for an incomplete Runtime profile")
+			return dshcli.Info{}, nil
+		},
+		AgentHome: func(string) (string, error) {
+			t.Fatal("AgentHome() called for an incomplete Runtime profile")
+			return "", nil
+		},
+	})
+	_, err := rt.Start(context.Background(), agentruntime.Handle{RuntimeID: "rt-agent-test"})
+	if err == nil || !strings.Contains(err.Error(), "DSH runtime profile requires") {
+		t.Fatalf("Start() error = %v", err)
 	}
 }
 

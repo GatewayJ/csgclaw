@@ -181,6 +181,9 @@ func (r *Runtime) Provision(ctx context.Context, req agentruntime.ProvisionReque
 	if agentID == "" || r.deps.AgentHome == nil {
 		return fmt.Errorf("DSH agent home resolver is required")
 	}
+	if err := validateRuntimeProfile(req.Profile); err != nil {
+		return err
+	}
 	agentHome, err := r.deps.AgentHome(agentID)
 	if err != nil {
 		return err
@@ -307,6 +310,10 @@ func (r *Runtime) start(ctx context.Context, h agentruntime.Handle, spec *agentr
 	}
 	if spec != nil && ref.Profile.ModelID == "" {
 		ref.Profile = spec.Profile
+	}
+	ref.Profile = ref.Profile.Normalized()
+	if err := validateRuntimeProfile(ref.Profile); err != nil {
+		return agentruntime.StateUnknown, err
 	}
 	opts, err := DecodeRuntimeOptions(ref.RuntimeOptions)
 	if err != nil {
@@ -704,16 +711,20 @@ func cloneRuntimeMetadata(meta runtimeMetadata) runtimeMetadata {
 }
 
 func (r *Runtime) ValidateConfig(ctx context.Context, current agentruntime.RuntimeConfigSnapshot) error {
-	profile := current.Profile
-	if strings.TrimSpace(profile.APIKey) == "" || strings.TrimSpace(profile.BaseURL) == "" || strings.TrimSpace(profile.ModelID) == "" {
-		return fmt.Errorf("DSH requires API key, base URL, and model ID")
-	}
 	opts, err := DecodeRuntimeOptions(current.Options)
 	if err != nil {
 		return err
 	}
 	_, err = r.deps.ResolveBinary(ctx, opts.ExecutablePath)
 	return err
+}
+
+func validateRuntimeProfile(profile agentruntime.Profile) error {
+	profile = profile.Normalized()
+	if profile.APIKey == "" || profile.BaseURL == "" || profile.ModelID == "" {
+		return fmt.Errorf("DSH runtime profile requires API key, base URL, and model ID")
+	}
+	return nil
 }
 
 func (r *Runtime) RestartRequired(change agentruntime.RuntimeConfigChange) (bool, error) {

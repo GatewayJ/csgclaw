@@ -84,6 +84,24 @@ func TestBuiltinStoreListGetAndFetchWorkspace(t *testing.T) {
 	if len(data) == 0 {
 		t.Fatal("FetchWorkspace() copied empty AGENT.md")
 	}
+
+	dshWorkspace, err := store.FetchWorkspace(context.Background(), "dsh-worker")
+	if err != nil {
+		t.Fatalf("FetchWorkspace(dsh-worker) error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dshWorkspace.Path) })
+	for _, name := range []string{"AGENTS.md", "HEARTBEAT.md", "IDENTITY.md", "SOUL.md", "TOOLS.md", "USER.md"} {
+		data, err := os.ReadFile(filepath.Join(dshWorkspace.Path, name))
+		if err != nil {
+			t.Fatalf("ReadFile(dsh-worker/%s) error = %v", name, err)
+		}
+		if len(data) == 0 {
+			t.Fatalf("FetchWorkspace(dsh-worker) copied empty %s", name)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(dshWorkspace.Path, "skills", "agent-teams", "SKILL.md")); err != nil || len(data) == 0 {
+		t.Fatalf("ReadFile(dsh-worker/skills/agent-teams/SKILL.md) = %d bytes, %v", len(data), err)
+	}
 }
 
 func TestMkdirHubWorkspaceTempFallsBackToSlashTmpWhenEnvTempRootIsMissing(t *testing.T) {
