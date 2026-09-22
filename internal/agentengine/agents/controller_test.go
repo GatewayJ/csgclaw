@@ -20,9 +20,11 @@ import (
 	"csgclaw/internal/assets"
 	"csgclaw/internal/channel/feishu"
 	"csgclaw/internal/config"
+	"csgclaw/internal/dshcli"
 	"csgclaw/internal/mcpschema"
 	agentruntime "csgclaw/internal/runtime"
 	runtimecodex "csgclaw/internal/runtime/codex"
+	runtimedsh "csgclaw/internal/runtime/dsh"
 	runtimeinstructions "csgclaw/internal/runtime/instructions"
 	"csgclaw/internal/runtime/openclawsandbox"
 	"csgclaw/internal/runtime/picoclawsandbox"
@@ -1078,6 +1080,11 @@ func TestCreateWorkerPersistsCodexProfileBeforeRuntimeNew(t *testing.T) {
 func TestCreateWorkerUsesDSHRuntimeAndPersistsBeforeNew(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
+	dshValidator := runtimedsh.New(runtimedsh.Dependencies{
+		ResolveBinary: func(context.Context, string) (dshcli.Info, error) {
+			return dshcli.Info{Path: "/opt/dsh", Version: "0.1.5-rc.2"}, nil
+		},
+	})
 	var svc *Controller
 	svc, err := NewController(
 		testModelConfig(),
@@ -1085,7 +1092,8 @@ func TestCreateWorkerUsesDSHRuntimeAndPersistsBeforeNew(t *testing.T) {
 		"manager-image:test",
 		"",
 		WithRuntime(fakeAgentRuntime{
-			kind: RuntimeKindDSH,
+			kind:     RuntimeKindDSH,
+			validate: dshValidator.ValidateConfig,
 			new: func(_ context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
 				persisted, ok := svc.Agent(spec.AgentID)
 				if !ok {
@@ -1111,8 +1119,8 @@ func TestCreateWorkerUsesDSHRuntimeAndPersistsBeforeNew(t *testing.T) {
 	got, err := svc.CreateWorker(context.Background(), CreateAgentSpec{
 		ID: "agent-dsh", Name: "dsh-worker", RuntimeKind: RuntimeKindDSH,
 		AgentProfile: AgentProfile{
-			Name: "dsh-worker", Provider: ProviderAPI, BaseURL: "https://api.example/v1",
-			APIKey: "api-key", ModelID: "deepseek-chat", ReasoningEffort: DefaultReasoningEffort, ProfileComplete: true,
+			Name: "dsh-worker", Provider: ProviderOpenCSG,
+			ModelID: "deepseek-chat", ReasoningEffort: DefaultReasoningEffort, ProfileComplete: true,
 		},
 	})
 	if err != nil {
@@ -8164,6 +8172,59 @@ func TestCreateWorkerFromTemplateAppliesDefaultsAndOverlaysWorkspace(t *testing.
 	}
 	if _, err := os.Stat(filepath.Join(workspaceRoot, "skills", "custom", "SKILL.md")); err != nil {
 		t.Fatalf("template skill missing after overlay: %v", err)
+	}
+}
+
+func TestCreateWorkerFromBuiltinDSHTemplateOverlaysDefaultWorkspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	hubSvc, err := hub.NewService(config.HubConfig{}, hub.DefaultStoreFactory)
+	if err != nil {
+		t.Fatalf("hub.NewService() error = %v", err)
+	}
+	overlayTarget := t.TempDir()
+	svc, err := NewController(
+		testModelConfig(),
+		config.ServerConfig{ListenAddr: "127.0.0.1:18080", AccessToken: "shared-token"},
+		"manager-image:test",
+		"",
+		WithHubService(hubSvc),
+		WithRuntime(fakeAgentRuntime{
+			kind: RuntimeKindDSH,
+			provision: func(_ context.Context, req agentruntime.ProvisionRequest) error {
+				if !strings.Contains(req.TemplateInstructions, "CSGClaw DSH Worker") {
+					t.Fatalf("Provision().TemplateInstructions = %q", req.TemplateInstructions)
+				}
+				return sandboxgateway.OverlayWorkspaceTree(req.WorkspaceOverlay, overlayTarget)
+			},
+			new: func(_ context.Context, spec agentruntime.Spec) (agentruntime.Handle, error) {
+				return agentruntime.Handle{RuntimeID: spec.RuntimeID, HandleID: "dsh-agent"}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewController() error = %v", err)
+	}
+
+	got, err := svc.CreateRecord(context.Background(), CreateRequest{Spec: CreateAgentSpec{
+		Name:         "dsh-worker",
+		FromTemplate: "builtin.dsh-worker",
+		AgentProfile: AgentProfile{
+			Name: "dsh-worker", Provider: ProviderOpenCSG, ModelID: "deepseek-chat", ProfileComplete: true,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if got.RuntimeKind != RuntimeKindDSH || got.BoxID != "dsh-agent" {
+		t.Fatalf("Create() = %+v", got)
+	}
+	for _, name := range []string{"HEARTBEAT.md", "IDENTITY.md", "SOUL.md", "TOOLS.md", "USER.md"} {
+		if _, err := os.Stat(filepath.Join(overlayTarget, name)); err != nil {
+			t.Fatalf("template overlay %s error = %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(overlayTarget, "skills", "agent-teams", "SKILL.md")); err != nil {
+		t.Fatalf("template overlay agent-teams skill error = %v", err)
 	}
 }
 
