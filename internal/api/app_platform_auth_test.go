@@ -262,162 +262,52 @@ func TestAppsDoNotAddLoginToPersonalUI(t *testing.T) {
 	}
 }
 
-func TestAppNoAuthRejectsInvalidAgentAndCrossOriginRequests(t *testing.T) {
+func TestAppNoAuthRejectsInvalidAgent(t *testing.T) {
 	h, _, _, _, _ := newAppPlatformAuthFixture(t)
-	rec := appAuthRequest(t, h, http.MethodGet, "/api/v1/connectors/catalog", "", "agent.invalid", nil)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("invalid Agent accepted: %d", rec.Code)
-	}
-	req := httptest.NewRequest(http.MethodGet, "http://localhost:18080/api/v1/connectors/catalog", nil)
-	req.Header.Set("Origin", "https://other.example")
+	req := httptest.NewRequest(http.MethodGet, "http://csghub-runner:8082/api/v1/connectors/catalog", nil)
+	req.Header.Set("Authorization", "Bearer agent.invalid")
+	req.Header.Set("Origin", "https://opencsg-stg.com")
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
-	rec = httptest.NewRecorder()
+	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("cross-origin accepted: %d", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d, want 401: %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestAppRequestSameOrigin(t *testing.T) {
-	tests := []struct {
-		name             string
-		requestURL       string
-		origin           string
-		secFetchSite     string
-		advertiseBaseURL string
-		want             bool
-	}{
-		{
-			name:       "direct HTTP origin",
-			requestURL: "http://localhost:18080/api/v1/connectors/catalog",
-			origin:     "http://localhost:18080",
-			want:       true,
-		},
-		{
-			name:       "direct HTTPS origin",
-			requestURL: "https://csgclaw.example.test/api/v1/connectors/catalog",
-			origin:     "https://csgclaw.example.test",
-			want:       true,
-		},
-		{
-			name:             "advertised origin through HTTP proxy",
-			requestURL:       "http://csghub-runner:8082/api/v1/connectors/catalog",
-			origin:           "https://aigateway.opencsg-stg.com",
-			secFetchSite:     "same-origin",
-			advertiseBaseURL: "https://aigateway.opencsg-stg.com/v1/sandboxes/user-123?jwt=test",
-			want:             true,
-		},
-		{
-			name:             "advertised HTTPS origin with explicit default port",
-			requestURL:       "http://csghub-runner:8082/api/v1/connectors/catalog",
-			origin:           "https://aigateway.example.test",
-			secFetchSite:     "same-origin",
-			advertiseBaseURL: "https://aigateway.example.test:443/v1/sandboxes/user-123",
-			want:             true,
-		},
-		{
-			name:             "advertised HTTP origin with explicit default port",
-			requestURL:       "http://csghub-runner:8082/api/v1/connectors/catalog",
-			origin:           "http://aigateway.example.test",
-			secFetchSite:     "same-origin",
-			advertiseBaseURL: "http://aigateway.example.test:80/v1/sandboxes/user-123",
-			want:             true,
-		},
-		{
-			name:       "direct HTTPS origin with explicit default port",
-			requestURL: "https://csgclaw.example.test:443/api/v1/connectors/catalog",
-			origin:     "https://csgclaw.example.test",
-			want:       true,
-		},
-		{
-			name:             "advertised non-default port",
-			requestURL:       "http://csghub-runner:8082/api/v1/connectors/catalog",
-			origin:           "https://aigateway.example.test:8443",
-			advertiseBaseURL: "https://aigateway.example.test:8443/v1/sandboxes/user-123",
-			want:             true,
-		},
-		{
-			name:             "different advertised port",
-			requestURL:       "http://csghub-runner:8082/api/v1/connectors/catalog",
-			origin:           "https://aigateway.example.test",
-			advertiseBaseURL: "https://aigateway.example.test:8443/v1/sandboxes/user-123",
-			want:             false,
-		},
-		{
-			name:             "direct origin remains available with advertised URL",
-			requestURL:       "http://localhost:18080/api/v1/connectors/catalog",
-			origin:           "http://localhost:18080",
-			advertiseBaseURL: "https://aigateway.example.test/v1/sandboxes/user-123",
-			want:             true,
-		},
-		{
-			name:             "different advertised origin",
-			requestURL:       "http://csghub-runner:8082/api/v1/connectors/catalog",
-			origin:           "https://other.example.test",
-			advertiseBaseURL: "https://aigateway.example.test/v1/sandboxes/user-123",
-			want:             false,
-		},
-		{
-			name:             "cross-site request",
-			requestURL:       "http://csghub-runner:8082/api/v1/connectors/catalog",
-			origin:           "https://aigateway.example.test",
-			secFetchSite:     "cross-site",
-			advertiseBaseURL: "https://aigateway.example.test/v1/sandboxes/user-123",
-			want:             false,
-		},
-		{
-			name:             "invalid advertised URL",
-			requestURL:       "http://csghub-runner:8082/api/v1/connectors/catalog",
-			origin:           "https://aigateway.example.test",
-			advertiseBaseURL: "://invalid",
-			want:             false,
-		},
-		{
-			name:       "missing origin",
-			requestURL: "http://csghub-runner:8082/api/v1/connectors/catalog",
-			want:       true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, tt.requestURL, nil)
-			if tt.origin != "" {
-				req.Header.Set("Origin", tt.origin)
+func TestAppPlatformAllowsPortalRequestsThroughProxy(t *testing.T) {
+	h, alice, _, _, _ := newAppPlatformAuthFixture(t)
+	h.SetAdvertiseBaseURL("https://aigateway.opencsg-stg.com/v1/sandboxes/template-instance")
+	for _, site := range []string{"same-site", "cross-site"} {
+		t.Run(site, func(t *testing.T) {
+			for _, tc := range []struct{ method, path string }{
+				{http.MethodPost, "/api/v1/channels/csgclaw/participants"},
+				{http.MethodPost, "/api/v1/agents/" + alice.ID + "/sessions/session/responses"},
+				{http.MethodGet, "/api/v1/agents/" + alice.ID + "/profile"},
+				{http.MethodPut, "/api/v1/agents/" + alice.ID + "/profile"},
+			} {
+				t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+					req := httptest.NewRequest(tc.method, "http://csghub-runner:8082"+tc.path, nil)
+					req.Header.Set("Origin", "https://opencsg-stg.com")
+					req.Header.Set("Sec-Fetch-Site", site)
+					rec := httptest.NewRecorder()
+					h.authorizeAppPlatformRequests(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						w.WriteHeader(http.StatusNoContent)
+					})).ServeHTTP(rec, req)
+					if rec.Code != http.StatusNoContent {
+						t.Fatalf("status=%d, want 204: %s", rec.Code, rec.Body.String())
+					}
+				})
 			}
-			if tt.secFetchSite != "" {
-				req.Header.Set("Sec-Fetch-Site", tt.secFetchSite)
-			}
-			if got := appRequestSameOrigin(req, tt.advertiseBaseURL); got != tt.want {
-				t.Fatalf("appRequestSameOrigin() = %v, want %v", got, tt.want)
+			req := httptest.NewRequest(http.MethodGet, "http://csghub-runner:8082/api/v1/connectors/catalog", nil)
+			req.Header.Set("Origin", "https://opencsg-stg.com")
+			req.Header.Set("Sec-Fetch-Site", site)
+			rec := httptest.NewRecorder()
+			h.Routes().ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("router status=%d, want 200: %s", rec.Code, rec.Body.String())
 			}
 		})
-	}
-}
-
-func TestAppNoAuthAllowsAdvertisedOriginThroughProxy(t *testing.T) {
-	h, _, _, _, _ := newAppPlatformAuthFixture(t)
-	h.SetAdvertiseBaseURL("https://aigateway.opencsg-stg.com:443/v1/sandboxes/user-123?jwt=test")
-
-	req := httptest.NewRequest(http.MethodPost, "http://csghub-runner:8082/api/v1/channels/csgclaw/participants", strings.NewReader(`{}`))
-	req.Header.Set("Origin", "https://aigateway.opencsg-stg.com")
-	req.Header.Set("Sec-Fetch-Site", "same-origin")
-	rec := httptest.NewRecorder()
-	h.authorizeAppPlatformRequests(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("advertised origin status=%d body=%s", rec.Code, rec.Body.String())
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "http://csghub-runner:8082/api/v1/missing", strings.NewReader(`{}`))
-	req.Header.Set("Origin", "https://aigateway.opencsg-stg.com")
-	req.Header.Set("Sec-Fetch-Site", "same-origin")
-	rec = httptest.NewRecorder()
-	h.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("advertised origin router status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -471,29 +361,6 @@ func TestAppNoAuthAllowsCrossSiteOpenCSGCallbacks(t *testing.T) {
 			resp := send()
 			if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != server.URL+"/#/settings?auth_result=success" {
 				t.Fatalf("successful callback status = %d, location = %q", resp.StatusCode, resp.Header.Get("Location"))
-			}
-		})
-	}
-}
-
-func TestAppCrossSiteCallbackExemptionIsScoped(t *testing.T) {
-	h, _, _, _, _ := newAppPlatformAuthFixture(t)
-	for _, tc := range []struct{ method, path string }{
-		{http.MethodPost, authCallbackPath},
-		{http.MethodHead, authCallbackPath},
-		{http.MethodGet, authCallbackPath + "/extra"},
-		{http.MethodGet, "/api/v1/auth/status"},
-		{http.MethodPost, "/api/v1/auth/login"},
-		{http.MethodPost, "/api/v1/auth/logout"},
-		{http.MethodPost, githubConnectorCallbackPath},
-	} {
-		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			req := httptest.NewRequest(tc.method, tc.path, nil)
-			req.Header.Set("Sec-Fetch-Site", "cross-site")
-			rec := httptest.NewRecorder()
-			h.Routes().ServeHTTP(rec, req)
-			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "origin_denied") {
-				t.Fatalf("status = %d, body = %s; want origin_denied", rec.Code, rec.Body.String())
 			}
 		})
 	}

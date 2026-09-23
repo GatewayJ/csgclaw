@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	agent "csgclaw/internal/agentengine/agents"
@@ -34,71 +33,6 @@ func (h *Handler) authorizesAgentToken(agentID, header string) bool {
 	return ok && strings.HasPrefix(header, "Bearer ") && owner.AuthorizesAgentAccessToken(agentID, strings.TrimPrefix(header, "Bearer "))
 }
 
-func appRequestSameOrigin(r *http.Request, advertiseBaseURL string) bool {
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		return false
-	}
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	parsedOrigin, ok := parseAppHTTPURL(origin)
-	if !ok {
-		return false
-	}
-
-	requestScheme := "http"
-	if r.TLS != nil {
-		requestScheme = "https"
-	}
-	requestOrigin, requestOriginOK := parseAppHTTPURL(requestScheme + "://" + r.Host)
-	if requestOriginOK && appOriginsMatch(parsedOrigin, requestOrigin) {
-		return true
-	}
-
-	advertised, ok := parseAppHTTPURL(advertiseBaseURL)
-	if !ok {
-		return false
-	}
-	return appOriginsMatch(parsedOrigin, advertised)
-}
-
-func parseAppHTTPURL(rawURL string) (*url.URL, bool) {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || parsed.User != nil || parsed.Hostname() == "" {
-		return nil, false
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "http", "https":
-		return parsed, true
-	default:
-		return nil, false
-	}
-}
-
-func appOriginsMatch(left, right *url.URL) bool {
-	return strings.EqualFold(left.Scheme, right.Scheme) &&
-		strings.EqualFold(left.Hostname(), right.Hostname()) &&
-		appOriginPort(left) == appOriginPort(right)
-}
-
-func appOriginPort(origin *url.URL) string {
-	if port := origin.Port(); port != "" {
-		return port
-	}
-	if strings.EqualFold(origin.Scheme, "https") {
-		return "443"
-	}
-	return "80"
-}
-
-func isAppAuthenticationCallback(r *http.Request) bool {
-	if r.Method != http.MethodGet {
-		return false
-	}
-	return r.URL.Path == authCallbackPath || r.URL.Path == githubConnectorCallbackPath
-}
-
 func (h *Handler) authorizeAppPlatformRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if h.apps == nil {
@@ -124,19 +58,6 @@ func (h *Handler) authorizeAppPlatformRequests(next http.Handler) http.Handler {
 		// are handled above and never gain management permissions from NoAuth.
 		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer agent.") {
 			writeCodedAPIError(w, http.StatusUnauthorized, "unauthorized", "Invalid Agent credential")
-			return
-		}
-		// Sign-in providers return through a cross-site top-level navigation.
-		// These exact GET routes must reach their callback handlers, which
-		// validate the provider credentials or OAuth state.
-		if isAppAuthenticationCallback(r) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// The personal Web UI has no service-token login. Existing handlers
-		// retain their own API credential checks where those are required.
-		if !appRequestSameOrigin(r, h.advertiseBaseURL) {
-			writeCodedAPIError(w, http.StatusForbidden, "origin_denied", "Requests must use the same origin")
 			return
 		}
 		next.ServeHTTP(w, r)
