@@ -1074,7 +1074,7 @@ Agent 回复仍只会唤醒被显式提及的 Agent，以防止回复循环。
 - thread reply 还会发布 `thread.updated`
 - 发送附件时使用 `multipart/form-data`，其中 `payload` JSON part 包含同样字段，`files` part 可以出现一次或多次。
 - 至少带有一个文件时允许发送纯附件消息。
-- 每条消息最多包含 10 个附件，单文件上限为 `100 MiB`，总大小上限为 `256 MiB`。
+- 每条消息最多包含 10 个附件，单文件上限为 `1 GiB`，总大小上限为 `2 GiB`。
 - 返回的 message 可以包含 `attachments`，字段包括 `id`、`name`、`kind`、`media_type`、`size_bytes`、`sha256`、`created_at`、`download_url`、可选的 `preview_url`、可选图片尺寸，以及面向 agent 投递时可选的 `workspace_path`。
 
 Multipart 示例：
@@ -1103,6 +1103,7 @@ files=@diagram.png;type=image/png
 csgclaw room attachments list --room-id <房间> --query <文件名关键词>
 csgclaw room attachments list --room-id <房间> --message-id <来源消息>
 csgclaw room attachments download --room-id <房间> --attachment-id <附件ID> --output <新建本地路径>
+csgclaw room attachments delete --room-id <房间> --attachment-id <附件ID>
 ```
 
 智能体运行环境中的 `csgclaw-cli` 提供相同命令。
@@ -1117,6 +1118,15 @@ Worker 的服务端任务上下文包含 `request_source_message_id`，由父任
 当前消息附件和引用的线程上下文附件统一进入文件输入链路，按附件 ID 去重，并为每次执行独立准备临时文件。
 清空消息和删除房间沿用现有附件引用清理规则，显式下载的工作区副本仍是普通本地文件。
 该接口不开放智能体未发布的工作区文件，也不提供文档正文搜索。
+
+`DELETE /api/v1/rooms/{id}/attachments/{attachment_id}` 按附件 ID 移除该房间消息和保留线程上下文中的引用，成功返回 `204 No Content`。
+删除保留消息文本以及独立保存到工作目录的副本，仅在没有其他附件引用时回收共享文件数据。
+附件不存在时返回 404，非房间成员的 Agent 凭据返回 403。
+删除后发送包含 `room_id` 和 `attachment_id` 的 `room.attachment_deleted` 事件，及时更新聊天界面。
+
+`.csgclaw/engine-inputs` 和 `.csgclaw/attachments` 下的运行时输入是临时文件。
+用户要求长期保存时，Agent 必须复制或下载到普通工作目录路径，验证结果后再确认保存成功。
+后续聊天应通过房间附件命令找回历史上传，不能只依赖已失效的临时路径。
 
 ### `GET /api/v1/attachments/{id}`
 
