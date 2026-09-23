@@ -2227,6 +2227,11 @@ export function normalizeRuntimeKind(kind: unknown): RuntimeKind {
   }
 }
 
+export function canPublishCommunityTemplateRuntime(runtimeKind: unknown): boolean {
+  const normalizedRuntimeKind = normalizeRuntimeKind(runtimeKind);
+  return normalizedRuntimeKind === "codex" || normalizedRuntimeKind === "dsh";
+}
+
 export function isNotifierRuntimeDraft(draft: Partial<AgentDraft> | null | undefined): boolean {
   return normalizeBotType(draft?.bot_type) === BOT_TYPE_NOTIFICATION;
 }

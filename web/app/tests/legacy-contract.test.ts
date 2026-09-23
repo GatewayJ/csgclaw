@@ -98,7 +98,7 @@ describe("legacy UI contract", () => {
     expect(source).toContain("const canPublishLocal =");
     expect(source).toContain('runtimeKind === "dsh"');
     expect(source).toContain('runtimeKind === "openclaw_sandbox"');
-    expect(source).toContain('const canPublishCommunity = !isManager && runtimeKind === "codex";');
+    expect(source).toContain("canPublishCommunityTemplateRuntime(runtimeKind)");
   });
 
   it("keeps thread context hidden and shows the thread affordance as a message hover toolbar", () => {

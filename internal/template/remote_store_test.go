@@ -285,14 +285,9 @@ func TestRemoteStorePublishUploadsArchiveAndCreatesTemplateCode(t *testing.T) {
 	names := make(map[string]bool, len(archive.File))
 	for _, file := range archive.File {
 		names[file.Name] = true
-		reader, openErr := file.Open()
-		if openErr != nil {
-			t.Fatalf("Open(%s) error = %v", file.Name, openErr)
-		}
-		content, readErr := io.ReadAll(reader)
-		_ = reader.Close()
-		if readErr != nil {
-			t.Fatalf("ReadAll(%s) error = %v", file.Name, readErr)
+		content, err := readZipFile(file)
+		if err != nil {
+			t.Fatalf("readZipFile(%s) error = %v", file.Name, err)
 		}
 		if bytes.Contains(content, []byte("staged memory must not upload")) {
 			t.Errorf("uploaded archive leaked staged memory through %q", file.Name)
@@ -333,6 +328,73 @@ func TestRemoteStorePublishUploadsArchiveAndCreatesTemplateCode(t *testing.T) {
 		if strings.Contains(name, codexTemplateMemoryStagingDir) {
 			t.Errorf("uploaded archive contains reserved memory staging path %q", name)
 		}
+	}
+}
+
+func readZipFile(file *zip.File) ([]byte, error) {
+	reader, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
+}
+
+func TestBuildRemoteTemplateArchivePreservesDSHWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	instructionsPath := filepath.Join(workspace, "AGENTS.md")
+	if err := os.WriteFile(instructionsPath, []byte("# DSH template\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(AGENTS.md) error = %v", err)
+	}
+	skillsPath := filepath.Join(t.TempDir(), "skills")
+	if err := os.MkdirAll(filepath.Join(skillsPath, "review"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(skills) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsPath, "review", "SKILL.md"), []byte("# Review\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+
+	archive, err := buildRemoteTemplateArchive(PublishSpec{
+		Name:        "dsh-reviewer",
+		Description: "DSH review worker",
+		RuntimeKind: "dsh",
+		WorkspaceRef: WorkspaceRef{
+			Kind:             WorkspaceKindDir,
+			Path:             workspace,
+			InstructionsPath: instructionsPath,
+			SkillsPath:       skillsPath,
+		},
+		MCPServers: map[string]any{
+			"docs": map[string]any{"url": "https://mcp.example.test"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRemoteTemplateArchive() error = %v", err)
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatalf("zip.NewReader() error = %v", err)
+	}
+	files := make(map[string]string, len(reader.File))
+	for _, file := range reader.File {
+		content, err := readZipFile(file)
+		if err != nil {
+			t.Fatalf("readZipFile(%s) error = %v", file.Name, err)
+		}
+		files[file.Name] = string(content)
+	}
+	if !strings.Contains(files["agent.toml"], "runtime_kind = 'dsh'") {
+		t.Fatalf("agent.toml = %q, want DSH runtime kind", files["agent.toml"])
+	}
+	if got := files["instructions/AGENTS.md"]; got != "# DSH template\n" {
+		t.Fatalf("instructions/AGENTS.md = %q", got)
+	}
+	if got := files["skills/review/SKILL.md"]; got != "# Review\n" {
+		t.Fatalf("skills/review/SKILL.md = %q", got)
+	}
+	if got := files["mcps/mcp.json"]; !strings.Contains(got, "https://mcp.example.test") {
+		t.Fatalf("mcps/mcp.json = %q", got)
 	}
 }
 
@@ -408,6 +470,67 @@ func TestRemoteStoreListMergesOrganizationAndAgentTemplatesByNamespacePath(t *te
 		t.Fatalf("List()[1].Metadata = %#v, want sensitive check from OpenCSG templates response", got)
 	} else if got.SensitiveCheck.Status != "Fail" || got.SensitiveCheck.FailureDetails[0].Message != "checker result" {
 		t.Fatalf("List()[1].Metadata.SensitiveCheck = %#v", got.SensitiveCheck)
+	}
+}
+
+func TestRemoteStorePublishRejectsRuntimeOutsideCommunityTemplateProtocol(t *testing.T) {
+	store := NewAuthenticatedRemoteStore("http://127.0.0.1", "access-token", "alice")
+	_, err := store.Publish(context.Background(), PublishSpec{
+		Name:        "openclaw-reviewer",
+		Description: "Reviews changes",
+		RuntimeKind: "openclaw",
+		Image:       "openclaw:latest",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot be published to the community") {
+		t.Fatalf("Publish() error = %v, want community runtime rejection", err)
+	}
+}
+
+func TestRemoteStorePublishUsesSharedCodeTemplateProtocolForCommunityRuntimes(t *testing.T) {
+	for _, runtimeKind := range []string{"codex", "dsh"} {
+		t.Run(runtimeKind, func(t *testing.T) {
+			var created remoteCreateCodeRequest
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/codes/upload_url":
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+						"url":      "http://" + r.Host + "/object-storage",
+						"uuid":     "package-uuid",
+						"formData": map[string]string{},
+					}})
+				case "/object-storage":
+					w.WriteHeader(http.StatusNoContent)
+				case "/api/v1/codes":
+					if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
+						t.Fatalf("Decode(create) error = %v", err)
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+						"path": "alice/" + runtimeKind + "-reviewer",
+					}})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			item, err := NewAuthenticatedRemoteStore(srv.URL, "access-token", "alice").Publish(context.Background(), PublishSpec{
+				Name:        runtimeKind + "-reviewer",
+				Description: "Reviews changes",
+				RuntimeKind: runtimeKind,
+			})
+			if err != nil {
+				t.Fatalf("Publish() error = %v", err)
+			}
+			if got, want := created.Type, "template"; got != want {
+				t.Fatalf("create type = %q, want %q", got, want)
+			}
+			if got, want := created.Name, runtimeKind+"-reviewer"; got != want {
+				t.Fatalf("create name = %q, want %q", got, want)
+			}
+			if got, want := item.RuntimeKind, runtimeKind; got != want {
+				t.Fatalf("Publish().RuntimeKind = %q, want %q", got, want)
+			}
+		})
 	}
 }
 

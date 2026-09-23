@@ -48,6 +48,7 @@ import {
   notifierThirdPartyRelayWebhookURL,
   normalizeAuthProviderName,
   normalizeRuntimeKind,
+  canPublishCommunityTemplateRuntime,
   parseMCPServersText,
   notificationPushWebhookPathForBot,
   parseJSONMap,
@@ -953,6 +954,13 @@ describe("agent model helpers", () => {
     expect(providerNeedsAuth("api")).toBe(false);
     expect(formatProviderLabel("csghub_lite")).toBe("CSGHub Lite");
     expect(formatProviderLabel("csghub")).toBe("OpenCSG");
+  });
+
+  it("allows Codex and DSH templates to publish to the community", () => {
+    expect(canPublishCommunityTemplateRuntime("codex")).toBe(true);
+    expect(canPublishCommunityTemplateRuntime("dsh")).toBe(true);
+    expect(canPublishCommunityTemplateRuntime("openclaw_sandbox")).toBe(false);
+    expect(canPublishCommunityTemplateRuntime("picoclaw")).toBe(false);
   });
 
   it("advances agent creation progress toward each step target", () => {

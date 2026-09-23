@@ -72,6 +72,7 @@ import {
   agentToDraft,
   isAgentProfileDraftComplete,
   isAgentProfileMarkedComplete,
+  canPublishCommunityTemplateRuntime,
   createAgentSelectableTemplates,
   defaultWorkerImageForRuntime,
   draftMCPServersForSave,
@@ -1921,7 +1922,7 @@ export function useAgentController({
     if (target !== "local" && !requireOpenCSGAuthentication()) {
       return false;
     }
-    if (target !== "local" && agentRuntimeKind(selectedAgentForPage) !== "codex") {
+    if (target !== "local" && !canPublishCommunityTemplateRuntime(agentRuntimeKind(selectedAgentForPage))) {
       return false;
     }
     setAgentPagePublishBusy(true);
@@ -1959,6 +1960,7 @@ export function useAgentController({
               publishedTemplateID,
               deployReviewPending ? "Pending" : "Fail",
               deployReviewPending ? "" : message,
+              agentRuntimeKind(selectedAgentForPage),
             ),
           );
         }

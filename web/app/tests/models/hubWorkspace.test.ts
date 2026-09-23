@@ -24,11 +24,18 @@ describe("hub workspace helpers", () => {
     expect(isDeletableHubTemplate({ id: "official.review-bot", source: { kind: "remote" } })).toBe(false);
   });
 
-  it("only allows local Codex templates to publish to the community", () => {
+  it("allows local Codex and DSH templates to publish to the community", () => {
     expect(
       canPublishHubTemplateToCommunity({
         id: "local.codex",
         runtime_kind: "codex",
+        source: { kind: "local" },
+      }),
+    ).toBe(true);
+    expect(
+      canPublishHubTemplateToCommunity({
+        id: "local.dsh",
+        runtime_kind: "dsh",
         source: { kind: "local" },
       }),
     ).toBe(true);

@@ -1,4 +1,4 @@
-import type { AgentTemplateLike } from "@/models/agents";
+import { canPublishCommunityTemplateRuntime, normalizeRuntimeKind, type AgentTemplateLike } from "@/models/agents";
 import type { LocaleCode, TranslateFn } from "@/models/conversations";
 import type { WorkspaceEntry, WorkspaceFile, WorkspaceListing } from "@/models/workspace";
 
@@ -27,10 +27,7 @@ export function canPublishHubTemplateToCommunity(template: HubTemplate | null | 
   if (!isDeletableHubTemplate(template)) {
     return false;
   }
-  const runtimeKind = String(template?.runtime_kind || template?.workspace?.kind || "")
-    .trim()
-    .toLowerCase();
-  return runtimeKind === "codex";
+  return canPublishCommunityTemplateRuntime(template?.runtime_kind || template?.workspace?.kind);
 }
 
 export function isHubTemplateMemoryEnabled(template: HubTemplate | null | undefined): boolean {
@@ -113,6 +110,7 @@ export function upsertHubTemplateReviewState(
   templateID: string,
   status: "Pending" | "Fail",
   message = "",
+  runtimeKind: unknown = "",
 ): HubTemplate[] {
   const id = templateID.trim();
   if (!id) return [...(templates ?? [])];
@@ -123,6 +121,7 @@ export function upsertHubTemplateReviewState(
     status,
     failure_details: message.trim() ? [{ message: message.trim() }] : [],
   };
+  const normalizedRuntimeKind = normalizeRuntimeKind(runtimeKind);
   const current = templates ?? [];
   const existingIndex = current.findIndex((template) => template.id === id);
   if (existingIndex < 0) {
@@ -133,6 +132,7 @@ export function upsertHubTemplateReviewState(
         name,
         namespace: namespace || undefined,
         role: "worker",
+        runtime_kind: normalizedRuntimeKind || undefined,
         source: { kind: HUB_REGISTRY_KIND_REMOTE, name: OFFICIAL_HUB_REGISTRY_NAME },
         metadata: { sensitive_check: sensitiveCheck },
       },
@@ -142,6 +142,7 @@ export function upsertHubTemplateReviewState(
     index === existingIndex
       ? {
           ...template,
+          runtime_kind: template.runtime_kind || normalizedRuntimeKind || undefined,
           metadata: {
             ...template.metadata,
             sensitive_check: (template.metadata?.sensitive_check?.failure_details ?? []).some((detail) =>
