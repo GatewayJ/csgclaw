@@ -101,10 +101,10 @@ describe("AgentDetailPane metadata editing", () => {
     const entry = screen.getByRole("button", { name: /reviewer/ });
     view.rerender(<Harness workspaceSupported skills={skills} resourceBusy="skill:reviewer" />);
     expect(screen.getByRole("button", { name: /reviewer/ })).toBe(entry);
-    expect(screen.getByRole("button", { name: "agentResourceDisable" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "reviewer" })).toBeDisabled();
     view.rerender(<Harness workspaceSupported skills={[{ ...skills[0], enabled: false }]} />);
     expect(screen.getByRole("button", { name: /reviewer/ })).toBe(entry);
-    expect(screen.getByRole("button", { name: "agentResourceEnable" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "reviewer" })).not.toBeChecked();
   });
 
   it("offers tool cleanup after Feishu disconnect without showing a connected Bot", async () => {
@@ -514,12 +514,12 @@ describe("Profile 资源交互", () => {
       { wrapper: createQueryWrapper().wrapper },
     );
     await user.click(screen.getByRole("button", { name: /agentProfileSkillsTab/ }));
-    await user.click(screen.getByRole("button", { name: "agentResourceEnable" }));
+    await user.click(screen.getByRole("switch", { name: "reviewer" }));
     expect(onSetResourceEnabled).toHaveBeenCalledWith("skill", "reviewer", true);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /reviewer/ }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "reviewer" })).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: "agentResourceEnable" })).toBeEnabled();
+    expect(within(dialog).getByRole("switch", { name: "reviewer" })).toBeEnabled();
   });
 });

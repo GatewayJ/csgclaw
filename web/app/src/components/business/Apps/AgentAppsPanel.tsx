@@ -3,6 +3,7 @@ import { useState } from "react";
 import { BookOpen, Boxes, GitBranch, MessageCircle, Plus, RefreshCw } from "lucide-react";
 import {
   Button,
+  Switch,
   DialogRoot,
   DialogContent,
   DialogHeader,
@@ -243,13 +244,12 @@ export function AppManagedMCPRows({
             icon={<AppIcon appID={app.app_id} />}
             onOpen={() => setDetailID(app.installation_id)}
             actions={
-              <Button
-                size="sm"
+              <Switch
+                aria-label={app.name}
+                checked={app.enabled}
                 disabled={busy || (!app.enabled && app.resource_enabled === false)}
-                onClick={() => void toggle(app)}
-              >
-                {t(app.enabled ? "agentResourceDisable" : "agentResourceEnable")}
-              </Button>
+                onCheckedChange={() => void toggle(app)}
+              />
             }
           />
         ))}
@@ -266,7 +266,17 @@ export function AppManagedMCPRows({
               <DialogTitle>{selected?.name}</DialogTitle>
               <DialogDescription>{t("appManagedMCP")}</DialogDescription>
             </div>
-            <DialogCloseButton label={t("close")} />
+            <div className="flex shrink-0 items-center gap-4">
+              {selected ? (
+                <Switch
+                  aria-label={selected.name}
+                  checked={selected.enabled}
+                  disabled={busy || (!selected.enabled && selected.resource_enabled === false)}
+                  onCheckedChange={() => void toggle(selected)}
+                />
+              ) : null}
+              <DialogCloseButton label={t("close")} />
+            </div>
           </DialogHeader>
           <DialogBody>
             {feedback}
@@ -287,14 +297,6 @@ export function AppManagedMCPRows({
             >
               {t("appSettings")}
             </Button>
-            {selected ? (
-              <Button
-                disabled={busy || (!selected.enabled && selected.resource_enabled === false)}
-                onClick={() => void toggle(selected)}
-              >
-                {t(selected.enabled ? "agentResourceDisable" : "agentResourceEnable")}
-              </Button>
-            ) : null}
           </DialogFooter>
         </DialogContent>
       </DialogRoot>

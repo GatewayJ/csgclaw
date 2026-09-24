@@ -100,6 +100,7 @@ import { localizeTemplateSourceTag } from "@/shared/i18n";
 import type { AgentTemplatePublishTarget } from "@/api/hub";
 import {
   Button,
+  Switch,
   Checkbox,
   DialogBody,
   DialogCloseButton,
@@ -1797,9 +1798,12 @@ function AgentMCPPanel({
                         <RefreshCw size={14} />
                       </Button>
                     ) : null}
-                    <Button size="sm" disabled={mutationBusy || !onToggle} onClick={() => void onToggle?.(server)}>
-                      {t(server.config.enabled === false ? "agentResourceEnable" : "agentResourceDisable")}
-                    </Button>
+                    <Switch
+                      aria-label={mcpServerDisplayName(server)}
+                      checked={server.config.enabled !== false}
+                      disabled={mutationBusy || !onToggle}
+                      onCheckedChange={() => void onToggle?.(server)}
+                    />
                     <Button
                       size="sm"
                       variant="secondaryGray"
@@ -2437,9 +2441,12 @@ function AgentSkillsPanel({
               badge={<span>{t(skill.enabled === false ? "agentResourceDisabled" : "agentResourceEnabled")}</span>}
               actions={
                 <>
-                  <Button size="sm" disabled={mutationBusy || !onToggle} onClick={() => void onToggle?.(skill)}>
-                    {t(skill.enabled === false ? "agentResourceEnable" : "agentResourceDisable")}
-                  </Button>
+                  <Switch
+                    aria-label={skill.name}
+                    checked={skill.enabled !== false}
+                    disabled={mutationBusy || !onToggle}
+                    onCheckedChange={() => void onToggle?.(skill)}
+                  />
                   <Button
                     size="sm"
                     variant="secondaryGray"

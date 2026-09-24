@@ -9,6 +9,7 @@ import { mcpServerDisplayName, mcpServerDetailConfig } from "@/models/mcp";
 import { WorkspaceFileTree, WorkspaceFilePreview } from "@/components/business/WorkspaceFileTree";
 import {
   Button,
+  Switch,
   DialogRoot,
   DialogContent,
   DialogHeader,
@@ -75,7 +76,10 @@ export function AgentResourceDetails({
             <DialogTitle>{server ? mcpServerDisplayName(server) : name}</DialogTitle>
             <DialogDescription>{skill?.description || server?.description || name}</DialogDescription>
           </div>
-          <DialogCloseButton label={t("close")} />
+          <div className="flex shrink-0 items-center gap-4">
+            <Switch aria-label={name} checked={enabled} disabled={busy || !canToggle} onCheckedChange={onToggle} />
+            <DialogCloseButton label={t("close")} />
+          </div>
         </DialogHeader>
         <DialogBody>
           <p>{t(enabled ? "agentResourceEnabled" : "agentResourceDisabled")}</p>
@@ -127,9 +131,6 @@ export function AgentResourceDetails({
         <DialogFooter>
           <Button variant="outlineDanger" disabled={busy} onClick={onDelete}>
             {t(skill ? "agentDeleteSkill" : "agentDeleteMCP")}
-          </Button>
-          <Button disabled={busy || !canToggle} onClick={onToggle}>
-            {t(busy ? "agentResourceApplying" : enabled ? "agentResourceDisable" : "agentResourceEnable")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -123,7 +123,7 @@ describe("Agent Apps", () => {
     mockServer([installation]);
     render(<Harness mode="mcp" />);
     await screen.findByText("Managed by connector · Connected");
-    expect(screen.getByRole("button", { name: "Disable" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Work GitLab" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: /Managed by connector/ }));
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(screen.getByRole("button", { name: "Settings" })).toBeVisible();
@@ -136,7 +136,7 @@ describe("Agent Apps", () => {
     await userEvent.click(screen.getByRole("button", { name: /Managed by connector/ }));
     const dialog = screen.getByRole("dialog");
     fetch.mockResolvedValueOnce(Response.json({ error: "update failed" }, { status: 500 }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Disable" }));
+    await userEvent.click(within(dialog).getByRole("switch", { name: "Work GitLab" }));
     expect(await within(dialog).findByRole("alert")).toBeVisible();
   });
 
