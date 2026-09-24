@@ -152,7 +152,7 @@ Server 保持当前 Hub catalog 的排序，并返回归一化后的 Skill 摘�
 
 ### `POST /api/v1/skills:install`
 
-从同一个有效 OpenCSG Hub 安装远端 Skill。用户已登录时，Server 会在仓库压缩包请求以及旧版 Hub 的每个 tree/blob 回退请求中携带匹配环境的 OpenCSG Access Token，从而安装该用户有权查看的私有 Skill；未登录时仍只能安装公开 Skill。设置 `replace` 可覆盖同名本地 Skill。
+从同一个有效 OpenCSG Hub 安装远端 Skill。用户已登录时，Server 会在仓库压缩包请求以及旧版 Hub 的每个 tree/blob 回退请求中携带匹配环境的 OpenCSG Access Token，从而安装该用户有权查看的私有 Skill；未登录时仍只能安装公开 Skill。设置 `replace` 可覆盖同名本地 Skill。内置 Skill 禁止替换；远端安装窗口中，安装名称与内置 Skill 同名时隐藏操作按钮。
 
 ```json
 {

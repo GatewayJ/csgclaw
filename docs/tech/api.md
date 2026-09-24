@@ -152,7 +152,7 @@ The server keeps the current Hub catalog ordering and returns normalized Skill s
 
 ### `POST /api/v1/skills:install`
 
-Installs one remote Skill from the same effective OpenCSG Hub. For a signed-in user, the server sends the matching OpenCSG access token with the archive request and with every legacy tree/blob fallback request, allowing installation of private Skills visible to that user. Signed-out installs remain limited to public Skills. Set `replace` to overwrite an existing local Skill with the same name.
+Installs one remote Skill from the same effective OpenCSG Hub. For a signed-in user, the server sends the matching OpenCSG access token with the archive request and with every legacy tree/blob fallback request, allowing installation of private Skills visible to that user. Signed-out installs remain limited to public Skills. Set `replace` to overwrite an existing local Skill with the same name. Built-in Skills cannot be replaced; the remote install dialog hides the action when the installation name matches a built-in Skill.
 
 ```json
 {
