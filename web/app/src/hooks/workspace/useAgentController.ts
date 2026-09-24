@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAgentResourceEnablement } from "./useAgentResourceEnablement";
 import { useBlocker } from "react-router-dom";
 import { apiErrorBillingURL, apiErrorCode, errorMessage as apiErrorMessage, type ApiError } from "@/api/client";
 import { loginCLIProxyProviderRequest } from "@/api/cliproxy";
@@ -829,6 +830,19 @@ export function useAgentController({
     return normalizeFeishuPendingRegistration(feishuPendingRegistrations[agentID], agentID);
   }, [feishuPendingRegistrations, selectedAgentForPage?.id]);
   const agentDetailAgentID = selectedAgentForPage?.id || "";
+  const resourceAgentIDRef = useRef(agentDetailAgentID);
+  resourceAgentIDRef.current = agentDetailAgentID;
+  const resourceEnablement = useAgentResourceEnablement(agentDetailAgentID, t, async (id) => {
+    await refreshAgentStateRef.current(id);
+    const view = await fetchAgentMCPServers(id);
+    if (resourceAgentIDRef.current !== id) return;
+    setAgentPageDraft((current) =>
+      current ? { ...current, mcpServers: cloneMCPServersForDraft(view.servers) } : current,
+    );
+    setAgentPageSavedDraft((current) =>
+      current ? { ...current, mcpServers: cloneMCPServersForDraft(view.servers) } : current,
+    );
+  });
   const globalSkillsQuery = useQuery({
     queryKey: workspaceQueryKeys.skills(),
     queryFn: async () => {
@@ -2991,6 +3005,10 @@ export function useAgentController({
       mcpAddError: agentMCPAddError,
       mcpDeleteBusy: agentMCPDeleteBusy,
       mcpDeleteError: agentMCPDeleteError,
+      resourceBusy: resourceEnablement.busy,
+      resourceError: resourceEnablement.error,
+      onRetryResource: resourceEnablement.retry,
+      onSetResourceEnabled: resourceEnablement.setEnabled,
       skills: agentSkillsQuery.data ?? [],
       skillsLoading: agentSkillsQuery.isFetching,
       skillsError: agentSkillsError,

@@ -112,6 +112,14 @@ func (f *Controller) Create(ctx context.Context, request contract.AgentCreateReq
 			return contract.Agent{}, err
 		}
 	}
+	if len(spec.SkillStates) > 0 {
+		if _, err := f.Update(ctx, created.ID, contract.AgentUpdateRequest{Spec: spec, FieldMask: []string{"skill_states"}}); err != nil {
+			if createdByCall {
+				err = errors.Join(err, f.DeleteRecord(context.Background(), created.ID))
+			}
+			return contract.Agent{}, err
+		}
+	}
 	if spec.Memory != nil {
 		if _, err := f.UpdateMemoryEnabled(ctx, created.ID, spec.Memory.Enabled); err != nil {
 			if createdByCall {
@@ -238,7 +246,7 @@ func (f *Controller) List(ctx context.Context, options contract.AgentListOptions
 }
 
 func (f *Controller) Update(ctx context.Context, agentID string, request contract.AgentUpdateRequest) (contract.Agent, error) {
-	loadSkills := len(request.FieldMask) == 0 || fieldMaskContains(request.FieldMask, "skills")
+	loadSkills := len(request.FieldMask) == 0 || (fieldMaskContains(request.FieldMask, "skills") || fieldMaskContains(request.FieldMask, "skill_states"))
 	loadMemory := fieldMaskContains(request.FieldMask, "memory") || request.Spec.Memory != nil
 	reconcileDesiredState := fieldMaskContains(request.FieldMask, "desired_state")
 	item, err := f.updateDesired(ctx, agentID, request.ResourceVersion, loadSkills, loadMemory, reconcileDesiredState, false, func(current contract.AgentSpec) (contract.AgentSpec, error) {
@@ -292,6 +300,8 @@ func mergeAgentUpdate(current contract.AgentSpec, request contract.AgentUpdateRe
 			next.Model = request.Spec.Model
 		case "model.selector":
 			next.Model.Selector = request.Spec.Model.Selector
+		case "skill_states":
+			next.SkillStates = maps.Clone(request.Spec.SkillStates)
 		case "skills":
 			next.Skills = append([]string(nil), request.Spec.Skills...)
 		case "mcp_servers":
@@ -314,7 +324,7 @@ type agentSpecChange struct {
 	name, description, instructions, image bool
 	runtimeSelection, runtimeOptions       bool
 	modelSelector, modelConfig             bool
-	skills, mcpServers                     bool
+	skills, skillStates, mcpServers        bool
 	memory                                 bool
 	runtimeCredentials, runtimeInitShell   bool
 	desiredState                           bool
@@ -322,13 +332,13 @@ type agentSpecChange struct {
 
 func (c agentSpecChange) any() bool {
 	return c.name || c.description || c.instructions || c.image ||
-		c.runtimeSelection || c.runtimeOptions || c.modelSelector || c.modelConfig || c.skills ||
+		c.runtimeSelection || c.runtimeOptions || c.modelSelector || c.modelConfig || c.skills || c.skillStates ||
 		c.mcpServers || c.memory || c.runtimeCredentials || c.runtimeInitShell || c.desiredState
 }
 
 func (c agentSpecChange) serviceUpdate() bool {
 	return c.name || c.description || c.instructions || c.image ||
-		c.runtimeOptions || c.modelSelector || c.modelConfig || c.mcpServers ||
+		c.runtimeOptions || c.modelSelector || c.modelConfig || c.skillStates || c.mcpServers ||
 		c.runtimeCredentials || c.runtimeInitShell
 }
 
@@ -347,6 +357,7 @@ func diffAgentSpec(previous, desired contract.AgentSpec) agentSpecChange {
 		modelSelector:      previous.Model.Selector != desired.Model.Selector,
 		modelConfig:        !reflect.DeepEqual(previousModelConfig, desiredModelConfig),
 		skills:             !slices.Equal(previous.Skills, desired.Skills),
+		skillStates:        !maps.Equal(previous.SkillStates, desired.SkillStates),
 		mcpServers:         !reflect.DeepEqual(previous.MCPServers, desired.MCPServers),
 		memory:             !reflect.DeepEqual(previous.Memory, desired.Memory),
 		runtimeCredentials: !maps.Equal(previous.Runtime.Credentials, desired.Runtime.Credentials),
@@ -387,7 +398,7 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 			return fmt.Errorf("agent %q not found", agentID)
 		}
 		if resourceVersion != "" && resourceVersion != resourceVersionForAgent(previous) {
-			return &contract.TurnError{Code: contract.ErrorInvalidRequest, Message: "agent resource version is stale"}
+			return ErrAgentResourceVersionConflict
 		}
 		var previousSkills []string
 		var err error
@@ -423,8 +434,28 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 		if desired.Role != current.Role {
 			return &contract.TurnError{Code: contract.ErrorInvalidRequest, Message: "agent role changes are not supported"}
 		}
+		if loadSkills {
+			for name := range desired.SkillStates {
+				if !slices.Contains(desired.Skills, name) {
+					if slices.Contains(previousSkills, name) {
+						delete(desired.SkillStates, name)
+					} else {
+						return fmt.Errorf("%w: %s", ErrAgentSkillInvalid, name)
+					}
+				}
+			}
+		}
 		change := diffAgentSpec(current, desired)
-		if !change.any() && !reconcileDesiredState && !forceRecreate {
+		if change.skillStates {
+			if err := f.validateSkillStates(createAgentSpec(desired).RuntimeConfig().LegacyKind(), desired.SkillStates); err != nil {
+				return err
+			}
+		}
+		resourceUpdate := change.skills || change.skillStates || change.mcpServers || (previous.AgentProfile.EnvRestartRequired && (loadSkills || desired.MCPServers != nil))
+		if resourceUpdate && isHostRuntimeKind(previous.RuntimeKind) {
+			lifecycleCtx = context.WithValue(lifecycleCtx, deferResourceRestartKey{}, true)
+		}
+		if !change.any() && !resourceUpdate && !reconcileDesiredState && !forceRecreate {
 			updated = previous
 			return nil
 		}
@@ -438,6 +469,11 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 			}
 		}
 		if replacesRuntime {
+			if change.skillStates {
+				if _, err := f.UpdateRecord(lifecycleCtx, agentID, UpdateRequest{SkillStates: &desired.SkillStates, FieldMask: []string{"skill_states"}}); err != nil {
+					return err
+				}
+			}
 			replacement := createAgentSpec(desired)
 			replacement.ID = previous.ID
 			updated, err = f.CreateRecord(lifecycleCtx, CreateRequest{Spec: replacement, Replace: true})
@@ -473,6 +509,12 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 				}
 			}
 		}
+		if (skillsChanged || change.skillStates) && !replacesRuntime && supportsSkillEnablement(updated.RuntimeKind) {
+			updated, err = f.markResourceRestart(agentID)
+			if err != nil {
+				return err
+			}
+		}
 		if (change.desiredState || reconcileDesiredState) && !forceRecreate {
 			switch desired.DesiredState {
 			case contract.AgentDesiredStateRunning:
@@ -499,10 +541,22 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 				return err
 			}
 		}
-		if skillsChanged && !replacesRuntime && !forceRecreate &&
-			strings.EqualFold(updated.RuntimeKind, RuntimeKindCodex) &&
-			isRuntimeRunning(previous) && isRuntimeRunning(updated) && desired.DesiredState == contract.AgentDesiredStateRunning {
-			updated, err = f.restartRuntimeLocked(lifecycleCtx, agentID)
+		if resourceUpdate && !replacesRuntime && !forceRecreate && isHostRuntimeKind(updated.RuntimeKind) {
+			if updated.AgentProfile.EnvRestartRequired && desired.DesiredState == contract.AgentDesiredStateRunning && (isRuntimeRunning(updated) || previous.AgentProfile.EnvRestartRequired) {
+				if change.mcpServers {
+					if err := f.reconcileMCPServers(lifecycleCtx, previous, updated); err != nil {
+						return err
+					}
+				}
+				updated, err = f.restartRuntimeLocked(lifecycleCtx, agentID)
+			} else {
+				if change.mcpServers || previous.AgentProfile.EnvRestartRequired {
+					err = f.reconcileMCPServers(lifecycleCtx, previous, updated)
+				}
+				if err == nil && (change.skillStates || skillsChanged || previous.AgentProfile.EnvRestartRequired) {
+					err = f.reconcileSkillStates(lifecycleCtx, updated)
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -563,7 +617,7 @@ func (f *Controller) Recreate(ctx context.Context, agentID string, options contr
 			return contract.Agent{}, &contract.TurnError{Code: contract.ErrorInvalidRequest, Message: "recreate update and image upgrade cannot be combined"}
 		}
 		request := *options.Update
-		loadSkills := len(request.FieldMask) == 0 || fieldMaskContains(request.FieldMask, "skills")
+		loadSkills := len(request.FieldMask) == 0 || (fieldMaskContains(request.FieldMask, "skills") || fieldMaskContains(request.FieldMask, "skill_states"))
 		loadMemory := fieldMaskContains(request.FieldMask, "memory") || request.Spec.Memory != nil
 		return f.updateDesired(ctx, agentID, request.ResourceVersion, loadSkills, loadMemory, false, true, func(current contract.AgentSpec) (contract.AgentSpec, error) {
 			return mergeAgentUpdate(current, request), nil
@@ -764,6 +818,11 @@ func updateAgentRequestForChanges(spec contract.AgentSpec, change agentSpecChang
 		request.AgentProfile = &profile
 		addField("agent_profile")
 	}
+	if change.skillStates {
+		states := maps.Clone(spec.SkillStates)
+		request.SkillStates = &states
+		addField("skill_states")
+	}
 	if change.mcpServers {
 		servers := mcpToService(spec.MCPServers)
 		request.MCPServers = &servers
@@ -891,6 +950,7 @@ func cloneAgentSpec(input contract.AgentSpec) contract.AgentSpec {
 	input.Model.Headers = maps.Clone(input.Model.Headers)
 	input.Model.Env = maps.Clone(input.Model.Env)
 	input.Model.Options = utils.CloneAnyMap(input.Model.Options)
+	input.SkillStates = maps.Clone(input.SkillStates)
 	input.MCPServers = mcpFromService(mcpToService(input.MCPServers))
 	if input.Memory != nil {
 		memory := *input.Memory
@@ -943,8 +1003,9 @@ func (f *Controller) specFromService(selected Agent, skills []string, includeSec
 			Env:             maps.Clone(selected.AgentProfile.Env),
 			Options:         utils.CloneAnyMap(selected.AgentProfile.RequestOptions),
 		},
-		Skills:     append([]string(nil), skills...),
-		MCPServers: mcpFromService(selected.MCPServers),
+		SkillStates: maps.Clone(selected.SkillStates),
+		Skills:      append([]string(nil), skills...),
+		MCPServers:  mcpFromService(selected.MCPServers),
 	}
 	switch contract.AgentDesiredState(strings.ToLower(strings.TrimSpace(selected.DesiredState))) {
 	case contract.AgentDesiredStateRunning:

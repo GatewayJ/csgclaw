@@ -119,11 +119,14 @@ describe("Agent Apps", () => {
     await screen.findByText("Connect the services your agent needs");
   });
 
-  it("projects app-managed MCP rows with only an App settings action", async () => {
+  it("展示 App MCP 开关与详情弹框", async () => {
     mockServer([installation]);
     render(<Harness mode="mcp" />);
     await screen.findByText("Managed by connector · Connected");
-    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Settings"]);
+    expect(screen.getByRole("button", { name: "Disable" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: /Managed by connector/ }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeVisible();
   });
 
   it("requires a fresh connection test after changing settings and never prefills saved secrets", async () => {

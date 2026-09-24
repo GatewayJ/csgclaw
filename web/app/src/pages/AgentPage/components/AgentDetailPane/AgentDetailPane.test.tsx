@@ -1,3 +1,4 @@
+import { createQueryWrapper } from "../../../../../tests/helpers/queryClient";
 // @vitest-environment jsdom
 
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -470,5 +471,42 @@ describe("AgentDetailPane MCP snapshots", () => {
     expect(screen.queryByText("agentKnowledgeMCPSourceDeleted")).not.toBeInTheDocument();
     expect(screen.queryByText("agentKnowledgeMCPUpdateAvailable")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "agentDeleteMCP" })).toBeEnabled();
+  });
+});
+
+describe("Profile 资源交互", () => {
+  it.each(["codex", "dsh"])("%s 的开关与详情入口独立", async (runtimeKind) => {
+    const user = userEvent.setup();
+    const onSetResourceEnabled = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ entries: [], path: "reviewer/SKILL.md", content: "# Reviewer" }), {
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    render(
+      <Harness
+        item={{
+          ...agent,
+          runtime_kind: runtimeKind,
+          runtime: { ...agent.runtime, kind: runtimeKind, name: runtimeKind },
+        }}
+        workspaceSupported
+        skills={[{ name: "reviewer", description: "Review", enabled: false }]}
+        onSetResourceEnabled={onSetResourceEnabled}
+      />,
+      { wrapper: createQueryWrapper().wrapper },
+    );
+    await user.click(screen.getByRole("button", { name: /agentProfileSkillsTab/ }));
+    await user.click(screen.getByRole("button", { name: "agentResourceEnable" }));
+    expect(onSetResourceEnabled).toHaveBeenCalledWith("skill", "reviewer", true);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /reviewer/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "reviewer" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "agentResourceEnable" })).toBeEnabled();
   });
 });

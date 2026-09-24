@@ -1,3 +1,4 @@
+import { createQueryWrapper } from "../helpers/queryClient";
 import { useState } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import {
@@ -109,36 +110,38 @@ describe("useConversationController slash skill helpers", () => {
     const navigatePane = vi.fn();
     const setActiveConversationId = vi.fn();
 
-    renderHook(() =>
-      useConversationController({
-        activeConversationId: "",
-        activePane: { type: WorkspacePaneTypes.conversation, id: "" },
-        agents: [],
-        authBusyProvider: "",
-        authStatuses: {},
-        data: managerData,
-        locale: "en" as LocaleCode,
-        managerProfile: null,
-        managerProfileIncomplete: false,
-        hasObservedWorkLease: () => false,
-        messageActionBusy: "",
-        messageActionFeedback: {},
-        navigatePane,
-        onMessageAction: () => {},
-        onProviderLogin: async () => {},
-        openCSGAuthGuard: openCSGAuthGuardStub(),
-        preferredFallbackConversationId: "dm-manager",
-        rooms: managerData.rooms,
-        selectComputer: () => {},
-        selectConversation: () => {},
-        setActiveConversationId,
-        setBootstrapData: () => {},
-        setShowToolCalls: () => {},
-        showToolCalls: false,
-        t,
-        theme: "light",
-        workingParticipantsForRoom: () => [],
-      }),
+    renderHook(
+      () =>
+        useConversationController({
+          activeConversationId: "",
+          activePane: { type: WorkspacePaneTypes.conversation, id: "" },
+          agents: [],
+          authBusyProvider: "",
+          authStatuses: {},
+          data: managerData,
+          locale: "en" as LocaleCode,
+          managerProfile: null,
+          managerProfileIncomplete: false,
+          hasObservedWorkLease: () => false,
+          messageActionBusy: "",
+          messageActionFeedback: {},
+          navigatePane,
+          onMessageAction: () => {},
+          onProviderLogin: async () => {},
+          openCSGAuthGuard: openCSGAuthGuardStub(),
+          preferredFallbackConversationId: "dm-manager",
+          rooms: managerData.rooms,
+          selectComputer: () => {},
+          selectConversation: () => {},
+          setActiveConversationId,
+          setBootstrapData: () => {},
+          setShowToolCalls: () => {},
+          showToolCalls: false,
+          t,
+          theme: "light",
+          workingParticipantsForRoom: () => [],
+        }),
+      { wrapper: createQueryWrapper().wrapper },
     );
 
     await waitFor(() => {
@@ -265,7 +268,9 @@ describe("useConversationController send errors", () => {
       },
     );
 
-    const { result } = renderHook(() => useConversationControllerTestHarness());
+    const { result } = renderHook(() => useConversationControllerTestHarness(), {
+      wrapper: createQueryWrapper().wrapper,
+    });
     const editor = document.createElement("div");
     editor.textContent = "hello";
 
