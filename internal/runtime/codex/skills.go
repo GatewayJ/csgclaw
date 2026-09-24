@@ -58,7 +58,7 @@ func renderSkillStates(content, home string, states map[string]skill.State) stri
 	var block strings.Builder
 	block.WriteString(strings.TrimRight(content, "\n") + "\n" + skillConfigBegin + "\n")
 	for _, name := range names {
-		fmt.Fprintf(&block, "[[skills.config]]\npath = %s\nenabled = false\n", strconv.Quote(filepath.Join(home, "skills", name)))
+		fmt.Fprintf(&block, "[[skills.config]]\npath = %s\nenabled = false\n", strconv.Quote(filepath.Join(home, "skills", name, "SKILL.md")))
 	}
 	block.WriteString(skillConfigEnd + "\n")
 	return block.String()

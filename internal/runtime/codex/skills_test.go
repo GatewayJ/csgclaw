@@ -1,11 +1,13 @@
 package codex
 
 import (
-	agentruntime "csgclaw/internal/runtime"
-	skill "csgclaw/internal/skill/state"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	agentruntime "csgclaw/internal/runtime"
+	skill "csgclaw/internal/skill/state"
 )
 
 func TestSkillStatesSurviveConfigRefreshAndReenable(t *testing.T) {
@@ -13,7 +15,7 @@ func TestSkillStatesSurviveConfigRefreshAndReenable(t *testing.T) {
 	disabled := map[string]skill.State{"reviewer": {Enabled: false}}
 	content := renderSkillStates("model = \"old\"\n", home, disabled)
 	content = configureCodexHomeConfig(content, agentruntime.Profile{Provider: "api", BaseURL: "https://example.com", APIKey: "test", ModelID: "new"}, map[string]any{})
-	if !strings.Contains(content, filepath.Join(home, "skills", "reviewer")) || !strings.Contains(content, "enabled = false") {
+	if !strings.Contains(content, "path = "+strconv.Quote(filepath.Join(home, "skills", "reviewer", "SKILL.md"))) || !strings.Contains(content, "enabled = false") {
 		t.Fatalf("配置刷新后缺少禁用状态：%s", content)
 	}
 	if got := renderSkillStates(content, home, disabled); strings.Count(got, "[[skills.config]]") != 1 {
