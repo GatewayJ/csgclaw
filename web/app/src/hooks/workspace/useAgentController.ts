@@ -830,12 +830,10 @@ export function useAgentController({
     return normalizeFeishuPendingRegistration(feishuPendingRegistrations[agentID], agentID);
   }, [feishuPendingRegistrations, selectedAgentForPage?.id]);
   const agentDetailAgentID = selectedAgentForPage?.id || "";
-  const resourceAgentIDRef = useRef(agentDetailAgentID);
-  resourceAgentIDRef.current = agentDetailAgentID;
   const resourceEnablement = useAgentResourceEnablement(agentDetailAgentID, t, async (id) => {
-    await refreshAgentStateRef.current(id);
+    if (!(await refreshAgentStateRef.current(id))) throw new Error(t("agentResourceRefreshFailed"));
     const view = await fetchAgentMCPServers(id);
-    if (resourceAgentIDRef.current !== id) return;
+    if (selectedAgentForPageRef.current?.id !== id) return;
     setAgentPageDraft((current) =>
       current ? { ...current, mcpServers: cloneMCPServersForDraft(view.servers) } : current,
     );

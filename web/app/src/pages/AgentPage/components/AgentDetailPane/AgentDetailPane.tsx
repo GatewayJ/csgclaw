@@ -1050,7 +1050,6 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 skillAddBusy={skillAddBusy}
                 skillAddError={skillAddError}
                 skillCandidatesLoading={skillCandidatesLoading}
-                skillDeleteBusy={skillDeleteBusy}
                 skillDeleteError={skillDeleteError}
                 skills={skills}
                 skillsError={skillsError}
@@ -1080,6 +1079,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
               <>
                 {showApps ? (
                   <AppManagedMCPRows
+                    key={item?.id}
                     controller={appsController}
                     t={t}
                     onSelect={selectAppSettings}
@@ -1097,7 +1097,6 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                   mutationBusy={resourceMutationBusy || Boolean(appsController.busyID)}
                   addBusy={mcpAddBusy}
                   addError={mcpAddError}
-                  deleteBusy={mcpDeleteBusy}
                   deleteError={mcpDeleteError}
                   servers={mcpServers}
                   hasManagedApps={appsController.items.length > 0}
@@ -1687,7 +1686,6 @@ type AgentMCPPanelProps = {
   hasManagedApps?: boolean;
   addBusy: boolean;
   addError: string;
-  deleteBusy: boolean;
   deleteError: string;
   onOpenAddMCP: () => void;
   onRequestDeleteMCP: (server: MCPServer) => void;
@@ -2350,7 +2348,6 @@ type AgentSkillsPanelProps = {
   skillAddBusy: boolean;
   skillAddError: string;
   skillCandidatesLoading: boolean;
-  skillDeleteBusy: boolean;
   skillDeleteError: string;
   skills: readonly SlashSkillOption[];
   skillsError: string;

@@ -4,7 +4,6 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import {
   buildSlashPickerState,
   normalizeSlashShorthandForPayload,
-  skillDescriptionFromMarkdown,
   slashSkillCommandText,
   slashCommandInputText,
   slashPickerQueryForDraft,
@@ -195,13 +194,6 @@ describe("useConversationController slash skill helpers", () => {
       { description: "建议创建智能体，不会自动执行", name: "创建智能体", type: "command" },
       { description: "建议创建房间，不会自动执行", name: "创建房间", type: "command" },
     ]);
-  });
-
-  it("extracts optional skill descriptions from SKILL.md frontmatter", () => {
-    expect(
-      skillDescriptionFromMarkdown('---\nname: browser\ndescription: "Control the in-app browser"\n---\n# Browser'),
-    ).toBe("Control the in-app browser");
-    expect(skillDescriptionFromMarkdown("---\nname: empty\n---\n# Empty")).toBe("");
   });
 
   it("renders selected skills as canonical slash-command XML", () => {

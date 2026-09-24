@@ -129,6 +129,17 @@ describe("Agent Apps", () => {
     expect(screen.getByRole("button", { name: "Settings" })).toBeVisible();
   });
 
+  it("在 App MCP 详情中显示启用失败", async () => {
+    const fetch = mockServer([installation]);
+    render(<Harness mode="mcp" />);
+    await screen.findByText("Managed by connector · Connected");
+    await userEvent.click(screen.getByRole("button", { name: /Managed by connector/ }));
+    const dialog = screen.getByRole("dialog");
+    fetch.mockResolvedValueOnce(Response.json({ error: "update failed" }, { status: 500 }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Disable" }));
+    expect(await within(dialog).findByRole("alert")).toBeVisible();
+  });
+
   it("requires a fresh connection test after changing settings and never prefills saved secrets", async () => {
     const user = userEvent.setup();
     const probe = vi.fn().mockResolvedValue({ connected: true, tools: installation.tools });

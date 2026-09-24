@@ -16,15 +16,11 @@ type deferResourceRestartKey struct{}
 var ErrSkillEnablementUnsupported = errors.New("runtime does not support skill enablement")
 var ErrAgentResourceVersionConflict = &contract.TurnError{Code: contract.ErrorInvalidRequest, Message: "agent resource version is stale"}
 
-func supportsSkillEnablement(kind string) bool {
-	return kind == RuntimeKindCodex || kind == RuntimeKindDSH
-}
-
-func (s *Controller) validateSkillStates(kind string, states map[string]skill.State) error {
+func validateSkillStates(kind string, states map[string]skill.State) error {
 	if len(states) == 0 {
 		return nil
 	}
-	if !supportsSkillEnablement(kind) {
+	if !isHostRuntimeKind(kind) {
 		return ErrSkillEnablementUnsupported
 	}
 	for name := range states {

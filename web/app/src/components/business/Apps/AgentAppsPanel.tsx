@@ -226,13 +226,14 @@ export function AppManagedMCPRows({
     }
   }
   const busy = disabled || Boolean(controller.busyID);
+  const feedback = error ? (
+    <p role="alert" className="form-error">
+      {localizeAPIError(error, t, t("agentResourceApplyFailed"))}
+    </p>
+  ) : null;
   return controller.items.length ? (
     <>
-      {error ? (
-        <p role="alert" className="form-error">
-          {localizeAPIError(error, t, t("agentResourceApplyFailed"))}
-        </p>
-      ) : null}
+      {selected ? null : feedback}
       <ResourceList>
         {controller.items.map((app) => (
           <ResourceListCard
@@ -268,6 +269,7 @@ export function AppManagedMCPRows({
             <DialogCloseButton label={t("close")} />
           </DialogHeader>
           <DialogBody>
+            {feedback}
             {selected ? (
               <>
                 <p>{appStatus(selected, t)}</p>

@@ -7,8 +7,6 @@ import { workspaceQueryKeys } from "./workspaceQueries";
 
 export function useAgentResourceEnablement(agentID: string, t: TranslateFn, onChanged: (id: string) => Promise<void>) {
   const queryClient = useQueryClient();
-  const currentAgent = useRef(agentID);
-  currentAgent.current = agentID;
   const inFlight = useRef(false);
   const lastRequest = useRef<{ agentID: string; kind: AgentResourceKind; name: string; enabled: boolean } | null>(null);
   const [state, setState] = useState({ agentID, busy: "", error: "" });
@@ -23,17 +21,23 @@ export function useAgentResourceEnablement(agentID: string, t: TranslateFn, onCh
     } catch (error) {
       failure = localizeAPIError(error, t, t("agentResourceApplyFailed"));
     } finally {
-      await Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(agentID) }),
-        queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPServers(agentID) }),
-        currentAgent.current === agentID ? onChanged(agentID) : Promise.resolve(),
+      const refreshed = await Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(agentID) }, { throwOnError: true }),
+        queryClient.invalidateQueries(
+          { queryKey: workspaceQueryKeys.agentMCPServers(agentID) },
+          { throwOnError: true },
+        ),
+        onChanged(agentID),
       ]);
+      if (!failure && refreshed.some((result) => result.status === "rejected")) {
+        failure = t("agentResourceRefreshFailed");
+      }
       inFlight.current = false;
-      if (currentAgent.current === agentID) setState({ agentID, busy: "", error: failure });
+      setState({ agentID, busy: "", error: failure });
     }
   }
   return {
-    busy: state.agentID === agentID ? state.busy : "",
+    busy: state.busy,
     error: state.agentID === agentID ? state.error : "",
     setEnabled,
     retry: async () => {

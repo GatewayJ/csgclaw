@@ -544,14 +544,14 @@ func (s *Controller) updateWithManagedRuntimeOptions(ctx context.Context, id str
 		return Agent{}, err
 	}
 	s.mu.Unlock()
-	deferred, _ := ctx.Value(deferResourceRestartKey{}).(bool)
-	if deferred {
-		return current, nil
-	}
 	if instructionsUpdated || agentProfileUpdated || runtimeOptionsUpdated {
 		if err := s.reconcileRuntimeConfig(ctx, previous, current); err != nil {
 			return Agent{}, err
 		}
+	}
+	deferred, _ := ctx.Value(deferResourceRestartKey{}).(bool)
+	if deferred {
+		return current, nil
 	}
 	if mcpServersUpdated {
 		// OpenClaw consumes MCP settings during provisioning/recreation. Writing

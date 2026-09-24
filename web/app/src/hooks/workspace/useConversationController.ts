@@ -90,8 +90,6 @@ import { handleSlashPickerNavigation } from "@/components/business/ConversationP
 import { modelProviderConfigUsesOpenCSG } from "@/models/modelProviders";
 import { isOpenCSGRuntimeAuthenticationError } from "./useOpenCSGAuthGuard";
 
-export { skillDescriptionFromMarkdown } from "@/models/slashCommands";
-
 type ComposerMentionState = {
   endOffset: number;
   query: string;

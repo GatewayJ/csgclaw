@@ -128,3 +128,71 @@ func TestResourceEnablementLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestMetadataUpdateDoesNotApplyPendingResources(t *testing.T) {
+	for _, kind := range []string{RuntimeKindCodex, RuntimeKindDSH} {
+		t.Run(kind, func(t *testing.T) {
+			calls := 0
+			rt := &skillStateRuntime{fakeAgentRuntime: fakeAgentRuntime{kind: kind,
+				start: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+					calls++
+					return agentruntime.StateRunning, nil
+				},
+				mcpReconcile: func(context.Context, agentruntime.Handle, agentruntime.MCPServersChange) error { calls++; return nil },
+			}}
+			svc, err := NewController(testModelConfig(), config.ServerConfig{}, "", filepath.Join(t.TempDir(), "agents.json"), WithRuntime(rt))
+			if err != nil {
+				t.Fatal(err)
+			}
+			item := Agent{ID: "agent-metadata", Name: "metadata", Role: RoleWorker, RuntimeKind: kind, RuntimeName: kind, RuntimeID: "rt-metadata", Status: string(agentruntime.StateRunning), DesiredState: DesiredStateRunning,
+				ProfileComplete: true, AgentProfile: AgentProfile{Provider: ProviderAPI, BaseURL: "https://example.com", APIKey: "test", ModelID: "test", ProfileComplete: true, EnvRestartRequired: true},
+				MCPServers: map[string]any{"search": map[string]any{"url": "https://example.com/mcp"}},
+			}
+			svc.agents[item.ID] = item
+			updated, err := svc.Update(context.Background(), item.ID, contract.AgentUpdateRequest{Spec: contract.AgentSpec{Description: "修改说明"}, FieldMask: []string{"description"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != 0 {
+				t.Fatalf("修改说明触发了资源应用：%d", calls)
+			}
+			if !updated.Status.Model.EnvRestartRequired {
+				t.Fatal("待重启标记被清除")
+			}
+		})
+	}
+}
+
+func TestResourceUpdateAlsoReconcilesRuntimeConfig(t *testing.T) {
+	for _, kind := range []string{RuntimeKindCodex, RuntimeKindDSH} {
+		t.Run(kind, func(t *testing.T) {
+			configCalls, starts := 0, 0
+			rt := &skillStateRuntime{fakeAgentRuntime: fakeAgentRuntime{kind: kind,
+				reconcile: func(context.Context, agentruntime.Handle, agentruntime.RuntimeConfigChange) error {
+					configCalls++
+					return nil
+				},
+				mcpRestart: func(agentruntime.MCPServersChange) (bool, error) { return true, nil },
+				start: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
+					starts++
+					return agentruntime.StateRunning, nil
+				},
+			}}
+			svc, err := NewController(testModelConfig(), config.ServerConfig{}, "", filepath.Join(t.TempDir(), "agents.json"), WithRuntime(rt))
+			if err != nil {
+				t.Fatal(err)
+			}
+			item := Agent{ID: "agent-combined", Name: "combined", Role: RoleWorker, RuntimeKind: kind, RuntimeName: kind, RuntimeID: "rt-combined", Status: string(agentruntime.StateRunning), DesiredState: DesiredStateRunning,
+				ProfileComplete: true, AgentProfile: AgentProfile{Provider: ProviderAPI, BaseURL: "https://example.com", APIKey: "test", ModelID: "test", ProfileComplete: true},
+			}
+			svc.agents[item.ID] = item
+			_, err = svc.Update(context.Background(), item.ID, contract.AgentUpdateRequest{Spec: contract.AgentSpec{Instructions: "新的指令", MCPServers: map[string]contract.MCPServerConfig{"search": {"url": "https://example.com/mcp"}}}, FieldMask: []string{"instructions", "mcp_servers"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if configCalls != 1 || starts != 1 {
+				t.Fatalf("配置应用及启动次数错误：%d/%d", configCalls, starts)
+			}
+		})
+	}
+}
