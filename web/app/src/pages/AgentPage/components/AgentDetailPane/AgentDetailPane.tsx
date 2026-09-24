@@ -1035,13 +1035,6 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 ) : null}
               </div>
             ) : null}
-            {["skills", "mcp"].includes(visibleActiveProfileTab) ? (
-              <p role="status" className="m-0 text-sm">
-                <span className={resourceBusy ? undefined : "invisible"} aria-hidden={!resourceBusy}>
-                  {t("agentResourceApplyingHint")}
-                </span>
-              </p>
-            ) : null}
             {visibleActiveProfileTab === "skills" && workspaceSupported ? (
               <AgentSkillsPanel
                 onOpenDetail={(skill) => openResourceDetail("skill", skill.name)}
