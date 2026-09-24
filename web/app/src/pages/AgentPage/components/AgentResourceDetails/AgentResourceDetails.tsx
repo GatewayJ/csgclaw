@@ -82,7 +82,6 @@ export function AgentResourceDetails({
           </div>
         </DialogHeader>
         <DialogBody>
-          <p>{t(enabled ? "agentResourceEnabled" : "agentResourceDisabled")}</p>
           {error ? (
             <div role="alert" className="form-error">
               {error}

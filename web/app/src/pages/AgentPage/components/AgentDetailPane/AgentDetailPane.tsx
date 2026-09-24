@@ -1775,15 +1775,14 @@ function AgentMCPPanel({
                 icon={<Server size={20} />}
                 onOpen={() => onOpenDetail(server)}
                 badge={
-                  <span>
-                    {t(server.config.enabled === false ? "agentResourceDisabled" : "agentResourceEnabled")}
+                  <>
                     {mcpManagedKnowledgeBaseSource(server.config) ? <span>{t("agentKnowledgeMCPBadge")}</span> : null}
                     {sourceUnavailable ? (
                       <span>{t("agentKnowledgeMCPSourceDeleted")}</span>
                     ) : updateAvailable ? (
                       <span>{t("agentKnowledgeMCPUpdateAvailable")}</span>
                     ) : null}
-                  </span>
+                  </>
                 }
                 actions={
                   <>
@@ -2438,7 +2437,6 @@ function AgentSkillsPanel({
               description={skill.description}
               icon={<FileCode2 size={20} />}
               onOpen={() => onOpenDetail(skill)}
-              badge={<span>{t(skill.enabled === false ? "agentResourceDisabled" : "agentResourceEnabled")}</span>}
               actions={
                 <>
                   <Switch
