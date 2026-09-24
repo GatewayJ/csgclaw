@@ -94,6 +94,27 @@ function Harness({
 }
 
 describe("AgentDetailPane metadata editing", () => {
+  it("preserves the skill list and status space while applying an enablement change", async () => {
+    const skills = [{ name: "reviewer", description: "Review", enabled: true }];
+    const view = render(<Harness workspaceSupported skills={skills} />);
+    await userEvent.click(screen.getByRole("button", { name: /agentProfileSkillsTab/ }));
+    const entry = screen.getByRole("button", { name: /reviewer/ });
+    const hint = screen.getByText("agentResourceApplyingHint");
+    const status = hint.closest('[role="status"]');
+    expect(hint).toHaveClass("invisible");
+    expect(hint).toHaveAttribute("aria-hidden", "true");
+    view.rerender(<Harness workspaceSupported skills={skills} resourceBusy="skill:reviewer" />);
+    expect(screen.getByRole("button", { name: /reviewer/ })).toBe(entry);
+    expect(screen.getByText("agentResourceApplyingHint").closest('[role="status"]')).toBe(status);
+    expect(hint).not.toHaveClass("invisible");
+    expect(hint).toHaveAttribute("aria-hidden", "false");
+    view.rerender(<Harness workspaceSupported skills={[{ ...skills[0], enabled: false }]} />);
+    expect(screen.getByRole("button", { name: /reviewer/ })).toBe(entry);
+    expect(screen.getByText("agentResourceApplyingHint").closest('[role="status"]')).toBe(status);
+    expect(hint).toHaveClass("invisible");
+    expect(screen.getByRole("button", { name: "agentResourceEnable" })).toBeInTheDocument();
+  });
+
   it("offers tool cleanup after Feishu disconnect without showing a connected Bot", async () => {
     const user = userEvent.setup();
     const onDisconnectFeishu = vi.fn();

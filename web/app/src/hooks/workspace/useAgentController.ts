@@ -3008,7 +3008,7 @@ export function useAgentController({
       onRetryResource: resourceEnablement.retry,
       onSetResourceEnabled: resourceEnablement.setEnabled,
       skills: agentSkillsQuery.data ?? [],
-      skillsLoading: agentSkillsQuery.isFetching,
+      skillsLoading: agentSkillsQuery.isLoading,
       skillsError: agentSkillsError,
       workspaceSupported: Boolean(selectedAgentForPage),
       directoryPickerAvailable: bootstrapConfig?.directory_picker_available !== false,
