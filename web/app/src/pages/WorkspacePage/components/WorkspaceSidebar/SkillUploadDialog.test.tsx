@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SkillSummary } from "@/models/skillhub";
 import { SkillUploadDialog } from "./SkillUploadDialog";
 
 afterEach(() => vi.restoreAllMocks());
@@ -115,5 +116,68 @@ describe("SkillUploadDialog", () => {
     await user.click(remoteTab);
 
     expect(onRemoteVisibleChange.mock.calls.filter(([visible]) => visible)).toHaveLength(2);
+  });
+});
+
+describe("远端 skill 安装操作", () => {
+  it.each<{ label: string; installedSkills: SkillSummary[]; action: string | null }>([
+    {
+      label: "system 来源",
+      installedSkills: [{ name: "agent-builder", source: "system", readonly: true }],
+      action: null,
+    },
+    { label: "builtin 来源", installedSkills: [{ name: "agent-builder", source: "builtin" }], action: null },
+    { label: "只读内置 skill", installedSkills: [{ name: "agent-builder", readonly: true }], action: null },
+    {
+      label: "同名本地 skill",
+      installedSkills: [{ name: "agent-builder", source: "local" }],
+      action: "resourcesSkillRemoteReplaceAction",
+    },
+    {
+      label: "其他名称的内置 skill",
+      installedSkills: [{ name: "another-skill", source: "system" }],
+      action: "resourcesSkillRemoteInstallAction",
+    },
+  ])("$label", async ({ installedSkills, action }) => {
+    const user = userEvent.setup();
+    const onInstallRemoteSkill = vi.fn().mockResolvedValue(true);
+    const remoteSkill = {
+      name: "Agent Builder",
+      remotePath: "AIWizards/agent-builder",
+      source: "official",
+      readonly: true,
+    };
+    render(
+      <SkillUploadDialog
+        open
+        busy={false}
+        error=""
+        installedSkills={installedSkills}
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onInstallRemoteSkill={onInstallRemoteSkill}
+        remoteInstallBusy=""
+        remoteInstallError=""
+        remoteSkills={[remoteSkill]}
+        remoteSkillsError=""
+        remoteSkillsHasMore={false}
+        remoteSkillsLoading={false}
+        remoteSkillsLoadingMore={false}
+        remoteSkillsSearch=""
+        t={(key) => key}
+      />,
+    );
+    await user.click(screen.getByRole("tab", { name: "resourcesSkillRemoteInstallTab" }));
+    expect(screen.getByText("Agent Builder")).toBeVisible();
+    if (action) {
+      await user.click(screen.getByRole("button", { name: action }));
+      expect(onInstallRemoteSkill).toHaveBeenCalledWith(remoteSkill, {
+        replace: action === "resourcesSkillRemoteReplaceAction",
+      });
+    } else {
+      expect(screen.queryByRole("button", { name: "resourcesSkillRemoteReplaceAction" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "resourcesSkillRemoteInstallAction" })).not.toBeInTheDocument();
+      expect(onInstallRemoteSkill).not.toHaveBeenCalled();
+    }
   });
 });

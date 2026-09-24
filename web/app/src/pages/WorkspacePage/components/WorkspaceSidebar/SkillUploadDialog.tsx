@@ -15,7 +15,7 @@ import {
   Tooltip,
 } from "@/components/ui";
 import type { TranslateFn } from "@/models/conversations";
-import { hasSkillName, remoteSkillInstallName } from "@/models/skillhub";
+import { hasSkillName, remoteSkillInstallName, skillSourceBadgeName, SKILL_SOURCE_BUILTIN } from "@/models/skillhub";
 import { classNames } from "@/shared/lib/classNames";
 import styles from "./SkillUploadDialog.module.css";
 import type { SkillSummary } from "@/models/skillhub";
@@ -71,6 +71,7 @@ export function SkillUploadDialog({
   remoteSkillsSearch,
   t,
 }: SkillUploadDialogProps) {
+  const builtinSkills = installedSkills.filter((skill) => skillSourceBadgeName(skill) === SKILL_SOURCE_BUILTIN);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [localError, setLocalError] = useState("");
@@ -290,7 +291,9 @@ export function SkillUploadDialog({
                     <div className={styles.remoteList} onScroll={handleRemoteListScroll}>
                       {remoteSkills.map((item) => {
                         const installKey = item.remotePath || item.name;
-                        const installed = hasSkillName(installedSkills, remoteSkillInstallName(item));
+                        const installName = remoteSkillInstallName(item);
+                        const installed = hasSkillName(installedSkills, installName);
+                        const builtin = hasSkillName(builtinSkills, installName);
                         const description = item.description || item.remotePath || item.name;
                         const rowContent = (
                           <>
@@ -318,19 +321,21 @@ export function SkillUploadDialog({
                               ) : (
                                 <span className={styles.remoteLink}>{rowContent}</span>
                               )}
-                              <Button
-                                size="sm"
-                                variant="primary"
-                                loading={remoteInstallBusy === installKey}
-                                disabled={!onInstallRemoteSkill || Boolean(remoteInstallBusy)}
-                                onClick={() => void handleRemoteInstall(item, { replace: installed })}
-                              >
-                                {remoteInstallBusy === installKey
-                                  ? t("resourcesSkillRemoteInstalling")
-                                  : installed
-                                    ? t("resourcesSkillRemoteReplaceAction")
-                                    : t("resourcesSkillRemoteInstallAction")}
-                              </Button>
+                              {!builtin ? (
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  loading={remoteInstallBusy === installKey}
+                                  disabled={!onInstallRemoteSkill || Boolean(remoteInstallBusy)}
+                                  onClick={() => void handleRemoteInstall(item, { replace: installed })}
+                                >
+                                  {remoteInstallBusy === installKey
+                                    ? t("resourcesSkillRemoteInstalling")
+                                    : installed
+                                      ? t("resourcesSkillRemoteReplaceAction")
+                                      : t("resourcesSkillRemoteInstallAction")}
+                                </Button>
+                              ) : null}
                             </div>
                           </Tooltip>
                         );
