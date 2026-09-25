@@ -187,6 +187,7 @@ func (s *Store) MarkDelivered(intent channeltypes.DeliveryIntent) error {
 	return s.updateDelivery(intent.ID, func(stored *channeltypes.DeliveryIntent) {
 		stored.Status = channeltypes.DeliveryDelivered
 		stored.MessageID = strings.TrimSpace(intent.MessageID)
+		stored.COTID = strings.TrimSpace(intent.COTID)
 		stored.ReactionID = strings.TrimSpace(intent.ReactionID)
 		stored.NextAttemptAt = nil
 		stored.LastError = ""

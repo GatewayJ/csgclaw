@@ -155,8 +155,11 @@ func (r *Runner) refreshInteraction(key string) error {
 // ResolveInteraction receives routing identities reconstructed from a locally
 // delivered card, never from the submitted action value.
 func (r *Runner) ResolveInteraction(ctx context.Context, input interaction.Input) error {
-	r.controlMu.Lock()
-	defer r.controlMu.Unlock()
+	release, err := r.acquireControl(ctx, input.ConversationKey)
+	if err != nil {
+		return err
+	}
+	defer release()
 	key := interactionCreateID(input.TurnID, input.InteractionID)
 	r.interactionMu.Lock()
 	item := r.interactions[key]
