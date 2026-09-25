@@ -33,6 +33,7 @@ type Notifier interface {
 }
 
 type runnerState interface {
+	Delivery(string) (channeltypes.DeliveryIntent, bool)
 	ResolveControlTarget(feishustate.ControlQuery) (feishustate.ControlTarget, bool)
 	MarkCanceling(string)
 	RetryCOTCompletion(string) error
@@ -548,13 +549,7 @@ func fileDeliveryID(turnID string, index int) string {
 }
 
 func (r *Runner) deliveryExists(id string) bool {
-	lookup, ok := r.state.(interface {
-		Delivery(string) (channeltypes.DeliveryIntent, bool)
-	})
-	if !ok {
-		return false
-	}
-	_, found := lookup.Delivery(id)
+	_, found := r.state.Delivery(id)
 	return found
 }
 

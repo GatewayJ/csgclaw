@@ -108,6 +108,8 @@ func commentLogAttrs(comment normalizedComment, extra ...any) []any {
 
 func intakeItemLogAttrs(binding channeltypes.Binding, item intakeItem, extra ...any) []any {
 	switch {
+	case item.stop != nil:
+		return inboundMessageLogAttrs(*item.stop, extra...)
 	case item.message != nil:
 		return inboundMessageLogAttrs(*item.message, extra...)
 	case item.card != nil:

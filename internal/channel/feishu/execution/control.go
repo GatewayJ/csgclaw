@@ -78,23 +78,48 @@ func (r *Runner) CancelRequest(ctx context.Context, request interaction.CancelRe
 		return fmt.Errorf("无法确认此操作对应的任务或操作权限")
 	}
 	message := channel.InboundMessage{AgentID: request.AgentID, TurnID: request.TurnID, ConversationKey: request.ConversationKey, Source: channel.Source{BindingID: request.BindingID, MessageID: request.MessageID, ChatID: request.ChatID}}
-	switch target.Turn.Status {
+	return r.cancelTarget(ctx, message, target.Turn)
+}
+
+// cancelTarget is called while the conversation control is held.
+func (r *Runner) cancelTarget(ctx context.Context, message channel.InboundMessage, record channel.TurnRecord) error {
+	switch record.Status {
 	case channel.TurnSucceeded, channel.TurnFailed, channel.TurnCanceled:
 	default:
-		if r.ActiveTurn(request.ConversationKey) != request.TurnID {
+		if r.ActiveTurn(message.ConversationKey) != message.TurnID {
 			return fmt.Errorf("此任务已不再是当前执行的任务")
 		}
-		r.state.MarkCanceling(request.TurnID)
+		r.state.MarkCanceling(message.TurnID)
 		r.notify()
-		if err := r.Cancel(ctx, request.AgentID, request.ConversationKey, request.TurnID); err != nil {
+		if err := r.Cancel(ctx, message.AgentID, message.ConversationKey, message.TurnID); err != nil {
 			return err
 		}
 	}
 	// Completion delivery owns retries and its failure must not report that task
 	// cancellation failed. A successful completion is left unchanged.
-	if err := r.state.RetryCOTCompletion(request.TurnID + ":cot:create"); err != nil {
+	if err := r.state.RetryCOTCompletion(message.TurnID + ":cot:create"); err != nil {
 		r.logFinalizeError(message, err)
 	}
 	r.notify()
 	return nil
+}
+
+// Stop cancels the task captured when the control message was admitted.
+func (r *Runner) Stop(ctx context.Context, message channel.InboundMessage) error {
+	release, err := r.acquireControl(ctx, message.ConversationKey)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if message.TurnID == "" || r.ActiveTurn(message.ConversationKey) != message.TurnID {
+		slog.Info("ignore Feishu stop without matching active task", messageLogAttrs(message)...)
+		return nil
+	}
+	record, found := r.state.Get(message.TurnID)
+	create, hasCreate := r.state.Delivery(message.TurnID + ":cot:create")
+	if !found || !hasCreate || record.AgentID != message.AgentID || record.BindingID != message.Source.BindingID || record.ConversationKey != message.ConversationKey || create.ChatID != message.Source.ChatID || create.ThreadID != message.Source.ThreadID || message.Source.SenderID == "" || create.RequesterID != message.Source.SenderID {
+		return fmt.Errorf("无法确认停止请求对应的任务或操作权限")
+	}
+	slog.Info("apply Feishu stop command", messageLogAttrs(message)...)
+	return r.cancelTarget(ctx, message, record)
 }
