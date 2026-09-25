@@ -9,8 +9,7 @@ manager, worker, and admin identities into `~/.csgclaw/im/participants.json`.
 CSGClaw does not read Feishu credentials from `config.toml`. The old
 `channels/feishu.toml` path is not migrated automatically by this flow.
 
-Each running chat task has a separate control card with a callback-based stop
-button. The callback resolves the original task and requester from local records.
+Control callbacks resolve the original task and requester from local delivery records.
 Task cancellation and COT completion have independent states; completion failures
 can be retried from a separate card. Final COT events and completion requests are
 separate deliveries. Native COT client controls remain platform-managed.

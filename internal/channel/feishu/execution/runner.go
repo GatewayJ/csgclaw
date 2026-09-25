@@ -34,7 +34,7 @@ type Notifier interface {
 
 type runnerState interface {
 	ResolveControlTarget(feishustate.ControlQuery) (feishustate.ControlTarget, bool)
-	MarkCanceling(string, channeltypes.DeliveryIntent) error
+	MarkCanceling(string)
 	RetryCOTCompletion(string) error
 	Put(channeltypes.TurnRecord) error
 	Get(string) (channeltypes.TurnRecord, bool)
