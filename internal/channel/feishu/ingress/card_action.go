@@ -19,6 +19,7 @@ type normalizedCardAction struct {
 	input           interaction.Input
 	successText     string
 	trusted         bool
+	cotCreateID     string
 }
 
 const expiredCardActionText = "This card has expired and was not applied."
@@ -92,6 +93,12 @@ func normalizeCardAction(binding channeltypes.Binding, event transport.Event, ru
 			successText = "The requested turn is no longer active."
 		}
 	}
+	if route.intent.Kind == channeltypes.DeliveryCOTCreate {
+		if operation != interaction.OperationCancel {
+			return card, nil
+		}
+		card.cotCreateID = route.intent.ID
+	}
 	card.conversationKey = conversationKey
 	card.input = interaction.Input{
 		InteractionID:   route.intent.InteractionID,
@@ -120,6 +127,12 @@ func trustedCardRoute(binding channeltypes.Binding, action *transport.CardAction
 	intent, found, err := state.DeliveryByRemoteMessage(binding.ID, channeltypes.DeliveryCard, action.MessageID)
 	if err != nil {
 		return trustedCardRouteResult{}, false, fmt.Errorf("resolve trusted Feishu card route: %w", err)
+	}
+	if err == nil && !found {
+		intent, found, err = state.DeliveryByRemoteMessage(binding.ID, channeltypes.DeliveryCOTCreate, action.MessageID)
+		if err != nil {
+			return trustedCardRouteResult{}, false, err
+		}
 	}
 	if !found || intent.BindingID != binding.ID || intent.ChatID != strings.TrimSpace(action.ChatID) || (intent.RequesterID != "" && intent.RequesterID != strings.TrimSpace(action.Operator.OpenID)) {
 		return trustedCardRouteResult{}, false, nil

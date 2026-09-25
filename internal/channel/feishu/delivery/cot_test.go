@@ -15,13 +15,15 @@ import (
 
 type cotRecordingAdapter struct {
 	*recordingAdapter
-	cotMu      sync.Mutex
-	events     []channel.COTEvent
-	completed  int
-	creates    int
-	failUpdate bool
-	block      <-chan struct{}
-	entered    chan struct{}
+	cotMu            sync.Mutex
+	events           []channel.COTEvent
+	completed        int
+	creates          int
+	failUpdate       bool
+	completeFailures int
+	completeAttempts int
+	block            <-chan struct{}
+	entered          chan struct{}
 }
 
 func (a *cotRecordingAdapter) CreateCOT(ctx context.Context, _ transport.COTCreateRequest) (transport.COTRef, error) {
@@ -57,6 +59,11 @@ func (a *cotRecordingAdapter) CompleteCOT(_ context.Context, req transport.COTCo
 	defer a.cotMu.Unlock()
 	if req.Ref != (transport.COTRef{COTID: "cot", MessageID: "process"}) {
 		return errors.New("incorrect COT identifiers")
+	}
+	a.completeAttempts++
+	if a.completeFailures > 0 {
+		a.completeFailures--
+		return &transport.APIError{Operation: "complete COT", HTTPStatus: 503}
 	}
 	a.completed++
 	return nil
@@ -144,4 +151,82 @@ func TestSlowCOTDoesNotBlockReplyCard(t *testing.T) {
 	}
 	close(block)
 	t.Fatal("reply waited for COT")
+}
+
+func TestCOTCompletionRetriesWithoutAppendingEventsAgain(t *testing.T) {
+	store := feishustate.NewStore()
+	a := &cotRecordingAdapter{recordingAdapter: &recordingAdapter{}, completeFailures: 1}
+	d, _ := NewDispatcher(DispatcherOptions{State: store, Adapter: a, RetryInterval: time.Millisecond})
+	create := cotIntent("create", channel.DeliveryCOTCreate)
+	create.RelatedID = ""
+	_ = store.Enqueue(create)
+	end := cotIntent("turn:cot:complete", channel.DeliveryCOTComplete)
+	end.Events = []channel.COTEvent{{EventType: "RUN_FINISHED"}}
+	end.Reason = "done"
+	_ = store.Enqueue(end)
+	d.drainCOT(context.Background())
+	pending, _ := store.Delivery(end.ID)
+	if pending.Status != channel.DeliveryPending || len(pending.Events) != 0 {
+		t.Fatalf("retry=%+v", pending)
+	}
+	time.Sleep(2 * time.Millisecond)
+	d.drainCOT(context.Background())
+	finished, _ := store.Delivery(end.ID)
+	if finished.Status != channel.DeliveryDelivered || len(a.events) != 1 || a.completeAttempts != 2 {
+		t.Fatalf("status=%s events=%d attempts=%d", finished.Status, len(a.events), a.completeAttempts)
+	}
+	if _, found := store.Delivery("turn:cot:unavailable"); found {
+		t.Fatal("transient completion failure sent unavailable card")
+	}
+}
+
+func TestCOTCompletionCanBeRetriedByUserAfterExhaustion(t *testing.T) {
+	store := feishustate.NewStore()
+	a := &cotRecordingAdapter{recordingAdapter: &recordingAdapter{}, completeFailures: 3}
+	d, _ := NewDispatcher(DispatcherOptions{State: store, Adapter: a, RetryInterval: time.Nanosecond})
+	create := cotIntent("create", channel.DeliveryCOTCreate)
+	create.RelatedID = ""
+	_ = store.Enqueue(create)
+	end := cotIntent("turn:cot:complete", channel.DeliveryCOTComplete)
+	end.Events = []channel.COTEvent{{EventType: "RUN_FINISHED"}}
+	_ = store.Enqueue(end)
+	for i := 0; i < 3; i++ {
+		d.drainCOT(context.Background())
+	}
+	failed, _ := store.Delivery(end.ID)
+	if failed.Status != channel.DeliveryFailed {
+		t.Fatalf("status=%s", failed.Status)
+	}
+	if err := store.RetryCOTCompletion(create.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RetryCOTCompletion(create.ID); err != nil {
+		t.Fatal(err)
+	}
+	d.drainCOT(context.Background())
+	if a.completed != 1 || len(a.events) != 1 {
+		t.Fatalf("completed=%d events=%d", a.completed, len(a.events))
+	}
+	_ = store.RetryCOTCompletion(create.ID)
+	d.drainCOT(context.Background())
+	if a.completeAttempts != 4 {
+		t.Fatalf("repeated completed request: %d", a.completeAttempts)
+	}
+}
+
+func TestCOTFinalAppendFailureStillCompletes(t *testing.T) {
+	store := feishustate.NewStore()
+	a := &cotRecordingAdapter{recordingAdapter: &recordingAdapter{}, failUpdate: true}
+	d, _ := NewDispatcher(DispatcherOptions{State: store, Adapter: a})
+	create := cotIntent("create", channel.DeliveryCOTCreate)
+	create.RelatedID = ""
+	_ = store.Enqueue(create)
+	end := cotIntent("end", channel.DeliveryCOTComplete)
+	end.Events = []channel.COTEvent{{EventType: "RUN_FINISHED"}}
+	_ = store.Enqueue(end)
+	d.drainCOT(context.Background())
+	finished, _ := store.Delivery(end.ID)
+	if finished.Status != channel.DeliveryDelivered || a.completed != 1 {
+		t.Fatalf("status=%s complete=%d", finished.Status, a.completed)
+	}
 }

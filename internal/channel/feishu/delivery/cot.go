@@ -15,7 +15,8 @@ func isCOT(kind channel.DeliveryKind) bool {
 }
 
 // COT has its own worker so a process API request cannot delay an answer or
-// a permission card. Each batch is attempted once: the API has no replay key.
+// a permission card. Append batches are attempted once; completion retries
+// target the same COT without appending events again.
 func (d *Dispatcher) runCOT(ctx context.Context) {
 	defer close(d.cotDone)
 	ticker := time.NewTicker(600 * time.Millisecond)
@@ -45,6 +46,9 @@ func (d *Dispatcher) drainCOTPending(ctx context.Context, createsOnly bool) {
 	for index := 0; index < len(pending); index++ {
 		intent := pending[index]
 		if !isCOT(intent.Kind) || (createsOnly && intent.Kind != channel.DeliveryCOTCreate) {
+			continue
+		}
+		if intent.Kind == channel.DeliveryCOTComplete && !retryReady(intent, time.Now()) {
 			continue
 		}
 		if ctx.Err() != nil {
@@ -104,18 +108,26 @@ func (d *Dispatcher) drainCOTPending(ctx context.Context, createsOnly bool) {
 					err = client.UpdateCOT(requestCtx, transport.COTUpdateRequest{Ref: ref, Events: intent.Events})
 				}
 			case channel.DeliveryCOTComplete:
-				if !failed[intent.TurnID] {
-					err = client.UpdateCOT(requestCtx, transport.COTUpdateRequest{Ref: ref, Events: intent.Events})
+				if len(intent.Events) > 0 && !failed[intent.TurnID] {
+					if appendErr := client.UpdateCOT(requestCtx, transport.COTUpdateRequest{Ref: ref, Events: intent.Events}); appendErr != nil {
+						d.logDeliveryFailure(intent, appendErr, false, time.Time{})
+					}
+				}
+				if err = d.state.ClearCOTEvents(intent.ID); err != nil {
+					break
 				}
 				cancel()
 				requestCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
-				completeErr := client.CompleteCOT(requestCtx, transport.COTCompleteRequest{Ref: ref, Reason: intent.Reason})
-				if err == nil {
-					err = completeErr
-				}
+				err = client.CompleteCOT(requestCtx, transport.COTCompleteRequest{Ref: ref, Reason: intent.Reason})
 			}
 		}
 		cancel()
+		if intent.Kind == channel.DeliveryCOTComplete && err != nil && intent.Attempts+1 < maxDeliveryAttempts && transport.IsRetryable(err) {
+			next := nextRetryAt(time.Now(), d.interval, intent.Attempts+1)
+			_ = d.state.MarkRetryable(intent.ID, err, next)
+			d.logDeliveryFailure(intent, err, true, next)
+			continue
+		}
 		if intent.Kind == channel.DeliveryCOTComplete {
 			d.state.Pin(intent.RelatedID, false)
 		}
@@ -136,7 +148,11 @@ func (d *Dispatcher) drainCOTPending(ctx context.Context, createsOnly bool) {
 			notice.Kind = channel.DeliveryCard
 			notice.RelatedID = ""
 			notice.Events = nil
-			notice.Card = presentation.Card("过程展示暂时不可用，执行结果将通过回复卡片发送。")
+			text := "过程展示暂时不可用，执行结果将通过回复卡片发送。"
+			if intent.Kind == channel.DeliveryCOTComplete {
+				text = "过程状态更新失败，可点击结束按钮重试。"
+			}
+			notice.Card = presentation.Card(text)
 			_ = d.state.Enqueue(notice)
 			d.Notify()
 		}

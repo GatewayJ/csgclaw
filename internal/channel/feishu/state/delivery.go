@@ -388,3 +388,36 @@ func (s *Store) LatestCard(createID string) (channeltypes.DeliveryIntent, bool) 
 	}
 	return channeltypes.DeliveryIntent{}, false
 }
+
+// ClearCOTEvents records that a completion's append was attempted. Retrying the
+// independent completion request must never append those events again.
+func (s *Store) ClearCOTEvents(id string) error {
+	return s.updateDelivery(id, func(intent *channeltypes.DeliveryIntent) { intent.Events = nil })
+}
+
+// RetryCOTCompletion reopens a failed completion using only locally recorded
+// identifiers. Repeated clicks leave pending and completed requests unchanged.
+func (s *Store) RetryCOTCompletion(createID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	create, ok := s.deliveries[createID]
+	if !ok || create.Kind != channeltypes.DeliveryCOTCreate || create.Status != channeltypes.DeliveryDelivered || create.COTID == "" {
+		return fmt.Errorf("COT create record is unavailable")
+	}
+	id := create.TurnID + ":cot:complete"
+	intent, ok := s.deliveries[id]
+	if !ok {
+		return fmt.Errorf("COT completion is not ready")
+	}
+	if intent.Status != channeltypes.DeliveryFailed {
+		return nil
+	}
+	intent.Status = channeltypes.DeliveryPending
+	intent.Events = nil
+	intent.Attempts = 0
+	intent.NextAttemptAt = nil
+	intent.LastError = ""
+	s.deliveries[id] = intent
+	s.pinned[createID] = true
+	return nil
+}
