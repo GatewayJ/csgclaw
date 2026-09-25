@@ -223,22 +223,6 @@ func (r *Runner) ResolveInteraction(ctx context.Context, input interaction.Input
 	return nil
 }
 
-func (r *Runner) Stop(ctx context.Context, message channel.InboundMessage) error {
-	id := r.ActiveTurn(message.ConversationKey)
-	text := "当前没有正在执行的请求。"
-	if id != "" {
-		if err := r.Cancel(ctx, message.AgentID, message.ConversationKey, id); err != nil {
-			return err
-		}
-		return nil
-	}
-	if err := r.state.Enqueue(r.messageCardIntent(message, message.TurnID+":stop", 0, text)); err != nil {
-		return err
-	}
-	r.notify()
-	return nil
-}
-
 // Monitor refreshes expiry and failed delivery independently of Runtime events.
 // Its lifetime is the binding lifetime, including detached questions.
 func (r *Runner) Monitor(ctx context.Context) {

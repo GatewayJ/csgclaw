@@ -91,6 +91,8 @@ func (d *Dispatcher) drainCOTPending(ctx context.Context, createsOnly bool) {
 				continue
 			} else {
 				ref = transport.COTRef{COTID: create.COTID, MessageID: create.MessageID}
+				intent.COTID = ref.COTID
+				intent.MessageID = ref.MessageID
 			}
 		}
 		for _, item := range batch {

@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -45,5 +46,17 @@ func TestNativeCOTUsesAppIdentityAndSeparateEndpoints(t *testing.T) {
 	}
 	if strings.Join(methods, ",") != "POST,PUT,POST" || paths[2] != "/open-apis/im/v1/message_cot/complete/cot" {
 		t.Fatalf("requests=%v %v", methods, paths)
+	}
+}
+
+func TestCOTCompletionPreservesSanitizedAPIError(t *testing.T) {
+	client := lark.NewClient("app", "secret", lark.WithEnableTokenCache(false), lark.WithHttpClient(&singleAttemptHTTPClient{client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"code":10001,"msg":"invalid completion reason"}`))}, nil
+	})}}))
+	outbound := newDirectOutbound(client, tenantTokenSourceFunc(func(context.Context) (string, error) { return "tenant-token", nil }))
+	err := outbound.CompleteCOT(context.Background(), COTCompleteRequest{Ref: COTRef{COTID: "cot", MessageID: "message"}, Reason: "error"})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != 10001 || apiErr.Operation != "complete COT" || apiErr.Message != "invalid completion reason" {
+		t.Fatalf("error=%v", err)
 	}
 }
