@@ -3,9 +3,11 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	channel "csgclaw/internal/channel"
 
@@ -135,6 +137,12 @@ func (a *sdkLarkOpenAPI) CompleteCOT(ctx context.Context, r COTCompleteRequest) 
 	q.Set("message_id", r.Ref.MessageID)
 	q.Set("reason", r.Reason)
 	_, err := a.cotRequest(ctx, "complete COT", http.MethodPost, "/open-apis/im/v1/message_cot/complete/"+url.PathEscape(r.Ref.COTID), q, nil)
+	// The native stop button can finish the COT before backend cancellation finishes.
+	// Completing that same terminal COT is an idempotent success.
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.HTTPStatus == http.StatusOK && apiErr.Code == 10001 && strings.HasSuffix(apiErr.Message, "ext=CompleteCOT: already in terminal status") {
+		return nil
+	}
 	return err
 }
 func (a *sdkLarkOpenAPI) cotRequest(ctx context.Context, operation, method, path string, q larkcore.QueryParams, body any) (json.RawMessage, error) {
