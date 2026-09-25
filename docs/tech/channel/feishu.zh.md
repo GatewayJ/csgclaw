@@ -11,6 +11,11 @@ manager、worker 和 admin 身份写入 `~/.csgclaw/im/participants.json`。
 
 CSGClaw 不从 `config.toml` 读取飞书凭证。旧的 `channels/feishu.toml` 路径不会在本流程中自动迁移。
 
+聊天任务执行期间会显示独立控制卡片，“停止任务”按钮通过 callback 取消任务，
+不会发送聊天指令。渠道根据本地记录校验原任务和操作者。任务取消与 COT 结束分别
+记录状态；过程结束失败时可通过独立卡片重试。最后一批 COT 事件和结束请求分别发送。
+原生 COT 抽屉中的控件仍由飞书客户端管理。
+
 ## 命令
 
 绑定默认的飞书真人管理员：

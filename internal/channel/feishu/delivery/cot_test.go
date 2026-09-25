@@ -86,7 +86,7 @@ func TestCOTPreservesEventsAndCompletesAfterUpdates(t *testing.T) {
 	end := cotIntent("end", channel.DeliveryCOTComplete)
 	end.Reason = "done"
 	end.Events = []channel.COTEvent{{EventType: "finished"}}
-	_ = store.Enqueue(end)
+	enqueueCOTEnd(t, store, end)
 	d.drainCOT(context.Background())
 	d.drainCOT(context.Background())
 	if a.creates != 1 || a.completed != 1 || len(a.events) != 3 || a.events[0].EventType != "first" || a.events[2].EventType != "finished" {
@@ -110,7 +110,7 @@ func TestCOTFailureDoesNotReplayOrSendLaterSuffix(t *testing.T) {
 	_ = store.Enqueue(next)
 	end := cotIntent("end", channel.DeliveryCOTComplete)
 	end.Reason = "error"
-	_ = store.Enqueue(end)
+	enqueueCOTEnd(t, store, end)
 	d.drainCOT(context.Background())
 	if len(a.events) != 0 || a.completed != 1 {
 		t.Fatalf("events=%v completed=%d", a.events, a.completed)
@@ -163,7 +163,7 @@ func TestCOTCompletionRetriesWithoutAppendingEventsAgain(t *testing.T) {
 	end := cotIntent("turn:cot:complete", channel.DeliveryCOTComplete)
 	end.Events = []channel.COTEvent{{EventType: "RUN_FINISHED"}}
 	end.Reason = "done"
-	_ = store.Enqueue(end)
+	enqueueCOTEnd(t, store, end)
 	d.drainCOT(context.Background())
 	pending, _ := store.Delivery(end.ID)
 	if pending.Status != channel.DeliveryPending || len(pending.Events) != 0 {
@@ -189,7 +189,7 @@ func TestCOTCompletionCanBeRetriedByUserAfterExhaustion(t *testing.T) {
 	_ = store.Enqueue(create)
 	end := cotIntent("turn:cot:complete", channel.DeliveryCOTComplete)
 	end.Events = []channel.COTEvent{{EventType: "RUN_FINISHED"}}
-	_ = store.Enqueue(end)
+	enqueueCOTEnd(t, store, end)
 	for i := 0; i < 3; i++ {
 		d.drainCOT(context.Background())
 	}
@@ -223,10 +223,46 @@ func TestCOTFinalAppendFailureStillCompletes(t *testing.T) {
 	_ = store.Enqueue(create)
 	end := cotIntent("end", channel.DeliveryCOTComplete)
 	end.Events = []channel.COTEvent{{EventType: "RUN_FINISHED"}}
-	_ = store.Enqueue(end)
+	enqueueCOTEnd(t, store, end)
 	d.drainCOT(context.Background())
 	finished, _ := store.Delivery(end.ID)
 	if finished.Status != channel.DeliveryDelivered || a.completed != 1 {
 		t.Fatalf("status=%s complete=%d", finished.Status, a.completed)
+	}
+}
+
+func enqueueCOTEnd(t *testing.T, store *feishustate.Store, end channel.DeliveryIntent) {
+	t.Helper()
+	if len(end.Events) > 0 {
+		events := end
+		events.ID += ":events"
+		events.Kind = channel.DeliveryCOTUpdate
+		if err := store.Enqueue(events); err != nil {
+			t.Fatal(err)
+		}
+		end.Events = nil
+	}
+	if err := store.Enqueue(end); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCOTCompletionFailureKeepsRetryCardAfterAppendFailure(t *testing.T) {
+	store := feishustate.NewStore()
+	adapter := &cotRecordingAdapter{recordingAdapter: &recordingAdapter{}, failUpdate: true, completeFailures: 3}
+	dispatcher, _ := NewDispatcher(DispatcherOptions{State: store, Adapter: adapter, RetryInterval: time.Nanosecond})
+	create := cotIntent("create", channel.DeliveryCOTCreate)
+	create.RelatedID = ""
+	_ = store.Enqueue(create)
+	end := cotIntent("turn:cot:complete", channel.DeliveryCOTComplete)
+	end.Events = []channel.COTEvent{{EventType: "RUN_FINISHED"}}
+	enqueueCOTEnd(t, store, end)
+	for i := 0; i < 3; i++ {
+		dispatcher.drainCOT(context.Background())
+	}
+	for _, id := range []string{"turn:cot:unavailable", "turn:cot:completion-failed"} {
+		if _, found := store.Delivery(id); !found {
+			t.Fatalf("missing notice %s", id)
+		}
 	}
 }

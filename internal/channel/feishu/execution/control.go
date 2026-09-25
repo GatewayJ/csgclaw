@@ -1,6 +1,14 @@
 package execution
 
-import "context"
+import (
+	"context"
+	"fmt"
+
+	channel "csgclaw/internal/channel"
+	"csgclaw/internal/channel/feishu/interaction"
+	"csgclaw/internal/channel/feishu/presentation"
+	feishustate "csgclaw/internal/channel/feishu/state"
+)
 
 type conversationControl struct {
 	gate chan struct{}
@@ -46,4 +54,48 @@ func (r *Runner) acquireControl(ctx context.Context, key string) (func(), error)
 		releaseRef()
 		return nil, ctx.Err()
 	}
+}
+
+// CancelRequest keeps task cancellation independent from process presentation.
+func (r *Runner) CancelRequest(ctx context.Context, request interaction.CancelRequest) error {
+	release, err := r.acquireControl(ctx, request.ConversationKey)
+	if err != nil {
+		return err
+	}
+	defer release()
+	target, found := r.state.ResolveControlTarget(feishustate.ControlQuery{BindingID: request.BindingID, AgentID: request.AgentID, MessageID: request.MessageID, ChatID: request.ChatID, ThreadID: request.ThreadID, RequesterID: request.RequesterID})
+	if !found || request.RequesterID == "" || target.Intent.RequesterID == "" || target.Turn.TurnID != request.TurnID || target.Turn.ConversationKey != request.ConversationKey {
+		return fmt.Errorf("无法确认此操作对应的任务或操作权限")
+	}
+	message := channel.InboundMessage{AgentID: request.AgentID, TurnID: request.TurnID, ConversationKey: request.ConversationKey, Source: channel.Source{BindingID: request.BindingID, MessageID: request.MessageID, ChatID: request.ChatID}}
+	switch target.Turn.Status {
+	case channel.TurnSucceeded, channel.TurnFailed, channel.TurnCanceled:
+	default:
+		if r.ActiveTurn(request.ConversationKey) != request.TurnID {
+			return fmt.Errorf("此任务已不再是当前执行的任务")
+		}
+		var update channel.DeliveryIntent
+		if r.deliveryExists(request.TurnID + ":control:create") {
+			update = target.Intent
+			update.ID = request.TurnID + ":control:canceling"
+			update.Kind = channel.DeliveryCardUpdate
+			update.RelatedID = request.TurnID + ":control:create"
+			update.Sequence = target.Turn.LastSequence + 1
+			update.Card = presentation.TaskControl(channel.TurnCanceling)
+		}
+		if err := r.state.MarkCanceling(request.TurnID, update); err != nil {
+			r.logFinalizeError(message, err)
+		}
+		r.notify()
+		if err := r.Cancel(ctx, request.AgentID, request.ConversationKey, request.TurnID); err != nil {
+			return err
+		}
+	}
+	// Completion delivery owns retries and its failure must not report that task
+	// cancellation failed. A successful completion is left unchanged.
+	if err := r.state.RetryCOTCompletion(request.TurnID + ":cot:create"); err != nil {
+		r.logFinalizeError(message, err)
+	}
+	r.notify()
+	return nil
 }

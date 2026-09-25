@@ -1,7 +1,6 @@
 package ingress
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -9,6 +8,7 @@ import (
 	channeltypes "csgclaw/internal/channel"
 	feishuctx "csgclaw/internal/channel/feishu/context"
 	"csgclaw/internal/channel/feishu/interaction"
+	feishustate "csgclaw/internal/channel/feishu/state"
 	"csgclaw/internal/channel/feishu/transport"
 )
 
@@ -19,7 +19,6 @@ type normalizedCardAction struct {
 	input           interaction.Input
 	successText     string
 	trusted         bool
-	cotCreateID     string
 }
 
 const expiredCardActionText = "This card has expired and was not applied."
@@ -29,8 +28,7 @@ type activeTurnLookup interface {
 }
 
 type cardRouteState interface {
-	DeliveryByRemoteMessage(string, channeltypes.DeliveryKind, string) (channeltypes.DeliveryIntent, bool, error)
-	Get(string) (channeltypes.TurnRecord, bool)
+	ResolveControlTarget(feishustate.ControlQuery) (feishustate.ControlTarget, bool)
 }
 
 func normalizeCardAction(binding channeltypes.Binding, event transport.Event, runner activeTurnLookup, state cardRouteState) (normalizedCardAction, error) {
@@ -97,7 +95,6 @@ func normalizeCardAction(binding channeltypes.Binding, event transport.Event, ru
 		if operation != interaction.OperationCancel {
 			return card, nil
 		}
-		card.cotCreateID = route.intent.ID
 	}
 	card.conversationKey = conversationKey
 	card.input = interaction.Input{
@@ -124,31 +121,8 @@ func trustedCardRoute(binding channeltypes.Binding, action *transport.CardAction
 	if state == nil || action == nil || strings.TrimSpace(action.MessageID) == "" {
 		return trustedCardRouteResult{}, false, nil
 	}
-	intent, found, err := state.DeliveryByRemoteMessage(binding.ID, channeltypes.DeliveryCard, action.MessageID)
-	if err != nil {
-		return trustedCardRouteResult{}, false, fmt.Errorf("resolve trusted Feishu card route: %w", err)
-	}
-	if err == nil && !found {
-		intent, found, err = state.DeliveryByRemoteMessage(binding.ID, channeltypes.DeliveryCOTCreate, action.MessageID)
-		if err != nil {
-			return trustedCardRouteResult{}, false, err
-		}
-	}
-	if !found || intent.BindingID != binding.ID || intent.ChatID != strings.TrimSpace(action.ChatID) || (intent.RequesterID != "" && intent.RequesterID != strings.TrimSpace(action.Operator.OpenID)) {
-		return trustedCardRouteResult{}, false, nil
-	}
-	// Older transports provided a carrier thread ID. If it is present, it is an
-	// additional consistency check; generic Ingress intentionally leaves it
-	// empty and relies on the trusted delivery record above.
-	if threadID := strings.TrimSpace(action.ThreadID); threadID != "" && strings.TrimSpace(intent.ThreadID) != threadID {
-		return trustedCardRouteResult{}, false, nil
-	}
-	record, found := state.Get(intent.TurnID)
-	if !found || record.TurnID != intent.TurnID || record.BindingID != binding.ID ||
-		record.AgentID != binding.AgentID || strings.TrimSpace(record.ConversationKey) == "" {
-		return trustedCardRouteResult{}, false, nil
-	}
-	return trustedCardRouteResult{intent: intent, record: record}, true, nil
+	target, found := state.ResolveControlTarget(feishustate.ControlQuery{BindingID: binding.ID, AgentID: binding.AgentID, MessageID: strings.TrimSpace(action.MessageID), ChatID: strings.TrimSpace(action.ChatID), ThreadID: strings.TrimSpace(action.ThreadID), RequesterID: strings.TrimSpace(action.Operator.OpenID)})
+	return trustedCardRouteResult{intent: target.Intent, record: target.Turn}, found, nil
 }
 
 func firstMapString(values map[string]any, keys ...string) string {
@@ -173,18 +147,4 @@ func cardActionErrorText(err error) string {
 	default:
 		return "The card action could not be applied."
 	}
-}
-
-type activeTurnCanceler interface {
-	Cancel(context.Context, string, string, string) error
-}
-
-func handleCardAction(ctx context.Context, handler *interaction.Handler, canceler activeTurnCanceler, item normalizedCardAction) error {
-	if item.input.Action.Operation == interaction.OperationCancel && canceler != nil {
-		return canceler.Cancel(ctx, item.input.AgentID, item.input.ConversationKey, item.input.TurnID)
-	}
-	if handler == nil {
-		return fmt.Errorf("Feishu card action handler is unavailable")
-	}
-	return handler.Handle(ctx, item.input)
 }

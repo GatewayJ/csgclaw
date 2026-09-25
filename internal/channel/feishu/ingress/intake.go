@@ -407,17 +407,16 @@ func cardResetMessage(card normalizedCardAction) channeltypes.InboundMessage {
 }
 
 func (i *Intake) handleCard(ctx context.Context, card normalizedCardAction) error {
-	if card.cotCreateID != "" {
-		if i.runner.ActiveTurn(card.input.ConversationKey) == card.input.TurnID {
-			if err := i.runner.Cancel(ctx, card.input.AgentID, card.input.ConversationKey, card.input.TurnID); err != nil {
-				return i.completeCardResult(card, cardActionErrorText(err))
-			}
+	if card.input.Action.Operation == interaction.OperationCancel {
+		canceler, ok := i.runner.(interface {
+			CancelRequest(context.Context, interaction.CancelRequest) error
+		})
+		if !ok {
+			return i.completeCardResult(card, "任务取消暂时不可用。")
 		}
-		if err := i.state.RetryCOTCompletion(card.cotCreateID); err != nil {
-			return i.completeCardResult(card, "过程结束请求暂时无法提交。")
-		}
-		if i.notifier != nil {
-			i.notifier.Notify()
+		err := canceler.CancelRequest(ctx, interaction.CancelRequest{BindingID: i.binding.ID, AgentID: card.input.AgentID, ConversationKey: card.input.ConversationKey, TurnID: card.input.TurnID, MessageID: card.source.MessageID, ChatID: card.source.ChatID, ThreadID: card.source.ThreadID, RequesterID: card.input.ResponderID})
+		if err != nil {
+			return i.completeCardResult(card, cardActionErrorText(err))
 		}
 		return nil
 	}
@@ -433,7 +432,12 @@ func (i *Intake) handleCard(ctx context.Context, card normalizedCardAction) erro
 		}
 		return i.completeCardResult(card, "此确认暂时无法提交。")
 	}
-	err := handleCardAction(ctx, i.interactions, i.runner, card)
+	var err error
+	if i.interactions == nil {
+		err = fmt.Errorf("Feishu card action handler is unavailable")
+	} else {
+		err = i.interactions.Handle(ctx, card.input)
+	}
 	text := card.successText
 	if err != nil {
 		text = cardActionErrorText(err)

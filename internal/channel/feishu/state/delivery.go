@@ -129,6 +129,9 @@ func (s *Store) enqueueLocked(intent channeltypes.DeliveryIntent) error {
 	if intent.ID == "" || strings.TrimSpace(intent.BindingID) == "" || strings.TrimSpace(intent.TurnID) == "" {
 		return fmt.Errorf("feishu memory delivery: ID, binding ID, and turn ID are required")
 	}
+	if intent.Kind == channeltypes.DeliveryCOTComplete && len(intent.Events) != 0 {
+		return fmt.Errorf("COT completion cannot contain append events")
+	}
 	if _, exists := s.deliveries[intent.ID]; exists {
 		return nil
 	}
@@ -234,21 +237,6 @@ func (s *Store) updateDelivery(id string, update func(*channeltypes.DeliveryInte
 	s.deliveries[id] = intent
 	s.pruneDeliveriesLocked()
 	return nil
-}
-
-func (s *Store) DeliveryByRemoteMessage(bindingID string, kind channeltypes.DeliveryKind, messageID string) (channeltypes.DeliveryIntent, bool, error) {
-	if s == nil {
-		return channeltypes.DeliveryIntent{}, false, nil
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for index := len(s.deliveryOrder) - 1; index >= 0; index-- {
-		intent := s.deliveries[s.deliveryOrder[index]]
-		if intent.BindingID == bindingID && intent.Kind == kind && intent.Status == channeltypes.DeliveryDelivered && strings.TrimSpace(intent.MessageID) == strings.TrimSpace(messageID) {
-			return cloneIntent(intent), true, nil
-		}
-	}
-	return channeltypes.DeliveryIntent{}, false, nil
 }
 
 func (s *Store) pruneTurnsLocked() {
@@ -387,12 +375,6 @@ func (s *Store) LatestCard(createID string) (channeltypes.DeliveryIntent, bool) 
 		}
 	}
 	return channeltypes.DeliveryIntent{}, false
-}
-
-// ClearCOTEvents records that a completion's append was attempted. Retrying the
-// independent completion request must never append those events again.
-func (s *Store) ClearCOTEvents(id string) error {
-	return s.updateDelivery(id, func(intent *channeltypes.DeliveryIntent) { intent.Events = nil })
 }
 
 // RetryCOTCompletion reopens a failed completion using only locally recorded
