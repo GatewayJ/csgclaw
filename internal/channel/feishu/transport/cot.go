@@ -104,7 +104,7 @@ func (a *sdkLarkOpenAPI) CreateCOT(ctx context.Context, r COTCreateRequest) (COT
 	if r.OriginMessageID != "" {
 		body["origin_message_id"] = r.OriginMessageID
 	}
-	data, err := a.cotRequest(ctx, http.MethodPost, "/open-apis/im/v1/message_cot", q, body)
+	data, err := a.cotRequest(ctx, "create COT", http.MethodPost, "/open-apis/im/v1/message_cot", q, body)
 	if err != nil {
 		return COTRef{}, err
 	}
@@ -124,7 +124,7 @@ func (a *sdkLarkOpenAPI) UpdateCOT(ctx context.Context, r COTUpdateRequest) erro
 	if len(r.Events) == 0 {
 		return nil
 	}
-	_, err := a.cotRequest(ctx, http.MethodPut, "/open-apis/im/v1/message_cot", nil, map[string]any{"cot_id": r.Ref.COTID, "message_id": r.Ref.MessageID, "events": r.Events})
+	_, err := a.cotRequest(ctx, "update COT", http.MethodPut, "/open-apis/im/v1/message_cot", nil, map[string]any{"cot_id": r.Ref.COTID, "message_id": r.Ref.MessageID, "events": r.Events})
 	return err
 }
 func (a *sdkLarkOpenAPI) CompleteCOT(ctx context.Context, r COTCompleteRequest) error {
@@ -134,28 +134,29 @@ func (a *sdkLarkOpenAPI) CompleteCOT(ctx context.Context, r COTCompleteRequest) 
 	q := larkcore.QueryParams{}
 	q.Set("message_id", r.Ref.MessageID)
 	q.Set("reason", r.Reason)
-	_, err := a.cotRequest(ctx, http.MethodPost, "/open-apis/im/v1/message_cot/complete/"+url.PathEscape(r.Ref.COTID), q, nil)
+	_, err := a.cotRequest(ctx, "complete COT", http.MethodPost, "/open-apis/im/v1/message_cot/complete/"+url.PathEscape(r.Ref.COTID), q, nil)
 	return err
 }
-func (a *sdkLarkOpenAPI) cotRequest(ctx context.Context, method, path string, q larkcore.QueryParams, body any) (json.RawMessage, error) {
+func (a *sdkLarkOpenAPI) cotRequest(ctx context.Context, operation, method, path string, q larkcore.QueryParams, body any) (json.RawMessage, error) {
 	token, err := a.token(ctx)
 	if err != nil {
 		return nil, err
 	}
 	resp, err := a.client.Do(ctx, &larkcore.ApiReq{HttpMethod: method, ApiPath: path, QueryParams: q, Body: body, SupportedAccessTokenTypes: []larkcore.AccessTokenType{larkcore.AccessTokenTypeTenant}}, larkcore.WithTenantAccessToken(token))
 	if err != nil {
-		return nil, &APIError{Operation: "message_cot", cause: err}
+		return nil, &APIError{Operation: operation, cause: err}
 	}
 	var out struct {
-		Code int             `json:"code"`
-		Data json.RawMessage `json:"data"`
+		Code    int             `json:"code"`
+		Message string          `json:"msg"`
+		Data    json.RawMessage `json:"data"`
 	}
 	if json.Unmarshal(resp.RawBody, &out) != nil {
-		return nil, &APIError{Operation: "message_cot", HTTPStatus: resp.StatusCode, Message: "invalid response"}
+		return nil, &APIError{Operation: operation, HTTPStatus: resp.StatusCode, Message: "invalid response"}
 	}
 	a.invalidateRejectedToken(token, out.Code)
 	if out.Code != 0 || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &APIError{Operation: "message_cot", Code: out.Code, HTTPStatus: resp.StatusCode}
+		return nil, &APIError{Operation: operation, Code: out.Code, HTTPStatus: resp.StatusCode, Message: sanitizeAPIMessage(out.Message)}
 	}
 	return out.Data, nil
 }

@@ -36,6 +36,11 @@ func normalizeMessage(binding channeltypes.Binding, event transport.Event, bot t
 		text = string(message.RawContent)
 	}
 	text = feishuctx.StripBotMention(text, bot.OpenID, mentions)
+	// Retired channel commands must not start a new Engine turn or supersede
+	// the existing one through ordinary message admission.
+	if strings.EqualFold(strings.TrimSpace(text), "/stop") && len(resources) == 0 {
+		return channeltypes.InboundMessage{}, false, nil
+	}
 	files := make([]channeltypes.InboundFile, 0, len(resources))
 	for _, resource := range resources {
 		if strings.TrimSpace(resource.ID) == "" {

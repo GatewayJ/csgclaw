@@ -36,8 +36,7 @@ printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
 Feishu shows tool activity and available thought events in a native COT message.
 Reply text streams into independent message cards. Permission requests and user
 questions use separate interactive cards; only the originating user may answer.
-Use `/stop` to cancel execution while retaining conversation history, or `/new`
-to reset the conversation. Long replies use consecutive cards.
+Use `/new` to reset the conversation. Long replies use consecutive cards.
 
 The channel consumes existing Agent Engine events. Codex supports permission and
 user-input requests; DSH currently supplies permission requests. Detached Codex

@@ -367,13 +367,7 @@ func (i *Intake) process(ctx context.Context, item intakeItem) {
 		} else {
 			message = hydrated
 		}
-		if strings.EqualFold(strings.TrimSpace(message.Text), "/stop") {
-			if runner, ok := i.runner.(interface {
-				Stop(context.Context, channeltypes.InboundMessage) error
-			}); ok {
-				err = runner.Stop(ctx, message)
-			}
-		} else if i.runner.IsResetCommand(message.Text) {
+		if i.runner.IsResetCommand(message.Text) {
 			err = i.runner.Reset(ctx, message)
 		} else {
 			err = i.runner.Submit(ctx, message)
