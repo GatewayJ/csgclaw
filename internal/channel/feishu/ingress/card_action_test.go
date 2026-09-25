@@ -1,10 +1,13 @@
 package ingress
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	channeltypes "csgclaw/internal/channel"
 	feishuctx "csgclaw/internal/channel/feishu/context"
+	"csgclaw/internal/channel/feishu/interaction"
 	feishustate "csgclaw/internal/channel/feishu/state"
 	"csgclaw/internal/channel/feishu/transport"
 )
@@ -112,5 +115,76 @@ func TestResolutionRouteUsesDeliveredIdentityAndRejectsOtherUser(t *testing.T) {
 	got, err = normalizeCardAction(binding, event, fixedActiveTurn(""), store)
 	if err != nil || !got.trusted || got.input.InteractionID != "trusted-interaction" || got.input.AgentID != "agent" || got.input.TurnID != "turn" {
 		t.Fatalf("trusted route=%+v err=%v", got, err)
+	}
+}
+
+func TestCOTStopRoutesOnlyToTrustedProcessMessage(t *testing.T) {
+	store := feishustate.NewStore()
+	binding := channeltypes.Binding{ID: "binding", AgentID: "agent", Channel: "feishu"}
+	_ = store.Put(channeltypes.TurnRecord{TurnID: "old", BindingID: binding.ID, AgentID: binding.AgentID, ConversationKey: "conversation", Status: channeltypes.TurnSucceeded})
+	create := channeltypes.DeliveryIntent{ID: "old:cot:create", TurnID: "old", BindingID: binding.ID, Kind: channeltypes.DeliveryCOTCreate, ChatID: "chat", RequesterID: "owner", COTID: "cot", MessageID: "process"}
+	_ = store.Enqueue(create)
+	_ = store.MarkDelivered(create)
+	for _, tc := range []struct {
+		name, user, message, cmd string
+		trusted                  bool
+	}{
+		{"owner", "owner", "process", "stop", true},
+		{"other user", "other", "process", "stop", false},
+		{"unknown message", "owner", "unknown", "stop", false},
+		{"unsupported operation", "owner", "process", "reset", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			event := transport.Event{EventID: "click", CardAction: &transport.CardAction{MessageID: tc.message, ChatID: "chat", Operator: transport.Identity{OpenID: tc.user}, ActionValue: map[string]any{"cmd": tc.cmd, "turn_id": "new"}}}
+			got, err := normalizeCardAction(binding, event, fixedActiveTurn("new"), store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.trusted != tc.trusted {
+				t.Fatalf("route=%+v", got)
+			}
+			if tc.trusted && (got.cotCreateID != create.ID || got.input.TurnID != "old") {
+				t.Fatalf("wrong COT route=%+v", got)
+			}
+		})
+	}
+}
+
+type cotCancelRunner struct {
+	testIntakeRunner
+	active   string
+	canceled string
+}
+
+func (r *cotCancelRunner) ActiveTurn(string) string { return r.active }
+func (r *cotCancelRunner) Cancel(_ context.Context, _, _, turn string) error {
+	r.canceled = turn
+	return nil
+}
+
+func TestCOTStopCompletesOldProcessWithoutCancelingNewTurn(t *testing.T) {
+	for _, active := range []string{"old", "new", ""} {
+		t.Run("active="+active, func(t *testing.T) {
+			store := feishustate.NewStore()
+			create := channeltypes.DeliveryIntent{ID: "old:cot:create", TurnID: "old", BindingID: "binding", Kind: channeltypes.DeliveryCOTCreate, COTID: "cot", MessageID: "process"}
+			_ = store.Enqueue(create)
+			_ = store.MarkDelivered(create)
+			complete := channeltypes.DeliveryIntent{ID: "old:cot:complete", TurnID: "old", BindingID: "binding", Kind: channeltypes.DeliveryCOTComplete, RelatedID: create.ID}
+			_ = store.Enqueue(complete)
+			_ = store.MarkFailed(complete.ID, errors.New("unavailable"))
+			runner := &cotCancelRunner{active: active}
+			intake := &Intake{state: store, runner: runner}
+			card := normalizedCardAction{cotCreateID: create.ID, input: interaction.Input{AgentID: "agent", ConversationKey: "conversation", TurnID: "old"}}
+			if err := intake.handleCard(context.Background(), card); err != nil {
+				t.Fatal(err)
+			}
+			if (runner.canceled == "old") != (active == "old") {
+				t.Fatalf("active=%s canceled=%s", active, runner.canceled)
+			}
+			got, _ := store.Delivery(complete.ID)
+			if got.Status != channeltypes.DeliveryPending {
+				t.Fatalf("completion=%+v", got)
+			}
+		})
 	}
 }

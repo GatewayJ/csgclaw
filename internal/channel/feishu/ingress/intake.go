@@ -413,6 +413,20 @@ func cardResetMessage(card normalizedCardAction) channeltypes.InboundMessage {
 }
 
 func (i *Intake) handleCard(ctx context.Context, card normalizedCardAction) error {
+	if card.cotCreateID != "" {
+		if i.runner.ActiveTurn(card.input.ConversationKey) == card.input.TurnID {
+			if err := i.runner.Cancel(ctx, card.input.AgentID, card.input.ConversationKey, card.input.TurnID); err != nil {
+				return i.completeCardResult(card, cardActionErrorText(err))
+			}
+		}
+		if err := i.state.RetryCOTCompletion(card.cotCreateID); err != nil {
+			return i.completeCardResult(card, "过程结束请求暂时无法提交。")
+		}
+		if i.notifier != nil {
+			i.notifier.Notify()
+		}
+		return nil
+	}
 	if card.input.Action.Operation == interaction.OperationResolve {
 		if runner, ok := i.runner.(interface {
 			ResolveInteraction(context.Context, interaction.Input) error

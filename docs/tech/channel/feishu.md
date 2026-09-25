@@ -43,7 +43,10 @@ The channel consumes existing Agent Engine events. Codex supports permission and
 user-input requests; DSH currently supplies permission requests. Detached Codex
 questions start one follow-up turn in the same conversation after submission.
 COT delivery failure leaves reply delivery available and produces a notice card.
-COT append requests have no replay key and are attempted once. Delivery and
+COT append requests have no replay key and are attempted once. Completion requests
+retry transient failures up to three attempts without replaying events. Recognized
+stop callbacks from locally recorded COT messages target their original turn and
+can retry a failed completion. Delivery and
 interaction routing state is process-local. Presentation has no format setting.
 
 Bind the manager app:
