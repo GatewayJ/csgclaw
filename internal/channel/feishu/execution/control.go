@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	channel "csgclaw/internal/channel"
 	"csgclaw/internal/channel/feishu/interaction"
@@ -56,7 +57,17 @@ func (r *Runner) acquireControl(ctx context.Context, key string) (func(), error)
 }
 
 // CancelRequest keeps task cancellation independent from process presentation.
-func (r *Runner) CancelRequest(ctx context.Context, request interaction.CancelRequest) error {
+func (r *Runner) CancelRequest(ctx context.Context, request interaction.CancelRequest) (err error) {
+	attrs := []any{"binding_id", request.BindingID, "agent_id", request.AgentID, "turn_id", request.TurnID, "conversation_key", request.ConversationKey, "message_id", request.MessageID}
+	slog.Info("request Feishu cancellation", attrs...)
+	defer func() {
+		if err != nil {
+			slog.Warn("Feishu cancellation rejected or failed", append(attrs, "error", err)...)
+		} else {
+			record, _ := r.state.Get(request.TurnID)
+			slog.Info("Feishu cancellation handled", append(attrs, "status", record.Status)...)
+		}
+	}()
 	release, err := r.acquireControl(ctx, request.ConversationKey)
 	if err != nil {
 		return err

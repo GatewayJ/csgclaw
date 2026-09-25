@@ -353,7 +353,7 @@ func (r *Runner) Cancel(ctx context.Context, agentID, conversationKey, turnID st
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	slog.Debug("cancel Feishu Agent Engine turn requested",
+	slog.Info("cancel Feishu Agent Engine turn requested",
 		"agent_id", agentID,
 		"conversation_key", conversationKey,
 		"turn_id", turnID,
@@ -714,9 +714,9 @@ func (r *Runner) logTerminalResult(message channeltypes.InboundMessage, result a
 	attrs := messageLogAttrs(message, resultLogAttrs(result)...)
 	switch result.Status {
 	case agentengine.TurnSucceeded:
-		slog.Debug("Feishu Agent Engine run completed", attrs...)
+		slog.Info("Feishu Agent Engine run completed", attrs...)
 	case agentengine.TurnCanceled:
-		slog.Debug("Feishu Agent Engine run canceled", attrs...)
+		slog.Info("Feishu Agent Engine run canceled", attrs...)
 	default:
 		slog.Warn("Feishu Agent Engine run failed", attrs...)
 	}
