@@ -43,15 +43,21 @@ func (a *cotRecordingAdapter) CreateCOT(ctx context.Context, _ transport.COTCrea
 func (a *cotRecordingAdapter) UpdateCOT(_ context.Context, req transport.COTUpdateRequest) error {
 	a.cotMu.Lock()
 	defer a.cotMu.Unlock()
+	if req.Ref != (transport.COTRef{COTID: "cot", MessageID: "process"}) {
+		return errors.New("incorrect COT identifiers")
+	}
 	if a.failUpdate {
 		return errors.New("ambiguous update")
 	}
 	a.events = append(a.events, req.Events...)
 	return nil
 }
-func (a *cotRecordingAdapter) CompleteCOT(context.Context, transport.COTCompleteRequest) error {
+func (a *cotRecordingAdapter) CompleteCOT(_ context.Context, req transport.COTCompleteRequest) error {
 	a.cotMu.Lock()
 	defer a.cotMu.Unlock()
+	if req.Ref != (transport.COTRef{COTID: "cot", MessageID: "process"}) {
+		return errors.New("incorrect COT identifiers")
+	}
 	a.completed++
 	return nil
 }

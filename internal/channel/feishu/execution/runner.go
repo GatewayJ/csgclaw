@@ -58,6 +58,7 @@ type Runner struct {
 	notifier Notifier
 
 	controlMu      sync.Mutex
+	controls       map[string]*conversationControl
 	interactionMu  sync.Mutex
 	interactions   map[string]*pendingInteraction
 	latest         map[string]string
@@ -89,6 +90,7 @@ func NewRunner(options RunnerOptions) (*Runner, error) {
 		files:          options.Files,
 		notifier:       options.Notifier,
 		active:         make(map[string]*activeRun),
+		controls:       make(map[string]*conversationControl),
 		interactions:   make(map[string]*pendingInteraction),
 		latest:         make(map[string]string),
 		workerContexts: make(map[string]context.Context),
@@ -99,8 +101,11 @@ func NewRunner(options RunnerOptions) (*Runner, error) {
 // Submit starts an Engine Run from the binding worker context. It does not
 // queue conversations; Agent Engine AdmissionSupersede owns replacement.
 func (r *Runner) Submit(ctx context.Context, message channeltypes.InboundMessage) error {
-	r.controlMu.Lock()
-	defer r.controlMu.Unlock()
+	release, err := r.acquireControl(ctx, message.ConversationKey)
+	if err != nil {
+		return err
+	}
+	defer release()
 	return r.submit(ctx, message)
 }
 func (r *Runner) submit(ctx context.Context, message channeltypes.InboundMessage) error {
@@ -284,8 +289,11 @@ func (r *Runner) run(ctx context.Context, active *activeRun, message channeltype
 
 // Reset handles /new through Engine's atomic active-Turn Reset operation.
 func (r *Runner) Reset(ctx context.Context, message channeltypes.InboundMessage) error {
-	r.controlMu.Lock()
-	defer r.controlMu.Unlock()
+	release, err := r.acquireControl(ctx, message.ConversationKey)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := validateMessage(message); err != nil {
 		return err
 	}
@@ -311,7 +319,7 @@ func (r *Runner) Reset(ctx context.Context, message channeltypes.InboundMessage)
 	if err := r.state.BeginTurn(turnRecord(message, channeltypes.TurnRunning)); err != nil {
 		return fmt.Errorf("record running Feishu reset: %w", err)
 	}
-	err := r.engine.Conversations(message.AgentID).Reset(ctx, agentengine.ConversationKey(message.ConversationKey))
+	err = r.engine.Conversations(message.AgentID).Reset(ctx, agentengine.ConversationKey(message.ConversationKey))
 	if err != nil {
 		result := resultFromError(err)
 		slog.Warn("Feishu Agent Engine reset failed",
