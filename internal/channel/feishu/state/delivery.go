@@ -19,6 +19,8 @@ const (
 // Store keeps transient turn correlation and delivery dependencies in memory.
 // Agent Engine remains the authority for active conversations and Turn IDs.
 type Store struct {
+	cotFailures   map[string]bool
+	pinned        map[string]bool
 	mu            sync.RWMutex
 	turns         map[string]channeltypes.TurnRecord
 	turnOrder     []string
@@ -28,8 +30,10 @@ type Store struct {
 
 func NewStore() *Store {
 	return &Store{
-		turns:      make(map[string]channeltypes.TurnRecord),
-		deliveries: make(map[string]channeltypes.DeliveryIntent),
+		turns:       make(map[string]channeltypes.TurnRecord),
+		pinned:      make(map[string]bool),
+		cotFailures: make(map[string]bool),
+		deliveries:  make(map[string]channeltypes.DeliveryIntent),
 	}
 }
 
@@ -132,6 +136,9 @@ func (s *Store) enqueueLocked(intent channeltypes.DeliveryIntent) error {
 	intent.Status = channeltypes.DeliveryPending
 	intent.CreatedAt = now
 	s.deliveries[intent.ID] = cloneIntent(intent)
+	if intent.Kind == channeltypes.DeliveryCOTCreate {
+		s.pinned[intent.ID] = true
+	}
 	s.deliveryOrder = append(s.deliveryOrder, intent.ID)
 	return nil
 }
@@ -189,6 +196,9 @@ func (s *Store) MarkDelivered(intent channeltypes.DeliveryIntent) error {
 func (s *Store) MarkFailed(id string, cause error) error {
 	return s.updateDelivery(id, func(intent *channeltypes.DeliveryIntent) {
 		intent.Status = channeltypes.DeliveryFailed
+		if intent.Kind == channeltypes.DeliveryCOTCreate || intent.Kind == channeltypes.DeliveryCOTUpdate {
+			s.cotFailures[intent.TurnID] = true
+		}
 		intent.Attempts++
 		intent.NextAttemptAt = nil
 		if cause != nil {
@@ -225,21 +235,6 @@ func (s *Store) updateDelivery(id string, update func(*channeltypes.DeliveryInte
 	return nil
 }
 
-func (s *Store) DeliveredCount(kind channeltypes.DeliveryKind, relatedID string) int {
-	if s == nil {
-		return 0
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	count := 0
-	for _, intent := range s.deliveries {
-		if intent.Kind == kind && intent.RelatedID == relatedID && intent.Status == channeltypes.DeliveryDelivered {
-			count++
-		}
-	}
-	return count
-}
-
 func (s *Store) DeliveryByRemoteMessage(bindingID string, kind channeltypes.DeliveryKind, messageID string) (channeltypes.DeliveryIntent, bool, error) {
 	if s == nil {
 		return channeltypes.DeliveryIntent{}, false, nil
@@ -265,7 +260,7 @@ func (s *Store) pruneTurnsLocked() {
 		if !exists {
 			continue
 		}
-		if len(s.turns) > maxTurnRecords && terminalTurn(record.Status) {
+		if len(s.turns) > maxTurnRecords && terminalTurn(record.Status) && !s.turnRequiredLocked(id) {
 			delete(s.turns, id)
 			continue
 		}
@@ -279,6 +274,9 @@ func (s *Store) pruneDeliveriesLocked() {
 		return
 	}
 	protected := make(map[string]struct{})
+	for id := range s.pinned {
+		protected[id] = struct{}{}
+	}
 	queue := make([]string, 0)
 	for id, intent := range s.deliveries {
 		if terminalDelivery(intent.Status) {
@@ -314,6 +312,9 @@ func (s *Store) pruneDeliveriesLocked() {
 		if len(s.deliveries) > maxDeliveryRecords && terminalDelivery(intent.Status) &&
 			!required && terminalTurn(turn.Status) {
 			delete(s.deliveries, id)
+			if intent.Kind == channeltypes.DeliveryCOTCreate {
+				delete(s.cotFailures, intent.TurnID)
+			}
 			continue
 		}
 		kept = append(kept, id)
@@ -335,6 +336,7 @@ func terminalDelivery(status channeltypes.DeliveryStatus) bool {
 }
 
 func cloneIntent(intent channeltypes.DeliveryIntent) channeltypes.DeliveryIntent {
+	intent.Events = append([]channeltypes.COTEvent(nil), intent.Events...)
 	if intent.Card != nil {
 		card := make(map[string]any, len(intent.Card))
 		for key, value := range intent.Card {
@@ -347,3 +349,41 @@ func cloneIntent(intent channeltypes.DeliveryIntent) channeltypes.DeliveryIntent
 
 func (s *Store) Intent(id string) (channeltypes.DeliveryIntent, bool) { return s.Delivery(id) }
 func (s *Store) Begin(id string) error                                { return s.BeginDelivery(id) }
+
+// COTFailed prevents sending a suffix after an earlier append had an ambiguous outcome.
+func (s *Store) COTFailed(turnID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cotFailures[turnID]
+}
+
+func (s *Store) Pin(id string, pin bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if pin {
+		s.pinned[id] = true
+	} else {
+		delete(s.pinned, id)
+	}
+}
+func (s *Store) turnRequiredLocked(id string) bool {
+	for key, item := range s.deliveries {
+		if item.TurnID == id && (s.pinned[key] || !terminalDelivery(item.Status)) {
+			return true
+		}
+	}
+	return false
+}
+
+// LatestCard returns the last queued snapshot, including updates awaiting delivery.
+func (s *Store) LatestCard(createID string) (channeltypes.DeliveryIntent, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := len(s.deliveryOrder) - 1; i >= 0; i-- {
+		item := s.deliveries[s.deliveryOrder[i]]
+		if (item.Kind == channeltypes.DeliveryCardUpdate && item.RelatedID == createID) || item.ID == createID {
+			return cloneIntent(item), true
+		}
+	}
+	return channeltypes.DeliveryIntent{}, false
+}

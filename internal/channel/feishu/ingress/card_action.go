@@ -85,7 +85,7 @@ func normalizeCardAction(binding channeltypes.Binding, event transport.Event, ru
 	threadID = route.intent.ThreadID
 	card.source.ThreadID = threadID
 	conversationKey := route.record.ConversationKey
-	turnID := ""
+	turnID := route.record.TurnID
 	if operation == interaction.OperationCancel {
 		turnID = route.record.TurnID
 		if runner == nil || runner.ActiveTurn(route.record.ConversationKey) != route.record.TurnID {
@@ -94,6 +94,10 @@ func normalizeCardAction(binding channeltypes.Binding, event transport.Event, ru
 	}
 	card.conversationKey = conversationKey
 	card.input = interaction.Input{
+		InteractionID:   route.intent.InteractionID,
+		ResponderID:     strings.TrimSpace(action.Operator.OpenID),
+		OptionID:        firstMapString(action.ActionValue, "option_id"),
+		FormValue:       action.FormValue,
 		AgentID:         route.record.AgentID,
 		ConversationKey: conversationKey,
 		TurnID:          turnID,
@@ -117,7 +121,7 @@ func trustedCardRoute(binding channeltypes.Binding, action *transport.CardAction
 	if err != nil {
 		return trustedCardRouteResult{}, false, fmt.Errorf("resolve trusted Feishu card route: %w", err)
 	}
-	if !found || intent.BindingID != binding.ID || intent.ChatID != strings.TrimSpace(action.ChatID) {
+	if !found || intent.BindingID != binding.ID || intent.ChatID != strings.TrimSpace(action.ChatID) || (intent.RequesterID != "" && intent.RequesterID != strings.TrimSpace(action.Operator.OpenID)) {
 		return trustedCardRouteResult{}, false, nil
 	}
 	// Older transports provided a carrier thread ID. If it is present, it is an

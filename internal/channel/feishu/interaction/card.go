@@ -16,8 +16,9 @@ import (
 type Operation string
 
 const (
-	OperationCancel Operation = "cancel"
-	OperationReset  Operation = "reset"
+	OperationResolve Operation = "resolve"
+	OperationCancel  Operation = "cancel"
+	OperationReset   Operation = "reset"
 )
 
 // CardAction is a Feishu card action after transport normalization.
@@ -29,6 +30,10 @@ type CardAction struct {
 // the binding and ingress layers. Callers must not populate these fields from
 // the card action value.
 type Input struct {
+	InteractionID   string
+	ResponderID     string
+	OptionID        string
+	FormValue       map[string]any
 	AgentID         string
 	ConversationKey string
 	TurnID          string

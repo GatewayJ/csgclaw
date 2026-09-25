@@ -33,9 +33,18 @@ printf '%s' "$APP_SECRET" | csgclaw-cli participant bind \
   --restart
 ```
 
-Hosted Codex Feishu replies use the Markdown presentation fixed by the channel
-implementation. Presentation mode is not part of participant binding or stored
-participant configuration.
+Feishu shows tool activity and available thought events in a native COT message.
+Reply text streams into independent message cards. Permission requests and user
+questions use separate interactive cards; only the originating user may answer.
+Use `/stop` to cancel execution while retaining conversation history, or `/new`
+to reset the conversation. Long replies use consecutive cards.
+
+The channel consumes existing Agent Engine events. Codex supports permission and
+user-input requests; DSH currently supplies permission requests. Detached Codex
+questions start one follow-up turn in the same conversation after submission.
+COT delivery failure leaves reply delivery available and produces a notice card.
+COT append requests have no replay key and are attempted once. Delivery and
+interaction routing state is process-local. Presentation has no format setting.
 
 Bind the manager app:
 

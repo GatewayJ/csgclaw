@@ -10,6 +10,7 @@ import (
 
 	channeltypes "csgclaw/internal/channel"
 	"csgclaw/internal/channel/feishu/interaction"
+	"csgclaw/internal/channel/feishu/presentation"
 	feishustate "csgclaw/internal/channel/feishu/state"
 	"csgclaw/internal/channel/feishu/transport"
 )
@@ -366,7 +367,13 @@ func (i *Intake) process(ctx context.Context, item intakeItem) {
 		} else {
 			message = hydrated
 		}
-		if i.runner.IsResetCommand(message.Text) {
+		if strings.EqualFold(strings.TrimSpace(message.Text), "/stop") {
+			if runner, ok := i.runner.(interface {
+				Stop(context.Context, channeltypes.InboundMessage) error
+			}); ok {
+				err = runner.Stop(ctx, message)
+			}
+		} else if i.runner.IsResetCommand(message.Text) {
 			err = i.runner.Reset(ctx, message)
 		} else {
 			err = i.runner.Submit(ctx, message)
@@ -406,6 +413,18 @@ func cardResetMessage(card normalizedCardAction) channeltypes.InboundMessage {
 }
 
 func (i *Intake) handleCard(ctx context.Context, card normalizedCardAction) error {
+	if card.input.Action.Operation == interaction.OperationResolve {
+		if runner, ok := i.runner.(interface {
+			ResolveInteraction(context.Context, interaction.Input) error
+		}); ok {
+			err := runner.ResolveInteraction(ctx, card.input)
+			if err != nil {
+				return i.completeCardResult(card, err.Error())
+			}
+			return nil
+		}
+		return i.completeCardResult(card, "此确认暂时无法提交。")
+	}
 	err := handleCardAction(ctx, i.interactions, i.runner, card)
 	text := card.successText
 	if err != nil {
@@ -419,11 +438,11 @@ func (i *Intake) completeCardResult(card normalizedCardAction, text string) erro
 		ID:        card.turnID + ":card-action-result",
 		BindingID: i.binding.ID,
 		TurnID:    card.turnID,
-		Kind:      channeltypes.DeliveryText,
+		Kind:      channeltypes.DeliveryCard,
 		ChatID:    card.source.ChatID,
 		ReplyTo:   card.source.MessageID,
 		ThreadID:  card.source.ThreadID,
-		Text:      text,
+		Card:      presentation.Card(text),
 	}
 	if err := i.state.Enqueue(intent); err != nil {
 		return err
