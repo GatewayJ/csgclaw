@@ -41,16 +41,16 @@ func TestStopCallbackCancelsEngineAndKeepsCOTFailureIndependent(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	control, ok := store.Delivery("old:control:create")
+	control, ok := store.Delivery("old:cot:create")
 	if !ok {
-		t.Fatal("no task control card")
+		t.Fatal("no COT message")
 	}
 	control.MessageID = "control-message"
 	if err := store.MarkDelivered(control); err != nil {
 		t.Fatal(err)
 	}
 	cot, _ := store.Delivery("old:cot:create")
-	cot.COTID, cot.MessageID = "cot", "cot-message"
+	cot.COTID, cot.MessageID = "cot", control.MessageID
 	if err := store.MarkDelivered(cot); err != nil {
 		t.Fatal(err)
 	}
@@ -78,9 +78,6 @@ func TestStopCallbackCancelsEngineAndKeepsCOTFailureIndependent(t *testing.T) {
 	events, ok := store.Delivery("old:cot:final-events")
 	if !ok || events.Kind != channel.DeliveryCOTUpdate || len(events.Events) == 0 {
 		t.Fatal("missing final COT events")
-	}
-	if _, ok := store.Delivery("old:control:final"); !ok {
-		t.Fatal("task control not finalized")
 	}
 	if err := store.MarkFailed(end.ID, errors.New("completion failed")); err != nil {
 		t.Fatal(err)

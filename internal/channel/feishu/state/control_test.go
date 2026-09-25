@@ -12,17 +12,13 @@ func TestCancelingPreservesTerminalStateAndPresentation(t *testing.T) {
 			if err := store.Put(channel.TurnRecord{TurnID: "turn", BindingID: "binding", AgentID: "agent", ConversationKey: "conversation", Status: status}); err != nil {
 				t.Fatal(err)
 			}
-			update := channel.DeliveryIntent{ID: "canceling", BindingID: "binding", TurnID: "turn", Kind: channel.DeliveryCardUpdate}
-			if err := store.MarkCanceling("turn", update); err != nil {
-				t.Fatal(err)
-			}
+			store.MarkCanceling("turn")
 			record, _ := store.Get("turn")
-			_, queued := store.Delivery(update.ID)
 			if status == channel.TurnRunning {
-				if record.Status != channel.TurnCanceling || !queued {
+				if record.Status != channel.TurnCanceling {
 					t.Fatal("missing cancellation state or update")
 				}
-			} else if record.Status != status || queued {
+			} else if record.Status != status {
 				t.Fatal("cancellation overwrote terminal state or queued stale presentation")
 			}
 		})

@@ -43,16 +43,12 @@ func (s *Store) ResolveControlTarget(q ControlQuery) (ControlTarget, bool) {
 	return ControlTarget{}, false
 }
 
-func (s *Store) MarkCanceling(turnID string, update channel.DeliveryIntent) error {
+func (s *Store) MarkCanceling(turnID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.turns[turnID]
 	if ok && (record.Status == channel.TurnAccepted || record.Status == channel.TurnRunning) {
 		record.Status = channel.TurnCanceling
 		s.turns[turnID] = record
-		if update.ID != "" {
-			return s.enqueueLocked(update)
-		}
 	}
-	return nil
 }

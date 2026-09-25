@@ -6,7 +6,6 @@ import (
 
 	channel "csgclaw/internal/channel"
 	"csgclaw/internal/channel/feishu/interaction"
-	"csgclaw/internal/channel/feishu/presentation"
 	feishustate "csgclaw/internal/channel/feishu/state"
 )
 
@@ -74,18 +73,7 @@ func (r *Runner) CancelRequest(ctx context.Context, request interaction.CancelRe
 		if r.ActiveTurn(request.ConversationKey) != request.TurnID {
 			return fmt.Errorf("此任务已不再是当前执行的任务")
 		}
-		var update channel.DeliveryIntent
-		if r.deliveryExists(request.TurnID + ":control:create") {
-			update = target.Intent
-			update.ID = request.TurnID + ":control:canceling"
-			update.Kind = channel.DeliveryCardUpdate
-			update.RelatedID = request.TurnID + ":control:create"
-			update.Sequence = target.Turn.LastSequence + 1
-			update.Card = presentation.TaskControl(channel.TurnCanceling)
-		}
-		if err := r.state.MarkCanceling(request.TurnID, update); err != nil {
-			r.logFinalizeError(message, err)
-		}
+		r.state.MarkCanceling(request.TurnID)
 		r.notify()
 		if err := r.Cancel(ctx, request.AgentID, request.ConversationKey, request.TurnID); err != nil {
 			return err
