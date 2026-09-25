@@ -65,6 +65,13 @@ func (r *Runner) enqueueProcessStart(message channel.InboundMessage) error {
 	if err := r.state.Enqueue(intent); err != nil {
 		return err
 	}
+	if message.Source.SenderID != "" {
+		control := r.messageCardIntent(message, message.TurnID+":control:create", 0, "")
+		control.Card = presentation.TaskControl(channel.TurnRunning)
+		if err := r.state.Enqueue(control); err != nil {
+			return err
+		}
+	}
 	return r.enqueueProcess(message, 0, presentation.NewProcess(message.TurnID, message.ConversationKey).Start())
 }
 
@@ -98,12 +105,28 @@ func (r *Runner) finishProcess(message channel.InboundMessage, p *presentation.P
 		}
 	}
 	intent.Events = append(intent.Events, p.Finish(status)...)
+	lastEvents := intent
+	lastEvents.ID = message.TurnID + ":cot:final-events"
+	lastEvents.Kind = channel.DeliveryCOTUpdate
+	if err := r.state.Enqueue(lastEvents); err != nil {
+		r.logFinalizeError(message, err)
+	}
+	intent.Events = nil
 	intent.Reason = "done"
 	if status != agentengine.TurnSucceeded {
 		intent.Reason = "error"
 	}
 	if err := r.state.Enqueue(intent); err != nil {
 		r.logFinalizeError(message, err)
+	}
+	if r.deliveryExists(message.TurnID + ":control:create") {
+		control := baseIntent(message, message.TurnID+":control:final", record.LastSequence+1)
+		control.Kind = channel.DeliveryCardUpdate
+		control.RelatedID = message.TurnID + ":control:create"
+		control.Card = presentation.TaskControl(record.Status)
+		if err := r.state.Enqueue(control); err != nil {
+			r.logFinalizeError(message, err)
+		}
 	}
 	r.notify()
 }

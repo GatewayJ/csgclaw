@@ -110,16 +110,6 @@ func (d *Dispatcher) drainCOTPending(ctx context.Context, createsOnly bool) {
 					err = client.UpdateCOT(requestCtx, transport.COTUpdateRequest{Ref: ref, Events: intent.Events})
 				}
 			case channel.DeliveryCOTComplete:
-				if len(intent.Events) > 0 && !failed[intent.TurnID] {
-					if appendErr := client.UpdateCOT(requestCtx, transport.COTUpdateRequest{Ref: ref, Events: intent.Events}); appendErr != nil {
-						d.logDeliveryFailure(intent, appendErr, false, time.Time{})
-					}
-				}
-				if err = d.state.ClearCOTEvents(intent.ID); err != nil {
-					break
-				}
-				cancel()
-				requestCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
 				err = client.CompleteCOT(requestCtx, transport.COTCompleteRequest{Ref: ref, Reason: intent.Reason})
 			}
 		}
@@ -150,11 +140,11 @@ func (d *Dispatcher) drainCOTPending(ctx context.Context, createsOnly bool) {
 			notice.Kind = channel.DeliveryCard
 			notice.RelatedID = ""
 			notice.Events = nil
-			text := "过程展示暂时不可用，执行结果将通过回复卡片发送。"
+			notice.Card = presentation.Card("过程展示暂时不可用，执行结果将通过回复卡片发送。")
 			if intent.Kind == channel.DeliveryCOTComplete {
-				text = "过程状态更新失败，可点击结束按钮重试。"
+				notice.ID = intent.TurnID + ":cot:completion-failed"
+				notice.Card = presentation.COTCompletionFailureCard()
 			}
-			notice.Card = presentation.Card(text)
 			_ = d.state.Enqueue(notice)
 			d.Notify()
 		}

@@ -156,6 +156,7 @@ const (
 	TurnSucceeded TurnStatus = "succeeded"
 	TurnFailed    TurnStatus = "failed"
 	TurnCanceled  TurnStatus = "canceled"
+	TurnCanceling TurnStatus = "canceling"
 )
 
 // TurnRecord correlates an Engine Turn with process-local delivery intents. It

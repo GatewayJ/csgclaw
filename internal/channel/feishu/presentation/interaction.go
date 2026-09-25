@@ -6,6 +6,7 @@ import (
 
 	"csgclaw/internal/activity"
 	"csgclaw/internal/agentengine"
+	channel "csgclaw/internal/channel"
 )
 
 func button(label, operation string, value map[string]any) map[string]any {
@@ -112,4 +113,27 @@ func interactionStatus(status string) string {
 	default:
 		return "已结束"
 	}
+}
+
+func TaskControl(status channel.TurnStatus) map[string]any {
+	switch status {
+	case channel.TurnSucceeded:
+		return Card("任务已完成。")
+	case channel.TurnFailed:
+		return Card("任务执行失败。")
+	case channel.TurnCanceled:
+		return Card("任务已取消。")
+	case channel.TurnCanceling:
+		return Card("正在取消任务…")
+	default:
+		return controlCard("任务执行中。", "停止任务")
+	}
+}
+
+func COTCompletionFailureCard() map[string]any {
+	return controlCard("过程展示结束失败，可以重试。", "重试结束过程")
+}
+
+func controlCard(text, label string) map[string]any {
+	return map[string]any{"schema": "2.0", "config": map[string]any{"update_multi": true}, "body": map[string]any{"elements": []any{markdownElement(text), button(label, "cancel", nil)}}}
 }
