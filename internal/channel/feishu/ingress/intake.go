@@ -173,6 +173,7 @@ func (i *Intake) HandleEvent(_ context.Context, event transport.Event) error {
 	if i == nil {
 		return fmt.Errorf("feishu intake is required")
 	}
+	slog.Info("receive Feishu ingress event", eventLogAttrs(i.binding, event, "occurred_at", eventTime(event))...)
 	switch event.Kind {
 	case transport.EventMessage:
 		i.identityMu.RLock()
@@ -184,7 +185,7 @@ func (i *Intake) HandleEvent(_ context.Context, event transport.Event) error {
 			return err
 		}
 		if !accepted {
-			slog.Debug("ignore Feishu message event", eventLogAttrs(i.binding, event, "reason", "not accepted")...)
+			slog.Info("ignore Feishu message event", eventLogAttrs(i.binding, event, "reason", "not accepted")...)
 			return nil
 		}
 		if !i.acceptFresh(event, message.ConversationKey) {
@@ -194,7 +195,7 @@ func (i *Intake) HandleEvent(_ context.Context, event transport.Event) error {
 			slog.Debug("drop duplicate Feishu message event", inboundMessageLogAttrs(message)...)
 			return nil
 		}
-		slog.Debug("admit Feishu message event", inboundMessageLogAttrs(message)...)
+		slog.Info("admit Feishu message event", inboundMessageLogAttrs(message)...)
 		i.admit(intakeItem{message: &message})
 		return nil
 
@@ -204,14 +205,15 @@ func (i *Intake) HandleEvent(_ context.Context, event transport.Event) error {
 			slog.Warn("normalize Feishu card action failed", eventLogAttrs(i.binding, event, "error", err)...)
 			return err
 		}
+		slog.Info("resolve Feishu card control", cardLogAttrs(card)...)
 		if !i.acceptFresh(event, firstNonEmpty(card.conversationKey, card.source.ChatID)) {
 			return nil
 		}
 		if !i.dedup.Claim(card.source) {
-			slog.Debug("drop duplicate Feishu card action", cardLogAttrs(card)...)
+			slog.Info("drop duplicate Feishu card action", cardLogAttrs(card)...)
 			return nil
 		}
-		slog.Debug("admit Feishu card action", cardLogAttrs(card)...)
+		slog.Info("admit Feishu card action", cardLogAttrs(card)...)
 		i.admit(intakeItem{card: &card})
 		return nil
 

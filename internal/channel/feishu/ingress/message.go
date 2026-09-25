@@ -2,6 +2,7 @@ package ingress
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	channeltypes "csgclaw/internal/channel"
@@ -39,6 +40,7 @@ func normalizeMessage(binding channeltypes.Binding, event transport.Event, bot t
 	// Retired channel commands must not start a new Engine turn or supersede
 	// the existing one through ordinary message admission.
 	if strings.EqualFold(strings.TrimSpace(text), "/stop") && len(resources) == 0 {
+		slog.Info("ignore Feishu retired control text", eventLogAttrs(binding, event, "reason", "retired_control_text")...)
 		return channeltypes.InboundMessage{}, false, nil
 	}
 	files := make([]channeltypes.InboundFile, 0, len(resources))
