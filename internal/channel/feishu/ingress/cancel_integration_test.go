@@ -9,6 +9,7 @@ import (
 	"csgclaw/internal/agentengine"
 	"csgclaw/internal/agentengine/enginetest"
 	channel "csgclaw/internal/channel"
+	feishuctx "csgclaw/internal/channel/feishu/context"
 	"csgclaw/internal/channel/feishu/execution"
 	"csgclaw/internal/channel/feishu/interaction"
 	"csgclaw/internal/channel/feishu/state"
@@ -106,5 +107,76 @@ func TestStopCallbackCancelsEngineAndKeepsCOTFailureIndependent(t *testing.T) {
 	record, _ = store.Get("old")
 	if record.Status != channel.TurnCanceled {
 		t.Fatal("presentation failure changed task state")
+	}
+}
+
+func TestTextStopCancelsCapturedTaskWithoutStartingAnotherRun(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	engine := enginetest.NewMemoryClient(agentengine.Agent{ID: "agent", Spec: agentengine.AgentSpec{Runtime: agentengine.RuntimeSpec{Adapter: "codex"}}, Status: agentengine.AgentStatus{State: agentengine.AgentStateRunning, Ready: true}})
+	started := make(chan string, 2)
+	engine.SetTurnBehavior(func(ctx context.Context, _ string, req agentengine.TurnRequest, _ agentengine.EventSink) agentengine.TurnResult {
+		started <- string(req.ID)
+		<-ctx.Done()
+		return agentengine.TurnResult{Status: agentengine.TurnCanceled}
+	})
+	store := state.NewStore()
+	runner, err := execution.NewRunner(execution.RunnerOptions{Engine: engine, State: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(); _ = runner.Wait(context.Background()) }()
+	binding := channel.Binding{ID: "binding", AgentID: "agent", Channel: "feishu"}
+	intake, err := NewIntake(IntakeOptions{Binding: binding, State: store, Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := channel.InboundMessage{AgentID: "agent", ConversationKey: feishuctx.ChatConversationKey("binding", "chat", ""), TurnID: "old", Text: "work", Source: channel.Source{Channel: "feishu", BindingID: "binding", ChatID: "chat", ChatType: "p2p", SenderID: "owner", EventID: "work-event", MessageID: "user-message"}}
+	if err := runner.Submit(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	event := transport.Event{Kind: transport.EventMessage, EventID: "stop-event", Message: &transport.Message{ID: "stop-message", ChatID: "chat", ChatType: transport.ChatP2P, ContentType: "text", Text: "/stop", Sender: transport.Identity{OpenID: "owner"}}}
+	if err := intake.HandleEvent(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	item := <-intake.queue
+	if item.stop == nil || item.message != nil || item.stop.TurnID != "old" {
+		t.Fatal("stop was not bound to the active task")
+	}
+	unauthorized := *item.stop
+	unauthorized.Source.SenderID = "other"
+	if err := runner.Stop(ctx, unauthorized); err == nil {
+		t.Fatal("another user canceled the task")
+	}
+	intake.process(ctx, item)
+	record, _ := store.Get("old")
+	if record.Status != channel.TurnCanceled {
+		t.Fatalf("task status=%s", record.Status)
+	}
+	if _, ok := store.Delivery("old:cot:complete"); !ok {
+		t.Fatal("missing COT completion")
+	}
+	select {
+	case id := <-started:
+		t.Fatalf("stop started task %s", id)
+	default:
+	}
+	message.TurnID = "new"
+	if err := runner.Submit(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	intake.process(ctx, item)
+	if runner.ActiveTurn(message.ConversationKey) != "new" {
+		t.Fatal("delayed stop canceled a newer task")
 	}
 }

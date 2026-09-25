@@ -39,6 +39,7 @@ type IntakeOptions struct {
 }
 
 type intakeItem struct {
+	stop    *channeltypes.InboundMessage
 	message *channeltypes.InboundMessage
 	card    *normalizedCardAction
 	comment *normalizedComment
@@ -193,6 +194,12 @@ func (i *Intake) HandleEvent(_ context.Context, event transport.Event) error {
 		}
 		if !i.dedup.Claim(message.Source) {
 			slog.Debug("drop duplicate Feishu message event", inboundMessageLogAttrs(message)...)
+			return nil
+		}
+		if strings.EqualFold(strings.TrimSpace(message.Text), "/stop") && len(message.Files) == 0 {
+			message.TurnID = i.runner.ActiveTurn(message.ConversationKey)
+			slog.Info("admit Feishu stop command", inboundMessageLogAttrs(message)...)
+			i.admit(intakeItem{stop: &message})
 			return nil
 		}
 		slog.Info("admit Feishu message event", inboundMessageLogAttrs(message)...)
@@ -358,6 +365,14 @@ func (i *Intake) run(ctx context.Context) {
 func (i *Intake) process(ctx context.Context, item intakeItem) {
 	var err error
 	switch {
+	case item.stop != nil:
+		if stopper, ok := i.runner.(interface {
+			Stop(context.Context, channeltypes.InboundMessage) error
+		}); ok {
+			err = stopper.Stop(ctx, *item.stop)
+		} else {
+			err = fmt.Errorf("Feishu task cancellation is unavailable")
+		}
 	case item.message != nil:
 		message := *item.message
 		if hydrated, hydrateErr := hydrateQuotedMessage(ctx, i.messages, message); hydrateErr != nil {

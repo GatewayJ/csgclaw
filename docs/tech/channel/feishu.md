@@ -14,6 +14,8 @@ Task cancellation and COT completion have independent states; completion failure
 can be retried from a separate card. Final COT events and completion requests are
 separate deliveries. Native COT client controls remain platform-managed.
 
+The native COT stop button sends `/stop`. The channel handles this message as a control request for the task active when the message arrives, validates the requester, and uses the existing Engine cancellation path. It does not submit a new prompt or send an extra command acknowledgement.
+
 ## Commands
 
 Bind the default human Feishu administrator:
