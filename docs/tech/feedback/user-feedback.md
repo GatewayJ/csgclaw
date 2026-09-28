@@ -11,3 +11,11 @@ CSGBot's existing feedback service creates the Issue. Optional `csgclaw` context
 A successful response closes the form and displays confirmation. Failures retain text and selected images. The browser prevents simultaneous submits and allows an explicit retry. An uncertain network outcome can result in a duplicate Issue if the user retries. The form is cleared when the active account/site changes; navigating away or reloading discards unsaved content. GitHub feedback remains available without OpenCSG authentication.
 
 Deploy the CSGBot optional context support before releasing this client so the CSGClaw title and label rules are applied. StarHub uses its existing authenticated CSGBot proxy. Real-site upload and submission integration remains to be verified.
+
+## Screenshots
+
+Browser captures of the actual Settings and FeedbackDialog components with a demo signed-in account. These previews show the UI and local image selection.
+
+![Settings feedback actions](assets/settings-feedback.png)
+
+![Feedback dialog with one selected image](assets/feedback-dialog.png)
