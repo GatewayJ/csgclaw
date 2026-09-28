@@ -16,8 +16,6 @@ import styles from "./FeedbackDialog.module.css";
 type Props = {
   open: boolean;
   busy: boolean;
-  locked: boolean;
-  checking: boolean;
   description: string;
   images: File[];
   error: string;
@@ -29,7 +27,7 @@ type Props = {
 };
 
 export function FeedbackDialog(props: Props) {
-  const { t, images, busy, locked } = props;
+  const { t, images, busy } = props;
   return (
     <DialogRoot
       open={props.open}
@@ -47,7 +45,7 @@ export function FeedbackDialog(props: Props) {
             {t("settingsFeedbackLabel")}
             <textarea
               value={props.description}
-              disabled={busy || locked}
+              disabled={busy}
               rows={6}
               maxLength={MAX_FEEDBACK_DESCRIPTION_LENGTH}
               placeholder={t("settingsFeedbackPlaceholder")}
@@ -60,7 +58,7 @@ export function FeedbackDialog(props: Props) {
               type="file"
               accept="image/jpeg,image/png"
               multiple
-              disabled={busy || locked}
+              disabled={busy}
               onChange={(event) => {
                 props.onImagesChange([...images, ...Array.from(event.target.files || [])]);
                 event.target.value = "";
@@ -75,7 +73,7 @@ export function FeedbackDialog(props: Props) {
                 <Button
                   variant="secondaryGray"
                   size="sm"
-                  disabled={busy || locked}
+                  disabled={busy}
                   aria-label={`${t("feedbackRemoveImage")} ${index + 1}`}
                   onClick={() => props.onImagesChange(images.filter((_, position) => position !== index))}
                 >
@@ -97,7 +95,7 @@ export function FeedbackDialog(props: Props) {
             disabled={busy || (!props.description.trim() && !images.length)}
             onClick={props.onSubmit}
           >
-            {t(props.checking ? "feedbackCheckStatus" : "feedbackSubmit")}
+            {t("feedbackSubmit")}
           </Button>
         </DialogFooter>
       </DialogContent>

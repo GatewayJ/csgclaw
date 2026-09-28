@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -22,14 +23,19 @@ func TestFeedbackUsesAuthenticatedSiteAndServerVersion(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer test-token" {
 			t.Error("missing user token")
 		}
-		if err := r.ParseMultipartForm(1024); err != nil {
+		var payload struct {
+			CSGClaw struct {
+				SiteURL string `json:"site_url"`
+				Version string `json:"version"`
+			} `json:"csgclaw"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
 		}
-		defer r.MultipartForm.RemoveAll()
-		if r.FormValue("site_url") == "https://attacker.example" || r.FormValue("version") == "fake" {
+		if payload.CSGClaw.SiteURL == "https://attacker.example" || payload.CSGClaw.Version == "fake" {
 			t.Error("trusted caller metadata")
 		}
-		io.WriteString(w, `{"success":true,"state":"succeeded","issue_id":5}`)
+		io.WriteString(w, `{"success":true,"issue_id":5}`)
 	}))
 	defer upstream.Close()
 	previousStore := auth.Default().Store
@@ -40,7 +46,7 @@ func TestFeedbackUsesAuthenticatedSiteAndServerVersion(t *testing.T) {
 	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	for key, value := range map[string]string{"submission_id": "5316f614-ab57-4e44-a4b6-1cccbcb1a0af", "problem_description": "Test", "site_url": "https://attacker.example", "version": "fake"} {
+	for key, value := range map[string]string{"problem_description": "Test", "site_url": "https://attacker.example", "version": "fake"} {
 		writer.WriteField(key, value)
 	}
 	writer.Close()

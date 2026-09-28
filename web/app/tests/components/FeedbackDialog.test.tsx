@@ -5,8 +5,6 @@ import { FeedbackDialog } from "@/pages/SettingsPage/components/FeedbackDialog";
 const props = {
   open: true,
   busy: false,
-  locked: false,
-  checking: false,
   description: "",
   images: [],
   error: "",
@@ -24,10 +22,8 @@ it("requires text or images and sends text changes to the controller", async () 
   expect(props.onDescriptionChange).toHaveBeenCalledWith("x");
 });
 
-it("locks edits while checking a submission result", async () => {
-  render(<FeedbackDialog {...props} description="Problem" locked checking error="Waiting" />);
+it("disables edits and submission while sending", () => {
+  render(<FeedbackDialog {...props} description="Problem" busy />);
   expect(screen.getByRole("textbox")).toBeDisabled();
-  expect(screen.getByRole("alert")).toHaveTextContent("Waiting");
-  await userEvent.setup().click(screen.getByRole("button", { name: "feedbackCheckStatus" }));
-  expect(props.onSubmit).toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "feedbackSubmit" })).toBeDisabled();
 });

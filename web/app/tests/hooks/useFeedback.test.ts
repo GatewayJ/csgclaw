@@ -1,52 +1,36 @@
 import { act, renderHook } from "@testing-library/react";
-import { fetchFeedbackStatus, submitFeedback } from "@/api/feedback";
+import { submitFeedback } from "@/api/feedback";
 import { useFeedback } from "@/pages/SettingsPage/useFeedback";
 
-vi.mock("@/api/feedback", () => ({ fetchFeedbackStatus: vi.fn(), submitFeedback: vi.fn() }));
+vi.mock("@/api/feedback", () => ({ submitFeedback: vi.fn() }));
 beforeEach(() => vi.clearAllMocks());
 
-it("preserves content and checks an uncertain result before another POST", async () => {
-  vi.mocked(submitFeedback).mockRejectedValueOnce(new Error("Network disconnected"));
-  vi.mocked(fetchFeedbackStatus).mockResolvedValueOnce({ success: true, state: "succeeded", issue_id: 15 });
+it("preserves content after failure and allows an explicit retry", async () => {
+  vi.mocked(submitFeedback)
+    .mockRejectedValueOnce(new Error("Network disconnected"))
+    .mockResolvedValueOnce({ success: true });
   const { result } = renderHook(() => useFeedback((key) => key));
-  act(() => result.current.changeDescription("A problem"));
+  const image = new File(["image"], "test.png", { type: "image/png" });
+  act(() => {
+    result.current.changeDescription("A problem");
+    result.current.changeImages([image]);
+  });
   await act(async () => {
     await result.current.submit();
   });
   expect(result.current.description).toBe("A problem");
-  expect(result.current.locked).toBe(true);
-  act(() => result.current.changeDescription("Another problem"));
-  expect(result.current.description).toBe("A problem");
-  await act(async () => {
-    await result.current.submit();
-  });
+  expect(result.current.images).toEqual([image]);
   expect(submitFeedback).toHaveBeenCalledOnce();
-  expect(fetchFeedbackStatus).toHaveBeenCalledWith(vi.mocked(submitFeedback).mock.calls[0][0]);
+  await act(async () => {
+    await result.current.submit();
+  });
+  expect(submitFeedback).toHaveBeenLastCalledWith("A problem", [image]);
   expect(result.current.success).toBe(true);
   expect(result.current.description).toBe("");
 });
 
-it("retries missing submissions with the same ID and content", async () => {
-  vi.mocked(submitFeedback)
-    .mockRejectedValueOnce(new Error("Network disconnected"))
-    .mockResolvedValueOnce({ success: true, state: "succeeded" });
-  vi.mocked(fetchFeedbackStatus).mockResolvedValueOnce({ success: false, state: "not_found" });
-  const { result } = renderHook(() => useFeedback((key) => key));
-  act(() => result.current.changeDescription("A problem"));
-  await act(async () => {
-    await result.current.submit();
-  });
-  await act(async () => {
-    await result.current.submit();
-  });
-  await act(async () => {
-    await result.current.submit();
-  });
-  expect(vi.mocked(submitFeedback).mock.calls[1]).toEqual(vi.mocked(submitFeedback).mock.calls[0]);
-});
-
 it("prevents simultaneous submits", async () => {
-  let resolve: (value: { success: boolean; state: "succeeded" }) => void = () => {};
+  let resolve: (value: { success: boolean }) => void = () => {};
   vi.mocked(submitFeedback).mockReturnValue(
     new Promise((done) => {
       resolve = done;
@@ -63,7 +47,7 @@ it("prevents simultaneous submits", async () => {
   });
   expect(submitFeedback).toHaveBeenCalledOnce();
   await act(async () => {
-    resolve({ success: true, state: "succeeded" });
+    resolve({ success: true });
     await first;
   });
 });
@@ -75,5 +59,4 @@ it("clears form state when the signed-in account or site changes", () => {
   act(() => result.current.changeDescription("Private feedback"));
   rerender({ scope: "user:site-b" });
   expect(result.current.description).toBe("");
-  expect(result.current.locked).toBe(false);
 });

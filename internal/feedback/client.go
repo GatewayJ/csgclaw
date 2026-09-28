@@ -15,18 +15,21 @@ import (
 
 const Endpoint = "/api/v1/csgbot/user-feedback"
 
+// The portal supports a 30 MiB upload limit; local validation enforces 5 MiB.
+const UploadEndpoint = "/internal_api/upload?max_size=30m"
+
 type Submission struct {
-	ID          string
 	Description string
 	SiteURL     string
 	Version     string
 	Channel     string
+	UserID      string
+	UserName    string
 	Images      []Image
 }
 
 type Result struct {
 	Success  bool   `json:"success"`
-	State    string `json:"state"`
 	IssueID  int    `json:"issue_id,omitempty"`
 	IssueURL string `json:"issue_url,omitempty"`
 	Message  string `json:"message,omitempty"`
@@ -43,59 +46,79 @@ type HTTPError struct{ Status int }
 func (e *HTTPError) Error() string { return fmt.Sprintf("feedback service returned HTTP %d", e.Status) }
 
 func (c *Client) Submit(ctx context.Context, submission Submission) (Result, error) {
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	fields := map[string]string{"submission_id": submission.ID, "problem_description": submission.Description,
-		"site_url": submission.SiteURL, "version": submission.Version, "channel": submission.Channel}
-	for key, value := range fields {
-		if err := writer.WriteField(key, value); err != nil {
-			return Result{}, err
-		}
-	}
+	urls := make([]string, 0, len(submission.Images))
 	for index, image := range submission.Images {
-		part, err := writer.CreateFormFile("images", fmt.Sprintf("feedback-%d.%s", index, image.Extension))
+		imageURL, err := c.upload(ctx, submission.SiteURL, index, image)
 		if err != nil {
 			return Result{}, err
 		}
-		if _, err = part.Write(image.Data); err != nil {
-			return Result{}, err
-		}
+		urls = append(urls, imageURL)
 	}
-	if err := writer.Close(); err != nil {
+	body, err := json.Marshal(map[string]any{
+		"problem_module": "feature", "problem_description": submission.Description,
+		"screenshot_urls": urls, "user_id": submission.UserID, "user_name": submission.UserName,
+		"csgclaw": map[string]string{"site_url": submission.SiteURL, "version": submission.Version, "channel": submission.Channel},
+	})
+	if err != nil {
 		return Result{}, err
 	}
-	return c.request(ctx, http.MethodPost, Endpoint, &body, writer.FormDataContentType())
-}
-
-func (c *Client) Status(ctx context.Context, id string) (Result, error) {
-	return c.request(ctx, http.MethodGet, Endpoint+"/"+url.PathEscape(id), nil, "")
-}
-
-func (c *Client) request(ctx context.Context, method, path string, body io.Reader, contentType string) (Result, error) {
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.BaseURL, "/")+path, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.BaseURL, "/")+Endpoint, bytes.NewReader(body))
 	if err != nil {
 		return Result{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Accept", "application/json")
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Content-Type", "application/json")
+	var result Result
+	err = c.request(req, &result)
+	return result, err
+}
+
+func (c *Client) upload(ctx context.Context, site string, index int, image Image) (string, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", fmt.Sprintf("feedback-%d.%s", index, image.Extension))
+	if err != nil {
+		return "", err
 	}
+	if _, err = part.Write(image.Data); err != nil {
+		return "", err
+	}
+	if err = writer.Close(); err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(site, "/")+UploadEndpoint, &body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	// The portal forwards this credential when its storage proxy is enabled.
+	req.AddCookie(&http.Cookie{Name: "user_token", Value: c.Token})
+	var result struct {
+		URL string `json:"url"`
+	}
+	if err = c.request(req, &result); err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(result.URL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return "", fmt.Errorf("image upload returned an invalid URL")
+	}
+	return result.URL, nil
+}
+
+func (c *Client) request(req *http.Request, result any) error {
+	req.Header.Set("Accept", "application/json")
 	client := c.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 4 * time.Minute, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+		client = &http.Client{Timeout: time.Minute, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	response, err := client.Do(req)
 	if err != nil {
-		return Result{}, err
+		return err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return Result{}, &HTTPError{Status: response.StatusCode}
+		return &HTTPError{Status: response.StatusCode}
 	}
-	var result Result
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
-		return Result{}, err
-	}
-	return result, nil
+	return json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(result)
 }

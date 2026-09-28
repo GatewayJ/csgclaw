@@ -19,7 +19,6 @@ func (h *Handler) registerCoreRoutes(router chi.Router) {
 	router.Route("/api/v1", func(r chi.Router) {
 		r.Get("/version", h.getVersion)
 		r.Post("/feedback", h.handleFeedback)
-		r.Get("/feedback/{submission_id}", h.handleFeedback)
 		r.Route("/upgrade", func(r chi.Router) {
 			r.Get("/status", h.getUpgradeStatus)
 			r.Put("/channel", h.updateUpgradeChannel)
