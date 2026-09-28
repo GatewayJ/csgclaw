@@ -222,11 +222,13 @@ describe("agent action visibility", () => {
     },
   );
 
-  it("does not show template publishing actions for the manager", async () => {
-    const user = userEvent.setup();
+  it.each([
+    { id: "manager-by-role", role: "manager" },
+    { id: "u-manager", role: "worker" },
+  ])("hides the empty More menu for manager $id", (identity) => {
     render(
       <AgentDetailPane
-        item={{ ...worker, id: "u-manager", name: "manager", role: "manager", runtime_kind: "codex" }}
+        item={{ ...worker, ...identity, name: "manager", runtime_kind: "codex" }}
         t={t}
         busyKey=""
         draft={null}
@@ -242,7 +244,7 @@ describe("agent action visibility", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Recreate" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Save as local template" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Publish to community" })).not.toBeInTheDocument();

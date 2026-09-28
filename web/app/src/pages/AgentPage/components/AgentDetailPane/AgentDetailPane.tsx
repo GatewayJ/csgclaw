@@ -2694,6 +2694,9 @@ function AgentActionsMenu({
   onDelete,
   onPublish,
 }: AgentActionsMenuProps) {
+  const hasActions = SHOW_AGENT_LIFECYCLE_ACTIONS || canPublishLocal || !isManager;
+  if (!hasActions) return null;
+
   return (
     <DropdownMenuRoot>
       <DropdownMenuTrigger asChild>
