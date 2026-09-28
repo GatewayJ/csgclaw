@@ -1,0 +1,36 @@
+.dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+.body {
+  display: grid;
+  gap: 12px;
+}
+.label {
+  display: grid;
+  gap: 8px;
+}
+.label textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+.images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.image {
+  display: grid;
+  gap: 8px;
+  width: 120px;
+}
+.image img {
+  width: 120px;
+  height: 90px;
+  object-fit: contain;
+}

@@ -29,6 +29,8 @@ import {
 import { readStoredAuthEnvironmentDraft, writeStoredAuthEnvironmentDraft } from "@/shared/storage/authEnvironment";
 import type { ThemeMode } from "@/shared/theme/theme";
 import { SwitchVersionDialog } from "./components/SwitchVersionDialog";
+import { FeedbackDialog } from "./components/FeedbackDialog";
+import { useFeedback } from "./useFeedback";
 import styles from "./SettingsPage.module.css";
 
 export function SettingsPage() {
@@ -40,6 +42,20 @@ export function SettingsPage() {
   const [switchOpen, setSwitchOpen] = useState(false);
   const [switchVersionOpen, setSwitchVersionOpen] = useState(false);
   const sidebar = controller.sidebarProps;
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackPendingLogin, setFeedbackPendingLogin] = useState(false);
+  const feedback = useFeedback(
+    controller.t,
+    `${sidebar?.authStatus.user_uuid || ""}:${sidebar?.authStatus.base_url || ""}`,
+  );
+
+  useEffect(() => {
+    if (feedbackPendingLogin && sidebar?.authStatus.authenticated) {
+      setFeedbackPendingLogin(false);
+      setConnectionOpen(false);
+      setFeedbackOpen(true);
+    }
+  }, [feedbackPendingLogin, sidebar?.authStatus.authenticated]);
   const refreshUpgradeStatus = sidebar?.onRefreshUpgradeStatus;
   const showUpgradeControls = Boolean(sidebar?.showUpgradeControls);
   const progressActive = Boolean(
@@ -384,6 +400,19 @@ export function SettingsPage() {
           description={sidebar.t("settingsFeedbackDescription")}
         >
           <div className={styles.actionLine}>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => {
+                if (signedIn) setFeedbackOpen(true);
+                else {
+                  setFeedbackPendingLogin(true);
+                  openConnectionDialog();
+                }
+              }}
+            >
+              {sidebar.t("feedbackWrite")}
+            </Button>
             <a className={styles.linkButton} href={feedbackURL} target="_blank" rel="noreferrer">
               {sidebar.t("settingsFeedbackGithubAction")}
             </a>
@@ -391,6 +420,20 @@ export function SettingsPage() {
         </SettingsRow>
       </div>
 
+      {feedback.success ? <p role="status">{sidebar.t("feedbackSuccess")}</p> : null}
+      <FeedbackDialog
+        open={feedbackOpen}
+        {...feedback}
+        t={sidebar.t}
+        onOpenChange={setFeedbackOpen}
+        onDescriptionChange={feedback.changeDescription}
+        onImagesChange={feedback.changeImages}
+        onSubmit={() => {
+          void feedback.submit().then((success) => {
+            if (success) setFeedbackOpen(false);
+          });
+        }}
+      />
       <OpenCSGConnectionDialog
         busy={sidebar.authBusy}
         environment={connectionDraft}
