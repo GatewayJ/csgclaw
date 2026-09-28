@@ -587,6 +587,10 @@ func (s *Controller) updateWithManagedRuntimeOptions(ctx context.Context, id str
 			return Agent{}, fmt.Errorf("agent %q not found", id)
 		}
 	}
+	if instructionsUpdated && previous.Instructions != updated.Instructions && !restartRequired {
+		updated, _, err := s.ReloadRuntimeIfRunning(ctx, id)
+		return updated, err
+	}
 	return updated, nil
 }
 

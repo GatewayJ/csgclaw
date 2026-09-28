@@ -557,7 +557,7 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 			}
 		}
 		if resourceUpdate && !replacesRuntime && !options.forceRecreate && isHostRuntimeKind(updated.RuntimeKind) {
-			if updated.AgentProfile.EnvRestartRequired && desired.DesiredState == contract.AgentDesiredStateRunning && (isRuntimeRunning(updated) || previous.AgentProfile.EnvRestartRequired) {
+			if (updated.AgentProfile.EnvRestartRequired || change.instructions) && desired.DesiredState == contract.AgentDesiredStateRunning && (isRuntimeRunning(updated) || previous.AgentProfile.EnvRestartRequired) {
 				if change.mcpServers {
 					if err := f.reconcileMCPServers(lifecycleCtx, previous, updated); err != nil {
 						return err
