@@ -88,7 +88,6 @@ import { renderMarkdown } from "@/components/business/MessageContent/markdown";
 import "@/components/business/MessageContent/MessageContent.css";
 import { avatarFallbackText } from "@/shared/avatar";
 import { localizeTemplateSourceTag } from "@/shared/i18n";
-import type { AgentTemplatePublishTarget } from "@/api/hub";
 import {
   Button,
   Switch,
@@ -167,12 +166,6 @@ export type AgentDetailPaneProps = {
   onRetryModels?: () => void | Promise<unknown>;
   onProviderLogin?: (provider: string) => VoidOrPromise;
   onRequireOpenCSGAuth?: () => boolean;
-  onPublish?: (
-    target: AgentTemplatePublishTarget,
-    name: string,
-    description: string,
-    includeMemory: boolean,
-  ) => boolean | Promise<boolean>;
   onRecreate: AgentActionHandler;
   onSave?: () => VoidOrPromise;
   onMetadataSave?: (patch: AgentMetadataSavePatch) => VoidOrPromise;
@@ -186,9 +179,6 @@ export type AgentDetailPaneProps = {
   onInitLarkCLI?: AgentActionHandler;
   onShowLarkCLIInstall?: AgentActionHandler;
   onUpgrade?: AgentActionHandler;
-  publishBusy?: boolean;
-  publishDisabled?: boolean;
-  publishError?: string;
   locale?: LocaleCode;
   saveError?: string;
   saveBillingURL?: string;

@@ -260,24 +260,19 @@ export type UseAgentControllerArgs = {
   onAgentDeleted?: (item: AgentLike) => void;
   profileDetailAgentID?: string;
   refreshMCPServers?: () => Promise<unknown>;
-  refreshHubTemplates: () => Promise<void>;
   refreshWorkspaceAgents: (options?: FetchAgentsOptions) => Promise<AgentLike[]>;
   refreshWorkspaceBootstrap: () => Promise<IMData | null>;
   refreshWorkspaceBootstrapConfig: () => Promise<RuntimeBootstrapConfig | null>;
   refreshWorkspaceManagerProfile: () => Promise<AgentProfileLike | null>;
   refreshWorkspaceModelProviders?: () => Promise<ModelProviderCatalog | null>;
   rooms: IMConversation[];
-  navigatePane: WorkspaceNavigationController["navigatePane"];
   selectAgent: WorkspaceNavigationController["selectAgent"];
   selectComputer: WorkspaceNavigationController["selectComputer"];
   selectConversation: WorkspaceNavigationController["selectConversation"];
-  selectHub: WorkspaceNavigationController["selectHub"];
   selectModelProvider?: WorkspaceNavigationController["selectModelProvider"];
   setAgentsData: WorkspaceQuerySetter<AgentLike[]>;
   setBootstrapData: WorkspaceQuerySetter<IMData | null>;
   setManagerProfileData: WorkspaceQuerySetter<AgentProfileLike | null>;
-  setHubPublishError?: (message: string) => void;
-  setSelectedHubTemplateId: WorkspaceUiState["setSelectedHubTemplateId"];
   t: TranslateFn;
 };
 

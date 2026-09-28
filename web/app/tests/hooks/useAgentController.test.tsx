@@ -28,7 +28,6 @@ import {
   updateAgentRequest,
 } from "@/api/agents";
 import { createUserRequest } from "@/api/im";
-import { publishAgentTemplateRequest } from "@/api/hub";
 import { fetchAgentMCPServerSourceStatus } from "@/api/mcp";
 import { patchCsgclawUserRequest } from "@/api/participants";
 import { fetchSkills } from "@/api/skills";
@@ -128,14 +127,6 @@ vi.mock("@/api/im", async () => {
   };
 });
 
-vi.mock("@/api/hub", async () => {
-  const actual = await vi.importActual<typeof import("@/api/hub")>("@/api/hub");
-  return {
-    ...actual,
-    publishAgentTemplateRequest: vi.fn(),
-  };
-});
-
 vi.mock("@/api/mcp", async () => {
   const actual = await vi.importActual<typeof import("@/api/mcp")>("@/api/mcp");
   return {
@@ -228,7 +219,6 @@ function useAgentControllerHarness(
     bootstrapConfig?: RuntimeBootstrapConfig | null;
     refreshedBootstrapConfig?: RuntimeBootstrapConfig | null;
     refreshMCPServers?: () => Promise<unknown>;
-    setHubPublishError?: (message: string) => void;
     t?: TranslateFn;
   } = {},
 ) {
@@ -247,9 +237,6 @@ function useAgentControllerHarness(
   const selectAgent = selectAgentRef.current;
   const selectConversationRef = useRef(vi.fn());
   const selectConversation = selectConversationRef.current;
-  const refreshHubTemplatesRef = useRef(vi.fn(async () => undefined));
-  const navigatePaneRef = useRef(vi.fn());
-  const setSelectedHubTemplateIdRef = useRef(vi.fn());
   const [data, setData] = useState<IMData | null>(() => options.data ?? null);
   const openCSGAuthGuard = useMemo(
     () => openCSGAuthGuardStub(options.openCSGAuthenticated ?? false),
@@ -294,17 +281,14 @@ function useAgentControllerHarness(
     onAgentDeleted: options.onAgentDeleted,
     openCSGAuthGuard,
     refreshMCPServers: options.refreshMCPServers ?? vi.fn(async () => null),
-    refreshHubTemplates: refreshHubTemplatesRef.current,
     refreshWorkspaceAgents,
     refreshWorkspaceBootstrap,
     refreshWorkspaceBootstrapConfig,
     refreshWorkspaceManagerProfile,
     rooms: data?.rooms ?? [],
-    navigatePane: navigatePaneRef.current,
     selectAgent,
     selectComputer: vi.fn(),
     selectConversation,
-    selectHub: vi.fn(),
     setAgentsData,
     setBootstrapData: (value) => {
       setData((current) => (typeof value === "function" ? value(current) : value));
@@ -312,8 +296,6 @@ function useAgentControllerHarness(
     setManagerProfileData: (value) => {
       setManagerProfile((current) => (typeof value === "function" ? value(current) : value));
     },
-    setHubPublishError: options.setHubPublishError,
-    setSelectedHubTemplateId: setSelectedHubTemplateIdRef.current,
     t: options.t ?? t,
   });
 
@@ -324,9 +306,6 @@ function useAgentControllerHarness(
     refreshWorkspaceBootstrap,
     refreshWorkspaceBootstrapConfig,
     refreshWorkspaceManagerProfile,
-    refreshHubTemplates: refreshHubTemplatesRef.current,
-    navigatePane: navigatePaneRef.current,
-    setSelectedHubTemplateId: setSelectedHubTemplateIdRef.current,
     selectAgent,
     selectConversation,
   };
@@ -365,7 +344,6 @@ describe("useAgentController", () => {
     vi.mocked(startFeishuRegistrationRequest).mockReset();
     vi.mocked(updateAgentRequest).mockReset();
     vi.mocked(patchCsgclawUserRequest).mockReset();
-    vi.mocked(publishAgentTemplateRequest).mockReset();
     navigationBlockerMock.current = {
       proceed: vi.fn(),
       reset: vi.fn(),
@@ -1255,110 +1233,6 @@ describe("useAgentController", () => {
 
     expect(result.current.agentViewProps.saveError).toBe("Insufficient balance");
     expect(result.current.agentViewProps.saveBillingURL).toBe("https://opencsg-stg.com/settings/billing");
-
-    await act(async () => {
-      await result.current.agentViewProps.onPublish?.("official", "manager", "manager template", false);
-    });
-
-    expect(result.current.agentViewProps.saveError).toBe("");
-    expect(result.current.agentViewProps.saveBillingURL).toBe("");
-  });
-
-  it("opens the published template when community deployment is waiting for review", async () => {
-    const setHubPublishError = vi.fn();
-    const worker: AgentLike = {
-      ...oldAgent,
-      id: "u-worker",
-      name: "reviewer",
-      role: "worker",
-      runtime_kind: "codex",
-    };
-    vi.mocked(publishAgentTemplateRequest).mockRejectedValueOnce({
-      status: 409,
-      code: "AGENT-ERR-22",
-      message: "sensitive-content review is still pending",
-      publishedTemplateId: "alice/reviewer",
-    } satisfies ApiError);
-    const { result } = renderHook(
-      () =>
-        useAgentControllerHarness({
-          activePane: { type: WorkspacePaneTypes.agent, id: "u-worker" },
-          agents: [worker],
-          openCSGAuthenticated: true,
-          setHubPublishError,
-        }),
-      { wrapper: createWrapper() },
-    );
-
-    let published = false;
-    await act(async () => {
-      published =
-        (await result.current.controller.agentViewProps.onPublish?.(
-          "official_deploy",
-          "reviewer",
-          "Reviews changes",
-          false,
-        )) ?? false;
-    });
-
-    expect(published).toBe(true);
-    expect(result.current.refreshHubTemplates).toHaveBeenCalledOnce();
-    expect(result.current.setSelectedHubTemplateId).toHaveBeenCalledWith("alice/reviewer");
-    expect(setHubPublishError).toHaveBeenCalledWith("sensitive-content review is still pending");
-    expect(result.current.navigatePane).toHaveBeenCalledWith(
-      { type: WorkspacePaneTypes.hub, id: "alice/reviewer", resourceType: "template" },
-      [],
-    );
-  });
-
-  it.each([
-    ["RESOURCE-ERR-1", "deployment resource is unavailable"],
-    ["template_deploy_failed", "template deployment failed"],
-  ])("opens the published template after partial deployment failure %s", async (code, message) => {
-    const setHubPublishError = vi.fn();
-    const worker: AgentLike = {
-      ...oldAgent,
-      id: "u-worker",
-      name: "reviewer",
-      role: "worker",
-      runtime_kind: "codex",
-    };
-    vi.mocked(publishAgentTemplateRequest).mockRejectedValueOnce({
-      status: 502,
-      code,
-      message,
-      publishedTemplateId: "alice/reviewer",
-    } satisfies ApiError);
-    const { result } = renderHook(
-      () =>
-        useAgentControllerHarness({
-          activePane: { type: WorkspacePaneTypes.agent, id: "u-worker" },
-          agents: [worker],
-          openCSGAuthenticated: true,
-          setHubPublishError,
-        }),
-      { wrapper: createWrapper() },
-    );
-
-    let published = false;
-    await act(async () => {
-      published =
-        (await result.current.controller.agentViewProps.onPublish?.(
-          "official_deploy",
-          "reviewer",
-          "Reviews changes",
-          false,
-        )) ?? false;
-    });
-
-    expect(published).toBe(true);
-    expect(result.current.refreshHubTemplates).toHaveBeenCalledOnce();
-    expect(result.current.setSelectedHubTemplateId).toHaveBeenCalledWith("alice/reviewer");
-    expect(setHubPublishError).toHaveBeenCalledWith(message);
-    expect(result.current.navigatePane).toHaveBeenCalledWith(
-      { type: WorkspacePaneTypes.hub, id: "alice/reviewer", resourceType: "template" },
-      [],
-    );
   });
 
   it("does not wait for bootstrap or skill refresh after saving only the selected agent model", async () => {

@@ -307,7 +307,7 @@ export function useWorkspaceController() {
     },
     [activePane, navigatePane, rooms],
   );
-  const { hub, refreshHubTemplates } = useWorkspaceHubController({
+  const { hub } = useWorkspaceHubController({
     activePane,
     hubLoaded,
     hubTemplates,
@@ -360,24 +360,19 @@ export function useWorkspaceController() {
     onAgentDeleted: handleAgentDeleted,
     profileDetailAgentID: conversationProfileDetailAgentID,
     refreshMCPServers: hub.refetchMCPServers,
-    refreshHubTemplates,
     refreshWorkspaceAgents,
     refreshWorkspaceModelProviders,
     refreshWorkspaceBootstrap,
     refreshWorkspaceBootstrapConfig,
     refreshWorkspaceManagerProfile,
     rooms,
-    navigatePane,
     selectAgent,
     selectComputer,
     selectConversation,
-    selectHub,
     selectModelProvider,
     setAgentsData,
     setBootstrapData,
     setManagerProfileData,
-    setHubPublishError: hub.setPublishError,
-    setSelectedHubTemplateId,
     t,
   });
   const closeConversationAgentDetail = useCallback(
