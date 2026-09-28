@@ -174,7 +174,7 @@ func RunInterfaceContract(t *testing.T, factory InterfaceFactory) {
 		if err != nil || created.ID != "agent-explicit" || created.Spec.Model.Selector != "provider-a.model-a" || created.Spec.Runtime.Credentials != nil || created.Spec.Model.APIKey != "" {
 			t.Fatalf("Create(explicit ID) = %+v, %v", created, err)
 		}
-		unchanged, err := agents.Update(context.Background(), created.ID, agentengine.AgentUpdateRequest{Spec: created.Spec, ResourceVersion: created.ResourceVersion})
+		unchanged, err := agents.Update(context.Background(), created.ID, agentengine.AgentUpdateRequest{Spec: created.Spec, FieldMask: []string{"description"}, ResourceVersion: created.ResourceVersion})
 		if err != nil || !unchanged.UpdatedAt.Equal(created.UpdatedAt) {
 			t.Fatalf("no-op Update() = %+v, %v, want UpdatedAt %v", unchanged, err, created.UpdatedAt)
 		}

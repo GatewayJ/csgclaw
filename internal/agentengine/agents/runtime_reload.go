@@ -2,8 +2,9 @@ package agents
 
 import (
 	"context"
-	agentruntime "csgclaw/internal/runtime"
 	"fmt"
+
+	agentruntime "csgclaw/internal/runtime"
 )
 
 // ReloadRuntimeIfRunning loads already-activated incremental projections. Unlike
@@ -21,37 +22,46 @@ func (s *Controller) ReloadRuntimeIfRunning(ctx context.Context, id string) (Age
 	if !isRuntimeRunning(selected) {
 		return selected, false, nil
 	}
+	item, err := s.reloadRuntimeLocked(ctx, selected)
+	return item, err == nil, err
+}
+
+// reloadRuntimeLocked 复用已有运行环境重新加载配置；调用方持有 lifecycle。
+func (s *Controller) reloadRuntimeLocked(ctx context.Context, selected Agent) (Agent, error) {
+	id := selected.ID
 	rt, err := s.runtimeForKind(selected.RuntimeKind)
 	if err != nil {
-		return Agent{}, false, err
+		return Agent{}, err
 	}
 	handle := runtimeHandleForAgent(selected)
-	if _, err := rt.Stop(ctx, handle); err != nil {
-		return Agent{}, false, err
-	}
-	if _, err := s.updateRuntimeState(id, agentruntime.Info{HandleID: handle.HandleID, State: agentruntime.StateStopped}); err != nil {
-		return Agent{}, false, err
+	if isRuntimeRunning(selected) {
+		if _, err := rt.Stop(ctx, handle); err != nil {
+			return Agent{}, err
+		}
+		if _, err := s.updateRuntimeState(id, agentruntime.Info{HandleID: handle.HandleID, State: agentruntime.StateStopped}); err != nil {
+			return Agent{}, err
+		}
 	}
 	if err := s.observeStoppedExtensions(ctx, id); err != nil {
-		return Agent{}, false, err
+		return Agent{}, err
 	}
 	state, err := rt.Start(ctx, handle)
 	if err != nil {
-		return Agent{}, false, err
+		return Agent{}, err
 	}
 	info, err := rt.Info(ctx, handle)
 	if err != nil {
-		return Agent{}, false, err
+		return Agent{}, err
 	}
 	if info.State == "" {
 		info.State = state
 	}
 	item, err := s.updateRuntimeState(id, info)
 	if err != nil {
-		return Agent{}, false, err
+		return Agent{}, err
 	}
 	if err := s.observeStartedExtensions(ctx, id); err != nil {
-		return Agent{}, false, err
+		return Agent{}, err
 	}
-	return item, true, nil
+	return item, nil
 }

@@ -15,7 +15,7 @@ import (
 func TestInstructionsUpdateReloadsRunningRuntime(t *testing.T) {
 	for _, kind := range []string{RuntimeKindCodex, RuntimeKindDSH, RuntimeKindOpenClawSandbox} {
 		for _, role := range []string{RoleWorker, RoleManager} {
-			for _, scenario := range []string{"changed", "combined_mcp", "unchanged", "stopped", "metadata", "reconcile_failure", "stop_failure", "start_failure"} {
+			for _, scenario := range []string{"changed", "combined_mcp", "unchanged", "replace", "stopped", "metadata", "reconcile_failure", "stop_failure", "start_failure"} {
 				t.Run(kind+"/"+role+"/"+scenario, func(t *testing.T) {
 					state := agentruntime.StateRunning
 					if scenario == "stopped" {
@@ -24,9 +24,10 @@ func TestInstructionsUpdateReloadsRunningRuntime(t *testing.T) {
 					initialState := state
 					var calls []string
 					failure := errors.New("指令更新失败")
+					failureEnabled := true
 					instructions := "旧指令"
 					next := "最新指令"
-					if scenario == "unchanged" {
+					if scenario == "unchanged" || scenario == "replace" {
 						next = instructions
 					}
 					var svc *Controller
@@ -40,7 +41,7 @@ func TestInstructionsUpdateReloadsRunningRuntime(t *testing.T) {
 						mcpRestart: func(agentruntime.MCPServersChange) (bool, error) { return false, nil },
 						reconcile: func(context.Context, agentruntime.Handle, agentruntime.RuntimeConfigChange) error {
 							calls = append(calls, "reconcile")
-							if scenario == "reconcile_failure" {
+							if scenario == "reconcile_failure" && failureEnabled {
 								return failure
 							}
 							current, _ := svc.Agent(id)
@@ -55,7 +56,7 @@ func TestInstructionsUpdateReloadsRunningRuntime(t *testing.T) {
 							if h.RuntimeID != normalizeRuntimeID("rt-instructions", id) {
 								t.Fatalf("运行环境发生变化：%s", h.RuntimeID)
 							}
-							if scenario == "stop_failure" {
+							if scenario == "stop_failure" && failureEnabled {
 								return state, failure
 							}
 							state = agentruntime.StateStopped
@@ -63,7 +64,7 @@ func TestInstructionsUpdateReloadsRunningRuntime(t *testing.T) {
 						},
 						start: func(context.Context, agentruntime.Handle) (agentruntime.State, error) {
 							calls = append(calls, "start")
-							if scenario == "start_failure" {
+							if scenario == "start_failure" && failureEnabled {
 								return state, failure
 							}
 							state = agentruntime.StateRunning
@@ -102,6 +103,13 @@ func TestInstructionsUpdateReloadsRunningRuntime(t *testing.T) {
 					}
 					svc.agents[id] = item
 					req := contract.AgentUpdateRequest{Spec: contract.AgentSpec{Instructions: next}, FieldMask: []string{"instructions"}}
+					if scenario == "replace" {
+						spec, err := svc.specFromService(item, nil, true)
+						if err != nil {
+							t.Fatal(err)
+						}
+						req = contract.AgentUpdateRequest{Spec: spec}
+					}
 					if scenario == "combined_mcp" {
 						req.Spec.MCPServers = map[string]contract.MCPServerConfig{"search": {"url": "https://example.com/mcp"}}
 						req.FieldMask = append(req.FieldMask, "mcp_servers")
@@ -122,7 +130,7 @@ func TestInstructionsUpdateReloadsRunningRuntime(t *testing.T) {
 					}
 					var want []string
 					switch scenario {
-					case "changed", "start_failure":
+					case "changed", "unchanged", "replace", "start_failure":
 						want = []string{"reconcile", "stop", "start"}
 					case "combined_mcp":
 						want = []string{"reconcile", "stop", "start"}
@@ -143,6 +151,31 @@ func TestInstructionsUpdateReloadsRunningRuntime(t *testing.T) {
 					}
 					if scenario == "start_failure" && current.Status != string(agentruntime.StateStopped) {
 						t.Fatalf("启动失败后的状态为 %s", current.Status)
+					}
+					failureEnabled = false
+					calls = nil
+					result, err = svc.Update(context.Background(), id, req)
+					if err != nil {
+						t.Fatalf("再次保存失败：%v", err)
+					}
+					if result.Status.State != contract.AgentState(initialState) {
+						t.Fatalf("再次保存后的状态为 %s，预期 %s", result.Status.State, initialState)
+					}
+					want = []string{"reconcile", "stop", "start"}
+					switch scenario {
+					case "metadata":
+						want = nil
+					case "stopped":
+						want = []string{"reconcile"}
+					case "start_failure":
+						want = []string{"reconcile", "start"}
+					case "combined_mcp":
+						if isHostRuntimeKind(kind) {
+							want = []string{"reconcile", "stop", "provision", "start"}
+						}
+					}
+					if !reflect.DeepEqual(calls, want) {
+						t.Fatalf("再次保存的调用顺序为 %v，预期 %v", calls, want)
 					}
 				})
 			}
