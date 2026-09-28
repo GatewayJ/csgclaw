@@ -25,6 +25,7 @@ func (r *Runner) replyIntents(message channel.InboundMessage, sequence uint64, f
 		createID := fmt.Sprintf("%s:reply:%06d:create", message.TurnID, i)
 		intent := baseIntent(message, createID, sequence)
 		intent.Kind = channel.DeliveryCard
+		intent.FinalReply = final
 		intent.Card = card
 		if i > 0 {
 			intent.RelatedID = fmt.Sprintf("%s:reply:%06d:create", message.TurnID, i-1)

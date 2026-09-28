@@ -233,6 +233,7 @@ func (r *Runner) Monitor(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			r.pruneConversationIndexes()
 			r.interactionMu.Lock()
 			items := make(map[string]pendingInteraction)
 			for key, item := range r.interactions {

@@ -73,3 +73,27 @@ func TestLongCodeReplyKeepsFencesAndFitsWireLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessPreservesLongDeltasBeforeWireSplitting(t *testing.T) {
+	text := strings.Repeat("中文😀\"\n", 2000)
+	p := NewProcess("turn", "scope")
+	events := p.Observe(agentengine.TurnEvent{Kind: agentengine.TurnEventThoughtDelta, Thought: text})
+	events = append(events, p.Observe(agentengine.TurnEvent{Kind: agentengine.TurnEventToolCallStart, Tool: &agentengine.ToolActivity{ID: "tool", Kind: "exec", InputSummary: text}})...)
+	found := 0
+	for _, e := range events {
+		if e.EventType != "REASONING_MESSAGE_CONTENT" && e.EventType != "TOOL_CALL_ARGS" {
+			continue
+		}
+		var b map[string]string
+		if err := json.Unmarshal([]byte(e.Content), &b); err != nil {
+			t.Fatal(err)
+		}
+		if b["delta"] != text {
+			t.Fatal("delta truncated before transport")
+		}
+		found++
+	}
+	if found != 2 {
+		t.Fatal("missing deltas")
+	}
+}

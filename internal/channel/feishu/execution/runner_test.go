@@ -317,7 +317,7 @@ func TestRunnerRendersEngineEventsIntoMemoryDelivery(t *testing.T) {
 	}
 	finalID := message.TurnID + ":reply:000000:final"
 	final, ok := store.Delivery(finalID)
-	if !ok || final.Kind != channeltypes.DeliveryCardUpdate || !strings.Contains(cardText(final.Card), "answer") {
+	if !ok || !final.FinalReply || final.Kind != channeltypes.DeliveryCardUpdate || !strings.Contains(cardText(final.Card), "answer") {
 		t.Fatalf("final delivery = %#v, found=%t", final, ok)
 	}
 }

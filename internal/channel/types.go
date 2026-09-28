@@ -204,6 +204,8 @@ type COTEvent struct {
 }
 
 type DeliveryIntent struct {
+	// FinalReply enables one independent replacement if terminal reply delivery fails.
+	FinalReply      bool           `json:"final_reply,omitempty"`
 	RequesterID     string         `json:"requester_id,omitempty"`
 	COTID           string         `json:"cot_id,omitempty"`
 	OriginMessageID string         `json:"origin_message_id,omitempty"`

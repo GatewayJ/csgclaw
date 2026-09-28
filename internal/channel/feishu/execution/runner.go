@@ -109,7 +109,7 @@ func (r *Runner) Submit(ctx context.Context, message channeltypes.InboundMessage
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer func() { release(); r.pruneConversationIndexes() }()
 	return r.submit(ctx, message)
 }
 func (r *Runner) submit(ctx context.Context, message channeltypes.InboundMessage) error {
@@ -178,6 +178,7 @@ func (r *Runner) run(ctx context.Context, active *activeRun, message channeltype
 		}
 		delete(r.runs, active)
 		r.mu.Unlock()
+		r.pruneConversationIndexes()
 	}()
 	if isChatReply(message) {
 		defer r.finishProcess(message, process)
@@ -297,7 +298,7 @@ func (r *Runner) Reset(ctx context.Context, message channeltypes.InboundMessage)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer func() { release(); r.pruneConversationIndexes() }()
 	if err := validateMessage(message); err != nil {
 		return err
 	}

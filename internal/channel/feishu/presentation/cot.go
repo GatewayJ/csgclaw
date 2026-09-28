@@ -53,7 +53,7 @@ func (p *Process) Observe(e agentengine.TurnEvent) []channel.COTEvent {
 			add("REASONING_START", map[string]any{"messageId": id})
 			add("REASONING_MESSAGE_START", map[string]any{"messageId": id, "role": "reasoning"})
 		}
-		add("REASONING_MESSAGE_CONTENT", map[string]any{"messageId": id, "delta": bounded(e.Thought, 1200)})
+		add("REASONING_MESSAGE_CONTENT", map[string]any{"messageId": id, "delta": e.Thought})
 	case agentengine.TurnEventToolCallStart, agentengine.TurnEventToolCallUpdate:
 		t := e.Tool
 		if t == nil || t.ID == "" {
@@ -77,7 +77,7 @@ func (p *Process) Observe(e agentengine.TurnEvent) []channel.COTEvent {
 			}
 			add("TOOL_CALL_START", map[string]any{"toolCallId": t.ID, "toolCallName": name, "title": title, "icon": "default"})
 			if t.InputSummary != "" {
-				add("TOOL_CALL_ARGS", map[string]any{"toolCallId": t.ID, "delta": bounded(t.InputSummary, 1200)})
+				add("TOOL_CALL_ARGS", map[string]any{"toolCallId": t.ID, "delta": t.InputSummary})
 			}
 			add("TOOL_CALL_END", map[string]any{"toolCallId": t.ID})
 			p.tools[t.ID] = false
@@ -87,7 +87,7 @@ func (p *Process) Observe(e agentengine.TurnEvent) []channel.COTEvent {
 			p.tools[t.ID] = true
 			content := t.Status
 			if t.OutputSummary != "" {
-				content += "\n" + bounded(t.OutputSummary, 1200)
+				content += "\n" + t.OutputSummary
 			}
 			add("TOOL_CALL_RESULT", map[string]any{"toolCallId": t.ID, "messageId": "result-" + t.ID, "role": "tool", "content": content})
 		}
@@ -123,14 +123,6 @@ func (p *Process) Finish(status agentengine.TurnStatus) []channel.COTEvent {
 		result = "canceled"
 	}
 	return append(events, processEvent("RUN_FINISHED", map[string]any{"runId": p.runID, "threadId": p.scope, "status": result}))
-}
-
-func bounded(s string, n int) string {
-	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
 }
 
 func (p *Process) reasoningID() string {

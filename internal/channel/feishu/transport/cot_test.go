@@ -92,3 +92,55 @@ func TestCOTCompletionAcceptsOnlyAlreadyTerminalResponse(t *testing.T) {
 		})
 	}
 }
+
+func TestCOTLimitsOnActualHTTPBody(t *testing.T) {
+	calls := 0
+	client := lark.NewClient("app", "secret", lark.WithEnableTokenCache(false), lark.WithHttpClient(&singleAttemptHTTPClient{client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		raw, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(raw) > 16000 {
+			t.Fatalf("wire body: %d", len(raw))
+		}
+		var b struct {
+			Events []json.RawMessage `json:"events"`
+		}
+		if err := json.Unmarshal(raw, &b); err != nil {
+			t.Fatal(err)
+		}
+		if len(b.Events) > 16 {
+			t.Fatal("too many events")
+		}
+		for _, e := range b.Events {
+			if len(e) > 1024 {
+				t.Fatal("event exceeds wire budget")
+			}
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"code":0}`))}, nil
+	})}}))
+	outbound := newDirectOutbound(client, tenantTokenSourceFunc(func(context.Context) (string, error) { return "tenant-token", nil }))
+	content, _ := json.Marshal(map[string]string{"delta": strings.Repeat("中文😀\n\"\\<>&", 3000), "toolCallId": "id"})
+	updates, err := SplitCOTUpdates(COTUpdateRequest{Ref: COTRef{"cot", "message"}, Events: []channel.COTEvent{{EventType: "TOOL_CALL_ARGS", Content: string(content)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range updates {
+		if err := outbound.UpdateCOT(context.Background(), u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := calls
+	invalid := COTUpdateRequest{Ref: COTRef{"cot", "message"}, Events: make([]channel.COTEvent, 17)}
+	if err := outbound.UpdateCOT(context.Background(), invalid); err == nil || calls != before {
+		t.Fatal("invalid request reached HTTP")
+	}
+	invalid.Events = []channel.COTEvent{{Content: strings.Repeat("x", 1024)}}
+	if err := outbound.UpdateCOT(context.Background(), invalid); err == nil || calls != before {
+		t.Fatal("oversized event reached HTTP")
+	}
+	if calls < 2 {
+		t.Fatal("expected multiple requests")
+	}
+}

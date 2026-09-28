@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ type cotRecordingAdapter struct {
 	completed        int
 	creates          int
 	failUpdate       bool
+	updateCalls      int
+	failUpdateAt     int
 	completeFailures int
 	completeAttempts int
 	block            <-chan struct{}
@@ -48,7 +51,8 @@ func (a *cotRecordingAdapter) UpdateCOT(_ context.Context, req transport.COTUpda
 	if req.Ref != (transport.COTRef{COTID: "cot", MessageID: "process"}) {
 		return errors.New("incorrect COT identifiers")
 	}
-	if a.failUpdate {
+	a.updateCalls++
+	if a.failUpdate || a.updateCalls == a.failUpdateAt {
 		return errors.New("ambiguous update")
 	}
 	a.events = append(a.events, req.Events...)
@@ -264,5 +268,27 @@ func TestCOTCompletionFailureKeepsRetryCardAfterAppendFailure(t *testing.T) {
 		if _, found := store.Delivery(id); !found {
 			t.Fatalf("missing notice %s", id)
 		}
+	}
+}
+
+func TestCOTSplitFailureStopsWithoutReplay(t *testing.T) {
+	store := feishustate.NewStore()
+	a := &cotRecordingAdapter{recordingAdapter: &recordingAdapter{}, failUpdateAt: 2}
+	d, _ := NewDispatcher(DispatcherOptions{State: store, Adapter: a})
+	create := cotIntent("create", channel.DeliveryCOTCreate)
+	create.RelatedID = ""
+	_ = store.Enqueue(create)
+	update := cotIntent("update", channel.DeliveryCOTUpdate)
+	update.Events = []channel.COTEvent{{EventType: "TOOL_CALL_ARGS", Content: `{"toolCallId":"tool","delta":"` + strings.Repeat("x", 40000) + `"}`}}
+	_ = store.Enqueue(update)
+	end := cotIntent("end", channel.DeliveryCOTComplete)
+	enqueueCOTEnd(t, store, end)
+	d.drainCOT(context.Background())
+	d.drainCOT(context.Background())
+	if a.updateCalls != 2 || len(a.events) != 15 || a.completed != 1 {
+		t.Fatalf("calls=%d events=%d complete=%d", a.updateCalls, len(a.events), a.completed)
+	}
+	if _, ok := store.Delivery("turn:cot:unavailable"); !ok {
+		t.Fatal("missing fallback notice")
 	}
 }

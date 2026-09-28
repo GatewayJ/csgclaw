@@ -126,7 +126,10 @@ func (a *sdkLarkOpenAPI) UpdateCOT(ctx context.Context, r COTUpdateRequest) erro
 	if len(r.Events) == 0 {
 		return nil
 	}
-	_, err := a.cotRequest(ctx, "update COT", http.MethodPut, "/open-apis/im/v1/message_cot", nil, map[string]any{"cot_id": r.Ref.COTID, "message_id": r.Ref.MessageID, "events": r.Events})
+	if err := validateCOTUpdate(r); err != nil {
+		return err
+	}
+	_, err := a.cotRequest(ctx, "update COT", http.MethodPut, "/open-apis/im/v1/message_cot", nil, cotUpdateBody(r))
 	return err
 }
 func (a *sdkLarkOpenAPI) CompleteCOT(ctx context.Context, r COTCompleteRequest) error {

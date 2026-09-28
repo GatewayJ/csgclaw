@@ -198,6 +198,9 @@ func (d *Dispatcher) drain(ctx context.Context) {
 				d.discardMediaUpload(intent.ID)
 			}
 			d.logDeliveryFailure(intent, err, retry, nextAttemptAt)
+			if markErr == nil && !retry {
+				d.enqueueFinalReplyReplacement(intent)
+			}
 			if retry {
 				blockedScopes[lane] = struct{}{}
 			}
@@ -323,6 +326,9 @@ func deliveryLane(intent channeltypes.DeliveryIntent) string {
 	scope := deliveryScope(intent)
 	switch intent.Kind {
 	case channeltypes.DeliveryCard:
+		if strings.HasSuffix(intent.ID, ":replacement") {
+			return scope + "\x00reply-replacement\x00" + intent.TurnID
+		}
 		return scope + "\x00card\x00" + intent.TurnID + "\x00" + intent.ID
 	case channeltypes.DeliveryCardUpdate:
 		return scope + "\x00card\x00" + intent.TurnID + "\x00" + presentationMessageID(intent)

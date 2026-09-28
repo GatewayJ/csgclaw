@@ -48,7 +48,25 @@ Use `/new` to reset the conversation. Long replies use consecutive cards.
 The channel consumes existing Agent Engine events. Codex supports permission and
 user-input requests; DSH currently supplies permission requests. Detached Codex
 questions start one follow-up turn in the same conversation after submission.
+COT updates use conservative local wire budgets: 1,024 bytes per encoded event,
+16 events per request, and 16,000 bytes per complete JSON request body, including
+escaping and identifiers. Thought and tool-argument deltas are split without
+truncation; display titles and result summaries may be shortened with an ellipsis.
+Oversized metadata fails locally. Partial append failures stop later fragments
+without replaying successful fragments. These budgets are not verified Feishu
+limits, and live API validation is still required.
 COT delivery failure leaves reply delivery available and produces a notice card.
+If a final reply card cannot be created or updated after its bounded retries,
+the dispatcher sends that final page as one independent replacement card. It
+retains the original chat/thread routing and complete page content, with a stable
+idempotency key and at most three attempts for transient failures. Failed
+replacements do not spawn further replacements. Replacement pages share a
+per-turn delivery lane: retries block later pages; permanent failure allows the
+remaining pages to proceed. Idle conversation indexes are reclaimed after runs
+and pending interactions finish, while detached questions retain their routing.
+Streaming and interaction cards
+are excluded. This does not recover pending deliveries after a process restart
+or guarantee delivery while Feishu permissions or connectivity remain broken.
 COT append requests have no replay key and are attempted once. Completion requests
 retry transient failures up to three attempts without replaying events. Recognized
 stop callbacks from locally recorded COT messages target their original turn and

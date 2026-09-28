@@ -56,23 +56,11 @@ func (d *Dispatcher) drainCOTPending(ctx context.Context, createsOnly bool) {
 		}
 		batch := []channel.DeliveryIntent{intent}
 		if intent.Kind == channel.DeliveryCOTUpdate {
-			size := 0
-			for _, e := range intent.Events {
-				size += len(e.Content)
-			}
 			for index+1 < len(pending) {
 				next := pending[index+1]
-				if next.Kind != channel.DeliveryCOTUpdate || next.TurnID != intent.TurnID {
+				if next.Kind != channel.DeliveryCOTUpdate || next.TurnID != intent.TurnID || len(intent.Events)+len(next.Events) > 16 {
 					break
 				}
-				n := 0
-				for _, e := range next.Events {
-					n += len(e.Content)
-				}
-				if size+n > 16000 {
-					break
-				}
-				size += n
 				index++
 				batch = append(batch, next)
 				intent.Events = append(intent.Events, next.Events...)
@@ -107,7 +95,16 @@ func (d *Dispatcher) drainCOTPending(ctx context.Context, createsOnly bool) {
 				if failed[intent.TurnID] {
 					err = ErrDependencyTerminal
 				} else {
-					err = client.UpdateCOT(requestCtx, transport.COTUpdateRequest{Ref: ref, Events: intent.Events})
+					var updates []transport.COTUpdateRequest
+					updates, err = transport.SplitCOTUpdates(transport.COTUpdateRequest{Ref: ref, Events: intent.Events})
+					for _, update := range updates {
+						if err != nil {
+							break
+						}
+						updateCtx, updateCancel := context.WithTimeout(ctx, 10*time.Second)
+						err = client.UpdateCOT(updateCtx, update)
+						updateCancel()
+					}
 				}
 			case channel.DeliveryCOTComplete:
 				err = client.CompleteCOT(requestCtx, transport.COTCompleteRequest{Ref: ref, Reason: intent.Reason})
