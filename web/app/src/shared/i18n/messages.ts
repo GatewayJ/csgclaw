@@ -2,6 +2,7 @@ export const messages = {
   zh: {
     resourceAllLoaded: "已加载全部 {total} 项",
     resourceLoading: "加载中…",
+    resourceUpdating: "处理中…",
     resourceLoadMore: "加载更多",
     resourceLoadFailed: "资源加载失败",
     resource_list_changed: "资源列表已变化，请重新加载",
@@ -1875,6 +1876,7 @@ export const messages = {
   en: {
     resourceAllLoaded: "All {total} items loaded",
     resourceLoading: "Loading…",
+    resourceUpdating: "Updating…",
     resourceLoadMore: "Load more",
     resourceLoadFailed: "Failed to load resources",
     resource_list_changed: "Resources changed. Reload the list.",

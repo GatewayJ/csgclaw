@@ -523,3 +523,36 @@ describe("Profile 资源交互", () => {
     expect(within(dialog).getByRole("switch", { name: "reviewer" })).toBeEnabled();
   });
 });
+
+it.each(["skill", "mcp"])("%s 更新期间保留其他资源状态并标记当前条目", async (kind) => {
+  const onSetResourceEnabled = vi.fn();
+  render(
+    <Harness
+      workspaceSupported
+      resourceBusy={`${kind}:alpha`}
+      skills={[
+        { name: "alpha", enabled: true },
+        { name: "beta", enabled: true },
+        { name: "gamma", enabled: false },
+      ]}
+      mcpServers={[
+        { name: "alpha", config: { enabled: true } },
+        { name: "beta", config: { enabled: true } },
+        { name: "gamma", config: { enabled: false } },
+      ]}
+      onSetResourceEnabled={onSetResourceEnabled}
+    />,
+    { wrapper: createQueryWrapper().wrapper },
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: kind === "skill" ? /agentProfileSkillsTab/ : /agentProfileMCPTab/ }),
+  );
+  for (const name of ["alpha", "beta", "gamma"]) {
+    const control = screen.getByRole("switch", { name });
+    expect(control).toBeDisabled();
+    expect(control).toHaveAttribute("aria-checked", String(name !== "gamma"));
+    expect(control).toHaveAttribute("aria-busy", String(name === "alpha"));
+  }
+  expect(screen.getByText("resourceUpdating")).toBeVisible();
+  expect(onSetResourceEnabled).not.toHaveBeenCalled();
+});

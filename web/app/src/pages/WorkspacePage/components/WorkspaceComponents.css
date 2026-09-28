@@ -2327,8 +2327,8 @@
   line-height: 20px;
 }
 
-button:disabled,
-button[disabled],
+button:disabled:not(.csg-switch),
+button[disabled]:not(.csg-switch),
 .agent-icon-button:disabled,
 .agent-action-text:disabled,
 .composer-send-button:disabled,
@@ -2405,8 +2405,8 @@ button[disabled],
   color: #fda29b;
 }
 
-:root[data-theme="dark"] button:disabled,
-:root[data-theme="dark"] button[disabled],
+:root[data-theme="dark"] button:disabled:not(.csg-switch),
+:root[data-theme="dark"] button[disabled]:not(.csg-switch),
 :root[data-theme="dark"] .agent-icon-button:disabled,
 :root[data-theme="dark"] .agent-action-text:disabled,
 :root[data-theme="dark"] .composer-send-button:disabled,

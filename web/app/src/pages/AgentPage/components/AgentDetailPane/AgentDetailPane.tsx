@@ -1068,6 +1068,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
             {visibleActiveProfileTab === "skills" && workspaceSupported ? (
               <AgentSkillsPanel
                 continuation={skillContinuation}
+                toggleBusyName={resourceBusy.startsWith("skill:") ? resourceBusy.slice(6) : ""}
                 onOpenDetail={(skill) => openResourceDetail("skill", skill.name)}
                 onToggle={
                   canToggleResources && onSetResourceEnabled
@@ -1115,6 +1116,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 ) : null}
                 <AgentMCPPanel
                   continuation={mcpContinuation}
+                  toggleBusyName={resourceBusy.startsWith("mcp:") ? resourceBusy.slice(4) : ""}
                   listError={mcpListError}
                   onOpenDetail={(server) => openResourceDetail("mcp", server.name)}
                   onToggle={
@@ -1708,6 +1710,7 @@ function AgentRuntimePanel({
 }
 
 type AgentMCPPanelProps = {
+  toggleBusyName: string;
   continuation?: ResourceContinuation;
   listError?: string;
   onOpenDetail: (item: MCPServer) => void;
@@ -1729,6 +1732,7 @@ type AgentMCPPanelProps = {
 };
 
 function AgentMCPPanel({
+  toggleBusyName,
   continuation,
   listError,
   onRequestDeleteMCP,
@@ -1843,7 +1847,9 @@ function AgentMCPPanel({
                         <RefreshCw size={14} />
                       </Button>
                     ) : null}
+                    {toggleBusyName === server.name ? <span role="status">{t("resourceUpdating")}</span> : null}
                     <Switch
+                      aria-busy={toggleBusyName === server.name}
                       aria-label={mcpServerDisplayName(server)}
                       checked={server.config.enabled !== false}
                       disabled={mutationBusy || !onToggle}
@@ -2387,6 +2393,7 @@ function AgentInstructionsPanel({ draft, t, updateDraft }: AgentInstructionsPane
 }
 
 type AgentSkillsPanelProps = {
+  toggleBusyName: string;
   continuation?: ResourceContinuation;
   onOpenDetail: (item: SlashSkillOption) => void;
   onToggle?: (item: SlashSkillOption) => Promise<void>;
@@ -2402,6 +2409,7 @@ type AgentSkillsPanelProps = {
 };
 
 function AgentSkillsPanel({
+  toggleBusyName,
   continuation,
   onOpenDetail,
   onToggle,
@@ -2493,7 +2501,9 @@ function AgentSkillsPanel({
                   <span className="hub-template-source-badge agent-skill-status-badge">
                     {skill.enabled === false ? t("appStatusDisabled") : t("resourcesSkillEnabled")}
                   </span>
+                  {toggleBusyName === skill.name ? <span role="status">{t("resourceUpdating")}</span> : null}
                   <Switch
+                    aria-busy={toggleBusyName === skill.name}
                     className="agent-skill-card-switch-sm"
                     aria-label={skill.name}
                     checked={skill.enabled !== false}
