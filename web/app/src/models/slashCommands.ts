@@ -178,3 +178,15 @@ function findTagEndOutsideQuotes(content: string, start: number): number | null 
   }
   return null;
 }
+
+export type SkillContinuation = {
+  scope?: string;
+  hasMore: boolean;
+  loading: boolean;
+  failed: boolean;
+  loadMore: () => Promise<boolean>;
+  retry: () => void;
+};
+
+export const builtinSlashCommandNames = ["new"];
+export const suggestedSlashCommandNames = suggestedActionCommands.map((command) => command.name);

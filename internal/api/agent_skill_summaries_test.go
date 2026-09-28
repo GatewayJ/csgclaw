@@ -34,6 +34,9 @@ func TestSkillSummariesBrowserFixture(t *testing.T) {
 	item := completeWorkerAgent("agent-skills", "Skills Verification")
 	item.RuntimeKind = agent.RuntimeKindCodex
 	item.MCPServers = map[string]any{"search": map[string]any{"url": "https://example.com/mcp"}}
+	for i := 0; i < 30; i++ {
+		item.MCPServers[fmt.Sprintf("server-%03d", i)] = map[string]any{"url": "https://example.com/mcp"}
+	}
 	controller := mustNewSeededServiceWithOptions(t, []agent.Agent{item}, agent.WithRuntime(&resourceEnablementRuntime{snapshotMCPServersRuntime: snapshotMCPServersRuntime{fakeCompatRuntime: fakeCompatRuntime{kind: agent.RuntimeKindCodex}}}))
 	layout, err := controller.AgentLayout(item.ID)
 	if err != nil {
@@ -49,8 +52,8 @@ func TestSkillSummariesBrowserFixture(t *testing.T) {
 		}
 	}
 	engine := agentengine.New(controller)
-	h := NewHandlerWithAuth(AgentServices{Records: controller, Workspace: controller.Workspace(), Models: controller.Models(), Runtime: controller}, engine, im.NewServiceFromBootstrap(im.Bootstrap{CurrentUserID: "user-admin", Users: []im.User{{ID: "user-admin", Name: "admin", Role: "admin"}}}), nil, nil, nil, nil, "", true)
-	h.SetParticipantService(participant.NewService(participant.NewMemoryStore([]apitypes.Participant{{ID: "pt-skills", Channel: "csgclaw", Type: participant.TypeAgent, AgentID: item.ID, Name: "Skills Verification", ChannelUserRef: "user-skills", ChannelUserKind: participant.ChannelUserKindLocalUserID}}), participant.WithAgentEngine(engine)))
+	h := NewHandlerWithAuth(AgentServices{Records: controller, Workspace: controller.Workspace(), Models: controller.Models(), Runtime: controller}, engine, im.NewServiceFromBootstrap(im.Bootstrap{CurrentUserID: "user-admin", Users: []im.User{{ID: "user-admin", Name: "admin", Role: "admin"}, {ID: "agent-skills", Name: "Skills Verification", Role: "worker"}}, Rooms: []im.Room{{ID: "room-skills", Title: "Skills Verification", IsDirect: true, Members: []string{"user-admin", "agent-skills"}, Messages: []im.Message{}}}}), nil, nil, nil, nil, "", true)
+	h.SetParticipantService(participant.NewService(participant.NewMemoryStore([]apitypes.Participant{{ID: "pt-skills", Channel: "csgclaw", Type: participant.TypeAgent, AgentID: item.ID, Name: "Skills Verification", ChannelUserRef: "agent-skills", ChannelUserKind: participant.ChannelUserKindLocalUserID}}), participant.WithAgentEngine(engine)))
 	h.SetAgentRuntimeService(runtimecatalog.NewService())
 	router := h.Routes()
 	finished := make(chan struct{})
@@ -64,7 +67,7 @@ func TestSkillSummariesBrowserFixture(t *testing.T) {
 	}
 	select {
 	case <-finished:
-	case <-time.After(150 * time.Second):
+	case <-time.After(5 * time.Minute):
 		t.Fatal("browser verification timed out")
 	}
 }
@@ -105,6 +108,18 @@ func TestAgentSkillSummariesThroughEngineHTTP(t *testing.T) {
 			}
 			if strings.Contains(w.Body.String(), "private-body-marker") || strings.Contains(w.Body.String(), layout.SkillsRoot) {
 				t.Fatal("summary leaked body or Runtime path")
+			}
+			paged := httptest.NewRecorder()
+			h.Routes().ServeHTTP(paged, httptest.NewRequest(http.MethodGet, "/api/v1/agents/agent-skills/skill-summaries?pagination=page&page=2&per=7", nil))
+			var page resourcePage[agentengine.SkillSummary]
+			if err := json.Unmarshal(paged.Body.Bytes(), &page); err != nil || paged.Code != http.StatusOK || len(page.Items) != 7 || page.Total != 1000 || page.Items[0].Name != "skill-0007" || paged.Header().Get("ETag") == "" {
+				t.Fatalf("unexpected paged summaries: %d %s %v", paged.Code, paged.Body, err)
+			}
+			searched := httptest.NewRecorder()
+			h.Routes().ServeHTTP(searched, httptest.NewRequest(http.MethodGet, "/api/v1/agents/agent-skills/skill-summaries?pagination=cursor&enabled=true&search=sk999&limit=20", nil))
+			var batch resourcePage[agentengine.SkillSummary]
+			if err := json.Unmarshal(searched.Body.Bytes(), &batch); err != nil || searched.Code != http.StatusOK || len(batch.Items) != 1 || batch.Items[0].Name != "skill-0999" || !batch.Items[0].Enabled || batch.HasMore {
+				t.Fatalf("unexpected searched summaries: %d %s %v", searched.Code, searched.Body, err)
 			}
 			plain, err := engine.Agents().Get(context.Background(), item.ID, agentengine.AgentGetOptions{})
 			if err != nil || plain.Status.SkillSummaries != nil {

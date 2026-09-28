@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAgentResourceLists } from "./useAgentResourceLists";
 import { useAgentResourceEnablement } from "./useAgentResourceEnablement";
 import { useBlocker } from "react-router-dom";
 import { apiErrorBillingURL, apiErrorCode, errorMessage as apiErrorMessage, type ApiError } from "@/api/client";
@@ -841,38 +842,43 @@ export function useAgentController({
       current ? { ...current, mcpServers: cloneMCPServersForDraft(view.servers) } : current,
     );
   });
+  const [skillCandidatesAgentID, setSkillCandidatesAgentID] = useState("");
   const globalSkillsQuery = useQuery({
+    enabled: Boolean(agentDetailAgentID) && skillCandidatesAgentID === agentDetailAgentID,
     queryKey: workspaceQueryKeys.skills(),
     queryFn: async () => {
       const payload = await fetchSkills();
       return Array.isArray(payload) ? payload : [];
     },
   });
+  const resourceLists = useAgentResourceLists(agentDetailAgentID);
   const agentSkillsQuery = useQuery({
     queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID),
     queryFn: ({ signal }) => fetchAgentSkillSummaries(agentDetailAgentID, signal),
-    enabled: Boolean(agentDetailAgentID),
+    enabled: Boolean(agentDetailAgentID) && skillCandidatesAgentID === agentDetailAgentID,
   });
   const agentMCPServersQuery = useQuery({
     queryKey: workspaceQueryKeys.agentMCPServers(agentDetailAgentID),
     queryFn: () => fetchAgentMCPServers(agentDetailAgentID),
     enabled: Boolean(agentDetailAgentID),
   });
-  const agentSkillsError = agentSkillsQuery.error
-    ? errorMessage(agentSkillsQuery.error, t("agentSkillsLoadFailed"))
-    : agentSkillsQuery.data?.some((skill) => skill.error)
+  const agentSkillsError = resourceLists.skills.query.error
+    ? errorMessage(resourceLists.skills.query.error, t("agentSkillsLoadFailed"))
+    : resourceLists.skills.items.some((skill) => skill.error)
       ? t("agentSkillMetadataUnavailable")
       : "";
   const agentSkillCandidates = useMemo(() => {
+    if (!agentSkillsQuery.data) return [];
     const currentSkillNames = new Set((agentSkillsQuery.data ?? []).map((skill) => String(skill?.name || "").trim()));
     return (globalSkillsQuery.data ?? []).filter((skill) => {
       const name = String(skill?.name || "").trim();
       return Boolean(name) && !currentSkillNames.has(name);
     });
   }, [agentSkillsQuery.data, globalSkillsQuery.data]);
-  const agentSkillCandidatesError = globalSkillsQuery.error
-    ? errorMessage(globalSkillsQuery.error, t("agentSkillsLoadFailed"))
-    : "";
+  const agentSkillCandidatesError =
+    globalSkillsQuery.error || agentSkillsQuery.error
+      ? errorMessage(globalSkillsQuery.error || agentSkillsQuery.error, t("agentSkillsLoadFailed"))
+      : "";
   const agentMCPServers = useMemo(() => {
     return mcpServersFromMap(agentMCPServersQuery.data?.servers);
   }, [agentMCPServersQuery.data]);
@@ -881,10 +887,10 @@ export function useAgentController({
   const [agentMCPSourceSyncBusyName, setAgentMCPSourceSyncBusyName] = useState("");
   const managedAgentMCPServerNames = useMemo(
     () =>
-      agentMCPServers
+      resourceLists.mcp.items
         .filter((server) => Boolean(mcpManagedKnowledgeBaseSource(server.config)))
         .map((server) => server.name),
-    [agentMCPServers],
+    [resourceLists.mcp.items],
   );
 
   useEffect(() => {
@@ -935,6 +941,9 @@ export function useAgentController({
       try {
         const result = await syncAgentMCPServerSource(agentDetailAgentID, name);
         queryClient.setQueryData(workspaceQueryKeys.agentMCPServers(agentDetailAgentID), result.agent);
+        await queryClient.invalidateQueries({
+          queryKey: [...workspaceQueryKeys.agentMCPServers(agentDetailAgentID), "page"],
+        });
         setAgentMCPSourceStatuses((current) => ({ ...current, [name]: result.source }));
         return true;
       } catch (error) {
@@ -2984,7 +2993,22 @@ export function useAgentController({
       authBusyProvider: cliproxyAuthBusy,
       notifierWebhookPublicOrigin,
       skillCandidates: agentSkillCandidates,
-      skillCandidatesLoading: globalSkillsQuery.isFetching,
+      skillCandidatesLoading:
+        globalSkillsQuery.isFetching ||
+        agentSkillsQuery.isFetching ||
+        (!agentSkillsQuery.data && !agentSkillsQuery.isError),
+      onLoadSkillCandidates: () => {
+        setSkillCandidatesAgentID(agentDetailAgentID);
+        if (skillCandidatesAgentID === agentDetailAgentID) {
+          void globalSkillsQuery.refetch();
+          void agentSkillsQuery.refetch();
+        }
+      },
+      skillContinuation: resourceLists.skills.continuation,
+      mcpContinuation: resourceLists.mcp.continuation,
+      mcpListError: resourceLists.mcp.query.error
+        ? errorMessage(resourceLists.mcp.query.error, t("resourcesMCPLoadFailed"))
+        : "",
       skillCandidatesError: agentSkillCandidatesError,
       skillAddBusy: agentSkillAddBusy,
       skillAddError: agentSkillAddError,
@@ -2993,7 +3017,7 @@ export function useAgentController({
       mcpCandidates: agentMCPCandidates,
       mcpCandidatesLoading: catalogMCPServersLoading,
       mcpCandidatesError: catalogMCPServersError,
-      mcpServers: agentMCPServers,
+      mcpServers: resourceLists.mcp.items,
       mcpSourceBusyNames: agentMCPSourceBusyNames,
       mcpSourceUnavailableNames: new Set(
         Object.entries(agentMCPSourceStatuses)
@@ -3014,8 +3038,8 @@ export function useAgentController({
       resourceError: resourceEnablement.error,
       onRetryResource: resourceEnablement.retry,
       onSetResourceEnabled: resourceEnablement.setEnabled,
-      skills: agentSkillsQuery.data ?? [],
-      skillsLoading: agentSkillsQuery.isLoading,
+      skills: resourceLists.skills.items,
+      skillsLoading: resourceLists.skills.query.isLoading,
       skillsError: agentSkillsError,
       workspaceSupported: Boolean(selectedAgentForPage),
       directoryPickerAvailable: bootstrapConfig?.directory_picker_available !== false,

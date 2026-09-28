@@ -220,11 +220,13 @@ function ConversationPaneContent({
   onApplyMention,
   slashCandidates = [],
   slashIndex = 0,
+  slashContinuation,
   slashPickerLoading = false,
   slashPickerOpen = false,
   onApplySlashCandidate = (_name) => {},
   threadSlashCandidates = [],
   threadSlashIndex = 0,
+  threadSlashContinuation,
   threadSlashPickerLoading = false,
   threadSlashPickerOpen = false,
   onApplyThreadSlashCandidate = (_name) => {},
@@ -471,6 +473,7 @@ function ConversationPaneContent({
       onOpenAgentDetail={onOpenAgentDetail}
       threadSlashCandidates={threadSlashCandidates}
       threadSlashIndex={threadSlashIndex}
+      threadSlashContinuation={threadSlashContinuation}
       threadSlashPickerLoading={threadSlashPickerLoading}
       threadSlashPickerOpen={threadSlashPickerOpen}
       onApplyThreadSlashCandidate={onApplyThreadSlashCandidate}
@@ -614,6 +617,7 @@ function ConversationPaneContent({
           mentionableUsersByName={mentionableUsersByName}
           slashCandidates={slashCandidates}
           slashIndex={slashIndex}
+          slashContinuation={slashContinuation}
           slashPickerLoading={slashPickerLoading}
           slashPickerOpen={slashPickerOpen}
           t={t}

@@ -5,6 +5,7 @@ import (
 	agent "csgclaw/internal/agentengine/agents"
 	"csgclaw/internal/mcp"
 	"csgclaw/internal/mcpschema"
+	"csgclaw/internal/resourcequery"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,11 @@ func (h *Handler) handleAgentMCPServersByID(w http.ResponseWriter, r *http.Reque
 		http.NotFound(w, r)
 		return
 	}
+	query, err := parseResourceQuery(r)
+	if err != nil {
+		writeResourceQueryError(w, err)
+		return
+	}
 	current, err := h.agentEngine.Agents().Get(r.Context(), id, agentengine.AgentGetOptions{AdoptMCPServers: true})
 	if err != nil {
 		status := http.StatusBadRequest
@@ -41,6 +47,27 @@ func (h *Handler) handleAgentMCPServersByID(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.Header().Set("ETag", strconv.Quote(current.ResourceVersion))
+	if query != nil {
+		entries := make([]resourcequery.Entry, 0, len(current.Spec.MCPServers))
+		for name, config := range current.Spec.MCPServers {
+			entries = append(entries, resourcequery.Entry{Name: name, Enabled: config["enabled"] != false})
+		}
+		names, meta, err := resourcequery.Select(entries, *query, id)
+		if err != nil {
+			writeResourceQueryError(w, err)
+			return
+		}
+		type entry struct {
+			Name   string                      `json:"name"`
+			Config agentengine.MCPServerConfig `json:"config"`
+		}
+		items := make([]entry, 0, len(names))
+		for _, name := range names {
+			items = append(items, entry{Name: name, Config: current.Spec.MCPServers[name]})
+		}
+		writeJSON(w, http.StatusOK, resourcePage[entry]{Items: items, Metadata: meta})
+		return
+	}
 	writeJSON(w, http.StatusOK, agent.MCPServersView{AgentID: current.ID, RuntimeKind: current.Status.RuntimeKind, Servers: serviceMCPServers(current.Spec.MCPServers)})
 }
 

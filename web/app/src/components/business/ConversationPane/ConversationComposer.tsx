@@ -1,3 +1,4 @@
+import type { SkillContinuation } from "@/models/slashCommands";
 import { ContextUsageRing } from "./ContextUsageRing";
 import { memo, useId, useMemo, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
@@ -69,6 +70,7 @@ export type ConversationComposerProps = {
   onWorkingAction?: (participant?: ConversationWorkingParticipant) => void;
   slashCandidates: SlashPickerCandidate[];
   slashIndex: number;
+  slashContinuation?: SkillContinuation;
   slashPickerLoading: boolean;
   slashPickerOpen: boolean;
   t: TranslateFn;
@@ -97,6 +99,7 @@ export const ConversationComposer = memo(function ConversationComposer({
   mentionableUsersByName,
   slashCandidates,
   slashIndex,
+  slashContinuation,
   slashPickerLoading,
   slashPickerOpen,
   t,
@@ -138,6 +141,7 @@ export const ConversationComposer = memo(function ConversationComposer({
         <SlashPicker
           candidates={slashCandidates}
           activeIndex={slashIndex}
+          continuation={slashContinuation}
           loading={slashPickerLoading}
           t={t}
           onSelect={(name) => onApplySlashCandidate(name)}

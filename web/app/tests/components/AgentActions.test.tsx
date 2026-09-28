@@ -1,3 +1,4 @@
+import { createQueryWrapper } from "../helpers/queryClient";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -1585,9 +1586,11 @@ describe("agent action visibility", () => {
         onOpenDM={vi.fn()}
         onDeleteSkill={onDeleteSkill}
       />,
+      { wrapper: createQueryWrapper().wrapper },
     );
 
     await user.click(screen.getByRole("button", { name: /^skills/i }));
+    await user.click(screen.getByRole("button", { name: /alpha.*Alpha installed/ }));
     await user.click(screen.getAllByRole("button", { name: "Delete" })[0]);
     expect(screen.getByText('Delete skill "alpha" from this agent?')).toBeInTheDocument();
 

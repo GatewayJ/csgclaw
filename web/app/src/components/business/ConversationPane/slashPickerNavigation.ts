@@ -1,7 +1,9 @@
+import type { SkillContinuation } from "@/models/slashCommands";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { SlashPickerCandidate } from "@/models/slashCommands";
 
 export type SlashPickerNavigationInput = {
+  continuation?: SkillContinuation;
   event: ReactKeyboardEvent<HTMLElement>;
   candidates: SlashPickerCandidate[];
   activeIndex: number;
@@ -13,6 +15,7 @@ export type SlashPickerNavigationInput = {
 };
 
 export function handleSlashPickerNavigation({
+  continuation,
   event,
   candidates,
   activeIndex,
@@ -30,6 +33,17 @@ export function handleSlashPickerNavigation({
   if ((event.key === "ArrowDown" || (controlNavigation && navigationKey === "n")) && candidates.length > 0) {
     event.preventDefault();
     onPrepareNavigation?.();
+    if (
+      continuation?.hasMore &&
+      candidates[activeIndex]?.type === "skill" &&
+      candidates[activeIndex + 1]?.type !== "skill"
+    ) {
+      if (!continuation.loading)
+        void continuation.loadMore().then((loaded) => {
+          if (loaded) onIndexChange(activeIndex + 1);
+        });
+      return true;
+    }
     onIndexChange((activeIndex + 1) % candidates.length);
     return true;
   }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"csgclaw/internal/agentengine/contract"
 	"csgclaw/internal/agentengine/registry"
+	"csgclaw/internal/resourcequery"
 	skilllocal "csgclaw/internal/skill/local"
 	skill "csgclaw/internal/skill/state"
 	"errors"
@@ -30,6 +31,26 @@ func (s *WorkspaceService) SkillSummaries(ctx context.Context, agentID string) (
 		out = append(out, contract.SkillSummary{Enabled: skill.Enabled(agent.SkillStates, item.Name), Name: item.Name, Description: item.Description, Error: item.Error})
 	}
 	return out, nil
+}
+
+func (s *WorkspaceService) SkillSummariesPage(ctx context.Context, agentID string, q resourcequery.Query) ([]contract.SkillSummary, *resourcequery.Metadata, error) {
+	layout, err := s.AgentLayout(agentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	agent, ok := s.agentSnapshot(agentID)
+	if !ok {
+		return nil, nil, errors.New("agent not found")
+	}
+	items, meta, err := skilllocal.ListSummariesPage(ctx, layout.SkillsRoot, q, func(name string) bool { return skill.Enabled(agent.SkillStates, name) })
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make([]contract.SkillSummary, 0, len(items))
+	for _, item := range items {
+		out = append(out, contract.SkillSummary{Enabled: skill.Enabled(agent.SkillStates, item.Name), Name: item.Name, Description: item.Description, Error: item.Error})
+	}
+	return out, &meta, nil
 }
 
 // WorkspaceService owns layout lookup, read-only browsing/export and logs.

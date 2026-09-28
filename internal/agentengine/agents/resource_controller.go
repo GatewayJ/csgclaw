@@ -160,7 +160,11 @@ func (f *Controller) Get(ctx context.Context, agentID string, options contract.A
 	if err != nil || !options.IncludeSkillSummaries {
 		return item, err
 	}
-	item.Status.SkillSummaries, err = f.Workspace().SkillSummaries(ctx, item.ID)
+	if options.SkillQuery != nil {
+		item.Status.SkillSummaries, item.Status.SkillPage, err = f.Workspace().SkillSummariesPage(ctx, item.ID, *options.SkillQuery)
+	} else {
+		item.Status.SkillSummaries, err = f.Workspace().SkillSummaries(ctx, item.ID)
+	}
 	return item, err
 }
 

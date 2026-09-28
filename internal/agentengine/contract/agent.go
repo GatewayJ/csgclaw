@@ -3,6 +3,7 @@ package contract
 import (
 	"context"
 	"csgclaw/internal/modelprovider"
+	"csgclaw/internal/resourcequery"
 	skill "csgclaw/internal/skill/state"
 	"time"
 )
@@ -37,6 +38,8 @@ type AgentGetOptions struct {
 	IncludeDocuments bool `json:"include_documents,omitempty"`
 	// IncludeSkillSummaries reads bounded, Runtime-local metadata on demand.
 	IncludeSkillSummaries bool `json:"include_skill_summaries,omitempty"`
+	// SkillQuery bounds summary metadata when IncludeSkillSummaries is enabled.
+	SkillQuery *resourcequery.Query `json:"skill_query,omitempty"`
 	// AdoptMCPServers reads unmanaged Runtime MCP state for an explicit MCP
 	// administration operation. Runtime read failures are returned to the caller.
 	AdoptMCPServers bool `json:"adopt_mcp_servers,omitempty"`
@@ -170,19 +173,20 @@ type MCPServerConfig map[string]any
 
 // AgentStatus is observed lifecycle state and is never desired configuration.
 type AgentStatus struct {
-	SkillSummaries []SkillSummary       `json:"skill_summaries,omitempty"`
-	State          AgentState           `json:"state"`
-	RuntimeID      string               `json:"runtime_id,omitempty"`
-	RuntimeKind    string               `json:"runtime_kind,omitempty"`
-	SandboxID      string               `json:"sandbox_id,omitempty"`
-	Ready          bool                 `json:"ready"`
-	Message        string               `json:"message,omitempty"`
-	Availability   *RuntimeAvailability `json:"availability,omitempty"`
-	StartupPending bool                 `json:"startup_pending,omitempty"`
-	Model          ModelView            `json:"model,omitempty"`
-	Capabilities   AgentCapabilities    `json:"capabilities,omitempty"`
-	Instructions   *InstructionsStatus  `json:"instructions,omitempty"`
-	Memory         *MemoryStatus        `json:"memory,omitempty"`
+	SkillPage      *resourcequery.Metadata `json:"skill_page,omitempty"`
+	SkillSummaries []SkillSummary          `json:"skill_summaries,omitempty"`
+	State          AgentState              `json:"state"`
+	RuntimeID      string                  `json:"runtime_id,omitempty"`
+	RuntimeKind    string                  `json:"runtime_kind,omitempty"`
+	SandboxID      string                  `json:"sandbox_id,omitempty"`
+	Ready          bool                    `json:"ready"`
+	Message        string                  `json:"message,omitempty"`
+	Availability   *RuntimeAvailability    `json:"availability,omitempty"`
+	StartupPending bool                    `json:"startup_pending,omitempty"`
+	Model          ModelView               `json:"model,omitempty"`
+	Capabilities   AgentCapabilities       `json:"capabilities,omitempty"`
+	Instructions   *InstructionsStatus     `json:"instructions,omitempty"`
+	Memory         *MemoryStatus           `json:"memory,omitempty"`
 }
 
 // SkillSummary is a read-only projection, independent of desired Skill names.

@@ -1,3 +1,5 @@
+import { ResourceLoadMore } from "../ResourceLoadMore";
+import type { ResourceContinuation } from "@/hooks/workspace/useInfiniteAgentResources";
 import { mcpManagedKnowledgeBaseSource } from "@/models/mcp";
 import {
   AlertCircle,
@@ -233,6 +235,10 @@ export type AgentDetailPaneProps = {
   mcpAddError?: string;
   mcpDeleteBusy?: boolean;
   mcpDeleteError?: string;
+  skillContinuation?: ResourceContinuation;
+  mcpContinuation?: ResourceContinuation;
+  mcpListError?: string;
+  onLoadSkillCandidates?: () => void;
   skills?: SlashSkillOption[];
   skillsError?: string;
   skillsLoading?: boolean;
@@ -293,6 +299,10 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     skills = [],
     skillsLoading = false,
     skillsError = "",
+    skillContinuation,
+    mcpContinuation,
+    mcpListError = "",
+    onLoadSkillCandidates,
     skillCandidates = [],
     skillCandidatesLoading = false,
     skillCandidatesError = "",
@@ -541,14 +551,30 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
             ...(!isNotifierDraft ? [{ id: "instructions" as const, label: t("agentInstructions") }] : []),
             ...(item.memory_supported ? [{ id: "memory" as const, label: t("agentMemoryTab") }] : []),
             ...(workspaceSupported
-              ? [{ id: "skills" as const, label: t("agentProfileSkillsTab"), count: skills.length }]
+              ? [
+                  {
+                    id: "skills" as const,
+                    label: t("agentProfileSkillsTab"),
+                    count: skillContinuation?.total ?? skills.length,
+                  },
+                ]
               : []),
             ...(showApps ? [{ id: "apps" as const, label: t("agentAppsTab") }] : []),
             ...(showMCPServers ? [{ id: "mcp" as const, label: t("agentProfileMCPTab") }] : []),
             ...(!isNotificationBotAgent(item) ? [{ id: "channels" as const, label: t("agentChannelsTitle") }] : []),
           ]
         : [],
-    [draft, isNotifierDraft, item, showApps, showMCPServers, skills.length, t, workspaceSupported],
+    [
+      draft,
+      isNotifierDraft,
+      item,
+      showApps,
+      showMCPServers,
+      skills.length,
+      skillContinuation?.total,
+      t,
+      workspaceSupported,
+    ],
   );
   const selectedProfileTab = requestedProfileTab || activeProfileTab;
   const visibleActiveProfileTab = profileTabs.some((tab) => tab.id === selectedProfileTab)
@@ -609,6 +635,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
       setAddMCPDialogOpen(false);
       setDeleteMCPDialogOpen(false);
       setMCPPendingDelete(null);
+      setResourceDetail(null);
     }
   }, [showMCPServers]);
 
@@ -650,6 +677,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     if (deleted) {
       setDeleteSkillDialogOpen(false);
       setSkillPendingDelete(null);
+      setResourceDetail(null);
     }
   }
 
@@ -1037,6 +1065,8 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
             ) : null}
             {visibleActiveProfileTab === "skills" && workspaceSupported ? (
               <AgentSkillsPanel
+                continuation={skillContinuation}
+                toggleBusyName={resourceBusy.startsWith("skill:") ? resourceBusy.slice(6) : ""}
                 onOpenDetail={(skill) => openResourceDetail("skill", skill.name)}
                 onToggle={
                   canToggleResources && onSetResourceEnabled
@@ -1046,13 +1076,15 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 mutationBusy={resourceMutationBusy || Boolean(appsController.busyID)}
                 skillAddBusy={skillAddBusy}
                 skillAddError={skillAddError}
-                skillCandidatesLoading={skillCandidatesLoading}
                 skillDeleteError={skillDeleteError}
                 skills={skills}
                 skillsError={skillsError}
                 skillsLoading={skillsLoading}
                 t={t}
-                onOpenAddSkills={() => setAddSkillsDialogOpen(true)}
+                onOpenAddSkills={() => {
+                  onLoadSkillCandidates?.();
+                  setAddSkillsDialogOpen(true);
+                }}
               />
             ) : null}
 
@@ -1081,6 +1113,9 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                   />
                 ) : null}
                 <AgentMCPPanel
+                  continuation={mcpContinuation}
+                  toggleBusyName={resourceBusy.startsWith("mcp:") ? resourceBusy.slice(4) : ""}
+                  listError={mcpListError}
                   onOpenDetail={(server) => openResourceDetail("mcp", server.name)}
                   onToggle={
                     canToggleResources && onSetResourceEnabled
@@ -1673,6 +1708,9 @@ function AgentRuntimePanel({
 }
 
 type AgentMCPPanelProps = {
+  toggleBusyName: string;
+  continuation?: ResourceContinuation;
+  listError?: string;
   onOpenDetail: (item: MCPServer) => void;
   onToggle?: (item: MCPServer) => Promise<void>;
   mutationBusy: boolean;
@@ -1692,6 +1730,9 @@ type AgentMCPPanelProps = {
 };
 
 function AgentMCPPanel({
+  toggleBusyName,
+  continuation,
+  listError,
   onRequestDeleteMCP,
   onOpenDetail,
   onToggle,
@@ -1722,7 +1763,9 @@ function AgentMCPPanel({
           </p>
         </div>
         <div className="agent-skills-summary-actions">
-          <span className="agent-skills-summary-count">{t("agentMCPCount", { count: servers.length })}</span>
+          <span className="agent-skills-summary-count">
+            {t("agentMCPCount", { count: continuation?.total ?? servers.length })}
+          </span>
           <Tooltip content={t("agentMCPAdd")}>
             <span>
               <Button
@@ -1741,7 +1784,17 @@ function AgentMCPPanel({
       </div>
       {addError ? <div className="form-error">{addError}</div> : null}
       {deleteError ? <div className="form-error">{deleteError}</div> : null}
-      {!servers.length ? (
+      {listError ? (
+        <div className="form-error" role="alert">
+          {listError}{" "}
+          {continuation ? (
+            <Button size="sm" onClick={continuation.retry}>
+              {t("retry")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {!continuation?.loading && !listError && !servers.length ? (
         <div className="agent-skills-summary-empty">
           <span className="agent-skills-summary-icon" aria-hidden="true">
             <Server size={18} strokeWidth={1.8} />
@@ -1792,7 +1845,9 @@ function AgentMCPPanel({
                         <RefreshCw size={14} />
                       </Button>
                     ) : null}
+                    {toggleBusyName === server.name ? <span role="status">{t("resourceUpdating")}</span> : null}
                     <Switch
+                      aria-busy={toggleBusyName === server.name}
                       aria-label={mcpServerDisplayName(server)}
                       checked={server.config.enabled !== false}
                       disabled={mutationBusy || !onToggle}
@@ -1814,6 +1869,7 @@ function AgentMCPPanel({
           })}
         </ResourceList>
       ) : null}
+      <ResourceLoadMore continuation={continuation} t={t} />
     </section>
   );
 }
@@ -2335,13 +2391,14 @@ function AgentInstructionsPanel({ draft, t, updateDraft }: AgentInstructionsPane
 }
 
 type AgentSkillsPanelProps = {
+  toggleBusyName: string;
+  continuation?: ResourceContinuation;
   onOpenDetail: (item: SlashSkillOption) => void;
   onToggle?: (item: SlashSkillOption) => Promise<void>;
   mutationBusy: boolean;
   onOpenAddSkills: () => void;
   skillAddBusy: boolean;
   skillAddError: string;
-  skillCandidatesLoading: boolean;
   skillDeleteError: string;
   skills: readonly SlashSkillOption[];
   skillsError: string;
@@ -2350,13 +2407,14 @@ type AgentSkillsPanelProps = {
 };
 
 function AgentSkillsPanel({
+  toggleBusyName,
+  continuation,
   onOpenDetail,
   onToggle,
   mutationBusy,
   onOpenAddSkills,
   skillAddBusy,
   skillAddError,
-  skillCandidatesLoading,
   skillDeleteError,
   skills,
   skillsError,
@@ -2371,7 +2429,9 @@ function AgentSkillsPanel({
           <p className="profile-section-description">{t("agentSkillsDescription")}</p>
         </div>
         <div className="agent-skills-summary-actions">
-          <span className="agent-skills-summary-count">{t("agentSkillsCount", { count: skills.length })}</span>
+          <span className="agent-skills-summary-count">
+            {t("agentSkillsCount", { count: continuation?.total ?? skills.length })}
+          </span>
           <Tooltip content={t("agentSkillAdd")}>
             <span>
               <Button
@@ -2379,7 +2439,7 @@ function AgentSkillsPanel({
                 variant="secondaryGray"
                 size="sm"
                 aria-label={t("agentSkillAdd")}
-                disabled={mutationBusy || skillCandidatesLoading || skillAddBusy}
+                disabled={mutationBusy || skillAddBusy}
                 onClick={onOpenAddSkills}
               >
                 <Plus aria-hidden="true" size={16} strokeWidth={2.2} />
@@ -2388,7 +2448,16 @@ function AgentSkillsPanel({
           </Tooltip>
         </div>
       </div>
-      {skillsError ? <div className="form-error">{skillsError}</div> : null}
+      {skillsError ? (
+        <div className="form-error">
+          {skillsError}{" "}
+          {continuation ? (
+            <Button size="sm" onClick={continuation.retry}>
+              {t("retry")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {skillAddError ? <div className="form-error">{skillAddError}</div> : null}
       {skillDeleteError ? <div className="form-error">{skillDeleteError}</div> : null}
       {skillsLoading ? (
@@ -2410,12 +2479,7 @@ function AgentSkillsPanel({
             <strong>{t("agentSkillsEmpty")}</strong>
             <p>{t("agentSkillsEmptyHint")}</p>
           </div>
-          <Button
-            variant="secondaryGray"
-            size="sm"
-            disabled={mutationBusy || skillCandidatesLoading || skillAddBusy}
-            onClick={onOpenAddSkills}
-          >
+          <Button variant="secondaryGray" size="sm" disabled={mutationBusy || skillAddBusy} onClick={onOpenAddSkills}>
             <Plus aria-hidden="true" size={15} strokeWidth={2.2} />
             {t("agentSkillAdd")}
           </Button>
@@ -2435,7 +2499,9 @@ function AgentSkillsPanel({
                   <span className="hub-template-source-badge agent-skill-status-badge">
                     {skill.enabled === false ? t("appStatusDisabled") : t("resourcesSkillEnabled")}
                   </span>
+                  {toggleBusyName === skill.name ? <span role="status">{t("resourceUpdating")}</span> : null}
                   <Switch
+                    aria-busy={toggleBusyName === skill.name}
                     className="agent-skill-card-switch-sm"
                     aria-label={skill.name}
                     checked={skill.enabled !== false}
@@ -2448,6 +2514,7 @@ function AgentSkillsPanel({
           ))}
         </div>
       ) : null}
+      <ResourceLoadMore continuation={continuation} t={t} />
     </section>
   );
 }

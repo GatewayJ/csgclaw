@@ -3,6 +3,7 @@ package local
 import (
 	"bufio"
 	"context"
+	"csgclaw/internal/resourcequery"
 	"errors"
 	"io"
 	"os"
@@ -88,6 +89,63 @@ enqueue:
 		}
 	}
 	return out, nil
+}
+
+// ListSummariesPage enumerates membership before reading metadata only for the selected names.
+func ListSummariesPage(ctx context.Context, root string, q resourcequery.Query, enabled func(string) bool) ([]SkillSummary, resourcequery.Metadata, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, resourcequery.Metadata{}, err
+	}
+	directory, err := os.OpenRoot(root)
+	if errors.Is(err, os.ErrNotExist) {
+		_, meta, selectErr := resourcequery.Select(nil, q, root)
+		return []SkillSummary{}, meta, selectErr
+	}
+	if err != nil {
+		return nil, resourcequery.Metadata{}, err
+	}
+	defer directory.Close()
+	file, err := directory.Open(".")
+	if err != nil {
+		return nil, resourcequery.Metadata{}, err
+	}
+	entries, err := file.ReadDir(-1)
+	_ = file.Close()
+	if err != nil {
+		return nil, resourcequery.Metadata{}, err
+	}
+	candidates := make([]resourcequery.Entry, 0, len(entries))
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, resourcequery.Metadata{}, err
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		// Match the full-list behavior: absent SKILL.md files are not resources;
+		// unreadable metadata remains visible with its existing error marker.
+		_, statErr := directory.Lstat(filepath.Join(entry.Name(), skillFileName))
+		if errors.Is(statErr, os.ErrNotExist) {
+			continue
+		}
+		candidates = append(candidates, resourcequery.Entry{Name: entry.Name(), Enabled: enabled(entry.Name())})
+	}
+	names, meta, err := resourcequery.Select(candidates, q, root)
+	if err != nil {
+		return nil, meta, err
+	}
+	items := make([]SkillSummary, 0, len(names))
+	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			return nil, meta, err
+		}
+		item, present := readSkillSummary(ctx, directory, name)
+		if !present {
+			return nil, meta, resourcequery.ErrChanged
+		}
+		items = append(items, item)
+	}
+	return items, meta, nil
 }
 
 func readSkillSummary(ctx context.Context, root *os.Root, name string) (SkillSummary, bool) {

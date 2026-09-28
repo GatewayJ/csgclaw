@@ -6,6 +6,7 @@ export function ResourceList({ children }: { children: ReactNode }) {
 }
 
 export function ResourceListCard({
+  disabled,
   title,
   description,
   icon,
@@ -14,6 +15,7 @@ export function ResourceListCard({
   active,
   onOpen,
 }: {
+  disabled?: boolean;
   title: string;
   description?: string;
   icon: ReactNode;
@@ -24,7 +26,7 @@ export function ResourceListCard({
 }) {
   return (
     <article className={`${styles.card} ${active ? styles.active : ""}`}>
-      <button type="button" className={styles.content} onClick={onOpen}>
+      <button type="button" disabled={disabled} className={styles.content} onClick={onOpen}>
         <span className={styles.icon} aria-hidden="true">
           {icon}
         </span>

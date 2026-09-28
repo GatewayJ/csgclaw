@@ -3,6 +3,7 @@ package enginetest
 
 import (
 	"context"
+	"csgclaw/internal/resourcequery"
 	"errors"
 	"fmt"
 	"maps"
@@ -365,6 +366,24 @@ func (a *memoryAgents) Get(ctx context.Context, agentID string, options agenteng
 		}
 	}
 	sort.Slice(item.Status.SkillSummaries, func(i, j int) bool { return item.Status.SkillSummaries[i].Name < item.Status.SkillSummaries[j].Name })
+	if options.SkillQuery != nil && options.IncludeSkillSummaries {
+		entries := make([]resourcequery.Entry, 0, len(item.Status.SkillSummaries))
+		byName := map[string]agentengine.SkillSummary{}
+		for _, summary := range item.Status.SkillSummaries {
+			entries = append(entries, resourcequery.Entry{Name: summary.Name, Enabled: summary.Enabled})
+			byName[summary.Name] = summary
+		}
+		names, meta, err := resourcequery.Select(entries, *options.SkillQuery, item.ID)
+		if err != nil {
+			return agentengine.Agent{}, err
+		}
+		item.Status.SkillSummaries = make([]agentengine.SkillSummary, 0, len(names))
+		for _, name := range names {
+			item.Status.SkillSummaries = append(item.Status.SkillSummaries, byName[name])
+		}
+		item.Status.SkillPage = &meta
+	}
+
 	return item, nil
 }
 

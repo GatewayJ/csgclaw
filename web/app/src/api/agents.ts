@@ -501,7 +501,7 @@ export async function setAgentResourceEnabled(
 ): Promise<AgentResourceEnabledResult> {
   const base = `api/v1/agents/${encodeURIComponent(agentID)}`;
   const list = kind === "skill" ? "skill-summaries" : "mcp-servers";
-  const { headers } = await requestWithResponse<unknown>(`${base}/${list}`);
+  const { headers } = await requestWithResponse<unknown>(`${base}/${list}?pagination=page&page=1&per=1`);
   const etag = headers.get("ETag");
   if (!etag)
     throw {

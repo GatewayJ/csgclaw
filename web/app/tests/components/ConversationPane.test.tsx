@@ -1,3 +1,4 @@
+import { createQueryWrapper } from "../helpers/queryClient";
 import { createRef, useRef, useState } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -336,7 +337,7 @@ function renderThreadPane({
     );
   }
 
-  return render(<Harness />);
+  return render(<Harness />, { wrapper: createQueryWrapper().wrapper });
 }
 
 describe("ConversationPane", () => {
@@ -914,6 +915,7 @@ describe("ConversationPane", () => {
 
     const drawer = screen.getByRole("dialog", { name: "agentDetailPanel" });
     await user.click(within(drawer).getByRole("button", { name: /agentProfileSkillsTab/ }));
+    await user.click(within(drawer).getByRole("button", { name: /alpha.*Alpha skill/ }));
     await user.click(within(drawer).getByRole("button", { name: "agentDeleteSkill" }));
 
     const confirmation = screen.getByRole("dialog", { name: "agentDeleteSkill" });

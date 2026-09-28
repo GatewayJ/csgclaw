@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"csgclaw/internal/resourcequery"
 	"errors"
 	"fmt"
 	"os"
@@ -108,5 +109,29 @@ func BenchmarkListSummaries(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func TestPagedSummariesMembershipAndMetadata(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"alpha", "beta", "zulu", "empty"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if name != "empty" {
+			if err := os.WriteFile(filepath.Join(root, name, "SKILL.md"), []byte("---\ndescription: "+name+" description\n---\nbody"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	enabled := true
+	items, meta, err := ListSummariesPage(context.Background(), root, resourcequery.Query{Mode: "page", Page: 2, Size: 1, Enabled: &enabled}, func(name string) bool { return name != "beta" })
+	if err != nil || meta.Total != 2 || len(items) != 1 || items[0].Name != "zulu" || items[0].Description != "zulu description" {
+		t.Fatalf("%+v %+v %v", items, meta, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := ListSummariesPage(ctx, root, resourcequery.Query{Mode: "page", Page: 1, Size: 1}, func(string) bool { return true }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation: %v", err)
 	}
 }

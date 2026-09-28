@@ -1,3 +1,17 @@
+import { fetchAgentSkillBatch, fetchAgentMCPBatch } from "@/api/agentResources";
+import type { AgentMCPServersView } from "@/api/agents";
+import { mcpServersFromMap } from "@/models/mcp";
+vi.mock("@/api/agentResources", () => ({ fetchAgentSkillBatch: vi.fn(), fetchAgentMCPBatch: vi.fn() }));
+function setMCPView(view: AgentMCPServersView) {
+  vi.mocked(fetchAgentMCPServers).mockResolvedValue(view);
+  const items = mcpServersFromMap(view.servers);
+  vi.mocked(fetchAgentMCPBatch).mockResolvedValue({
+    items,
+    total: items.length,
+    has_more: false,
+    list_revision: "test",
+  });
+}
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
@@ -339,6 +353,23 @@ function useAgentControllerHarness(
 
 describe("useAgentController", () => {
   beforeEach(() => {
+    vi.mocked(fetchAgentSkillBatch).mockImplementation(async (id, cursor, _options, signal) => {
+      const items = await fetchAgentSkillSummaries(id, signal);
+      return {
+        items: items.slice(Number(cursor || 0), Number(cursor || 0) + 20),
+        total: items.length,
+        has_more: Number(cursor || 0) + 20 < items.length,
+        next_cursor: Number(cursor || 0) + 20 < items.length ? String(Number(cursor || 0) + 20) : undefined,
+        list_revision: "test",
+      };
+    });
+    vi.mocked(fetchAgentMCPBatch).mockResolvedValue({
+      items: [],
+      total: 0,
+      has_more: false,
+      list_revision: "test",
+    });
+
     vi.mocked(batchAddAgentMCPServersRequest).mockReset();
     vi.mocked(batchDeleteAgentMCPServersRequest).mockReset();
     vi.mocked(fetchAgent).mockReset();
@@ -1691,14 +1722,15 @@ describe("useAgentController", () => {
     await waitFor(() => expect(result.current.agentViewProps.savedDraft?.model_id).toBe("MiniMax-M2.5"));
   });
 
-  it("loads hundreds of descriptions with one summary request and no file requests", async () => {
+  it("loads one page of descriptions and exposes the complete resource count", async () => {
     const skills = Array.from({ length: 300 }, (_, index) => ({
       name: `skill-${index}`,
       description: `Description ${index}`,
     }));
     vi.mocked(fetchAgentSkillSummaries).mockResolvedValue(skills);
     const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
-    await waitFor(() => expect(result.current.agentViewProps.skills).toEqual(skills));
+    await waitFor(() => expect(result.current.agentViewProps.skills).toEqual(skills.slice(0, 20)));
+    expect(result.current.agentViewProps.skillContinuation.total).toBe(300);
     expect(fetchAgentSkillSummaries).toHaveBeenCalledTimes(1);
     expect(fetchAgentSkillsFile).not.toHaveBeenCalled();
   });
@@ -1742,8 +1774,9 @@ describe("useAgentController", () => {
 
     const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
 
+    act(() => result.current.agentViewProps.onLoadSkillCandidates());
     await waitFor(() => expect(fetchSkills).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(fetchAgentSkillSummaries).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchAgentSkillSummaries).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(result.current.agentViewProps.skills).toHaveLength(1));
 
     expect(result.current.agentViewProps.skillCandidates).toEqual([{ name: "beta", description: "Beta skill" }]);
@@ -1806,7 +1839,7 @@ describe("useAgentController", () => {
   });
 
   it("deletes an MCP server through the backend MCP management endpoint", async () => {
-    vi.mocked(fetchAgentMCPServers).mockResolvedValueOnce({
+    setMCPView({
       agent_id: "u-manager",
       runtime_kind: "codex",
       servers: {
@@ -1837,7 +1870,7 @@ describe("useAgentController", () => {
   });
 
   it("treats a managed knowledge base as a regular agent MCP without loading its source detail", async () => {
-    vi.mocked(fetchAgentMCPServers).mockResolvedValueOnce({
+    setMCPView({
       agent_id: "u-manager",
       runtime_kind: "codex",
       servers: {
@@ -1874,8 +1907,8 @@ describe("useAgentController", () => {
     expect(fetchAgentMCPServerSourceStatus).not.toHaveBeenCalled();
   });
 
-  it("uses the single backend MCP server map for display, candidates, and deletion", async () => {
-    vi.mocked(fetchAgentMCPServers).mockResolvedValueOnce({
+  it("keeps paginated MCP display and complete candidate membership consistent", async () => {
+    setMCPView({
       agent_id: "u-manager",
       runtime_kind: "codex",
       servers: {
@@ -1923,7 +1956,7 @@ describe("useAgentController", () => {
   });
 
   it("filters catalog MCP candidates by the backend MCP server map", async () => {
-    vi.mocked(fetchAgentMCPServers).mockResolvedValueOnce({
+    setMCPView({
       agent_id: "u-manager",
       runtime_kind: "codex",
       servers: {
@@ -1949,7 +1982,7 @@ describe("useAgentController", () => {
   });
 
   it("renders the backend MCP server map when the runtime state is unavailable", async () => {
-    vi.mocked(fetchAgentMCPServers).mockResolvedValueOnce({
+    setMCPView({
       agent_id: "u-manager",
       runtime_kind: "codex",
       servers: {
@@ -1986,7 +2019,10 @@ describe("useAgentController", () => {
         servers: null,
       })
       .mockResolvedValue(installedView);
-    vi.mocked(batchAddAgentMCPServersRequest).mockResolvedValueOnce(installedView);
+    vi.mocked(batchAddAgentMCPServersRequest).mockImplementationOnce(async () => {
+      setMCPView(installedView);
+      return installedView;
+    });
 
     const { result } = renderHook(
       () =>
@@ -2013,7 +2049,7 @@ describe("useAgentController", () => {
   });
 
   it("asks the backend to delete the last MCP server", async () => {
-    vi.mocked(fetchAgentMCPServers).mockResolvedValueOnce({
+    setMCPView({
       agent_id: "u-manager",
       runtime_kind: "codex",
       servers: {

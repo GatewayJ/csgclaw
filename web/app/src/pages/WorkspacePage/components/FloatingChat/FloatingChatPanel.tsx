@@ -103,6 +103,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
     showToolCalls,
     slashCandidates = [],
     slashIndex = 0,
+    slashContinuation,
     slashPickerLoading = false,
     slashPickerOpen = false,
     t,
@@ -113,6 +114,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
     threadLoading,
     threadSlashCandidates = [],
     threadSlashIndex = 0,
+    threadSlashContinuation,
     threadSlashPickerLoading = false,
     threadSlashPickerOpen = false,
     usersById,
@@ -243,6 +245,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
       onRemoveAttachment={onRemoveThreadAttachment}
       threadSlashCandidates={threadSlashCandidates}
       threadSlashIndex={threadSlashIndex}
+      threadSlashContinuation={threadSlashContinuation}
       threadSlashPickerLoading={threadSlashPickerLoading}
       threadSlashPickerOpen={threadSlashPickerOpen}
       onApplyThreadSlashCandidate={onApplyThreadSlashCandidate}
@@ -330,6 +333,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
           mentionableUsersByName={mentionableUsersByName}
           slashCandidates={slashCandidates}
           slashIndex={slashIndex}
+          slashContinuation={slashContinuation}
           slashPickerLoading={slashPickerLoading}
           slashPickerOpen={slashPickerOpen}
           t={floatingComposerT}
