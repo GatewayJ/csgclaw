@@ -131,220 +131,32 @@ describe("agent action visibility", () => {
     window.localStorage.removeItem(AGENT_PROFILE_ACTIVE_TAB_STORAGE_KEY);
   });
 
-  it("allows OpenClaw agents to save local templates but not publish to the community", async () => {
-    const user = userEvent.setup();
-    const onPublish = vi.fn().mockResolvedValue(true);
-    render(
-      <AgentDetailPane
-        item={worker}
-        t={t}
-        busyKey=""
-        draft={null}
-        models={[]}
-        onDelete={vi.fn()}
-        onDraftChange={vi.fn()}
-        onInvite={vi.fn()}
-        onOpenDM={vi.fn()}
-        onPublish={onPublish}
-        onRecreate={vi.fn()}
-        onStart={vi.fn()}
-        onStop={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "More" }));
-    const saveLocal = screen.getByRole("menuitem", { name: "Save as local template" });
-    expect(saveLocal).not.toHaveAttribute("aria-disabled", "true");
-    await user.click(saveLocal);
-    expect(screen.getByRole("dialog", { name: "Publish agent template" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Template name" })).toHaveValue("Worker");
-    expect(screen.getByRole("textbox", { name: "Template description" })).toHaveValue("Agent description");
-    expect(screen.getByRole("checkbox", { name: "Include agent memory" })).not.toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Save as local template" }));
-    expect(onPublish).toHaveBeenCalledWith("local", "Worker", "Agent description", false);
-    expect(screen.queryByRole("dialog", { name: "Publish agent template" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "More" }));
-    await user.click(screen.getByRole("menuitem", { name: "Save as local template" }));
-    await user.click(screen.getByRole("checkbox", { name: "Include agent memory" }));
-    await user.click(screen.getByRole("button", { name: "Save as local template" }));
-    expect(onPublish).toHaveBeenLastCalledWith("local", "Worker", "Agent description", true);
-
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.queryByRole("menuitem", { name: "Publish to community" })).not.toBeInTheDocument();
-  });
-
-  it.each(["codex", "dsh"] as const)(
-    "allows %s agents to publish locally and to the community",
-    async (runtimeKind) => {
-      const user = userEvent.setup();
-      const onPublish = vi.fn().mockResolvedValue(true);
+  it.each(["openclaw_sandbox", "codex", "dsh", "notifier", "manager"])(
+    "keeps profile actions focused for %s agents",
+    (runtimeKind) => {
+      const item =
+        runtimeKind === "manager"
+          ? { ...worker, id: "agent-manager", role: "manager", runtime_kind: "codex" }
+          : { ...worker, runtime_kind: runtimeKind };
       render(
         <AgentDetailPane
-          item={{ ...worker, runtime_kind: runtimeKind }}
+          item={item}
           t={t}
-          busyKey=""
-          draft={null}
-          models={[]}
-          onDelete={vi.fn()}
-          onDraftChange={vi.fn()}
-          onInvite={vi.fn()}
-          onOpenDM={vi.fn()}
-          onPublish={onPublish}
-          onRecreate={vi.fn()}
           onStart={vi.fn()}
           onStop={vi.fn()}
+          onRecreate={vi.fn()}
+          onDelete={vi.fn()}
+          onInvite={vi.fn()}
+          onOpenDM={vi.fn()}
         />,
       );
 
-      await user.click(screen.getByRole("button", { name: "More" }));
-      expect(screen.getByRole("menuitem", { name: "Save as local template" })).toBeInTheDocument();
-      expect(screen.queryByRole("menuitem", { name: "Publish template only" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("menuitem", { name: "Publish and deploy" })).not.toBeInTheDocument();
-      await user.click(screen.getByRole("menuitem", { name: "Publish to community" }));
-      expect(screen.getByRole("button", { name: "Publish template only" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Publish and deploy" })).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Publish template only" }));
-
-      expect(onPublish).toHaveBeenCalledWith("official", "Worker", "Agent description", false);
-
-      await user.click(screen.getByRole("button", { name: "More" }));
-      await user.click(screen.getByRole("menuitem", { name: "Publish to community" }));
-      const includeMemory = screen.queryByRole("checkbox", { name: "Include agent memory" });
-      if (runtimeKind === "codex") {
-        expect(includeMemory).toBeInTheDocument();
-        await user.click(includeMemory!);
-      } else {
-        expect(includeMemory).not.toBeInTheDocument();
-      }
-      await user.click(screen.getByRole("button", { name: "Publish and deploy" }));
-      expect(onPublish).toHaveBeenCalledWith("official_deploy", "Worker", "Agent description", runtimeKind === "codex");
+      expect(screen.getByRole("button", { name: "DM" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "More", hidden: true })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Recreate", hidden: true })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Recreate", hidden: true })).not.toBeInTheDocument();
     },
   );
-
-  it("does not show template publishing actions for the manager", async () => {
-    const user = userEvent.setup();
-    render(
-      <AgentDetailPane
-        item={{ ...worker, id: "u-manager", name: "manager", role: "manager", runtime_kind: "codex" }}
-        t={t}
-        busyKey=""
-        draft={null}
-        models={[]}
-        onDelete={vi.fn()}
-        onDraftChange={vi.fn()}
-        onInvite={vi.fn()}
-        onOpenDM={vi.fn()}
-        onPublish={vi.fn()}
-        onRecreate={vi.fn()}
-        onStart={vi.fn()}
-        onStop={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.queryByRole("menuitem", { name: "Save as local template" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Publish to community" })).not.toBeInTheDocument();
-  });
-
-  it("requires sign-in for Codex community publishing without blocking local templates", async () => {
-    const user = userEvent.setup();
-    render(
-      <AgentDetailPane
-        item={{ ...worker, runtime_kind: "codex" }}
-        t={t}
-        busyKey=""
-        draft={null}
-        models={[]}
-        publishDisabled
-        onDelete={vi.fn()}
-        onDraftChange={vi.fn()}
-        onInvite={vi.fn()}
-        onOpenDM={vi.fn()}
-        onPublish={vi.fn()}
-        onRecreate={vi.fn()}
-        onStart={vi.fn()}
-        onStop={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("menuitem", { name: "Save as local template" })).not.toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    const publishCommunity = screen.getByRole("menuitem", { name: "Publish to community" });
-    expect(publishCommunity).toHaveAttribute("aria-disabled", "true");
-    expect(publishCommunity).toHaveAttribute("title", "Sign in to OpenCSG before publishing a template.");
-  });
-
-  it("rejects an invalid template name before publishing", async () => {
-    const user = userEvent.setup();
-    const onPublish = vi.fn().mockResolvedValue(true);
-    render(
-      <AgentDetailPane
-        item={worker}
-        t={t}
-        busyKey=""
-        draft={null}
-        models={[]}
-        onDelete={vi.fn()}
-        onDraftChange={vi.fn()}
-        onInvite={vi.fn()}
-        onOpenDM={vi.fn()}
-        onPublish={onPublish}
-        onRecreate={vi.fn()}
-        onStart={vi.fn()}
-        onStop={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "More" }));
-    await user.click(screen.getByRole("menuitem", { name: "Save as local template" }));
-    const nameInput = screen.getByRole("textbox", { name: "Template name" });
-    expect(nameInput).toHaveAttribute("maxlength", "24");
-    await user.clear(nameInput);
-    await user.type(nameInput, "2-invalid");
-    await user.click(screen.getByRole("button", { name: "Save as local template" }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Invalid template name");
-    expect(onPublish).not.toHaveBeenCalled();
-
-    await user.clear(nameInput);
-    await user.type(nameInput, "review-bot_2");
-    await user.click(screen.getByRole("button", { name: "Save as local template" }));
-    expect(onPublish).toHaveBeenCalledWith("local", "review-bot_2", "Agent description", false);
-  });
-
-  it("keeps the publish dialog open and shows duplicate local template errors", async () => {
-    const user = userEvent.setup();
-    const onPublish = vi.fn().mockResolvedValue(false);
-    render(
-      <AgentDetailPane
-        item={worker}
-        t={t}
-        busyKey=""
-        draft={null}
-        models={[]}
-        publishError={t("agentPublishLocalNameExists")}
-        onDelete={vi.fn()}
-        onDraftChange={vi.fn()}
-        onInvite={vi.fn()}
-        onOpenDM={vi.fn()}
-        onPublish={onPublish}
-        onRecreate={vi.fn()}
-        onStart={vi.fn()}
-        onStop={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "More" }));
-    await user.click(screen.getByRole("menuitem", { name: "Save as local template" }));
-    await user.click(screen.getByRole("button", { name: "Save as local template" }));
-
-    expect(screen.getByRole("dialog", { name: "Publish agent template" })).toBeInTheDocument();
-    expect(screen.getByText("A local template with this name already exists.")).toBeInTheDocument();
-  });
 
   it("shows a recreate warning when backend marks an agent restart required", () => {
     const onUpgrade = vi.fn();
@@ -415,7 +227,7 @@ describe("agent action visibility", () => {
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 
-  it("shows upgrade and recreate for outdated worker detail panes even when lifecycle actions are hidden", async () => {
+  it("shows upgrade for outdated worker detail panes", async () => {
     const user = userEvent.setup();
     const onUpgrade = vi.fn();
     render(
@@ -450,8 +262,7 @@ describe("agent action visibility", () => {
 
     await user.click(screen.getByRole("button", { name: "Upgrade" }));
     expect(onUpgrade).toHaveBeenCalledWith(expect.objectContaining({ id: worker.id }));
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("menuitem", { name: "Recreate" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Upgrade" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
@@ -1127,49 +938,6 @@ describe("agent action visibility", () => {
 
     expect(screen.queryByText("Upgrade required")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upgrade" })).not.toBeInTheDocument();
-  });
-
-  it("trusts complete notifier profile state when gating recreate in detail panes", async () => {
-    const user = userEvent.setup();
-    const notifier = {
-      ...worker,
-      id: "notifier-1",
-      name: "Notifier",
-      runtime_kind: "notifier",
-      profile_complete: true,
-      runtime_options: {},
-    };
-    render(
-      <AgentDetailPane
-        item={notifier}
-        t={t}
-        activeRoom={null}
-        busyKey=""
-        error=""
-        draft={agentToDraft(notifier)}
-        models={[]}
-        modelBusy={false}
-        saving={false}
-        publishBusy={false}
-        saveError=""
-        authStatuses={{}}
-        authBusyProvider=""
-        notifierWebhookPublicOrigin="http://127.0.0.1:18080"
-        onDraftChange={vi.fn()}
-        onSave={vi.fn()}
-        onPublish={vi.fn()}
-        onProviderLogin={vi.fn()}
-        onStart={vi.fn()}
-        onStop={vi.fn()}
-        onRecreate={vi.fn()}
-        onDelete={vi.fn()}
-        onInvite={vi.fn()}
-        onOpenDM={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("menuitem", { name: "Recreate" })).not.toHaveAttribute("data-disabled");
   });
 
   it("keeps header description compact until entering edit mode and removes duplicate basics fields", async () => {

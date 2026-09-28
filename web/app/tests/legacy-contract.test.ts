@@ -92,13 +92,6 @@ describe("legacy UI contract", () => {
     expect(source).toContain('get("api/v1/agents/image-candidates")');
     expect(source).toContain("agent_id: agentID");
     expect(source).toContain("setSelectedHubTemplateId(published.id);");
-    expect(source).toContain('className="agent-actions-menu"');
-    expect(source).toContain('onSelect={() => onPublish?.("local")}');
-    expect(source).toContain('onSelect={() => onPublish?.("official")}');
-    expect(source).toContain("const canPublishLocal =");
-    expect(source).toContain('runtimeKind === "dsh"');
-    expect(source).toContain('runtimeKind === "openclaw_sandbox"');
-    expect(source).toContain("canPublishCommunityTemplateRuntime(runtimeKind)");
   });
 
   it("keeps thread context hidden and shows the thread affordance as a message hover toolbar", () => {
