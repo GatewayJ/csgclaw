@@ -9,12 +9,18 @@ import {
   ExternalLink,
   FileCode2,
   Link2,
+  MoreHorizontal,
+  Play,
   Plus,
   RefreshCw,
+  Save,
   Server,
+  Square,
   Terminal,
   Trash2,
   Unlink2,
+  UploadCloud,
+  UserPlus,
   X,
 } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
@@ -29,6 +35,7 @@ import {
   updateAgentMemoryEnabled,
   type AgentMemoryDocument,
 } from "@/api/agents";
+import { SHOW_AGENT_LIFECYCLE_ACTIONS } from "@/shared/constants/agents";
 import { AGENT_PROFILE_ACTIVE_TAB_STORAGE_KEY } from "@/shared/storage/keys";
 import { localizeAPIError } from "@/shared/i18n";
 import {
@@ -50,6 +57,7 @@ import {
   agentGatewayUnavailableLabel,
   agentRuntimeStatusDetailLabel,
   agentRuntimeKind,
+  canPublishCommunityTemplateRuntime,
   isAgentGatewayDegraded,
   isAgentAvailable,
   agentModelID,
@@ -58,6 +66,7 @@ import {
   formatRuntimeKindLabel,
   hasConnectedAgentChannel,
   isAgentIncomplete,
+  isAgentLifecycleRunning,
   isNotificationBotAgent,
   isAgentRestartNeeded,
   isAgentUpgradeNeeded,
@@ -88,9 +97,11 @@ import { renderMarkdown } from "@/components/business/MessageContent/markdown";
 import "@/components/business/MessageContent/MessageContent.css";
 import { avatarFallbackText } from "@/shared/avatar";
 import { localizeTemplateSourceTag } from "@/shared/i18n";
+import type { AgentTemplatePublishTarget } from "@/api/hub";
 import {
   Button,
   Switch,
+  Checkbox,
   DialogBody,
   DialogCloseButton,
   DialogContent,
@@ -99,6 +110,11 @@ import {
   DialogHeader,
   DialogRoot,
   DialogTitle,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRoot,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Select,
   Tooltip,
 } from "@/components/ui";
@@ -166,6 +182,12 @@ export type AgentDetailPaneProps = {
   onRetryModels?: () => void | Promise<unknown>;
   onProviderLogin?: (provider: string) => VoidOrPromise;
   onRequireOpenCSGAuth?: () => boolean;
+  onPublish?: (
+    target: AgentTemplatePublishTarget,
+    name: string,
+    description: string,
+    includeMemory: boolean,
+  ) => boolean | Promise<boolean>;
   onRecreate: AgentActionHandler;
   onSave?: () => VoidOrPromise;
   onMetadataSave?: (patch: AgentMetadataSavePatch) => VoidOrPromise;
@@ -179,6 +201,9 @@ export type AgentDetailPaneProps = {
   onInitLarkCLI?: AgentActionHandler;
   onShowLarkCLIInstall?: AgentActionHandler;
   onUpgrade?: AgentActionHandler;
+  publishBusy?: boolean;
+  publishDisabled?: boolean;
+  publishError?: string;
   locale?: LocaleCode;
   saveError?: string;
   saveBillingURL?: string;
@@ -234,6 +259,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     requestedAppID,
     requestedAddAppID,
     onProfileTabChange,
+    activeRoom = null,
     busyKey = "",
     dialogPortalContainer = null,
     error = "",
@@ -251,6 +277,9 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     modelError = null,
     onRetryModels,
     saving = false,
+    publishBusy = false,
+    publishDisabled = false,
+    publishError = "",
     modelProviders = null,
     saveError = "",
     saveBillingURL = "",
@@ -286,6 +315,9 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     directoryPickerAvailable = true,
     onDraftChange,
     onSave,
+    onPublish,
+    onStart,
+    onStop,
     onMetadataSave,
     onMemoryChange,
     onStartFeishuConnect,
@@ -294,6 +326,8 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     onInitLarkCLI,
     onShowLarkCLIInstall,
     onUpgrade,
+    onDelete,
+    onInvite,
     onDismissNotice,
     onOpenDM,
     onAddSkills,
@@ -337,6 +371,12 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
   const [selectedMCPServerNames, setSelectedMCPServerNames] = useState<string[]>([]);
   const [deleteMCPDialogOpen, setDeleteMCPDialogOpen] = useState(false);
   const [mcpPendingDelete, setMCPPendingDelete] = useState<MCPServer | null>(null);
+  const [publishTarget, setPublishTarget] = useState<AgentTemplatePublishTarget | null>(null);
+  const [publishTemplateName, setPublishTemplateName] = useState("");
+  const [publishTemplateDescription, setPublishTemplateDescription] = useState("");
+  const [publishTemplateIncludeMemory, setPublishTemplateIncludeMemory] = useState(false);
+  const [publishTemplateNameError, setPublishTemplateNameError] = useState("");
+  const [publishAttempted, setPublishAttempted] = useState(false);
   const [isProfileScrolling, setIsProfileScrolling] = useState(false);
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -345,6 +385,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
   const isManager = isManagerAgent(item);
   const canEditAgentName = Boolean(draft && !isManager);
   const running = isAgentAvailable(item);
+  const lifecycleRunning = isAgentLifecycleRunning(item);
   const gatewayDegraded = isAgentGatewayDegraded(item);
   const statusLabel = agentAvailabilityStatusLabel(item, t);
   const runtimeStatusDetail = agentRuntimeStatusDetailLabel(item, t);
@@ -356,12 +397,46 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
   const profile = agentProfileConfig(item);
   const provider = item.provider || profile?.provider || providerNameForProviderID(profile?.model_provider_id || "");
   const runtimeKind = agentRuntimeKind(item);
+  const canPublishLocal =
+    !isManager && (runtimeKind === "codex" || runtimeKind === "dsh" || runtimeKind === "openclaw_sandbox");
+  const canPublishCommunity = !isManager && canPublishCommunityTemplateRuntime(runtimeKind);
+  const supportsTemplateMemory = runtimeKind === "codex" || runtimeKind === "openclaw_sandbox";
   const hasUnsavedChanges =
     hasUnsavedChangesProp ?? Boolean(draft && savedDraft && JSON.stringify(draft) !== JSON.stringify(savedDraft));
   const saveDisabled = agentProfilePageSaveDisabled(draft, item, { saving, savedDraft });
   const updateDraft = useCallback(
     (patch: Partial<AgentDraft>) => onDraftChange?.({ ...(draft || agentToDraft(item)), ...patch }),
     [draft, item, onDraftChange],
+  );
+  const openPublishDialog = useCallback(
+    (target: AgentTemplatePublishTarget) => {
+      setPublishTarget(target);
+      setPublishTemplateName(String(item.name || "").trim());
+      setPublishTemplateDescription(String(item.description || "").trim());
+      setPublishTemplateIncludeMemory(false);
+      setPublishTemplateNameError("");
+      setPublishAttempted(false);
+    },
+    [item.description, item.name],
+  );
+  const submitPublishTemplate = useCallback(
+    async (target = publishTarget) => {
+      const name = publishTemplateName.trim();
+      if (!/^[A-Za-z][A-Za-z0-9_-]{0,23}$/.test(name)) {
+        setPublishTemplateNameError(t("agentPublishTemplateNameInvalid"));
+        return;
+      }
+      if (!target || !onPublish) {
+        return;
+      }
+      setPublishTemplateNameError("");
+      setPublishAttempted(true);
+      const published = await onPublish(target, name, publishTemplateDescription.trim(), publishTemplateIncludeMemory);
+      if (published) {
+        setPublishTarget(null);
+      }
+    },
+    [onPublish, publishTarget, publishTemplateDescription, publishTemplateIncludeMemory, publishTemplateName, t],
   );
   const saveMetadataField = useCallback(
     <K extends keyof AgentMetadataSavePatch>(field: K, value: AgentMetadataSavePatch[K]): boolean => {
@@ -753,6 +828,25 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                 {t("agentUpgrade")}
               </Button>
             ) : null}
+            <AgentActionsMenu
+              item={item}
+              t={t}
+              activeRoom={activeRoom}
+              busy={busyKey.startsWith(busyPrefix)}
+              incomplete={incomplete}
+              isManager={isManager}
+              running={lifecycleRunning}
+              upgradeNeeded={upgradeNeeded}
+              canPublishLocal={canPublishLocal}
+              canPublishCommunity={canPublishCommunity}
+              publishBusy={publishBusy}
+              publishDisabled={publishDisabled}
+              onStart={onStart}
+              onStop={onStop}
+              onInvite={onInvite}
+              onDelete={onDelete}
+              onPublish={openPublishDialog}
+            />
             {draft && (hasUnsavedChanges || saving) ? (
               <Button
                 variant="primary"
@@ -1375,6 +1469,107 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
               {t("agentDeleteMCP")}
             </Button>
           </div>
+        </DialogContent>
+      </DialogRoot>
+      <DialogRoot open={publishTarget !== null} onOpenChange={(open) => (!open ? setPublishTarget(null) : undefined)}>
+        <DialogContent className="agent-publish-dialog" portalContainer={dialogPortalContainer}>
+          <DialogHeader>
+            <div>
+              <DialogTitle>{t("agentPublishTemplateTitle")}</DialogTitle>
+              <DialogDescription>
+                {publishTarget !== "local"
+                  ? t("agentPublishTemplateCommunitySubtitle")
+                  : t("agentPublishTemplateLocalSubtitle")}
+              </DialogDescription>
+            </div>
+            <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
+          </DialogHeader>
+          <DialogBody className="agent-publish-dialog-body">
+            <label className="agent-publish-field">
+              <span>{t("agentPublishTemplateName")}</span>
+              <input
+                value={publishTemplateName}
+                maxLength={24}
+                aria-label={t("agentPublishTemplateName")}
+                aria-invalid={Boolean(publishTemplateNameError)}
+                aria-describedby={publishTemplateNameError ? "agent-publish-template-name-error" : undefined}
+                onChange={(event) => {
+                  setPublishTemplateName(event.target.value);
+                  setPublishTemplateNameError("");
+                  setPublishAttempted(false);
+                }}
+              />
+              <small>{t("agentPublishTemplateNameHint")}</small>
+              {publishTemplateNameError ? (
+                <span id="agent-publish-template-name-error" className="agent-publish-field-error" role="alert">
+                  {publishTemplateNameError}
+                </span>
+              ) : null}
+            </label>
+            <label className="agent-publish-field">
+              <span>{t("agentPublishTemplateDescription")}</span>
+              <textarea
+                rows={4}
+                value={publishTemplateDescription}
+                aria-label={t("agentPublishTemplateDescription")}
+                onChange={(event) => setPublishTemplateDescription(event.target.value)}
+              />
+            </label>
+            {supportsTemplateMemory ? (
+              <label className="agent-publish-memory-option">
+                <Checkbox
+                  aria-label={t("agentPublishIncludeMemory")}
+                  checked={publishTemplateIncludeMemory}
+                  onCheckedChange={(checked) => setPublishTemplateIncludeMemory(checked === true)}
+                />
+                <span>
+                  <strong>{t("agentPublishIncludeMemory")}</strong>
+                  <small>{t("agentPublishIncludeMemoryWarning")}</small>
+                </span>
+              </label>
+            ) : null}
+            {publishAttempted && publishError ? <div className="form-error">{publishError}</div> : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="secondaryGray" size="md" disabled={publishBusy} onClick={() => setPublishTarget(null)}>
+              {t("cancel")}
+            </Button>
+            {publishTarget === "local" ? (
+              <Button
+                variant="primary"
+                size="md"
+                loading={publishBusy}
+                loadingLabel={t("agentPublishing")}
+                disabled={publishBusy}
+                onClick={() => void submitPublishTemplate("local")}
+              >
+                {t("agentSaveLocalTemplate")}
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="secondaryGray"
+                  size="md"
+                  loading={publishBusy}
+                  loadingLabel={t("agentPublishing")}
+                  disabled={publishBusy}
+                  onClick={() => void submitPublishTemplate("official")}
+                >
+                  {t("agentPublishCommunityTemplateOnly")}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  loading={publishBusy}
+                  loadingLabel={t("agentPublishing")}
+                  disabled={publishBusy}
+                  onClick={() => void submitPublishTemplate("official_deploy")}
+                >
+                  {t("agentPublishCommunityAndDeploy")}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
         </DialogContent>
       </DialogRoot>
     </section>
@@ -2456,5 +2651,103 @@ function AgentChannelsSection({
         </span>
       </div>
     </section>
+  );
+}
+
+type AgentActionsMenuProps = {
+  activeRoom?: IMConversation | null;
+  busy: boolean;
+  canPublishLocal: boolean;
+  canPublishCommunity: boolean;
+  incomplete: boolean;
+  isManager: boolean;
+  item: AgentLike;
+  onDelete: AgentActionHandler;
+  onInvite: AgentActionHandler;
+  onPublish?: (target: AgentTemplatePublishTarget) => VoidOrPromise;
+  onStart: AgentActionHandler;
+  onStop: AgentActionHandler;
+  onUpgrade?: AgentActionHandler;
+  publishBusy: boolean;
+  publishDisabled: boolean;
+  running: boolean;
+  t: TranslateFn;
+  upgradeNeeded: boolean;
+};
+
+function AgentActionsMenu({
+  item,
+  t,
+  activeRoom,
+  busy,
+  incomplete,
+  isManager,
+  running,
+  upgradeNeeded,
+  canPublishLocal,
+  canPublishCommunity,
+  publishBusy,
+  publishDisabled,
+  onStart,
+  onStop,
+  onInvite,
+  onDelete,
+  onPublish,
+}: AgentActionsMenuProps) {
+  return (
+    <DropdownMenuRoot>
+      <DropdownMenuTrigger asChild>
+        <Button variant="secondaryGray" size="md" className="agent-actions-menu-trigger">
+          <MoreHorizontal aria-hidden="true" size={18} strokeWidth={2} />
+          <span>{t("agentMoreActions")}</span>
+          {upgradeNeeded ? <span className="agent-actions-alert-dot" aria-hidden="true"></span> : null}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="agent-actions-menu" aria-label={t("agentMoreActions")}>
+        {SHOW_AGENT_LIFECYCLE_ACTIONS ? (
+          <DropdownMenuItem disabled={busy || incomplete} onSelect={() => (running ? onStop(item) : onStart(item))}>
+            {running ? (
+              <Square aria-hidden="true" size={15} strokeWidth={2} />
+            ) : (
+              <Play aria-hidden="true" size={15} strokeWidth={2} />
+            )}
+            <span>{running ? t("agentStop") : t("agentStart")}</span>
+          </DropdownMenuItem>
+        ) : null}
+        {SHOW_AGENT_LIFECYCLE_ACTIONS && activeRoom && !isManager ? (
+          <DropdownMenuItem disabled={busy} onSelect={() => onInvite(item)}>
+            <UserPlus aria-hidden="true" size={15} strokeWidth={2} />
+            <span>{t("inviteToRoom")}</span>
+          </DropdownMenuItem>
+        ) : null}
+        {canPublishLocal ? (
+          <>
+            <DropdownMenuItem disabled={publishBusy} onSelect={() => onPublish?.("local")}>
+              <Save aria-hidden="true" size={15} strokeWidth={2} />
+              <span>{publishBusy ? t("agentPublishing") : t("agentSaveLocalTemplate")}</span>
+            </DropdownMenuItem>
+            {canPublishCommunity ? (
+              <DropdownMenuItem
+                disabled={publishBusy || publishDisabled}
+                title={publishDisabled ? t("agentPublishLoginRequired") : undefined}
+                onSelect={() => onPublish?.("official")}
+              >
+                <UploadCloud aria-hidden="true" size={15} strokeWidth={2} />
+                <span>{publishBusy ? t("agentPublishing") : t("agentPublishCommunity")}</span>
+              </DropdownMenuItem>
+            ) : null}
+          </>
+        ) : null}
+        {!isManager ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem danger disabled={busy} onSelect={() => onDelete(item)}>
+              <Trash2 aria-hidden="true" size={15} strokeWidth={2} />
+              <span>{t("agentDelete")}</span>
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenuRoot>
   );
 }

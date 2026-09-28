@@ -37,6 +37,9 @@ import type {
   FetchAgentsOptions,
 } from "@/api/agents";
 import { patchCsgclawUserRequest } from "@/api/participants";
+import { publishAgentTemplateRequest, type AgentTemplatePublishTarget } from "@/api/hub";
+import { HubTemplateErrorCodes, hubTemplateErrorCode, upsertHubTemplateReviewState } from "@/models/hubWorkspace";
+import type { HubTemplate } from "@/models/hubWorkspace";
 import { createUserRequest, joinAgentToRoomRequest } from "@/api/im";
 import { fetchSkills } from "@/api/skills";
 import { createTeamRequest, deleteTeamRequest, fetchTeams, updateTeamRequest } from "@/api/tasks";
@@ -61,6 +64,7 @@ import {
   advanceAgentProgress,
   agentOfflineReasonLabel,
   agentProfileConfig,
+  agentRuntimeKind,
   agentRuntimeState,
   agentDraftMissingRequiredEnv,
   agentDraftWithRuntimeFieldsFromAgent,
@@ -69,6 +73,7 @@ import {
   agentToDraft,
   isAgentProfileDraftComplete,
   isAgentProfileMarkedComplete,
+  canPublishCommunityTemplateRuntime,
   createAgentSelectableTemplates,
   defaultWorkerImageForRuntime,
   draftMCPServersForSave,
@@ -557,19 +562,24 @@ export function useAgentController({
   onAgentDeleted,
   profileDetailAgentID = "",
   refreshMCPServers = async () => null,
+  refreshHubTemplates,
   refreshWorkspaceAgents,
   refreshWorkspaceBootstrap,
   refreshWorkspaceBootstrapConfig,
   refreshWorkspaceManagerProfile,
   refreshWorkspaceModelProviders = noopRefreshWorkspaceModelProviders,
   rooms,
+  navigatePane,
   selectAgent,
   selectComputer,
   selectConversation,
+  selectHub,
   selectModelProvider = noopSelectModelProvider,
   setAgentsData,
   setBootstrapData,
   setManagerProfileData,
+  setHubPublishError = () => undefined,
+  setSelectedHubTemplateId,
   t,
 }: UseAgentControllerArgs) {
   const { showNotice } = useGlobalNotice();
@@ -610,6 +620,8 @@ export function useAgentController({
   const [agentPageDraft, setAgentPageDraft] = useState<AgentDraft | null>(null);
   const [agentPageSavedDraft, setAgentPageSavedDraft] = useState<AgentDraft | null>(null);
   const [agentPageBusy, setAgentPageBusy] = useState(false);
+  const [agentPagePublishBusy, setAgentPagePublishBusy] = useState(false);
+  const [agentPagePublishError, setAgentPagePublishError] = useState("");
   const [agentPageError, setAgentPageError] = useState("");
   const [agentPageBillingURL, setAgentPageBillingURL] = useState("");
   function setAgentPageSaveError(message: string, billingURL = ""): void {
@@ -1283,6 +1295,7 @@ export function useAgentController({
       setAgentPageDraft(null);
       setAgentPageSavedDraft(null);
       setAgentPageSaveError("");
+      setAgentPagePublishBusy(false);
       return;
     }
     if (agentPageHasUnsavedChanges) {
@@ -1951,6 +1964,78 @@ export function useAgentController({
       }
     } finally {
       setAgentPageBusy(false);
+    }
+  }
+
+  async function publishAgentPage(
+    target: AgentTemplatePublishTarget,
+    name: string,
+    description: string,
+    includeMemory: boolean,
+  ): Promise<boolean> {
+    if (!selectedAgentForPage?.id || agentPagePublishBusy) {
+      return false;
+    }
+    setAgentPagePublishError("");
+    setAgentPageSaveError("");
+    if (target !== "local" && !requireOpenCSGAuthentication()) {
+      return false;
+    }
+    if (target !== "local" && !canPublishCommunityTemplateRuntime(agentRuntimeKind(selectedAgentForPage))) {
+      return false;
+    }
+    setAgentPagePublishBusy(true);
+    try {
+      const published = await publishAgentTemplateRequest(
+        selectedAgentForPage.id,
+        target,
+        name,
+        description,
+        includeMemory,
+      );
+      await refreshHubTemplates();
+      if (published?.id) {
+        setSelectedHubTemplateId(published.id);
+        navigatePane({ type: WorkspacePaneTypes.hub, id: published.id, resourceType: "template" }, rooms);
+      } else {
+        selectHub();
+      }
+      return true;
+    } catch (err) {
+      if (target !== "local" && handleOpenCSGAuthenticationError(err)) {
+        return false;
+      }
+      const errorCode = hubTemplateErrorCode(err);
+      const deploySensitiveCheckFailed = errorCode === HubTemplateErrorCodes.reviewFailed;
+      const deployReviewPending = errorCode === HubTemplateErrorCodes.reviewPending;
+      const publishedTemplateID = String((err as ApiError | null)?.publishedTemplateId ?? "").trim();
+      const message = errorMessage(err, t("agentActionFailed"));
+      if (target === "official_deploy" && publishedTemplateID) {
+        await refreshHubTemplates();
+        if (deploySensitiveCheckFailed || deployReviewPending) {
+          queryClient.setQueryData<HubTemplate[]>(workspaceQueryKeys.hubTemplates(), (templates) =>
+            upsertHubTemplateReviewState(
+              templates,
+              publishedTemplateID,
+              deployReviewPending ? "Pending" : "Fail",
+              deployReviewPending ? "" : message,
+              agentRuntimeKind(selectedAgentForPage),
+            ),
+          );
+        }
+        // Publishing succeeded, but deployment did not. Keep the upstream
+        // result visible after navigating to the newly published template,
+        // including the common case where review is still pending.
+        setHubPublishError(message);
+        setSelectedHubTemplateId(publishedTemplateID);
+        navigatePane({ type: WorkspacePaneTypes.hub, id: publishedTemplateID, resourceType: "template" }, rooms);
+        return true;
+      }
+      setAgentPagePublishError(message);
+      setAgentPageSaveError(message);
+      return false;
+    } finally {
+      setAgentPagePublishBusy(false);
     }
   }
 
@@ -2877,6 +2962,9 @@ export function useAgentController({
         retryAgentPageModels();
       },
       saving: agentPageBusy,
+      publishBusy: agentPagePublishBusy,
+      publishDisabled: !openCSGAuthenticated,
+      publishError: agentPagePublishError,
       saveError: agentPageError,
       saveBillingURL: agentPageBillingURL,
       notice: selectedAgentPageNotice?.message || "",
@@ -2933,6 +3021,7 @@ export function useAgentController({
           await refreshAgentState(agentID);
         }
       },
+      onPublish: publishAgentPage,
       onProviderLogin: loginCLIProxyProvider,
       onRequireOpenCSGAuth: requireOpenCSGAuthentication,
       onStart: (item: AgentLike | null | undefined) => runAgentAction(item, "start"),
