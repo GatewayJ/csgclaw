@@ -358,7 +358,7 @@ func (s *Controller) updateWithManagedRuntimeOptions(ctx context.Context, id str
 		}
 		current.Description = strings.TrimSpace(*req.Description)
 	}
-	if updateRequested("instructions", req.Instructions != nil) {
+	if instructionsUpdated {
 		if req.Instructions == nil {
 			s.mu.Unlock()
 			return Agent{}, fmt.Errorf("field_mask includes instructions but request is missing instructions")
@@ -586,6 +586,9 @@ func (s *Controller) updateWithManagedRuntimeOptions(ctx context.Context, id str
 		if !ok {
 			return Agent{}, fmt.Errorf("agent %q not found", id)
 		}
+	}
+	if instructionsUpdated && !restartRequired && (isRuntimeRunning(updated) || updated.DesiredState == DesiredStateRunning) {
+		return s.reloadRuntimeLocked(ctx, updated)
 	}
 	return updated, nil
 }

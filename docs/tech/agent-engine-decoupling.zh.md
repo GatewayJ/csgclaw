@@ -47,6 +47,8 @@ Runtime Registry 在装配后封闭，未注册能力返回错误。
 `Agents()` 暴露 Create、Get、List、Update、Delete、Recreate。
 Start/Stop 使用 `desired_state` field mask。
 Profile/model、Skills、MCP、instructions 和 memory 的 HTTP 操作都翻译成 field-mask 更新。
+
+每次提交 `instructions` 字段都会重新应用指令并重新加载期望运行的 Agent，内容相同也会执行。完整 Spec 更新同样包含指令保存。停止或启动失败后，可以再次保存相同指令进行重试；期望停止的 Agent 保持停止。同一次保存包含 Skills 或 MCP 修改时，共用资源更新的重启流程。
 省略 field mask 表示完整替换期望 Spec，只有 ID 的重建请求必须使用显式 mask 保留配置。
 省略的 write-only credentials 和模型密钥继续保留，返回值不暴露凭据内容。
 

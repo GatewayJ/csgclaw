@@ -347,7 +347,6 @@ func diffAgentSpec(previous, desired contract.AgentSpec) agentSpecChange {
 	return agentSpecChange{
 		name:               previous.Name != desired.Name,
 		description:        previous.Description != desired.Description,
-		instructions:       previous.Instructions != desired.Instructions,
 		image:              previous.Runtime.Image != desired.Runtime.Image,
 		runtimeSelection:   previous.Runtime.Adapter != desired.Runtime.Adapter || previous.Runtime.Sandboxed != desired.Runtime.Sandboxed,
 		runtimeOptions:     !reflect.DeepEqual(previous.Runtime.Options, desired.Runtime.Options),
@@ -388,6 +387,7 @@ func preserveWriteOnlyFields(current, desired contract.AgentSpec) contract.Agent
 }
 
 type agentUpdateOptions struct {
+	saveInstructions      bool
 	loadSkills            bool
 	loadMemory            bool
 	reconcileDesiredState bool
@@ -398,6 +398,7 @@ type agentUpdateOptions struct {
 func updateOptionsFor(request contract.AgentUpdateRequest) agentUpdateOptions {
 	loadSkills := len(request.FieldMask) == 0 || fieldMaskContains(request.FieldMask, "skills") || fieldMaskContains(request.FieldMask, "skill_states")
 	return agentUpdateOptions{
+		saveInstructions:      len(request.FieldMask) == 0 || fieldMaskContains(request.FieldMask, "instructions"),
 		loadSkills:            loadSkills,
 		loadMemory:            fieldMaskContains(request.FieldMask, "memory") || request.Spec.Memory != nil,
 		reconcileDesiredState: fieldMaskContains(request.FieldMask, "desired_state"),
@@ -461,6 +462,7 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 			}
 		}
 		change := diffAgentSpec(current, desired)
+		change.instructions = options.saveInstructions
 		if change.skillStates {
 			if err := validateSkillStates(createAgentSpec(desired).RuntimeConfig().LegacyKind(), desired.SkillStates); err != nil {
 				return err
@@ -557,7 +559,7 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 			}
 		}
 		if resourceUpdate && !replacesRuntime && !options.forceRecreate && isHostRuntimeKind(updated.RuntimeKind) {
-			if updated.AgentProfile.EnvRestartRequired && desired.DesiredState == contract.AgentDesiredStateRunning && (isRuntimeRunning(updated) || previous.AgentProfile.EnvRestartRequired) {
+			if (updated.AgentProfile.EnvRestartRequired || change.instructions) && desired.DesiredState == contract.AgentDesiredStateRunning && (isRuntimeRunning(updated) || previous.AgentProfile.EnvRestartRequired || change.instructions) {
 				if change.mcpServers {
 					if err := f.reconcileMCPServers(lifecycleCtx, previous, updated); err != nil {
 						return err

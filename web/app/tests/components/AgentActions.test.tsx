@@ -222,11 +222,13 @@ describe("agent action visibility", () => {
     },
   );
 
-  it("does not show template publishing actions for the manager", async () => {
-    const user = userEvent.setup();
+  it.each([
+    { id: "manager-by-role", role: "manager" },
+    { id: "u-manager", role: "worker" },
+  ])("hides the empty More menu for manager $id", (identity) => {
     render(
       <AgentDetailPane
-        item={{ ...worker, id: "u-manager", name: "manager", role: "manager", runtime_kind: "codex" }}
+        item={{ ...worker, ...identity, name: "manager", runtime_kind: "codex" }}
         t={t}
         busyKey=""
         draft={null}
@@ -242,7 +244,8 @@ describe("agent action visibility", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Recreate" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Save as local template" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Publish to community" })).not.toBeInTheDocument();
   });
@@ -415,7 +418,7 @@ describe("agent action visibility", () => {
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 
-  it("shows upgrade and recreate for outdated worker detail panes even when lifecycle actions are hidden", async () => {
+  it("详情页保留升级操作", async () => {
     const user = userEvent.setup();
     const onUpgrade = vi.fn();
     render(
@@ -451,7 +454,7 @@ describe("agent action visibility", () => {
     await user.click(screen.getByRole("button", { name: "Upgrade" }));
     expect(onUpgrade).toHaveBeenCalledWith(expect.objectContaining({ id: worker.id }));
     await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("menuitem", { name: "Recreate" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Recreate" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Upgrade" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
@@ -1129,7 +1132,7 @@ describe("agent action visibility", () => {
     expect(screen.queryByRole("button", { name: "Upgrade" })).not.toBeInTheDocument();
   });
 
-  it("trusts complete notifier profile state when gating recreate in detail panes", async () => {
+  it("通知 Agent 详情页保留删除操作", async () => {
     const user = userEvent.setup();
     const notifier = {
       ...worker,
@@ -1169,7 +1172,8 @@ describe("agent action visibility", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("menuitem", { name: "Recreate" })).not.toHaveAttribute("data-disabled");
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Recreate" })).not.toBeInTheDocument();
   });
 
   it("keeps header description compact until entering edit mode and removes duplicate basics fields", async () => {

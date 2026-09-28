@@ -319,7 +319,6 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     onPublish,
     onStart,
     onStop,
-    onRecreate,
     onMetadataSave,
     onMemoryChange,
     onStartFeishuConnect,
@@ -845,7 +844,6 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
               publishDisabled={publishDisabled}
               onStart={onStart}
               onStop={onStop}
-              onRecreate={onRecreate}
               onInvite={onInvite}
               onDelete={onDelete}
               onPublish={openPublishDialog}
@@ -2668,7 +2666,6 @@ type AgentActionsMenuProps = {
   onDelete: AgentActionHandler;
   onInvite: AgentActionHandler;
   onPublish?: (target: AgentTemplatePublishTarget) => VoidOrPromise;
-  onRecreate: AgentActionHandler;
   onStart: AgentActionHandler;
   onStop: AgentActionHandler;
   onUpgrade?: AgentActionHandler;
@@ -2694,11 +2691,13 @@ function AgentActionsMenu({
   publishDisabled,
   onStart,
   onStop,
-  onRecreate,
   onInvite,
   onDelete,
   onPublish,
 }: AgentActionsMenuProps) {
+  const hasActions = SHOW_AGENT_LIFECYCLE_ACTIONS || canPublishLocal || !isManager;
+  if (!hasActions) return null;
+
   return (
     <DropdownMenuRoot>
       <DropdownMenuTrigger asChild>
@@ -2719,10 +2718,6 @@ function AgentActionsMenu({
             <span>{running ? t("agentStop") : t("agentStart")}</span>
           </DropdownMenuItem>
         ) : null}
-        <DropdownMenuItem disabled={busy || incomplete} onSelect={() => onRecreate(item)}>
-          <RefreshCw aria-hidden="true" size={15} strokeWidth={2} />
-          <span>{t("agentRecreate")}</span>
-        </DropdownMenuItem>
         {SHOW_AGENT_LIFECYCLE_ACTIONS && activeRoom && !isManager ? (
           <DropdownMenuItem disabled={busy} onSelect={() => onInvite(item)}>
             <UserPlus aria-hidden="true" size={15} strokeWidth={2} />
