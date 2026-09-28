@@ -7,7 +7,7 @@ import { createQueryWrapper } from "../helpers/queryClient";
 vi.mock("@/api/agentResources", () => ({ fetchAgentSkillBatch: vi.fn() }));
 it("loads on demand, appends batches, searches the server, and refreshes enabled membership", async () => {
   let disabled = false;
-  vi.mocked(fetchAgentSkillBatch).mockImplementation(async (_id, search, cursor) => ({
+  vi.mocked(fetchAgentSkillBatch).mockImplementation(async (_id, cursor, { search } = {}) => ({
     items: search ? [{ name: "git-review" }] : cursor ? [{ name: "beta" }] : disabled ? [] : [{ name: "alpha" }],
     total: 2,
     page: 1,
@@ -38,9 +38,8 @@ it("loads on demand, appends batches, searches the server, and refreshes enabled
   await waitFor(() => expect(result.current.items.map((item) => item.name)).toEqual(["git-review"]));
   expect(fetchAgentSkillBatch).toHaveBeenLastCalledWith(
     "agent",
-    "gtr",
     "",
-    ["new", "创建智能体", "创建房间"],
+    { search: "gtr", enabled: true, exclude: ["new", "创建智能体", "创建房间"] },
     expect.any(AbortSignal),
   );
 });

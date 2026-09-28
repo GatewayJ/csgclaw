@@ -1,14 +1,12 @@
 import { builtinSlashCommandNames, suggestedSlashCommandNames, type SkillContinuation } from "@/models/slashCommands";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useInfiniteAgentResources } from "./useInfiniteAgentResources";
 import { fetchAgentSkillBatch } from "@/api/agentResources";
-import { apiErrorCode } from "@/api/client";
 import { workspaceQueryKeys } from "./workspaceQueries";
 
 const excludedCommands = [...builtinSlashCommandNames, ...suggestedSlashCommandNames];
 export function useInfiniteAgentSkills(agentID: string, search: string | null, enabled: boolean) {
   const [settledSearch, setSettledSearch] = useState(search);
-  const client = useQueryClient();
   const currentScope = useRef("");
   const scope = JSON.stringify([agentID, search, enabled]);
   useEffect(() => {
@@ -18,43 +16,33 @@ export function useInfiniteAgentSkills(agentID: string, search: string | null, e
     const timer = setTimeout(() => setSettledSearch(search), 150);
     return () => clearTimeout(timer);
   }, [search]);
-  const key = [...workspaceQueryKeys.agentSkills(agentID), "cursor", settledSearch ?? ""];
-  const query = useInfiniteQuery({
-    queryKey: key,
-    initialPageParam: "",
-    queryFn: ({ pageParam, signal }) =>
-      fetchAgentSkillBatch(agentID, settledSearch ?? "", pageParam, excludedCommands, signal),
-    getNextPageParam: (page) => page.next_cursor || undefined,
-    enabled: Boolean(agentID) && enabled && search !== null && search === settledSearch,
-    retry: (count, error) => apiErrorCode(error) !== "resource_list_changed" && count < 1,
-  });
-  const changed = apiErrorCode(query.error) === "resource_list_changed";
-  useEffect(() => {
-    if (changed)
-      void client.resetQueries({
-        queryKey: [...workspaceQueryKeys.agentSkills(agentID), "cursor", settledSearch ?? ""],
-        exact: true,
-      });
-  }, [changed, agentID, settledSearch, client]);
-  const ready = search === settledSearch;
-  const items = useMemo(
-    () => (ready ? (query.data?.pages.flatMap((page) => page.items) ?? []) : []),
-    [ready, query.data],
+  const resources = useInfiniteAgentResources(
+    [...workspaceQueryKeys.agentSkills(agentID), "cursor", "chat", settledSearch ?? ""],
+    (cursor, signal) =>
+      fetchAgentSkillBatch(
+        agentID,
+        cursor,
+        { search: settledSearch ?? "", enabled: true, exclude: excludedCommands },
+        signal,
+      ),
+    Boolean(agentID) && enabled && search !== null && search === settledSearch,
   );
+  const ready = search === settledSearch;
   const continuation: SkillContinuation = {
     scope,
-    hasMore: ready && Boolean(query.hasNextPage),
-    loading: query.isFetching || !ready,
-    failed: query.isError && !changed,
+    hasMore: ready && resources.continuation.hasMore,
+    loading: resources.continuation.loading || !ready,
+    failed: resources.continuation.failed,
     loadMore: async () => {
-      if (query.isFetching || !ready || !query.hasNextPage) return false;
-      const result = await query.fetchNextPage({ cancelRefetch: false });
-      return currentScope.current === scope && !result.isError;
+      if (!ready) return false;
+      const loaded = await resources.continuation.loadMore();
+      return currentScope.current === scope && loaded;
     },
-    retry: () => {
-      if (query.hasNextPage) void query.fetchNextPage();
-      else void query.refetch();
-    },
+    retry: resources.continuation.retry,
   };
-  return { items, continuation, loading: enabled && search !== null && (!ready || query.isLoading) };
+  return {
+    items: ready ? resources.items : [],
+    continuation,
+    loading: enabled && search !== null && (!ready || resources.query.isLoading),
+  };
 }

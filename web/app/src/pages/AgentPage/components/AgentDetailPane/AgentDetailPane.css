@@ -2958,10 +2958,11 @@
 
 .agent-detail-pane #agent-profile-skills .agent-profile-skill-card-grid,
 .agent-detail-pane #agent-profile-mcp > div:has(> article) {
-  grid-template-columns: repeat(var(--resource-columns, 2), minmax(0, 1fr));
-  grid-auto-rows: 112px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
 }
 .agent-detail-pane #agent-profile-skills article,
 .agent-detail-pane #agent-profile-mcp > div > article {
   min-height: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 112px;
 }

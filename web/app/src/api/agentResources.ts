@@ -11,31 +11,24 @@ export type ResourceBatch<T> = {
   next_cursor?: string;
   has_more: boolean;
 };
-export type ResourcePage<T> = ResourceBatch<T> & { page: number; per: number };
-export type PageRequest = { page: number; per: number; revision?: string };
-export function fetchAgentSkillPage(agentID: string, page: PageRequest, signal?: AbortSignal) {
-  return get<ResourcePage<AgentSkillSummary>>(
-    resourcePath(agentID, "skill-summaries", {
-      pagination: "page",
-      page: String(page.page),
-      per: String(page.per),
-      list_revision: page.revision ?? "",
-    }),
-    { signal },
-  );
-}
-export async function fetchAgentMCPPage(
+export type ResourceRequest = { search?: string; enabled?: boolean; exclude?: readonly string[] };
+
+export function fetchAgentSkillBatch(
   agentID: string,
-  page: PageRequest,
+  cursor: string,
+  request: ResourceRequest = {},
   signal?: AbortSignal,
-): Promise<ResourcePage<MCPServer>> {
-  const result = await get<ResourcePage<{ name: string; config: JSONRecord }>>(
-    resourcePath(agentID, "mcp-servers", {
-      pagination: "page",
-      page: String(page.page),
-      per: String(page.per),
-      list_revision: page.revision ?? "",
-    }),
+) {
+  return get<ResourceBatch<AgentSkillSummary>>(batchPath(agentID, "skill-summaries", cursor, request), { signal });
+}
+
+export async function fetchAgentMCPBatch(
+  agentID: string,
+  cursor: string,
+  signal?: AbortSignal,
+): Promise<ResourceBatch<MCPServer>> {
+  const result = await get<ResourceBatch<{ name: string; config: JSONRecord }>>(
+    batchPath(agentID, "mcp-servers", cursor),
     { signal },
   );
   return {
@@ -43,21 +36,12 @@ export async function fetchAgentMCPPage(
     items: result.items.map((item) => ({ ...item, description: mcpServerDescription(item.config) })),
   };
 }
-export function fetchAgentSkillBatch(
-  agentID: string,
-  search: string,
-  cursor: string,
-  exclude: readonly string[],
-  signal?: AbortSignal,
-) {
-  const params = new URLSearchParams({ pagination: "cursor", limit: "20", enabled: "true", search });
+
+function batchPath(agentID: string, resource: string, cursor: string, request: ResourceRequest = {}) {
+  const params = new URLSearchParams({ pagination: "cursor", limit: "20" });
   if (cursor) params.set("cursor", cursor);
-  for (const name of exclude) params.append("exclude", name);
-  return get<ResourceBatch<AgentSkillSummary>>(
-    `api/v1/agents/${encodeURIComponent(agentID)}/skill-summaries?${params}`,
-    { signal },
-  );
-}
-function resourcePath(agentID: string, resource: string, query: Record<string, string>) {
-  return `api/v1/agents/${encodeURIComponent(agentID)}/${resource}?${new URLSearchParams(query)}`;
+  if (request.search) params.set("search", request.search);
+  if (request.enabled !== undefined) params.set("enabled", String(request.enabled));
+  for (const name of request.exclude ?? []) params.append("exclude", name);
+  return `api/v1/agents/${encodeURIComponent(agentID)}/${resource}?${params}`;
 }

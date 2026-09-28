@@ -1,14 +1,12 @@
-import { fetchAgentSkillPage, fetchAgentMCPPage } from "@/api/agentResources";
+import { fetchAgentSkillBatch, fetchAgentMCPBatch } from "@/api/agentResources";
 import type { AgentMCPServersView } from "@/api/agents";
 import { mcpServersFromMap } from "@/models/mcp";
-vi.mock("@/api/agentResources", () => ({ fetchAgentSkillPage: vi.fn(), fetchAgentMCPPage: vi.fn() }));
+vi.mock("@/api/agentResources", () => ({ fetchAgentSkillBatch: vi.fn(), fetchAgentMCPBatch: vi.fn() }));
 function setMCPView(view: AgentMCPServersView) {
   vi.mocked(fetchAgentMCPServers).mockResolvedValue(view);
   const items = mcpServersFromMap(view.servers);
-  vi.mocked(fetchAgentMCPPage).mockResolvedValue({
+  vi.mocked(fetchAgentMCPBatch).mockResolvedValue({
     items,
-    page: 1,
-    per: 12,
     total: items.length,
     has_more: false,
     list_revision: "test",
@@ -355,21 +353,18 @@ function useAgentControllerHarness(
 
 describe("useAgentController", () => {
   beforeEach(() => {
-    vi.mocked(fetchAgentSkillPage).mockImplementation(async (id, options, signal) => {
+    vi.mocked(fetchAgentSkillBatch).mockImplementation(async (id, cursor, _options, signal) => {
       const items = await fetchAgentSkillSummaries(id, signal);
       return {
-        items: items.slice((options.page - 1) * options.per, options.page * options.per),
-        page: options.page,
-        per: options.per,
+        items: items.slice(Number(cursor || 0), Number(cursor || 0) + 20),
         total: items.length,
-        has_more: options.page * options.per < items.length,
+        has_more: Number(cursor || 0) + 20 < items.length,
+        next_cursor: Number(cursor || 0) + 20 < items.length ? String(Number(cursor || 0) + 20) : undefined,
         list_revision: "test",
       };
     });
-    vi.mocked(fetchAgentMCPPage).mockResolvedValue({
+    vi.mocked(fetchAgentMCPBatch).mockResolvedValue({
       items: [],
-      page: 1,
-      per: 12,
       total: 0,
       has_more: false,
       list_revision: "test",
@@ -1734,8 +1729,8 @@ describe("useAgentController", () => {
     }));
     vi.mocked(fetchAgentSkillSummaries).mockResolvedValue(skills);
     const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
-    await waitFor(() => expect(result.current.agentViewProps.skills).toEqual(skills.slice(0, 12)));
-    expect(result.current.agentViewProps.skillPagination.total).toBe(300);
+    await waitFor(() => expect(result.current.agentViewProps.skills).toEqual(skills.slice(0, 20)));
+    expect(result.current.agentViewProps.skillContinuation.total).toBe(300);
     expect(fetchAgentSkillSummaries).toHaveBeenCalledTimes(1);
     expect(fetchAgentSkillsFile).not.toHaveBeenCalled();
   });

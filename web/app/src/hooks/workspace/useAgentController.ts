@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAgentResourcePages } from "./useAgentResourcePages";
+import { useAgentResourceLists } from "./useAgentResourceLists";
 import { useAgentResourceEnablement } from "./useAgentResourceEnablement";
 import { useBlocker } from "react-router-dom";
 import { apiErrorBillingURL, apiErrorCode, errorMessage as apiErrorMessage, type ApiError } from "@/api/client";
@@ -851,7 +851,7 @@ export function useAgentController({
       return Array.isArray(payload) ? payload : [];
     },
   });
-  const resourcePages = useAgentResourcePages(agentDetailAgentID);
+  const resourceLists = useAgentResourceLists(agentDetailAgentID);
   const agentSkillsQuery = useQuery({
     queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID),
     queryFn: ({ signal }) => fetchAgentSkillSummaries(agentDetailAgentID, signal),
@@ -862,9 +862,9 @@ export function useAgentController({
     queryFn: () => fetchAgentMCPServers(agentDetailAgentID),
     enabled: Boolean(agentDetailAgentID),
   });
-  const agentSkillsError = resourcePages.skills.query.error
-    ? errorMessage(resourcePages.skills.query.error, t("agentSkillsLoadFailed"))
-    : resourcePages.skills.query.data?.items.some((skill) => skill.error)
+  const agentSkillsError = resourceLists.skills.query.error
+    ? errorMessage(resourceLists.skills.query.error, t("agentSkillsLoadFailed"))
+    : resourceLists.skills.items.some((skill) => skill.error)
       ? t("agentSkillMetadataUnavailable")
       : "";
   const agentSkillCandidates = useMemo(() => {
@@ -887,10 +887,10 @@ export function useAgentController({
   const [agentMCPSourceSyncBusyName, setAgentMCPSourceSyncBusyName] = useState("");
   const managedAgentMCPServerNames = useMemo(
     () =>
-      (resourcePages.mcp.query.data?.items ?? [])
+      resourceLists.mcp.items
         .filter((server) => Boolean(mcpManagedKnowledgeBaseSource(server.config)))
         .map((server) => server.name),
-    [resourcePages.mcp.query.data?.items],
+    [resourceLists.mcp.items],
   );
 
   useEffect(() => {
@@ -3004,10 +3004,10 @@ export function useAgentController({
           void agentSkillsQuery.refetch();
         }
       },
-      skillPagination: resourcePages.skills.pagination,
-      mcpPagination: resourcePages.mcp.pagination,
-      mcpListError: resourcePages.mcp.query.error
-        ? errorMessage(resourcePages.mcp.query.error, t("resourcesMCPLoadFailed"))
+      skillContinuation: resourceLists.skills.continuation,
+      mcpContinuation: resourceLists.mcp.continuation,
+      mcpListError: resourceLists.mcp.query.error
+        ? errorMessage(resourceLists.mcp.query.error, t("resourcesMCPLoadFailed"))
         : "",
       skillCandidatesError: agentSkillCandidatesError,
       skillAddBusy: agentSkillAddBusy,
@@ -3017,7 +3017,7 @@ export function useAgentController({
       mcpCandidates: agentMCPCandidates,
       mcpCandidatesLoading: catalogMCPServersLoading,
       mcpCandidatesError: catalogMCPServersError,
-      mcpServers: resourcePages.mcp.query.data?.items ?? [],
+      mcpServers: resourceLists.mcp.items,
       mcpSourceBusyNames: agentMCPSourceBusyNames,
       mcpSourceUnavailableNames: new Set(
         Object.entries(agentMCPSourceStatuses)
@@ -3038,8 +3038,8 @@ export function useAgentController({
       resourceError: resourceEnablement.error,
       onRetryResource: resourceEnablement.retry,
       onSetResourceEnabled: resourceEnablement.setEnabled,
-      skills: resourcePages.skills.query.data?.items ?? [],
-      skillsLoading: resourcePages.skills.query.isLoading,
+      skills: resourceLists.skills.items,
+      skillsLoading: resourceLists.skills.query.isLoading,
       skillsError: agentSkillsError,
       workspaceSupported: Boolean(selectedAgentForPage),
       directoryPickerAvailable: bootstrapConfig?.directory_picker_available !== false,

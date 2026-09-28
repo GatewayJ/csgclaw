@@ -1,9 +1,7 @@
 export const messages = {
   zh: {
-    resourcePaginationLabel: "资源分页",
-    resourcePreviousPage: "上一页",
-    resourceNextPage: "下一页",
-    resourcePagePosition: "第 {page} / {pages} 页，共 {total} 项",
+    resourceAllLoaded: "已加载全部 {total} 项",
+    resourceLoading: "加载中…",
     resourceLoadMore: "加载更多",
     resourceLoadFailed: "资源加载失败",
     resource_list_changed: "资源列表已变化，请重新加载",
@@ -1875,10 +1873,8 @@ export const messages = {
     },
   },
   en: {
-    resourcePaginationLabel: "Resource pagination",
-    resourcePreviousPage: "Previous",
-    resourceNextPage: "Next",
-    resourcePagePosition: "Page {page} / {pages}, {total} items",
+    resourceAllLoaded: "All {total} items loaded",
+    resourceLoading: "Loading…",
     resourceLoadMore: "Load more",
     resourceLoadFailed: "Failed to load resources",
     resource_list_changed: "Resources changed. Reload the list.",
