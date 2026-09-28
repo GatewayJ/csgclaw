@@ -1,3 +1,4 @@
+import type { SkillContinuation } from "@/models/slashCommands";
 import { isImageAttachment } from "@/models/attachments";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Paperclip, X } from "lucide-react";
@@ -94,6 +95,7 @@ export type ConversationThreadPanelProps = {
   thread?: ThreadView | null;
   threadSlashCandidates?: SlashPickerCandidate[];
   threadSlashIndex?: number;
+  threadSlashContinuation?: SkillContinuation;
   threadSlashPickerLoading?: boolean;
   threadSlashPickerOpen?: boolean;
   usersById: UsersById;
@@ -118,6 +120,7 @@ export function ConversationThreadPanel({
   onAddAttachments = () => {},
   threadSlashCandidates = [],
   threadSlashIndex = 0,
+  threadSlashContinuation,
   threadSlashPickerLoading = false,
   threadSlashPickerOpen = false,
   onApplyThreadSlashCandidate = (_name) => {},
@@ -372,6 +375,7 @@ export function ConversationThreadPanel({
             <SlashPicker
               candidates={threadSlashCandidates}
               activeIndex={threadSlashIndex}
+              continuation={threadSlashContinuation}
               loading={threadSlashPickerLoading}
               className="thread-slash-picker"
               t={t}
@@ -425,6 +429,7 @@ export function ConversationThreadPanel({
                   candidates: threadSlashCandidates,
                   activeIndex: threadSlashIndex,
                   pickerOpen: threadSlashPickerOpen,
+                  continuation: threadSlashContinuation,
                   onIndexChange: (value) => onSetThreadSlashIndex(value),
                   onApply: (value) => onApplyThreadSlashCandidate(value),
                   onDismiss: () => {

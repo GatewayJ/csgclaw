@@ -1,3 +1,4 @@
+import type { SkillContinuation } from "@/models/slashCommands";
 import type { ContextUsage } from "@/models/modelMetadata";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, RefObject, SetStateAction } from "react";
 import type { CLIProxyAuthStatusMap } from "@/hooks/workspace/useCLIProxyAuthStatuses";
@@ -145,6 +146,7 @@ export type ConversationPaneProps = {
   showToolCalls: boolean;
   slashCandidates?: SlashPickerCandidate[];
   slashIndex?: number;
+  slashContinuation?: SkillContinuation;
   slashPickerLoading?: boolean;
   slashPickerOpen?: boolean;
   t: TranslateFn;
@@ -155,6 +157,7 @@ export type ConversationPaneProps = {
   threadLoading: boolean;
   threadSlashCandidates?: SlashPickerCandidate[];
   threadSlashIndex?: number;
+  threadSlashContinuation?: SkillContinuation;
   threadSlashPickerLoading?: boolean;
   threadSlashPickerOpen?: boolean;
   usersById: UsersById;

@@ -1,3 +1,4 @@
+import { useSlashSelection } from "./useSlashSelection";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { errorMessage } from "@/api/client";
@@ -10,9 +11,7 @@ import {
   removeRoomUserRequest,
   sendMessageRequest,
 } from "@/api/im";
-import { fetchAgentSkillSummaries } from "@/api/agents";
-import { useQuery } from "@tanstack/react-query";
-import { workspaceQueryKeys } from "./workspaceQueries";
+import { useInfiniteAgentSkills } from "./useInfiniteAgentSkills";
 import {
   agentMatchesUser,
   appendMessageToData,
@@ -78,7 +77,12 @@ import {
   selectAttachmentFiles,
   type AttachmentDraft,
 } from "@/models/attachments";
-import { parseSlashCommand, type SlashSkillOption } from "@/models/slashCommands";
+import {
+  builtinSlashCommandNames,
+  suggestedSlashCommandNames,
+  parseSlashCommand,
+  type SlashSkillOption,
+} from "@/models/slashCommands";
 import { localizeAPIError } from "@/shared/i18n";
 import type { IMConversation, IMMessage, IMServerEvent, IMUser, ThreadView, TranslateFn } from "@/models/conversations";
 import type { SlashPickerCandidate } from "@/models/slashCommands";
@@ -667,16 +671,7 @@ export function useConversationController({
     }
     return "";
   }, [activeConversationAgentMembers, logAgent?.id]);
-  const skillQuery = useQuery({
-    queryKey: workspaceQueryKeys.agentSkills(activeConversationAgentId),
-    queryFn: ({ signal }) => fetchAgentSkillSummaries(activeConversationAgentId, signal),
-    enabled: Boolean(activeConversationAgentId),
-  });
-  const skillOptions = useMemo(
-    () => (skillQuery.data ?? []).filter((skill) => skill.enabled !== false),
-    [skillQuery.data],
-  );
-  const slashPickerLoading = skillQuery.isFetching;
+
   const activeConversationMembers = activeConversation
     ? activeConversation.members
         .map((id) => resolveUserByLocalIdentity(id, usersById))
@@ -735,6 +730,9 @@ export function useConversationController({
   const composerSendState = composerSendStatesByConversationId[activeConversationId] ?? idleComposerSendState;
   const removedAttachment = removedAttachmentsByConversationId[activeConversationId];
   const slashPickerEnabled = Boolean((hasActiveConversationAgent || logAgent?.id) && !slashPickerDismissed);
+  const mainSkills = useInfiniteAgentSkills(activeConversationAgentId, composerSlashQuery, slashPickerEnabled);
+  const skillOptions = mainSkills.items;
+  const slashPickerLoading = mainSkills.loading;
   const slashPickerState = useMemo(
     () =>
       buildSlashPickerState({
@@ -748,6 +746,12 @@ export function useConversationController({
   const slashPickerQuery = slashPickerState.query;
   const slashPickerActive = slashPickerState.active;
   const slashCandidates = slashPickerState.candidates;
+  useSlashSelection(
+    slashCandidates,
+    slashIndex,
+    setSlashIndex,
+    JSON.stringify([activeConversationAgentId, slashPickerQuery]),
+  );
   const activeThreadDraftKey = activeThreadRootID ? threadKey(activeConversationId, activeThreadRootID) : "";
   const [threadAttachmentWarning, setThreadAttachmentWarning] = useAttachmentWarning(activeThreadDraftKey);
   const activeThreadDraftSegments = useMemo(() => {
@@ -764,20 +768,31 @@ export function useConversationController({
     return threadAttachmentDraftsByKey[activeThreadDraftKey] ?? [];
   }, [activeThreadDraftKey, threadAttachmentDraftsByKey]);
   const threadSlashPickerEnabled = Boolean((logAgent?.id || hasActiveConversationAgent) && activeThreadDraftKey);
+  const threadSkills = useInfiniteAgentSkills(
+    activeConversationAgentId,
+    threadSlashQuery,
+    threadSlashPickerEnabled && !threadSlashPickerDismissed,
+  );
   const threadSlashPickerState = useMemo(
     () =>
       buildSlashPickerState({
         draftText: activeThreadDraft,
         enabled: threadSlashPickerEnabled,
         query: threadSlashQuery,
-        skillOptions,
+        skillOptions: threadSkills.items,
         disabled: threadSlashPickerDismissed,
       }),
-    [activeThreadDraft, threadSlashPickerEnabled, threadSlashPickerDismissed, threadSlashQuery, skillOptions],
+    [activeThreadDraft, threadSlashPickerEnabled, threadSlashPickerDismissed, threadSlashQuery, threadSkills.items],
   );
   const threadSlashPickerQuery = threadSlashPickerState.query;
   const threadSlashPickerActive = threadSlashPickerState.active;
   const threadSlashCandidates = threadSlashPickerState.candidates;
+  useSlashSelection(
+    threadSlashCandidates,
+    threadSlashIndex,
+    setThreadSlashIndex,
+    JSON.stringify([activeConversationAgentId, threadSlashPickerQuery]),
+  );
 
   useEffect(() => {
     if (!activeConversationId || !removedAttachment) {
@@ -847,11 +862,11 @@ export function useConversationController({
 
   useEffect(() => {
     setSlashIndex(0);
-  }, [slashPickerQuery, skillOptions]);
+  }, [slashPickerQuery, activeConversationAgentId]);
 
   useEffect(() => {
     setThreadSlashIndex(0);
-  }, [threadSlashPickerQuery, skillOptions]);
+  }, [threadSlashPickerQuery, activeConversationAgentId]);
 
   useEffect(() => {
     const wasIncomplete = managerProfileIncompleteRef.current;
@@ -1532,6 +1547,7 @@ export function useConversationController({
           candidates: slashCandidates,
           activeIndex: slashIndex,
           pickerOpen: slashPickerActive,
+          continuation: mainSkills.continuation,
           onIndexChange: setSlashIndex,
           onApply: (name) => applySlashCandidate(name, editorRef.current),
           onDismiss: () => {
@@ -1806,6 +1822,7 @@ export function useConversationController({
       slashCandidates,
       slashIndex,
       slashPickerLoading,
+      slashContinuation: mainSkills.continuation,
       slashPickerOpen: slashPickerActive,
       onApplySlashCandidate: applySlashCandidate,
       managerProfile,
@@ -1867,7 +1884,8 @@ export function useConversationController({
       onClearMemberActionError: clearMemberActionError,
       threadSlashCandidates,
       threadSlashIndex,
-      threadSlashPickerLoading: slashPickerLoading,
+      threadSlashPickerLoading: threadSkills.loading,
+      threadSlashContinuation: threadSkills.continuation,
       threadSlashPickerOpen: threadSlashPickerActive,
       onApplyThreadSlashCandidate: applyThreadSlashCandidate,
       onDismissThreadSlashPicker: () => {
@@ -1924,9 +1942,6 @@ export function useConversationController({
         : null,
   };
 }
-
-const builtinSlashCommandNames = ["new"];
-const suggestedSlashCommandNames = ["创建智能体", "创建房间"];
 
 type SlashPickerStateInput = {
   draftText: string;

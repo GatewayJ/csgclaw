@@ -22,9 +22,16 @@ func (h *Handler) handleAgentSkillSummaries(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "agent engine is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	item, err := h.agentEngine.Agents().Get(r.Context(), pathValue(r, "id"), agentengine.AgentGetOptions{IncludeSkillSummaries: true})
+	query, err := parseResourceQuery(r)
 	if err != nil {
-		writeAgentGetError(w, err)
+		writeResourceQueryError(w, err)
+		return
+	}
+	item, err := h.agentEngine.Agents().Get(r.Context(), pathValue(r, "id"), agentengine.AgentGetOptions{IncludeSkillSummaries: true, SkillQuery: query})
+	if err != nil {
+		if !writeResourceQueryError(w, err) {
+			writeAgentGetError(w, err)
+		}
 		return
 	}
 	items := item.Status.SkillSummaries
@@ -32,6 +39,10 @@ func (h *Handler) handleAgentSkillSummaries(w http.ResponseWriter, r *http.Reque
 		items = []agentengine.SkillSummary{}
 	}
 	w.Header().Set("ETag", strconv.Quote(item.ResourceVersion))
+	if query != nil && item.Status.SkillPage != nil {
+		writeJSON(w, http.StatusOK, resourcePage[agentengine.SkillSummary]{Items: items, Metadata: *item.Status.SkillPage})
+		return
+	}
 	writeJSON(w, http.StatusOK, items)
 }
 

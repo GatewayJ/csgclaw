@@ -176,6 +176,9 @@ describe("资源启用请求", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
     await setAgentResourceEnabled("agent-1", kind, "reviewer", false);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `api/v1/agents/agent-1/${kind === "skill" ? "skill-summaries" : "mcp-servers"}?pagination=page&page=1&per=1`,
+    );
     expect(fetchMock.mock.calls[1]).toEqual([
       `api/v1/agents/agent-1/${kind === "skill" ? "skills" : "mcp-servers"}/reviewer/enabled`,
       expect.objectContaining({

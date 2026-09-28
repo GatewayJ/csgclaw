@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAgentResourcePages } from "./useAgentResourcePages";
 import { useAgentResourceEnablement } from "./useAgentResourceEnablement";
 import { useBlocker } from "react-router-dom";
 import { apiErrorBillingURL, apiErrorCode, errorMessage as apiErrorMessage, type ApiError } from "@/api/client";
@@ -841,38 +842,43 @@ export function useAgentController({
       current ? { ...current, mcpServers: cloneMCPServersForDraft(view.servers) } : current,
     );
   });
+  const [skillCandidatesAgentID, setSkillCandidatesAgentID] = useState("");
   const globalSkillsQuery = useQuery({
+    enabled: Boolean(agentDetailAgentID) && skillCandidatesAgentID === agentDetailAgentID,
     queryKey: workspaceQueryKeys.skills(),
     queryFn: async () => {
       const payload = await fetchSkills();
       return Array.isArray(payload) ? payload : [];
     },
   });
+  const resourcePages = useAgentResourcePages(agentDetailAgentID);
   const agentSkillsQuery = useQuery({
     queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID),
     queryFn: ({ signal }) => fetchAgentSkillSummaries(agentDetailAgentID, signal),
-    enabled: Boolean(agentDetailAgentID),
+    enabled: Boolean(agentDetailAgentID) && skillCandidatesAgentID === agentDetailAgentID,
   });
   const agentMCPServersQuery = useQuery({
     queryKey: workspaceQueryKeys.agentMCPServers(agentDetailAgentID),
     queryFn: () => fetchAgentMCPServers(agentDetailAgentID),
     enabled: Boolean(agentDetailAgentID),
   });
-  const agentSkillsError = agentSkillsQuery.error
-    ? errorMessage(agentSkillsQuery.error, t("agentSkillsLoadFailed"))
-    : agentSkillsQuery.data?.some((skill) => skill.error)
+  const agentSkillsError = resourcePages.skills.query.error
+    ? errorMessage(resourcePages.skills.query.error, t("agentSkillsLoadFailed"))
+    : resourcePages.skills.query.data?.items.some((skill) => skill.error)
       ? t("agentSkillMetadataUnavailable")
       : "";
   const agentSkillCandidates = useMemo(() => {
+    if (!agentSkillsQuery.data) return [];
     const currentSkillNames = new Set((agentSkillsQuery.data ?? []).map((skill) => String(skill?.name || "").trim()));
     return (globalSkillsQuery.data ?? []).filter((skill) => {
       const name = String(skill?.name || "").trim();
       return Boolean(name) && !currentSkillNames.has(name);
     });
   }, [agentSkillsQuery.data, globalSkillsQuery.data]);
-  const agentSkillCandidatesError = globalSkillsQuery.error
-    ? errorMessage(globalSkillsQuery.error, t("agentSkillsLoadFailed"))
-    : "";
+  const agentSkillCandidatesError =
+    globalSkillsQuery.error || agentSkillsQuery.error
+      ? errorMessage(globalSkillsQuery.error || agentSkillsQuery.error, t("agentSkillsLoadFailed"))
+      : "";
   const agentMCPServers = useMemo(() => {
     return mcpServersFromMap(agentMCPServersQuery.data?.servers);
   }, [agentMCPServersQuery.data]);
@@ -881,10 +887,10 @@ export function useAgentController({
   const [agentMCPSourceSyncBusyName, setAgentMCPSourceSyncBusyName] = useState("");
   const managedAgentMCPServerNames = useMemo(
     () =>
-      agentMCPServers
+      (resourcePages.mcp.query.data?.items ?? [])
         .filter((server) => Boolean(mcpManagedKnowledgeBaseSource(server.config)))
         .map((server) => server.name),
-    [agentMCPServers],
+    [resourcePages.mcp.query.data?.items],
   );
 
   useEffect(() => {
@@ -935,6 +941,9 @@ export function useAgentController({
       try {
         const result = await syncAgentMCPServerSource(agentDetailAgentID, name);
         queryClient.setQueryData(workspaceQueryKeys.agentMCPServers(agentDetailAgentID), result.agent);
+        await queryClient.invalidateQueries({
+          queryKey: [...workspaceQueryKeys.agentMCPServers(agentDetailAgentID), "page"],
+        });
         setAgentMCPSourceStatuses((current) => ({ ...current, [name]: result.source }));
         return true;
       } catch (error) {
@@ -2984,7 +2993,22 @@ export function useAgentController({
       authBusyProvider: cliproxyAuthBusy,
       notifierWebhookPublicOrigin,
       skillCandidates: agentSkillCandidates,
-      skillCandidatesLoading: globalSkillsQuery.isFetching,
+      skillCandidatesLoading:
+        globalSkillsQuery.isFetching ||
+        agentSkillsQuery.isFetching ||
+        (!agentSkillsQuery.data && !agentSkillsQuery.isError),
+      onLoadSkillCandidates: () => {
+        setSkillCandidatesAgentID(agentDetailAgentID);
+        if (skillCandidatesAgentID === agentDetailAgentID) {
+          void globalSkillsQuery.refetch();
+          void agentSkillsQuery.refetch();
+        }
+      },
+      skillPagination: resourcePages.skills.pagination,
+      mcpPagination: resourcePages.mcp.pagination,
+      mcpListError: resourcePages.mcp.query.error
+        ? errorMessage(resourcePages.mcp.query.error, t("resourcesMCPLoadFailed"))
+        : "",
       skillCandidatesError: agentSkillCandidatesError,
       skillAddBusy: agentSkillAddBusy,
       skillAddError: agentSkillAddError,
@@ -2993,7 +3017,7 @@ export function useAgentController({
       mcpCandidates: agentMCPCandidates,
       mcpCandidatesLoading: catalogMCPServersLoading,
       mcpCandidatesError: catalogMCPServersError,
-      mcpServers: agentMCPServers,
+      mcpServers: resourcePages.mcp.query.data?.items ?? [],
       mcpSourceBusyNames: agentMCPSourceBusyNames,
       mcpSourceUnavailableNames: new Set(
         Object.entries(agentMCPSourceStatuses)
@@ -3014,8 +3038,8 @@ export function useAgentController({
       resourceError: resourceEnablement.error,
       onRetryResource: resourceEnablement.retry,
       onSetResourceEnabled: resourceEnablement.setEnabled,
-      skills: agentSkillsQuery.data ?? [],
-      skillsLoading: agentSkillsQuery.isLoading,
+      skills: resourcePages.skills.query.data?.items ?? [],
+      skillsLoading: resourcePages.skills.query.isLoading,
       skillsError: agentSkillsError,
       workspaceSupported: Boolean(selectedAgentForPage),
       directoryPickerAvailable: bootstrapConfig?.directory_picker_available !== false,

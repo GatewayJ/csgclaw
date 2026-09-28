@@ -2955,3 +2955,13 @@
   outline: none;
   box-shadow: var(--error-focus-ring);
 }
+
+.agent-detail-pane #agent-profile-skills .agent-profile-skill-card-grid,
+.agent-detail-pane #agent-profile-mcp > div:has(> article) {
+  grid-template-columns: repeat(var(--resource-columns, 2), minmax(0, 1fr));
+  grid-auto-rows: 112px;
+}
+.agent-detail-pane #agent-profile-skills article,
+.agent-detail-pane #agent-profile-mcp > div > article {
+  min-height: 0;
+}

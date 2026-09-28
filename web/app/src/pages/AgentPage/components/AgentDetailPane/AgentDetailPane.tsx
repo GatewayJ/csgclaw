@@ -1,3 +1,5 @@
+import { ResourcePagination, useResourceCapacity } from "../ResourcePagination";
+import type { ResourcePagination as PaginationState } from "@/hooks/workspace/useAgentResourcePages";
 import { mcpManagedKnowledgeBaseSource } from "@/models/mcp";
 import {
   AlertCircle,
@@ -233,6 +235,10 @@ export type AgentDetailPaneProps = {
   mcpAddError?: string;
   mcpDeleteBusy?: boolean;
   mcpDeleteError?: string;
+  skillPagination?: PaginationState;
+  mcpPagination?: PaginationState;
+  mcpListError?: string;
+  onLoadSkillCandidates?: () => void;
   skills?: SlashSkillOption[];
   skillsError?: string;
   skillsLoading?: boolean;
@@ -293,6 +299,10 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     skills = [],
     skillsLoading = false,
     skillsError = "",
+    skillPagination,
+    mcpPagination,
+    mcpListError = "",
+    onLoadSkillCandidates,
     skillCandidates = [],
     skillCandidatesLoading = false,
     skillCandidatesError = "",
@@ -542,14 +552,30 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
             ...(!isNotifierDraft ? [{ id: "instructions" as const, label: t("agentInstructions") }] : []),
             ...(item.memory_supported ? [{ id: "memory" as const, label: t("agentMemoryTab") }] : []),
             ...(workspaceSupported
-              ? [{ id: "skills" as const, label: t("agentProfileSkillsTab"), count: skills.length }]
+              ? [
+                  {
+                    id: "skills" as const,
+                    label: t("agentProfileSkillsTab"),
+                    count: skillPagination?.total ?? skills.length,
+                  },
+                ]
               : []),
             ...(showApps ? [{ id: "apps" as const, label: t("agentAppsTab") }] : []),
             ...(showMCPServers ? [{ id: "mcp" as const, label: t("agentProfileMCPTab") }] : []),
             ...(!isNotificationBotAgent(item) ? [{ id: "channels" as const, label: t("agentChannelsTitle") }] : []),
           ]
         : [],
-    [draft, isNotifierDraft, item, showApps, showMCPServers, skills.length, t, workspaceSupported],
+    [
+      draft,
+      isNotifierDraft,
+      item,
+      showApps,
+      showMCPServers,
+      skills.length,
+      skillPagination?.total,
+      t,
+      workspaceSupported,
+    ],
   );
   const selectedProfileTab = requestedProfileTab || activeProfileTab;
   const visibleActiveProfileTab = profileTabs.some((tab) => tab.id === selectedProfileTab)
@@ -610,6 +636,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
       setAddMCPDialogOpen(false);
       setDeleteMCPDialogOpen(false);
       setMCPPendingDelete(null);
+      setResourceDetail(null);
     }
   }, [showMCPServers]);
 
@@ -651,6 +678,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     if (deleted) {
       setDeleteSkillDialogOpen(false);
       setSkillPendingDelete(null);
+      setResourceDetail(null);
     }
   }
 
@@ -1039,22 +1067,28 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
             ) : null}
             {visibleActiveProfileTab === "skills" && workspaceSupported ? (
               <AgentSkillsPanel
+                capacityPaused={Boolean(detailSkill || detailMCP)}
+                pagination={skillPagination}
                 onOpenDetail={(skill) => openResourceDetail("skill", skill.name)}
                 onToggle={
                   canToggleResources && onSetResourceEnabled
                     ? (skill) => onSetResourceEnabled("skill", skill.name, skill.enabled === false)
                     : undefined
                 }
-                mutationBusy={resourceMutationBusy || Boolean(appsController.busyID)}
+                mutationBusy={
+                  resourceMutationBusy || Boolean(appsController.busyID) || Boolean(skillPagination?.loading)
+                }
                 skillAddBusy={skillAddBusy}
                 skillAddError={skillAddError}
-                skillCandidatesLoading={skillCandidatesLoading}
                 skillDeleteError={skillDeleteError}
                 skills={skills}
                 skillsError={skillsError}
                 skillsLoading={skillsLoading}
                 t={t}
-                onOpenAddSkills={() => setAddSkillsDialogOpen(true)}
+                onOpenAddSkills={() => {
+                  onLoadSkillCandidates?.();
+                  setAddSkillsDialogOpen(true);
+                }}
               />
             ) : null}
 
@@ -1083,13 +1117,18 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
                   />
                 ) : null}
                 <AgentMCPPanel
+                  capacityPaused={Boolean(detailSkill || detailMCP)}
+                  pagination={mcpPagination}
+                  listError={mcpListError}
                   onOpenDetail={(server) => openResourceDetail("mcp", server.name)}
                   onToggle={
                     canToggleResources && onSetResourceEnabled
                       ? (server) => onSetResourceEnabled("mcp", server.name, server.config.enabled === false)
                       : undefined
                   }
-                  mutationBusy={resourceMutationBusy || Boolean(appsController.busyID)}
+                  mutationBusy={
+                    resourceMutationBusy || Boolean(appsController.busyID) || Boolean(mcpPagination?.loading)
+                  }
                   addBusy={mcpAddBusy}
                   addError={mcpAddError}
                   deleteError={mcpDeleteError}
@@ -1675,6 +1714,9 @@ function AgentRuntimePanel({
 }
 
 type AgentMCPPanelProps = {
+  capacityPaused?: boolean;
+  pagination?: PaginationState;
+  listError?: string;
   onOpenDetail: (item: MCPServer) => void;
   onToggle?: (item: MCPServer) => Promise<void>;
   mutationBusy: boolean;
@@ -1694,6 +1736,9 @@ type AgentMCPPanelProps = {
 };
 
 function AgentMCPPanel({
+  capacityPaused,
+  pagination,
+  listError,
   onRequestDeleteMCP,
   onOpenDetail,
   onToggle,
@@ -1711,8 +1756,10 @@ function AgentMCPPanel({
   updateAvailableNames,
   t,
 }: AgentMCPPanelProps) {
+  const capacityRef = useResourceCapacity(pagination, capacityPaused);
   return (
     <section
+      ref={capacityRef}
       id="agent-profile-mcp"
       className="profile-section agent-skills-section agent-mcp-section agent-profile-scroll-target"
     >
@@ -1724,7 +1771,9 @@ function AgentMCPPanel({
           </p>
         </div>
         <div className="agent-skills-summary-actions">
-          <span className="agent-skills-summary-count">{t("agentMCPCount", { count: servers.length })}</span>
+          <span className="agent-skills-summary-count">
+            {t("agentMCPCount", { count: pagination?.total ?? servers.length })}
+          </span>
           <Tooltip content={t("agentMCPAdd")}>
             <span>
               <Button
@@ -1743,7 +1792,18 @@ function AgentMCPPanel({
       </div>
       {addError ? <div className="form-error">{addError}</div> : null}
       {deleteError ? <div className="form-error">{deleteError}</div> : null}
-      {!servers.length ? (
+      {listError ? (
+        <div className="form-error" role="alert">
+          {listError}{" "}
+          {pagination ? (
+            <Button size="sm" onClick={pagination.retry}>
+              {t("retry")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {pagination?.loading ? <div role="status">{t("loading")}</div> : null}
+      {!pagination?.loading && !listError && !servers.length ? (
         <div className="agent-skills-summary-empty">
           <span className="agent-skills-summary-icon" aria-hidden="true">
             <Server size={18} strokeWidth={1.8} />
@@ -1766,6 +1826,7 @@ function AgentMCPPanel({
             const syncBusy = sourceSyncBusyName === server.name;
             return (
               <ResourceListCard
+                disabled={pagination?.loading}
                 key={server.name}
                 title={mcpServerDisplayName(server)}
                 description={server.description}
@@ -1816,6 +1877,7 @@ function AgentMCPPanel({
           })}
         </ResourceList>
       ) : null}
+      <ResourcePagination pagination={pagination} t={t} />
     </section>
   );
 }
@@ -2337,13 +2399,14 @@ function AgentInstructionsPanel({ draft, t, updateDraft }: AgentInstructionsPane
 }
 
 type AgentSkillsPanelProps = {
+  capacityPaused?: boolean;
+  pagination?: PaginationState;
   onOpenDetail: (item: SlashSkillOption) => void;
   onToggle?: (item: SlashSkillOption) => Promise<void>;
   mutationBusy: boolean;
   onOpenAddSkills: () => void;
   skillAddBusy: boolean;
   skillAddError: string;
-  skillCandidatesLoading: boolean;
   skillDeleteError: string;
   skills: readonly SlashSkillOption[];
   skillsError: string;
@@ -2352,28 +2415,36 @@ type AgentSkillsPanelProps = {
 };
 
 function AgentSkillsPanel({
+  capacityPaused,
+  pagination,
   onOpenDetail,
   onToggle,
   mutationBusy,
   onOpenAddSkills,
   skillAddBusy,
   skillAddError,
-  skillCandidatesLoading,
   skillDeleteError,
   skills,
   skillsError,
   skillsLoading,
   t,
 }: AgentSkillsPanelProps) {
+  const capacityRef = useResourceCapacity(pagination, capacityPaused);
   return (
-    <section id="agent-profile-skills" className="profile-section agent-skills-section agent-profile-scroll-target">
+    <section
+      ref={capacityRef}
+      id="agent-profile-skills"
+      className="profile-section agent-skills-section agent-profile-scroll-target"
+    >
       <div className="agent-skills-summary-heading">
         <div className="profile-section-heading">
           <div className="profile-section-title">{t("agentSkillsTitle")}</div>
           <p className="profile-section-description">{t("agentSkillsDescription")}</p>
         </div>
         <div className="agent-skills-summary-actions">
-          <span className="agent-skills-summary-count">{t("agentSkillsCount", { count: skills.length })}</span>
+          <span className="agent-skills-summary-count">
+            {t("agentSkillsCount", { count: pagination?.total ?? skills.length })}
+          </span>
           <Tooltip content={t("agentSkillAdd")}>
             <span>
               <Button
@@ -2381,7 +2452,7 @@ function AgentSkillsPanel({
                 variant="secondaryGray"
                 size="sm"
                 aria-label={t("agentSkillAdd")}
-                disabled={mutationBusy || skillCandidatesLoading || skillAddBusy}
+                disabled={mutationBusy || skillAddBusy}
                 onClick={onOpenAddSkills}
               >
                 <Plus aria-hidden="true" size={16} strokeWidth={2.2} />
@@ -2390,7 +2461,16 @@ function AgentSkillsPanel({
           </Tooltip>
         </div>
       </div>
-      {skillsError ? <div className="form-error">{skillsError}</div> : null}
+      {skillsError ? (
+        <div className="form-error">
+          {skillsError}{" "}
+          {pagination ? (
+            <Button size="sm" onClick={pagination.retry}>
+              {t("retry")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {skillAddError ? <div className="form-error">{skillAddError}</div> : null}
       {skillDeleteError ? <div className="form-error">{skillDeleteError}</div> : null}
       {skillsLoading ? (
@@ -2412,12 +2492,7 @@ function AgentSkillsPanel({
             <strong>{t("agentSkillsEmpty")}</strong>
             <p>{t("agentSkillsEmptyHint")}</p>
           </div>
-          <Button
-            variant="secondaryGray"
-            size="sm"
-            disabled={mutationBusy || skillCandidatesLoading || skillAddBusy}
-            onClick={onOpenAddSkills}
-          >
+          <Button variant="secondaryGray" size="sm" disabled={mutationBusy || skillAddBusy} onClick={onOpenAddSkills}>
             <Plus aria-hidden="true" size={15} strokeWidth={2.2} />
             {t("agentSkillAdd")}
           </Button>
@@ -2427,6 +2502,7 @@ function AgentSkillsPanel({
         <div className="hub-skill-card-grid agent-profile-skill-card-grid">
           {skills.map((skill) => (
             <ResourceListCard
+              disabled={pagination?.loading}
               key={skill.name}
               title={skill.name}
               description={skill.description}
@@ -2450,6 +2526,7 @@ function AgentSkillsPanel({
           ))}
         </div>
       ) : null}
+      <ResourcePagination pagination={pagination} t={t} />
     </section>
   );
 }
