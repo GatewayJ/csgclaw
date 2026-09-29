@@ -97,3 +97,29 @@ func TestProcessPreservesLongDeltasBeforeWireSplitting(t *testing.T) {
 		t.Fatal("missing deltas")
 	}
 }
+
+func TestReplyIgnoresCommentaryAndTextSnapshots(t *testing.T) {
+	p := NewProgress()
+	for _, event := range []agentengine.TurnEvent{
+		{Kind: agentengine.TurnEventTextDelta, Text: "Checking tools.", Phase: "commentary"},
+		{Kind: agentengine.TurnEventTextDelta, Text: "Complete snapshot.", Phase: "final_answer", TextSnapshot: true},
+	} {
+		if _, changed := p.Observe(event); changed {
+			t.Fatal("non-incremental reply event rendered a card")
+		}
+	}
+	rendered, changed := p.Observe(agentengine.TurnEvent{Kind: agentengine.TurnEventTextDelta, Text: "Answer.", Phase: "final_answer"})
+	if !changed {
+		t.Fatal("final answer delta did not render a card")
+	}
+	content := rendered.Cards[0]["body"].(map[string]any)["elements"].([]any)[0].(map[string]any)["content"].(string)
+	if content != "Answer." {
+		t.Fatalf("reply content = %q", content)
+	}
+	p.Observe(agentengine.TurnEvent{Kind: agentengine.TurnEventTextDelta, Text: "Answer.", Phase: "final_answer", TextSnapshot: true})
+	final := p.Finalize(agentengine.TurnResult{Status: agentengine.TurnCanceled})
+	content = final.Cards[0]["body"].(map[string]any)["elements"].([]any)[0].(map[string]any)["content"].(string)
+	if content != "Answer." {
+		t.Fatalf("canceled reply content = %q", content)
+	}
+}
