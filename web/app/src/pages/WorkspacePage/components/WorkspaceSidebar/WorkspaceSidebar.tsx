@@ -49,10 +49,7 @@ const WORKSPACE_NAVIGATION_ICONS = {
 
 export function WorkspaceSidebar({
   isSidebarCollapsed,
-  theme,
-  onThemeChange,
   locale,
-  onLocaleChange,
   t,
   agentItems,
   modelProviders = null,
@@ -71,12 +68,6 @@ export function WorkspaceSidebar({
   onSelectApps,
   activeThreadRootID,
   currentUserID,
-  authBusy,
-  authLoggingOut,
-  authEnvironment,
-  authError,
-  authPending,
-  authStatus,
   usersById,
   collapsedWorkspaceGroups,
   currentWorkspaceLabel,
@@ -113,18 +104,11 @@ export function WorkspaceSidebar({
   upgradeStatus,
   upgradeBusy,
   upgradePhase,
-  upgradeError,
-  suppressUpgradeIssue,
-  onOpenUpgrade,
-  onOpenConfigSettings,
   onOpenSettings,
   onCollapseSidebar,
-  onAuthEnvironmentChange,
   onExpandSidebar,
   onSkillUploadOpenChange,
-  onLogin,
   onRequireOpenCSGAuthentication,
-  onLogout,
   skillUploadOpen,
   taskItems,
   teams,
@@ -468,29 +452,12 @@ export function WorkspaceSidebar({
           <SidebarUserButton
             active={isSettingsPane}
             presentation={isSidebarCollapsed ? "icon" : "row"}
-            theme={theme}
-            onThemeChange={onThemeChange}
-            locale={locale}
-            onLocaleChange={onLocaleChange}
             appVersion={appVersion}
             upgradeStatus={upgradeStatus}
             upgradeBusy={upgradeBusy}
             upgradePhase={upgradePhase}
-            upgradeError={upgradeError}
-            suppressUpgradeIssue={suppressUpgradeIssue}
             showUpgradeControls={showUpgradeControls}
-            onOpenUpgrade={onOpenUpgrade}
-            onOpenConfigSettings={onOpenConfigSettings}
             onOpenSettings={onOpenSettings}
-            authStatus={authStatus}
-            authEnvironment={authEnvironment}
-            authBusy={authBusy}
-            authLoggingOut={authLoggingOut}
-            authPending={authPending}
-            authError={authError}
-            onLogin={onLogin}
-            onLogout={onLogout}
-            onAuthEnvironmentChange={onAuthEnvironmentChange}
             t={t}
           />
         </div>

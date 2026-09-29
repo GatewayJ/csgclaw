@@ -536,3 +536,48 @@ describe("SettingsPage", () => {
     expect(screen.queryByRole("button", { name: "Update" })).not.toBeInTheDocument();
   });
 });
+
+it("opens feedback after the required OpenCSG login succeeds", async () => {
+  const controller = {
+    ready: true,
+    t,
+    sidebarProps: {
+      t,
+      authStatus: emptyAuthStatus(),
+      appVersion: "v0.8.0",
+      upgradeStatus: null,
+      theme: "light",
+      locale: "en",
+      showUpgradeControls: false,
+      onLogin: vi.fn(),
+      onLogout: vi.fn(),
+      onThemeChange: vi.fn(),
+      onLocaleChange: vi.fn(),
+    },
+  } as unknown as WorkspaceController;
+  const view = renderSettings(controller);
+  await userEvent.setup().click(screen.getByRole("button", { name: "feedbackWrite" }));
+  expect(screen.queryByRole("dialog", { name: "feedbackTitle" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "csghubConnectContinue" })).toBeVisible();
+  const authenticated = {
+    ...controller,
+    sidebarProps: {
+      ...controller.sidebarProps,
+      authStatus: {
+        ...emptyAuthStatus(),
+        authenticated: true,
+        user_uuid: "user",
+        name: "alice",
+        base_url: "https://site.example",
+      },
+    },
+  } as WorkspaceController;
+  view.rerender(
+    <TooltipProvider delayDuration={0}>
+      <WorkspaceControllerProvider controller={authenticated}>
+        <SettingsPage />
+      </WorkspaceControllerProvider>
+    </TooltipProvider>,
+  );
+  expect(await screen.findByRole("dialog", { name: "feedbackTitle" })).toBeVisible();
+});
