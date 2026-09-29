@@ -190,9 +190,10 @@ func (s *IMTranscriptStore) DeliverFailure(ctx context.Context, turn channel.Tur
 	}
 	metadata := transcriptMetadata("final", turn, nil)
 	metadata = mergeCSGClawMetadata(metadata, map[string]any{
-		channelrender.RuntimeErrorMetaKey: true,
-		"error_code":                      publicError.Code,
-		"presentation_version":            2,
+		channelrender.RuntimeErrorMetaKey:   true,
+		channelrender.RuntimeErrorDetailKey: strings.TrimSpace(internalError),
+		"error_code":                        publicError.Code,
+		"presentation_version":              2,
 	})
 	_, err := s.im.DeliverMessage(im.DeliverMessageRequest{
 		RoomID:       strings.TrimSpace(turn.RoomID),
@@ -350,6 +351,8 @@ func transcriptMetadata(kind string, turn channel.TurnContext, tool *agentengine
 		"delivery_kind":     strings.TrimSpace(kind),
 		"request_id":        strings.TrimSpace(turn.SourceMessageID),
 		"source_message_id": strings.TrimSpace(turn.SourceMessageID),
+		"turn_id":           strings.TrimSpace(string(turn.TurnID)),
+		"turn_message_id":   finalMessageID(turn),
 	}
 	if tool != nil {
 		entry["tool_call_id"] = strings.TrimSpace(tool.ID)

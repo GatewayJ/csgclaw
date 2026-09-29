@@ -164,6 +164,45 @@ func TestCheckResponsesAPIWithClientPostsMinimalResponsesRequest(t *testing.T) {
 	}
 }
 
+// Some Responses-to-Chat gateways forward parallel_tool_calls even for a
+// tool-free probe, which OpenAI rejects unless a function is declared.
+func TestCheckResponsesAPIWithClientThroughGatewayRequiringTools(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Tools []struct {
+				Type       string         `json:"type"`
+				Name       string         `json:"name"`
+				Parameters map[string]any `json:"parameters"`
+			} `json:"tools"`
+			ToolChoice        string `json:"tool_choice"`
+			ParallelToolCalls *bool  `json:"parallel_tool_calls"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+			http.Error(w, "invalid JSON", 400)
+			return
+		}
+		if len(payload.Tools) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"message":"Invalid value for 'parallel_tool_calls': 'parallel_tool_calls' is only allowed when 'tools' are specified.","type":"invalid_request_error","param":"parallel_tool_calls","code":null}}`)
+			return
+		}
+		if len(payload.Tools) != 1 || payload.Tools[0].Type != "function" || payload.Tools[0].Name == "" || payload.Tools[0].Parameters["type"] != "object" {
+			t.Errorf("invalid probe tool: %+v", payload.Tools)
+		}
+		if payload.ToolChoice != "none" || payload.ParallelToolCalls == nil || *payload.ParallelToolCalls {
+			t.Error("probe must disable tool execution")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"probe","object":"response","status":"completed","output":[]}`)
+	}))
+	defer srv.Close()
+	if err := CheckResponsesAPIWithClient(context.Background(), srv.Client(), srv.URL, "test-key", "gpt-4.1-mini", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCheckResponsesAPIWithClientAcceptsStreamingResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Accept"); got != "text/event-stream" {
@@ -492,6 +531,7 @@ func TestModelDirectorySeparatesImageGenerationFromVisionAndUnavailableModels(t 
    {"id":"image-two","task":["text-to-image","image-to-image"]},
    {"id":"editor-only","task":"image-to-image"},
    {"id":"image-offline","task":"text-to-image","availability":{"is_available":false}},
+   {"id":"MiniMax-Hailuo-2.3","task":"text-to-video","metadata":{"capabilities":{"video":{"size":["768P","1080P"],"seconds":[6,10]}}}},
    {"id":"gpt-image-2"}, {"id":"image-one","task":"text-to-image"}
   ]}`))
 	}))
@@ -502,6 +542,12 @@ func TestModelDirectorySeparatesImageGenerationFromVisionAndUnavailableModels(t 
 	}
 	if !reflect.DeepEqual(directory.ImageModels, []string{"image-one", "image-two", "gpt-image-2"}) {
 		t.Fatalf("image models: %v", directory.ImageModels)
+	}
+	if !reflect.DeepEqual(directory.VideoModels, []string{"MiniMax-Hailuo-2.3"}) {
+		t.Fatalf("video models: %v", directory.VideoModels)
+	}
+	if got := directory.VideoMetadata["MiniMax-Hailuo-2.3"]; !reflect.DeepEqual(got.Sizes, []string{"768P", "1080P"}) || !reflect.DeepEqual(got.Seconds, []int{6, 10}) {
+		t.Fatalf("video metadata: %#v", got)
 	}
 	if !reflect.DeepEqual(directory.Models, []string{"chat-vision", "gpt-image-2"}) {
 		t.Fatalf("chat models: %v", directory.Models)
