@@ -1,8 +1,11 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +23,7 @@ type cotRecordingAdapter struct {
 	events           []channel.COTEvent
 	completed        int
 	creates          int
+	createError      error
 	failUpdate       bool
 	updateCalls      int
 	failUpdateAt     int
@@ -33,6 +37,9 @@ func (a *cotRecordingAdapter) CreateCOT(ctx context.Context, _ transport.COTCrea
 	a.cotMu.Lock()
 	a.creates++
 	a.cotMu.Unlock()
+	if a.createError != nil {
+		return transport.COTRef{}, a.createError
+	}
 	if a.entered != nil {
 		close(a.entered)
 	}
@@ -251,7 +258,7 @@ func enqueueCOTEnd(t *testing.T, store *feishustate.Store, end channel.DeliveryI
 	}
 }
 
-func TestCOTCompletionFailureKeepsRetryCardAfterAppendFailure(t *testing.T) {
+func TestCOTCompletionFailureAfterAppendFailure(t *testing.T) {
 	store := feishustate.NewStore()
 	adapter := &cotRecordingAdapter{recordingAdapter: &recordingAdapter{}, failUpdate: true, completeFailures: 3}
 	dispatcher, _ := NewDispatcher(DispatcherOptions{State: store, Adapter: adapter, RetryInterval: time.Nanosecond})
@@ -264,9 +271,12 @@ func TestCOTCompletionFailureKeepsRetryCardAfterAppendFailure(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		dispatcher.drainCOT(context.Background())
 	}
-	for _, id := range []string{"turn:cot:unavailable", "turn:cot:completion-failed"} {
-		if _, found := store.Delivery(id); !found {
-			t.Fatalf("missing notice %s", id)
+	if _, found := store.Delivery("turn:cot:unavailable"); !found {
+		t.Fatal("missing unavailable notice")
+	}
+	for _, item := range store.Pending() {
+		if item.Kind == channel.DeliveryCard && item.ID != "turn:cot:unavailable" {
+			t.Fatalf("unexpected card: %s", item.ID)
 		}
 	}
 }
@@ -290,5 +300,93 @@ func TestCOTSplitFailureStopsWithoutReplay(t *testing.T) {
 	}
 	if _, ok := store.Delivery("turn:cot:unavailable"); !ok {
 		t.Fatal("missing fallback notice")
+	}
+}
+
+func TestCOTFailuresLogAndPreserveReplyDelivery(t *testing.T) {
+	for _, createFails := range []bool{true, false} {
+		name := "completion"
+		if createFails {
+			name = "creation"
+		}
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			store := feishustate.NewStore()
+			adapter := &cotRecordingAdapter{recordingAdapter: &recordingAdapter{messageID: "reply"}}
+			if createFails {
+				adapter.createError = &transport.APIError{Operation: "create COT", HTTPStatus: 503, Message: "creation unavailable"}
+			} else {
+				adapter.completeFailures = 3
+			}
+			d, _ := NewDispatcher(DispatcherOptions{State: store, Adapter: adapter, RetryInterval: time.Nanosecond})
+			create := cotIntent("create", channel.DeliveryCOTCreate)
+			create.RelatedID = ""
+			if err := store.Enqueue(create); err != nil {
+				t.Fatal(err)
+			}
+			end := cotIntent("turn:cot:complete", channel.DeliveryCOTComplete)
+			end.Events = []channel.COTEvent{{EventType: "RUN_FINISHED"}}
+			enqueueCOTEnd(t, store, end)
+			for i := 0; i < 3; i++ {
+				d.drainCOT(context.Background())
+			}
+			complete, _ := store.Delivery(end.ID)
+			if complete.Status != channel.DeliveryFailed {
+				t.Fatalf("completion status = %s", complete.Status)
+			}
+			wantCards := 0
+			if createFails {
+				wantCards = 1
+			}
+			cards := 0
+			for _, item := range store.Pending() {
+				if item.Kind == channel.DeliveryCard {
+					cards++
+					if item.ID != "turn:cot:unavailable" {
+						t.Fatalf("unexpected card: %s", item.ID)
+					}
+				}
+			}
+			if cards != wantCards || adapter.creates != 1 {
+				t.Fatalf("cards = %d, creates = %d", cards, adapter.creates)
+			}
+			if createFails && adapter.completeAttempts != 0 {
+				t.Fatal("completion attempted after creation failed")
+			}
+			if !createFails && adapter.completeAttempts != 3 {
+				t.Fatalf("completion attempts = %d", adapter.completeAttempts)
+			}
+			failedKinds := map[string]bool{}
+			for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+				var record map[string]any
+				if err := json.Unmarshal(line, &record); err != nil {
+					t.Fatal(err)
+				}
+				if record["level"] != "ERROR" {
+					continue
+				}
+				if record["turn_id"] != "turn" || record["binding_id"] != "binding" || record["error"] == nil || record["error"] == "" {
+					t.Fatalf("missing failure context: %s", line)
+				}
+				failedKinds[record["kind"].(string)] = true
+			}
+			if !failedKinds[string(channel.DeliveryCOTComplete)] || (createFails && !failedKinds[string(channel.DeliveryCOTCreate)]) {
+				t.Fatalf("missing failure logs: %s", logs.String())
+			}
+			reply := cotIntent("reply", channel.DeliveryCard)
+			reply.RelatedID = ""
+			reply.Card = presentation.Card("answer")
+			if err := store.Enqueue(reply); err != nil {
+				t.Fatal(err)
+			}
+			d.drain(context.Background())
+			delivered, _ := store.Delivery(reply.ID)
+			if delivered.Status != channel.DeliveryDelivered {
+				t.Fatalf("reply status = %s", delivered.Status)
+			}
+		})
 	}
 }

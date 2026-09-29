@@ -10,9 +10,9 @@ CSGClaw does not read Feishu credentials from `config.toml`. The old
 `channels/feishu.toml` path is not migrated automatically by this flow.
 
 Control callbacks resolve the original task and requester from local delivery records.
-Task cancellation and COT completion have independent states; completion failures
-can be retried from a separate card. Final COT events and completion requests are
-separate deliveries. Native COT client controls remain platform-managed.
+Task cancellation and COT completion have independent states. COT creation and
+completion failures are logged with delivery identifiers and error details.
+Final COT events and completion requests are separate deliveries. Native COT client controls remain platform-managed.
 
 The native COT stop button sends `/stop`. The channel handles this message as a control request for the task active when the message arrives, validates the requester, and uses the existing Engine cancellation path. It does not submit a new prompt or send an extra command acknowledgement.
 
@@ -55,7 +55,7 @@ truncation; display titles and result summaries may be shortened with an ellipsi
 Oversized metadata fails locally. Partial append failures stop later fragments
 without replaying successful fragments. These budgets are not verified Feishu
 limits, and live API validation is still required.
-COT delivery failure leaves reply delivery available and produces a notice card.
+COT creation or append failure leaves reply delivery available and produces a notice card.
 If a final reply card cannot be created or updated after its bounded retries,
 the dispatcher sends that final page as one independent replacement card. It
 retains the original chat/thread routing and complete page content, with a stable

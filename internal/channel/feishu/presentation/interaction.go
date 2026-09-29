@@ -113,11 +113,3 @@ func interactionStatus(status string) string {
 		return "已结束"
 	}
 }
-
-func COTCompletionFailureCard() map[string]any {
-	return controlCard("过程展示结束失败，可以重试。", "重试结束过程")
-}
-
-func controlCard(text, label string) map[string]any {
-	return map[string]any{"schema": "2.0", "config": map[string]any{"update_multi": true}, "body": map[string]any{"elements": []any{markdownElement(text), button(label, "cancel", nil)}}}
-}

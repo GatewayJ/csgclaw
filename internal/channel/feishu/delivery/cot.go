@@ -132,16 +132,15 @@ func (d *Dispatcher) drainCOTPending(ctx context.Context, createsOnly bool) {
 		if err != nil {
 			failed[intent.TurnID] = true
 			d.logDeliveryFailure(intent, err, false, time.Time{})
+			if intent.Kind == channel.DeliveryCOTComplete {
+				continue
+			}
 			notice := intent
 			notice.ID = intent.TurnID + ":cot:unavailable"
 			notice.Kind = channel.DeliveryCard
 			notice.RelatedID = ""
 			notice.Events = nil
 			notice.Card = presentation.Card("过程展示暂时不可用，执行结果将通过回复卡片发送。")
-			if intent.Kind == channel.DeliveryCOTComplete {
-				notice.ID = intent.TurnID + ":cot:completion-failed"
-				notice.Card = presentation.COTCompletionFailureCard()
-			}
 			_ = d.state.Enqueue(notice)
 			d.Notify()
 		}
