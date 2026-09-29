@@ -13,6 +13,10 @@ import (
 )
 
 func (h *Handler) handleFeedback(w http.ResponseWriter, r *http.Request) {
+	if !h.validateServerAccessToken(r.Header.Get("Authorization")) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	record, found, err := auth.Default().Store.Load()
 	status := record.Status()
 	if err != nil || !found || !status.Authenticated {
