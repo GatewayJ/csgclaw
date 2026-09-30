@@ -297,3 +297,48 @@ func channelBinding(agentID, participantID string) channeltypes.Binding {
 func (pipelineTestConversation) GetInteraction(context.Context, agentengine.ConversationKey, string) (agentengine.InteractionRequest, error) {
 	return agentengine.InteractionRequest{}, &agentengine.TurnError{Code: agentengine.ErrorInteractionNotFound, Message: "no interaction in this test fixture"}
 }
+
+func TestPipelineWorkerCloseMonitorWait(t *testing.T) {
+	for _, mode := range []string{"completed", "canceled", "deadline"} {
+		t.Run(mode, func(t *testing.T) {
+			monitorDone := make(chan struct{})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var expected error
+			switch mode {
+			case "completed":
+				close(monitorDone)
+			case "canceled":
+				cancel()
+				expected = context.Canceled
+			case "deadline":
+				ctx, cancel = context.WithTimeout(ctx, 20*time.Millisecond)
+				defer cancel()
+				expected = context.DeadlineExceeded
+			}
+			adapter := &pipelineTestAdapter{}
+			stopped := false
+			worker := &pipelineWorker{cancel: func() { stopped = true }, adapter: adapter, monitorDone: monitorDone}
+			result := make(chan error, 1)
+			go func() { result <- worker.Close(ctx) }()
+			select {
+			case err := <-result:
+				if !errors.Is(err, expected) {
+					t.Fatalf("Close error = %v, want %v", err, expected)
+				}
+				if !stopped || !adapter.closed {
+					t.Fatal("Close did not cancel the worker and close the adapter")
+				}
+			case <-time.After(time.Second):
+				if mode != "completed" {
+					close(monitorDone)
+				}
+				<-result
+				t.Fatal("Close waited beyond the caller context")
+			}
+			if mode != "completed" {
+				close(monitorDone)
+			}
+		})
+	}
+}

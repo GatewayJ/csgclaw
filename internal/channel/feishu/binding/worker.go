@@ -287,7 +287,11 @@ func (w *pipelineWorker) Close(ctx context.Context) error {
 		}
 	}
 	if monitorDone != nil {
-		<-monitorDone
+		select {
+		case <-monitorDone:
+		case <-waitCtx.Done():
+			closeErr = errors.Join(closeErr, fmt.Errorf("wait for Feishu interaction monitor: %w", waitCtx.Err()))
+		}
 	}
 	if dispatcher != nil {
 		dispatcher.Close()
