@@ -62,18 +62,15 @@ type AppReference struct {
 }
 
 type Definition struct {
-	Kind              string         `json:"kind"`
-	SupportedRuntimes []string       `json:"supported_runtimes,omitempty"`
-	CLIPackage        string         `json:"cli_package,omitempty"`
-	SkillBundle       string         `json:"skill_bundle,omitempty"`
-	AppID             string         `json:"app_id"`
-	Name              string         `json:"name"`
-	Description       string         `json:"description"`
-	Version           string         `json:"version"`
-	Interface         Interface      `json:"interface"`
-	ConfigSchema      map[string]any `json:"config_schema"`
-	AuthMethods       []string       `json:"auth_methods"`
-	OAuthSupported    bool           `json:"oauth_supported"`
+	Kind           string         `json:"kind"`
+	AppID          string         `json:"app_id"`
+	Name           string         `json:"name"`
+	Description    string         `json:"description"`
+	Version        string         `json:"version"`
+	Interface      Interface      `json:"interface"`
+	ConfigSchema   map[string]any `json:"config_schema"`
+	AuthMethods    []string       `json:"auth_methods"`
+	OAuthSupported bool           `json:"oauth_supported"`
 }
 
 // Config contains only displayable configuration. Secret headers and environment

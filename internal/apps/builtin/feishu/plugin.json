@@ -1,7 +1,6 @@
 {
   "name": "feishu",
-  "version": "0.1.0",
-  "description": "Connect to an existing Feishu MCP service.",
+  "description": "Feishu CLI and official Skills",
   "author": {"name": "OpenCSG"},
   "keywords": ["feishu"],
   "apps": "./apps.json",

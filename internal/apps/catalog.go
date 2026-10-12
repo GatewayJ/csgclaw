@@ -78,12 +78,15 @@ func (s *Service) Definition(appID string) (Definition, error) {
 		return Definition{}, ErrNotFound
 	}
 	if appID == "feishu" {
-		return Definition{AppID: appID, Kind: KindCLI, Name: pkg.Manifest.Interface.DisplayName, Description: "Feishu CLI and official Skills", Version: larkcli.Version, Interface: pkg.Manifest.Interface, ConfigSchema: map[string]any{"type": "object", "properties": map[string]any{}}, AuthMethods: []string{"device"}, OAuthSupported: true, SupportedRuntimes: []string{"codex", "dsh"}, CLIPackage: "larksuite/cli@" + larkcli.Version, SkillBundle: larkcli.SkillsCommit}, nil
+		return Definition{
+			AppID: appID, Kind: KindCLI, Name: pkg.Manifest.Interface.DisplayName,
+			Description: pkg.Manifest.Description, Interface: pkg.Manifest.Interface,
+			Version: larkcli.Version, AuthMethods: []string{"device"}, OAuthSupported: true,
+			ConfigSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		}, nil
 	}
 	authMethods := []string{"none", "bearer", "header", "env"}
-	if appID == "feishu" {
-		authMethods = append(authMethods, "feishu")
-	} else if appID == "gitlab" {
+	if appID == "gitlab" {
 		authMethods = []string{"connector"}
 	}
 	return Definition{Kind: KindMCP, AppID: appID, Name: pkg.Manifest.Interface.DisplayName, Description: pkg.Manifest.Description,
@@ -96,9 +99,6 @@ func configSchema(appID string) map[string]any {
 		return map[string]any{"type": "string", "title": title, "writeOnly": secret}
 	}
 	config := normalizeConfig(Config{}, appID)
-	if appID == "feishu" {
-		config.AuthMode = "feishu"
-	}
 	props := map[string]any{
 		"url": field("MCP URL", false), "token": field("Token / API Key", true),
 		"connector_id": field("Connector ID", false),
@@ -108,7 +108,6 @@ func configSchema(appID string) map[string]any {
 	// Editable installation defaults. Local knowledge bases may instead be selected
 	// through the knowledge picker; no credentials are embedded in these defaults.
 	props["url"].(map[string]any)["default"] = map[string]string{
-		"feishu":   "https://u-agentichub-lark-mcp-passthrough-1qr.public.opencsg.com/mcp",
 		"gitlab":   "https://u-agentichub-gitlab-mcp-1qq.public.opencsg.com/mcp",
 		"llm-wiki": "http://127.0.0.1:19093/mcp",
 	}[appID]
@@ -121,12 +120,6 @@ func configSchema(appID string) map[string]any {
 	}
 	props["startup_timeout_sec"] = map[string]any{"type": "integer", "default": config.StartupTimeoutSec}
 	props["tool_timeout_sec"] = map[string]any{"type": "integer", "default": config.ToolTimeoutSec}
-	if appID == "feishu" {
-		props["token"] = field("Platform access token (optional)", true)
-		props["app_id"] = field("App ID", true)
-		props["app_secret"] = field("App Secret", true)
-		props["credential_source"] = map[string]any{"type": "string", "enum": []string{"manual"}, "default": "manual"}
-	}
 	if appID == "gitlab" {
 		props["gitlab_base_url"] = field("GitLab instance URL", false)
 	}

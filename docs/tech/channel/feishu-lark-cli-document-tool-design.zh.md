@@ -74,7 +74,7 @@ CSGClaw 负责资源、安装、绑定与状态；lark-cli 负责应用设置、
 
 | 对象 | 新增内容 | 保存原则 |
 |-|-|-|
-| `Definition` | `kind`、`supported_runtimes`、`cli_package`、`skill_bundle`、`auth_steps` | 内置、受信任的定义；用户不能提交任意安装脚本 |
+| `Definition` | `kind` | 目录 API 描述接入类型、展示信息和授权方式；CLI 版本由安装器提供 |
 | 全局 `Installation` | `kind`、`package_version`、`skill_version`、`auth_account_ref`、`cli_config_dir`、`revision`、`auth_status` | 继续使用全局资源记录；列表仅返回脱敏身份和状态 |
 | Agent binding | `applied_revision`、`skills` | 继续引用 `ResourceID`；复用 `Installation.LastErrorCode` 及现有错误处理；不复制长期凭证 |
 | `AuthSession` | `session_id`、`resource_id`、`stage`、`status`、`expires_at`、`resource_revision` | 敏感轮询信息仅保存于后端私有目录 |
@@ -82,7 +82,13 @@ CSGClaw 负责资源、安装、绑定与状态；lark-cli 负责应用设置、
 
 旧记录缺少 `kind` 时按 `mcp` 读取；新建飞书资源明确写入 `cli`。`Config.Transport` 继续描述 MCP 的 HTTP / stdio，CLI 使用独立配置结构。CLI 的配置校验不要求 MCP URL、工具发现或 MCP session。
 
-`Manifest.Skills` 当前只是原始 JSON 字段，需要增加类型解析与安装处理，不能仅添加 manifest 字段就认定技能包已经生效。
+内置包继续使用 `plugin.json` 和 `apps.json`。`plugin.json` 保存名称、说明、图标等展示信息，`apps.json` 引用内置服务。飞书目录由这些展示信息与 CLI 类型、Device Flow 授权方式组合生成。飞书 CLI 版本、Skills commit、平台下载地址及 SHA-256 由 `internal/larkcli` 安装器统一管理，飞书 `plugin.json` 不保存 CLI 版本。
+
+安装器根据主机平台下载并校验官方二进制与 Skills，保存到 `package/<version>/bin` 和 `package/<version>/skills`，并生成 `package.json`，记录 `version`、`skills_commit`、`executable_sha256`、`skills_sha256`。`Installation` 保存已安装版本和授权状态；worker binding 引用全局资源，安装对应 Skills 并配置 CLI 路径及共享配置目录。当前支持 Codex、DSH host runtime。
+
+`Manifest.Skills` 保留为原始 JSON 元信息；飞书 Skills 由专用安装器处理。当前连接器目录仅加载程序内置包，自定义 CLI 包格式和上传安装入口尚未提供。
+
+历史 MCP 记录继续按现有规则加载，保留显式 `kind=mcp` 创建、配置校验、凭证处理、连接和迁移路径。
 
 每个 CSGClaw 实例只有一个全局飞书连接器，配置一个飞书机器人，对应一个 App ID。全局页面固定展示飞书连接器入口，首次配置时创建唯一资源记录，未配置时显示待配置状态。`internal/apps` 在资源写入的同一临界区检查飞书资源唯一性；重复或并发初始化复用该记录及授权会话。已断开的资源仍保留该唯一记录。
 

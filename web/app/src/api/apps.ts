@@ -2,7 +2,6 @@ import { del, get, patch, post } from "@/api/client";
 
 export type AppDefinition = {
   kind?: "mcp" | "cli";
-  supported_runtimes?: string[];
   app_id: string;
   name: string;
   description: string;

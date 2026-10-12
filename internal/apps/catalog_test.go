@@ -1,6 +1,7 @@
 package apps
 
 import (
+	"csgclaw/internal/larkcli"
 	"slices"
 	"testing"
 )
@@ -19,8 +20,8 @@ func TestCatalogInstallationDefaults(t *testing.T) {
 		if properties["url"].(map[string]any)["default"] != tc.url || properties["auth_mode"].(map[string]any)["default"] != tc.auth {
 			t.Fatalf("missing connection defaults for %s", tc.app)
 		}
-		if slices.Contains(definition.AuthMethods, "feishu") != (tc.app == "feishu") {
-			t.Fatal("Feishu auth advertised for another service")
+		if definition.Kind != KindMCP || slices.Contains(definition.AuthMethods, "feishu") {
+			t.Fatalf("unexpected MCP definition: %+v", definition)
 		}
 		for _, key := range []string{"token", "app_id", "app_secret"} {
 			if field, ok := properties[key].(map[string]any); ok && field["default"] != nil {
@@ -32,9 +33,20 @@ func TestCatalogInstallationDefaults(t *testing.T) {
 
 func TestFeishuCatalogUsesCLI(t *testing.T) {
 	s := newTestService(t, Options{})
+	pkg := s.packages["feishu"]
+	pkg.Manifest.Description = "Custom Feishu description"
+	pkg.Manifest.Interface.DisplayName = "Custom Feishu name"
+	pkg.Manifest.Version = "manifest-version"
+	s.packages["feishu"] = pkg
 	d, err := s.Definition("feishu")
-	if err != nil || d.Kind != KindCLI || len(d.SupportedRuntimes) != 2 || d.CLIPackage == "" || d.SkillBundle == "" {
+	if err != nil || d.Kind != KindCLI || d.Version != larkcli.Version {
 		t.Fatalf("definition=%+v error=%v", d, err)
+	}
+	if d.Name != pkg.Manifest.Interface.DisplayName || d.Description != pkg.Manifest.Description {
+		t.Fatalf("catalog does not use manifest display metadata: %+v", d)
+	}
+	if !d.OAuthSupported || !slices.Equal(d.AuthMethods, []string{"device"}) {
+		t.Fatalf("unexpected CLI authorization: %+v", d)
 	}
 	if len(d.ConfigSchema["properties"].(map[string]any)) != 0 {
 		t.Fatal("CLI setup must use official authorization")
