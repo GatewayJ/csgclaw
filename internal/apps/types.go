@@ -4,6 +4,8 @@ package apps
 
 import (
 	"context"
+	"csgclaw/internal/larkcli"
+	skill "csgclaw/internal/skill/state"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -60,14 +62,18 @@ type AppReference struct {
 }
 
 type Definition struct {
-	AppID          string         `json:"app_id"`
-	Name           string         `json:"name"`
-	Description    string         `json:"description"`
-	Version        string         `json:"version"`
-	Interface      Interface      `json:"interface"`
-	ConfigSchema   map[string]any `json:"config_schema"`
-	AuthMethods    []string       `json:"auth_methods"`
-	OAuthSupported bool           `json:"oauth_supported"`
+	Kind              string         `json:"kind"`
+	SupportedRuntimes []string       `json:"supported_runtimes,omitempty"`
+	CLIPackage        string         `json:"cli_package,omitempty"`
+	SkillBundle       string         `json:"skill_bundle,omitempty"`
+	AppID             string         `json:"app_id"`
+	Name              string         `json:"name"`
+	Description       string         `json:"description"`
+	Version           string         `json:"version"`
+	Interface         Interface      `json:"interface"`
+	ConfigSchema      map[string]any `json:"config_schema"`
+	AuthMethods       []string       `json:"auth_methods"`
+	OAuthSupported    bool           `json:"oauth_supported"`
 }
 
 // Config contains only displayable configuration. Secret headers and environment
@@ -107,6 +113,18 @@ type Credentials struct {
 func (Credentials) String() string { return "[redacted]" }
 
 type Installation struct {
+	RuntimeStatus   string               `json:"runtime_status,omitempty"`
+	Migration       *CLIMigrationStatus  `json:"migration,omitempty"`
+	RequestedScopes string               `json:"requested_scopes,omitempty"`
+	Kind            string               `json:"kind"`
+	Revision        uint64               `json:"revision,omitempty"`
+	AppliedRevision uint64               `json:"applied_revision,omitempty"`
+	PackageVersion  string               `json:"package_version,omitempty"`
+	SkillVersion    string               `json:"skill_version,omitempty"`
+	AuthStatus      *larkcli.Status      `json:"auth_status,omitempty"`
+	Skills          []skill.ManagedSkill `json:"skills,omitempty"`
+	Operation       *CLIOperation        `json:"operation,omitempty"`
+	CheckedAt       time.Time            `json:"checked_at,omitempty"`
 	// FeishuAppID is displayable identity metadata; secrets remain write-only.
 	FeishuAppID         string           `json:"feishu_app_id,omitempty"`
 	ResourceID          string           `json:"resource_id,omitempty"`
@@ -130,6 +148,7 @@ type Installation struct {
 }
 
 type CreateRequest struct {
+	Kind        string      `json:"kind,omitempty"`
 	AppID       string      `json:"app_id"`
 	Name        string      `json:"name"`
 	Config      Config      `json:"config"`
@@ -167,6 +186,7 @@ type ConnectorHTTPConfig struct {
 }
 
 type Options struct {
+	CLI                  *CLIOptions
 	OpenCSGCredentials   func(context.Context) (OpenCSGCredentials, error)
 	FeishuTokenSource    func(string, string) feishutransport.TenantTokenSource
 	ReadOnly             func(string) bool
@@ -176,6 +196,7 @@ type Options struct {
 
 // BindingSummary describes use of a global resource without exposing credentials.
 type BindingSummary struct {
+	RuntimeStatus  string `json:"runtime_status,omitempty"`
 	AgentName      string `json:"agent_name,omitempty"`
 	InstallationID string `json:"installation_id"`
 	AgentID        string `json:"agent_id"`

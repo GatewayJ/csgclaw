@@ -46,11 +46,12 @@ const (
 )
 
 var (
-	rootFeaturesTableHeaderRe  = regexp.MustCompile(`^\s*\[\s*features\s*\]\s*(?:#.*)?$`)
-	rootMemoriesTableHeaderRe  = regexp.MustCompile(`^\s*\[\s*memories\s*\]\s*(?:#.*)?$`)
-	mcpServersTableHeaderRe    = regexp.MustCompile(`^\s*\[\s*mcp_servers\s*(?:\.\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[A-Za-z0-9_-]+)\s*)*\]\s*(?:#.*)?$`)
-	proxyProviderTableHeaderRe = regexp.MustCompile(`^\s*\[\s*model_providers\s*\.\s*proxy\s*\]\s*(?:#.*)?$`)
-	rootProviderDirectiveRe    = regexp.MustCompile(`^\s*(?:model|model_provider|model_catalog_json|model_context_window|model_auto_compact_token_limit)\s*=`)
+	rootFeaturesTableHeaderRe   = regexp.MustCompile(`^\s*\[\s*features\s*\]\s*(?:#.*)?$`)
+	rootFeatureSubtableHeaderRe = regexp.MustCompile(`^\s*\[\[?\s*(?:features|"features"|'features')\s*\.`)
+	rootMemoriesTableHeaderRe   = regexp.MustCompile(`^\s*\[\s*memories\s*\]\s*(?:#.*)?$`)
+	mcpServersTableHeaderRe     = regexp.MustCompile(`^\s*\[\s*mcp_servers\s*(?:\.\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[A-Za-z0-9_-]+)\s*)*\]\s*(?:#.*)?$`)
+	proxyProviderTableHeaderRe  = regexp.MustCompile(`^\s*\[\s*model_providers\s*\.\s*proxy\s*\]\s*(?:#.*)?$`)
+	rootProviderDirectiveRe     = regexp.MustCompile(`^\s*(?:model|model_provider|model_catalog_json|model_context_window|model_auto_compact_token_limit)\s*=`)
 
 	rootDottedMultiAgentRe    = regexp.MustCompile(`^\s*features\s*\.\s*multi_agent\s*=`)
 	featuresTableMultiAgentRe = regexp.MustCompile(`^\s*multi_agent\s*=`)
@@ -802,6 +803,9 @@ func tomlInlineStringMap(values map[string]string) string {
 }
 
 func sanitizeCopiedCodexConfigContent(content string) string {
+	// The bundled Codex accepts boolean feature flags. Desktop configurations
+	// can contain feature option tables that its configuration reader rejects.
+	content = stripTableBlocks(content, rootFeatureSubtableHeaderRe)
 	if !strings.Contains(content, "[[skills.config]]") {
 		return content
 	}

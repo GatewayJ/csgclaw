@@ -923,7 +923,7 @@ func (h *Handler) configureRuntimeExtensionSources() {
 	if err != nil {
 		return
 	}
-	if err := registrar.RegisterRuntimeExtensionSource("feishu-participant", source); err != nil {
+	if err := registrar.RegisterRuntimeExtensionSource("feishu-participant", legacyConnectorSource{h: h, source: source}); err != nil {
 		if !strings.Contains(err.Error(), "already registered") {
 			return
 		}
@@ -3382,7 +3382,6 @@ func (h *Handler) presentAgentResponse(item agent.Agent) agentResponse {
 		resp.MemorySupported = h.svc.SupportsMemory(item.RuntimeKind)
 	}
 	resp.Runtime.OptionSchemas = runtimeOptionSchemasForAPI(resp.RuntimeOptionSchemas)
-	resp.LarkCLI = h.agentLarkCLIStatus(item)
 	return resp
 }
 

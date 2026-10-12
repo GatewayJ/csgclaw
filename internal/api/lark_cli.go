@@ -79,35 +79,7 @@ func (e *larkCLIConfigureError) Unwrap() error {
 }
 
 func (h *Handler) initAgentLarkCLI(w http.ResponseWriter, r *http.Request) {
-	if h.svc == nil {
-		http.Error(w, "agent service is not configured", http.StatusServiceUnavailable)
-		return
-	}
-	if h.participant == nil {
-		http.Error(w, "participant service is not configured", http.StatusServiceUnavailable)
-		return
-	}
-	agentID := strings.TrimSpace(pathValue(r, "id"))
-	if agentID == "" {
-		http.NotFound(w, r)
-		return
-	}
-	target, ok := h.svc.Agent(agentID)
-	if !ok {
-		writeAgentOperationError(w, fmt.Errorf("agent %q not found", agent.CanonicalID(agentID)), http.StatusNotFound)
-		return
-	}
-	if !supportsAgentLarkCLI(target.RuntimeKind) {
-		writeCodedAPIError(w, http.StatusBadRequest, "unsupported_runtime", "lark-cli init is supported for Codex and DSH workers")
-		return
-	}
-
-	result, err := h.configureAgentLarkCLI(r.Context(), target)
-	if err != nil {
-		h.writeLarkCLIConfigureError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusGone, map[string]any{"error": map[string]string{"code": "connector_management_required", "message": "Manage Feishu CLI in global connectors."}, "connector_url": "#/connectors?add_connector=feishu"})
 }
 
 func (h *Handler) configureAgentLarkCLI(ctx context.Context, target agent.Agent) (result apitypes.AgentLarkCLIInitResponse, err error) {
@@ -234,26 +206,7 @@ func (h *Handler) clearAgentLarkCLIState(ctx context.Context, agentID string) er
 // This fixed product action cannot remove a newly connected Bot or accept
 // arbitrary Extension payloads. Deletion is retryable after the Participant is gone.
 func (h *Handler) cleanupAgentLarkCLI(w http.ResponseWriter, r *http.Request) {
-	if h.agentRuntime == nil || h.agentEngine == nil {
-		http.Error(w, "Agent lifecycle coordinator is unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	agentID := pathValue(r, "id")
-	err := h.agentRuntime.WithAgentLifecycle(r.Context(), agentID, func(ctx context.Context) error {
-		if h.participant != nil {
-			for _, item := range h.participant.List(participant.ListOptions{Channel: participant.ChannelFeishu, Type: participant.TypeAgent, AgentID: agentID}) {
-				if item.ChannelUserKind == participant.ChannelUserKindAppID {
-					return errFeishuBotAppIDConflict
-				}
-			}
-		}
-		return h.clearAgentLarkCLIState(ctx, agentID)
-	})
-	if err != nil {
-		writeCodedAPIError(w, http.StatusConflict, "feishu_cleanup_pending", "Cleanup could not complete. Ensure Feishu is disconnected and retry.")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	h.initAgentLarkCLI(w, r)
 }
 
 func (h *Handler) agentLarkCLIStatus(target agent.Agent) *apitypes.AgentLarkCLIStatus {

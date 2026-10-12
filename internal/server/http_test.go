@@ -2,11 +2,14 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -404,5 +407,54 @@ func TestRunDesktopServesRendererAndSandboxOnSeparateListeners(t *testing.T) {
 	case <-beforeShutdown:
 	default:
 		t.Fatal("BeforeShutdown was not called")
+	}
+}
+
+func TestRunCompletesConnectorMigrationBeforeOnReady(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "apps.json")
+	if err := os.WriteFile(statePath, []byte(`{"feishu_cli_migration":{"v1":{"status":"pending","global_ready":true,"workers":{}}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(Options{ListenAddr: "127.0.0.1:0", Context: ctx, AppsStatePath: statePath, OnReady: func(_ *api.Handler, _ chi.Router) {
+			data, err := os.ReadFile(statePath)
+			if err != nil {
+				ready <- err.Error()
+				return
+			}
+			var state struct {
+				Migration map[string]struct {
+					Status string `json:"status"`
+				} `json:"feishu_cli_migration"`
+			}
+			if err := json.Unmarshal(data, &state); err != nil {
+				ready <- err.Error()
+				return
+			}
+			ready <- state.Migration["v1"].Status
+		}})
+	}()
+	select {
+	case status := <-ready:
+		if status != "completed" {
+			t.Errorf("migration status at Agent restore=%q", status)
+		}
+	case err := <-done:
+		t.Fatalf("server stopped before OnReady: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Error("OnReady did not complete")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not stop")
 	}
 }

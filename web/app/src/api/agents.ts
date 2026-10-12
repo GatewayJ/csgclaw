@@ -139,18 +139,6 @@ export type FeishuRegistrationFinalizeResult = FeishuRegistration & {
   };
 };
 
-export type AgentLarkCLIInitResult = {
-  agent_id?: string;
-  app_id?: string;
-  generation?: number;
-  runtime_loaded?: boolean;
-  warning?: string;
-  participant_id?: string;
-  restart_error?: string;
-  restart_status?: string;
-  status?: string;
-};
-
 function modelPayload(draft: AgentProfileModelRequest): AgentProfileModelRequest {
   return {
     agent_id: draft.agent_id,
@@ -410,14 +398,6 @@ export function deleteAgentLikeRequest(item: AgentLike): Promise<void> {
 
 export function deleteFeishuParticipantRequest(participantID: string): Promise<void> {
   return del(`api/v1/channels/feishu/participants/${encodeURIComponent(participantID)}`);
-}
-
-export function initAgentLarkCLIRequest(agentID: string): Promise<AgentLarkCLIInitResult> {
-  return post(`api/v1/agents/${encodeURIComponent(agentID)}/lark-cli:init`, {});
-}
-
-export function cleanupAgentLarkCLIRequest(agentID: string): Promise<void> {
-  return post(`api/v1/agents/${encodeURIComponent(agentID)}/lark-cli:cleanup`, {});
 }
 
 export function runAgentActionRequest(agentID: string, action: string): Promise<AgentLike> {

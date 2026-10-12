@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	skill "csgclaw/internal/skill/state"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,17 +34,22 @@ func persistedRecord(r record) any {
 		return r
 	}
 	return struct {
-		InstallationID   string    `json:"installation_id"`
-		ResourceID       string    `json:"resource_id"`
-		AgentID          string    `json:"agent_id"`
-		Enabled          bool      `json:"enabled"`
-		Disconnected     bool      `json:"disconnected"`
-		ConnectRequested bool      `json:"connect_requested"`
-		CreatedAt        time.Time `json:"created_at"`
-		UpdatedAt        time.Time `json:"updated_at"`
-	}{r.InstallationID, r.ResourceID, r.AgentID, r.Enabled, r.Disconnected, r.ConnectRequested, r.CreatedAt, r.UpdatedAt}
+		InstallationID   string               `json:"installation_id"`
+		ResourceID       string               `json:"resource_id"`
+		AgentID          string               `json:"agent_id"`
+		Enabled          bool                 `json:"enabled"`
+		Disconnected     bool                 `json:"disconnected"`
+		ConnectRequested bool                 `json:"connect_requested"`
+		Kind             string               `json:"kind"`
+		AppliedRevision  uint64               `json:"applied_revision,omitempty"`
+		Skills           []skill.ManagedSkill `json:"skills,omitempty"`
+		CLIApply         *cliBinding          `json:"cli_apply,omitempty"`
+		CreatedAt        time.Time            `json:"created_at"`
+		UpdatedAt        time.Time            `json:"updated_at"`
+	}{r.InstallationID, r.ResourceID, r.AgentID, r.Enabled, r.Disconnected, r.ConnectRequested, r.Kind, r.AppliedRevision, r.Skills, r.CLIApply, r.CreatedAt, r.UpdatedAt}
 }
 func hydrateBinding(r *record, resource record) {
+	r.Kind, r.Revision, r.PackageVersion, r.SkillVersion, r.AuthStatus = resource.Kind, resource.Revision, resource.PackageVersion, resource.SkillVersion, resource.AuthStatus
 	r.AppID, r.Name = resource.AppID, resource.Name
 	r.Config, r.Credentials, r.Package = copyJSON(resource.Config), copyJSON(resource.Credentials), resource.Package
 	r.ResourceEnabled = resource.Enabled
@@ -64,6 +70,12 @@ func (s *Service) persistAllLocked() error {
 	})
 }
 func (s *Service) loadResources(stored map[string]record) error {
+	for id, r := range stored {
+		if r.Kind == "" {
+			r.Kind = KindMCP
+			stored[id] = r
+		}
+	}
 	ids := make([]string, 0, len(stored))
 	for id := range stored {
 		ids = append(ids, id)
@@ -108,7 +120,9 @@ func (s *Service) loadResources(stored map[string]record) error {
 			hydrateBinding(&r, resource)
 		}
 		r.Tools, r.CredentialsSet, r.Bindings = nil, nil, nil
-		r.LastError, r.LastErrorCode, r.LastErrorHTTPStatus = "", "", 0
+		if r.Kind != KindCLI {
+			r.LastError, r.LastErrorCode, r.LastErrorHTTPStatus = "", "", 0
+		}
 		r.Status = "needs_configuration"
 		if r.Disconnected {
 			r.Status = "disconnected"
@@ -123,6 +137,9 @@ func (s *Service) loadResources(stored map[string]record) error {
 
 func (s *Service) viewLocked(e *entry) Installation {
 	item := view(e)
+	if e.record.Kind == KindCLI {
+		return s.cliViewLocked(e)
+	}
 	if e.record.AgentID != "" {
 		if !e.record.ResourceEnabled {
 			item.Status = "disabled"
@@ -185,6 +202,9 @@ func resourceConnectionStatusPriority(status string) int {
 }
 
 func (s *Service) Bind(ctx context.Context, agentID string, in BindRequest) (Installation, error) {
+	if s.isCLI("", in.ResourceID) {
+		return s.bindCLI(ctx, agentID, in.ResourceID)
+	}
 	if strings.TrimSpace(agentID) == "" {
 		return Installation{}, ErrInvalid
 	}
@@ -230,6 +250,9 @@ func (s *Service) Bind(ctx context.Context, agentID string, in BindRequest) (Ins
 }
 
 func (s *Service) updateResource(ctx context.Context, id string, in UpdateRequest, expected ...time.Time) (Installation, error) {
+	if s.isCLI("", id) {
+		return Installation{}, ErrInvalid
+	}
 	s.mu.Lock()
 	resource, err := s.findLocked("", id)
 	if err != nil {

@@ -28,9 +28,10 @@ export function appDescription(app: AppDefinition, t: TranslateFn): string {
 
 export function appStatus(app: AppInstallation, t: TranslateFn): string {
   if (!app.enabled || app.resource_enabled === false) return t("appStatusDisabled");
-  if (app.disconnected) return t("appStatusDisconnected");
+  if (app.disconnected) return t(app.kind === "cli" ? "appStatusNeedsConfiguration" : "appStatusDisconnected");
   const keys = {
     not_connected: "appStatusNotConnected",
+    applying: "feishuCLIApplying",
     configured: "appStatusConfigured",
     needs_configuration: "appStatusNeedsConfiguration",
     connecting: "appStatusConnecting",

@@ -1,6 +1,7 @@
 package apps
 
 import (
+	"csgclaw/internal/larkcli"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -76,13 +77,16 @@ func (s *Service) Definition(appID string) (Definition, error) {
 	if !ok {
 		return Definition{}, ErrNotFound
 	}
+	if appID == "feishu" {
+		return Definition{AppID: appID, Kind: KindCLI, Name: pkg.Manifest.Interface.DisplayName, Description: "Feishu CLI and official Skills", Version: larkcli.Version, Interface: pkg.Manifest.Interface, ConfigSchema: map[string]any{"type": "object", "properties": map[string]any{}}, AuthMethods: []string{"device"}, OAuthSupported: true, SupportedRuntimes: []string{"codex", "dsh"}, CLIPackage: "larksuite/cli@" + larkcli.Version, SkillBundle: larkcli.SkillsCommit}, nil
+	}
 	authMethods := []string{"none", "bearer", "header", "env"}
 	if appID == "feishu" {
 		authMethods = append(authMethods, "feishu")
 	} else if appID == "gitlab" {
 		authMethods = []string{"connector"}
 	}
-	return Definition{AppID: appID, Name: pkg.Manifest.Interface.DisplayName, Description: pkg.Manifest.Description,
+	return Definition{Kind: KindMCP, AppID: appID, Name: pkg.Manifest.Interface.DisplayName, Description: pkg.Manifest.Description,
 		Version: pkg.Manifest.Version, Interface: pkg.Manifest.Interface, ConfigSchema: configSchema(appID),
 		AuthMethods: authMethods, OAuthSupported: false}, nil
 }

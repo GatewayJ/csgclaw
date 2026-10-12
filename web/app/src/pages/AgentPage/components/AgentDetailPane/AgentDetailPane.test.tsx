@@ -108,7 +108,7 @@ describe("AgentDetailPane metadata editing", () => {
     expect(screen.getByRole("switch", { name: "reviewer" })).not.toBeChecked();
   });
 
-  it("offers tool cleanup after Feishu disconnect without showing a connected Bot", async () => {
+  it("keeps channel actions independent of connector cleanup", async () => {
     const user = userEvent.setup();
     const onDisconnectFeishu = vi.fn();
     render(
@@ -123,8 +123,8 @@ describe("AgentDetailPane metadata editing", () => {
     await user.click(screen.getByRole("button", { name: "agentChannelsTitle" }));
     expect(screen.getByText("feishuDisconnected")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "feishuDisconnect" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "feishuCleanupRetry" }));
-    expect(onDisconnectFeishu).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "feishuCleanupRetry" })).not.toBeInTheDocument();
+    expect(onDisconnectFeishu).not.toHaveBeenCalled();
   });
 
   it("places a dismiss button on the right side of a notice", async () => {
@@ -359,6 +359,35 @@ describe("AgentDetailPane memory", () => {
 });
 
 describe("AgentDetailPane MCP snapshots", () => {
+  it.each([
+    { runtimeKind: "dsh", sandbox: false, supported: true },
+    { runtimeKind: "openclaw_sandbox", sandbox: true, supported: false },
+  ])("shows the Feishu connector for $runtimeKind", async ({ runtimeKind, sandbox, supported }) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response(JSON.stringify({ items: [] }), { headers: { "content-type": "application/json" } }),
+      ),
+    );
+    render(
+      <Harness
+        draft={{ ...savedDraft, runtime_kind: runtimeKind, sandbox_enabled: sandbox }}
+        item={{
+          ...agent,
+          runtime_kind: runtimeKind,
+          runtime: { kind: runtimeKind, name: runtimeKind, sandbox_enabled: sandbox, state: "running" },
+        }}
+        requestedProfileTab="apps"
+      />,
+    );
+    const toggle = await screen.findByRole("switch", { name: "feishuCLIWorkerSwitch" });
+    if (supported) expect(toggle).toBeEnabled();
+    else {
+      expect(toggle).toBeDisabled();
+      expect(screen.getByText("feishuCLIUnsupported")).toBeVisible();
+    }
+  });
+
   it("distinguishes manually added MCP servers from app-managed services", async () => {
     vi.stubGlobal(
       "fetch",

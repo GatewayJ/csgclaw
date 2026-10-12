@@ -1138,7 +1138,10 @@ func TestBuildSessionEnvOnlyInjectsOpenAIAPIKey(t *testing.T) {
 	if got, want := envMap["EXTRA_FLAG"], "1"; got != want {
 		t.Fatalf("EXTRA_FLAG = %q, want %q", got, want)
 	}
-	for _, key := range []string{"ZDOTDIR", "BASH_ENV", "ENV", "LARKSUITE_CLI_CONFIG_DIR", "LARK_CHANNEL", "LARK_CHANNEL_HOME", "LARK_CHANNEL_PROFILE", "LARK_CHANNEL_CONFIG"} {
+	if got, want := envMap["LARKSUITE_CLI_CONFIG_DIR"], filepath.Join("/tmp/runtime-codex-home", "connectors", "feishu-disabled"); got != want {
+		t.Fatalf("disabled config directory=%q, want %q", got, want)
+	}
+	for _, key := range []string{"ZDOTDIR", "BASH_ENV", "ENV", "LARK_CHANNEL", "LARK_CHANNEL_HOME", "LARK_CHANNEL_PROFILE", "LARK_CHANNEL_CONFIG"} {
 		if got, ok := envMap[key]; ok {
 			t.Fatalf("%s = %q, want omitted from runtime env", key, got)
 		}
@@ -2840,6 +2843,9 @@ func TestRuntimeCreateCopiesAndSanitizesHostConfig(t *testing.T) {
 		`default_mode_request_user_input = false`,
 		`memories = false`,
 		``,
+		`[features.context_management]`,
+		`experimental_mode = true`,
+		``,
 		`[memories]`,
 		`generate_memories = false`,
 		`use_memories = false`,
@@ -2930,6 +2936,8 @@ func TestRuntimeCreateCopiesAndSanitizesHostConfig(t *testing.T) {
 		`unused-test-key`,
 		`https://unused.example/v1`,
 		`stale-host-model`,
+		`context_management`,
+		`experimental_mode`,
 		`stale-catalog.json`,
 		`Stale host proxy`,
 		`https://stale.example/v1`,

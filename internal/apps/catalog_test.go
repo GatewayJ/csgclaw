@@ -9,7 +9,6 @@ func TestCatalogInstallationDefaults(t *testing.T) {
 	service := newTestService(t, Options{})
 	for _, tc := range []struct{ app, url, auth string }{
 		{"gitlab", "https://u-agentichub-gitlab-mcp-1qq.public.opencsg.com/mcp", "bearer"},
-		{"feishu", "https://u-agentichub-lark-mcp-passthrough-1qr.public.opencsg.com/mcp", "feishu"},
 		{"llm-wiki", "http://127.0.0.1:19093/mcp", "bearer"},
 	} {
 		definition, err := service.Definition(tc.app)
@@ -28,5 +27,16 @@ func TestCatalogInstallationDefaults(t *testing.T) {
 				t.Fatal("secret in catalog defaults")
 			}
 		}
+	}
+}
+
+func TestFeishuCatalogUsesCLI(t *testing.T) {
+	s := newTestService(t, Options{})
+	d, err := s.Definition("feishu")
+	if err != nil || d.Kind != KindCLI || len(d.SupportedRuntimes) != 2 || d.CLIPackage == "" || d.SkillBundle == "" {
+		t.Fatalf("definition=%+v error=%v", d, err)
+	}
+	if len(d.ConfigSchema["properties"].(map[string]any)) != 0 {
+		t.Fatal("CLI setup must use official authorization")
 	}
 }
