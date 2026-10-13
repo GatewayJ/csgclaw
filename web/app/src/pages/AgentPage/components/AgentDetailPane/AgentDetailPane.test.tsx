@@ -95,6 +95,18 @@ function Harness({
 }
 
 describe("AgentDetailPane metadata editing", () => {
+  it("refreshes skills when entering the tab and returning from connectors", async () => {
+    const user = userEvent.setup();
+    const onRefreshSkills = vi.fn().mockResolvedValue(undefined);
+    render(<Harness workspaceSupported onRefreshSkills={onRefreshSkills} />);
+    expect(onRefreshSkills).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /agentProfileSkillsTab/ }));
+    await waitFor(() => expect(onRefreshSkills).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "agentAppsTab" }));
+    await user.click(screen.getByRole("button", { name: /agentProfileSkillsTab/ }));
+    await waitFor(() => expect(onRefreshSkills).toHaveBeenCalledTimes(2));
+  });
+
   it("preserves the skill list while applying an enablement change", async () => {
     const skills = [{ name: "reviewer", description: "Review", enabled: true }];
     const view = render(<Harness workspaceSupported skills={skills} />);

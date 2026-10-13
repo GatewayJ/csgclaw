@@ -2877,6 +2877,7 @@ export function useAgentController({
           void agentSkillsQuery.refetch();
         }
       },
+      onRefreshSkills: resourceLists.skills.query.refetch,
       skillContinuation: resourceLists.skills.continuation,
       mcpContinuation: resourceLists.mcp.continuation,
       mcpListError: resourceLists.mcp.query.error

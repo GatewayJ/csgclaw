@@ -228,6 +228,7 @@ export type AgentDetailPaneProps = {
   mcpContinuation?: ResourceContinuation;
   mcpListError?: string;
   onLoadSkillCandidates?: () => void;
+  onRefreshSkills?: () => void | Promise<unknown>;
   skills?: SlashSkillOption[];
   skillsError?: string;
   skillsLoading?: boolean;
@@ -291,6 +292,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     mcpContinuation,
     mcpListError = "",
     onLoadSkillCandidates,
+    onRefreshSkills,
     skillCandidates = [],
     skillCandidatesLoading = false,
     skillCandidatesError = "",
@@ -571,6 +573,9 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
   const visibleActiveProfileTab = profileTabs.some((tab) => tab.id === selectedProfileTab)
     ? selectedProfileTab
     : profileTabs[0]?.id;
+  useEffect(() => {
+    if (visibleActiveProfileTab === "skills" && workspaceSupported) void onRefreshSkills?.();
+  }, [item.id, visibleActiveProfileTab, workspaceSupported, onRefreshSkills]);
   const appsController = useAgentApps(
     String(item.id || ""),
     showApps && (visibleActiveProfileTab === "apps" || visibleActiveProfileTab === "mcp"),
