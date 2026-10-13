@@ -52,6 +52,7 @@ type Service struct {
 	cliCancel        context.CancelFunc
 	cliCancelSession string
 	cliWake          chan struct{}
+	cliDrain         chan chan struct{}
 	cliWG            sync.WaitGroup
 	mu               sync.Mutex
 	path             string
@@ -88,7 +89,7 @@ func NewService(statePath string, options Options) (*Service, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{path: statePath, options: options, packages: packages, cliWake: make(chan struct{}, 1), entries: map[string]*entry{}, gateways: map[string]*gateway{}, ctx: ctx, cancel: cancel}
+	s := &Service{path: statePath, options: options, packages: packages, cliWake: make(chan struct{}, 1), cliDrain: make(chan chan struct{}), entries: map[string]*entry{}, gateways: map[string]*gateway{}, ctx: ctx, cancel: cancel}
 	if statePath != "" {
 		s.dataRoot, err = filepath.Abs(filepath.Join(filepath.Dir(statePath), "apps"))
 	} else {
@@ -710,7 +711,6 @@ func (s *Service) Restore(ctx context.Context, agentID string) error {
 }
 
 func (s *Service) RestoreAll(ctx context.Context) error {
-	s.scheduleConnectorWork()
 	s.mu.Lock()
 	agents := map[string]bool{}
 	for _, e := range s.entries {
@@ -724,6 +724,26 @@ func (s *Service) RestoreAll(ctx context.Context) error {
 		if err := s.Restore(ctx, agentID); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	done := make(chan struct{})
+	select {
+	case s.cliDrain <- done:
+	case <-ctx.Done():
+		return errors.Join(append(errs, ctx.Err())...)
+	case <-s.ctx.Done():
+		return errors.Join(append(errs, s.ctx.Err())...)
+	}
+	select {
+	case <-done:
+		for agentID := range agents {
+			if err := s.CheckCLIReady(agentID); err != nil {
+				errs = append(errs, fmt.Errorf("restore connectors for %s: %w", agentID, err))
+			}
+		}
+	case <-ctx.Done():
+		errs = append(errs, ctx.Err())
+	case <-s.ctx.Done():
+		errs = append(errs, s.ctx.Err())
 	}
 	return errors.Join(errs...)
 }

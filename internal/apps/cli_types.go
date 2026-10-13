@@ -50,8 +50,6 @@ type cliOperation struct {
 	Process         connectorcli.ProcessRef           `json:"process,omitempty"`
 	Device          *connectorcli.DeviceAuthorization `json:"device,omitempty"`
 	Workers         map[string]bool                   `json:"workers,omitempty"`
-	BackupTaken     bool                              `json:"backup_taken,omitempty"`
-	ConfigExisted   bool                              `json:"config_existed,omitempty"`
 	Committed       bool                              `json:"committed,omitempty"`
 	Settled         bool                              `json:"settled,omitempty"`
 	Cancelled       bool                              `json:"cancelled,omitempty"`

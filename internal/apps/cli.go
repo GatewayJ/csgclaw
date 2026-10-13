@@ -371,7 +371,9 @@ func (s *Service) runConnectorWork() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
+		var done chan struct{}
 		select {
+		case done = <-s.cliDrain:
 		case <-s.ctx.Done():
 			return
 		case <-s.cliWake:
@@ -381,45 +383,62 @@ func (s *Service) runConnectorWork() {
 			s.cliWorkMu.Unlock()
 			continue
 		}
-		s.cliWorkMu.Lock()
-		s.mu.Lock()
-		var queued []string
-		for id, e := range s.entries {
-			if e.record.CLI != nil && e.record.CLI.Queued != nil {
-				queued = append(queued, id)
+		for {
+			s.processConnectorWork()
+			if done == nil {
+				break
 			}
-		}
-		s.mu.Unlock()
-		for _, id := range queued {
-			s.promoteQueuedCLI(id)
-		}
-		if m := s.migrationSnapshot(); m != nil && (m.Status == "pending" || m.Status == "running") {
-			_ = s.executeMigration(s.ctx)
-		}
-		s.mu.Lock()
-		var operations, bindings []string
-		for id, e := range s.entries {
-			if e.record.CLI != nil && activeCLI(e.record.CLI.Operation) {
-				operations = append(operations, id)
+			select {
+			case <-s.cliWake:
+				continue
+			default:
+				close(done)
 			}
-			if e.record.CLIApply != nil && e.record.CLIApply.Pending && e.record.LastErrorCode == "" && s.cliResourceSettledLocked(e.record.ResourceID) {
-				bindings = append(bindings, id)
-			}
+			break
 		}
-		s.mu.Unlock()
-		sort.Strings(operations)
-		sort.Strings(bindings)
-		for _, id := range operations {
-			s.executeCLI(id)
-		}
-		for _, id := range bindings {
-			if s.ctx.Err() == nil {
-				_ = s.applyBinding(s.ctx, id)
-			}
-		}
-		s.cliWorkMu.Unlock()
 	}
 }
+
+func (s *Service) processConnectorWork() {
+	s.cliWorkMu.Lock()
+	s.mu.Lock()
+	var queued []string
+	for id, e := range s.entries {
+		if e.record.CLI != nil && e.record.CLI.Queued != nil {
+			queued = append(queued, id)
+		}
+	}
+	s.mu.Unlock()
+	for _, id := range queued {
+		s.promoteQueuedCLI(id)
+	}
+	if m := s.migrationSnapshot(); m != nil && (m.Status == "pending" || m.Status == "running") {
+		_ = s.executeMigration(s.ctx)
+	}
+	s.mu.Lock()
+	var operations, bindings []string
+	for id, e := range s.entries {
+		if e.record.CLI != nil && activeCLI(e.record.CLI.Operation) {
+			operations = append(operations, id)
+		}
+		if e.record.CLIApply != nil && e.record.CLIApply.Pending && e.record.LastErrorCode == "" && s.cliResourceSettledLocked(e.record.ResourceID) {
+			bindings = append(bindings, id)
+		}
+	}
+	s.mu.Unlock()
+	sort.Strings(operations)
+	sort.Strings(bindings)
+	for _, id := range operations {
+		s.executeCLI(id)
+	}
+	for _, id := range bindings {
+		if s.ctx.Err() == nil {
+			_ = s.applyBinding(s.ctx, id)
+		}
+	}
+	s.cliWorkMu.Unlock()
+}
+
 func (s *Service) editCLI(id string, fn func(*record) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -488,10 +507,7 @@ func (s *Service) executeCLI(id string) {
 		migrationReady := migration == nil || migration.ResourceID != id || migration.Status == "completed"
 		if migrationReady && latest.CLI != nil && latest.CLI.Recovery == nil && !latest.CLI.Operation.Committed {
 			recovery, stop := context.WithTimeout(s.ctx, 30*time.Second)
-			restoreErr := s.restoreCLIConfig(id)
-			if restoreErr == nil {
-				restoreErr = s.recoverCLIStatus(recovery, id)
-			}
+			restoreErr := s.recoverCLIStatus(recovery, id)
 			if restoreErr == nil {
 				restoreErr = s.applyCLIWorkers(recovery, id)
 			}
@@ -577,9 +593,6 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 	}
 	if r.CLI.Recovery != nil {
 		if err = connectorcli.RecoverProcess(r.CLI.Recovery.Process); err != nil {
-			return err
-		}
-		if err = s.restoreCLIFile(id, r, r.CLI.Recovery); err != nil {
 			return err
 		}
 		if err = s.editCLI(id, func(r *record) error { r.CLI.Recovery = nil; return nil }); err != nil {

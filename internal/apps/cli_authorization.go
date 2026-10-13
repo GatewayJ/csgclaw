@@ -103,7 +103,7 @@ func (s *Service) recoverCLIStatus(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if !r.CLI.Operation.CommandsStarted && !r.CLI.Operation.BackupTaken {
+	if !r.CLI.Operation.CommandsStarted {
 		return nil
 	}
 	ready, status, err := s.checkCLIStatus(ctx, id, r)

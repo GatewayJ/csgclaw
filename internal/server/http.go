@@ -250,11 +250,14 @@ func Run(opts Options) error {
 		if runCtx.Err() != nil {
 			return
 		}
-		if opts.OnReady != nil {
-			opts.OnReady(handler, router)
-		}
 		if opts.AppsStatePath != "" {
 			handler.RestoreConnectors(runCtx)
+		}
+		if runCtx.Err() != nil {
+			return
+		}
+		if opts.OnReady != nil {
+			opts.OnReady(handler, router)
 		}
 	}()
 

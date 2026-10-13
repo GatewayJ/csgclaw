@@ -71,18 +71,7 @@ func (s *Service) persistAllLocked() error {
 }
 func (s *Service) loadResources(stored map[string]record) error {
 	converted := false
-	upgradedCLI := map[string]bool{}
 	for id, r := range stored {
-		if r.Kind == KindCLI && (r.Package.Manifest.Kind == "" || r.Package.CLI == nil || (r.AppID == "feishu" && len(r.Package.CLI.Status) == 0)) {
-			r.Package = s.packages[r.AppID]
-			if r.CLI != nil && r.Package.CLI != nil && r.AgentID == "" {
-				r.CLI.Ready, _, _ = r.Package.CLI.ReadStatus(r.AuthStatus)
-				r.Revision++
-				upgradedCLI[id] = true
-			}
-			converted = true
-			stored[id] = r
-		}
 		if r.Kind == "" {
 			r.Kind = KindMCP
 			stored[id] = r
@@ -129,12 +118,6 @@ func (s *Service) loadResources(stored map[string]record) error {
 				return fmt.Errorf("App binding has no global resource")
 			}
 			hydrateBinding(&r, resource)
-			if upgradedCLI[r.ResourceID] {
-				if r.CLIApply == nil {
-					r.CLIApply = &cliBinding{}
-				}
-				r.CLIApply.Pending = true
-			}
 		}
 		r.Tools, r.CredentialsSet, r.Bindings = nil, nil, nil
 		if r.Kind != KindCLI {

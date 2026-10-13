@@ -2,14 +2,18 @@ package server
 
 import (
 	"context"
+	"csgclaw/internal/apps"
 	"encoding/json"
 	"errors"
+	"fmt"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -456,5 +460,89 @@ func TestRunCompletesConnectorMigrationBeforeOnReady(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not stop")
+	}
+}
+
+func TestRunRestoresConnectorsBeforeOnReady(t *testing.T) {
+	for _, cancelRestore := range []bool{false, true} {
+		t.Run(fmt.Sprint("cancel=", cancelRestore), func(t *testing.T) {
+			var restoring atomic.Bool
+			entered := make(chan struct{}, 1)
+			release := make(chan struct{})
+			server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "fixture", Version: "1"}, nil)
+			handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if restoring.Load() {
+					select {
+					case entered <- struct{}{}:
+					default:
+					}
+					select {
+					case <-release:
+					case <-r.Context().Done():
+						return
+					}
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer upstream.Close()
+			defer close(release)
+			statePath := filepath.Join(t.TempDir(), "apps.json")
+			service, err := apps.NewService(statePath, apps.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.Create(context.Background(), "worker", apps.CreateRequest{AppID: "gitlab", Name: "GitLab", Config: apps.Config{URL: upstream.URL, AuthMode: "none"}, Connect: true})
+			if err != nil {
+				service.Close()
+				t.Fatal(err)
+			}
+			if err := service.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restoring.Store(true)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ready := make(chan struct{}, 1)
+			done := make(chan error, 1)
+			go func() {
+				done <- Run(Options{ListenAddr: "127.0.0.1:0", Context: ctx, AppsStatePath: statePath, OnReady: func(*api.Handler, chi.Router) { ready <- struct{}{} }})
+			}()
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("connector restoration did not begin")
+			}
+			select {
+			case <-ready:
+				t.Fatal("Worker startup ran before connector restoration")
+			case <-time.After(50 * time.Millisecond):
+			}
+			if !cancelRestore {
+				restoring.Store(false)
+				release <- struct{}{}
+				select {
+				case <-ready:
+				case <-time.After(5 * time.Second):
+					t.Fatal("Worker startup did not run after restoration")
+				}
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("server did not stop")
+			}
+			if cancelRestore {
+				select {
+				case <-ready:
+					t.Fatal("Worker startup ran after cancellation")
+				default:
+				}
+			}
+		})
 	}
 }

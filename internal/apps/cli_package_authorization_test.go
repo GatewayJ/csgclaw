@@ -174,48 +174,6 @@ func TestFeishuWorkflowRunsUnderCustomPackageName(t *testing.T) {
 	}
 }
 
-func TestCLIPackageUpgradeRetainsConfigurationAndRefreshesBinding(t *testing.T) {
-	service, _, id := newCLIFixture(t)
-	if got := waitCLIOperation(t, service, id, startCLITest(t, service, id, "connect", "connect")); got.Status != "completed" {
-		t.Fatal(got)
-	}
-	binding, err := service.Bind(context.Background(), "worker", BindRequest{ResourceID: id})
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitCLIBinding(t, service, binding.InstallationID, "worker")
-	snapshot, err := service.cliSnapshot(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := service.editCLI(id, func(r *record) error { r.Package.CLI.Status = nil; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.Close(); err != nil {
-		t.Fatal(err)
-	}
-	restored, err := NewService(service.path, service.options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer restored.Close()
-	current, err := restored.cliSnapshot(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(current.Package.CLI.Status) == 0 || current.CLI.ConfigDir != snapshot.CLI.ConfigDir || !current.CLI.Ready {
-		t.Fatal("upgrade did not preserve authorized resource")
-	}
-	if err := restored.CheckCLIReady("worker"); err == nil {
-		t.Fatal("old runtime binding was not queued for replacement")
-	}
-	restored.scheduleConnectorWork()
-	result := waitCLIBinding(t, restored, binding.InstallationID, "worker")
-	if result.Status != "connected" || result.AppliedRevision != current.Revision {
-		t.Fatalf("binding=%+v", result)
-	}
-}
-
 func TestCLICancelPendingResourcePreservesActiveAuthorization(t *testing.T) {
 	for _, action := range []string{"cancel", "disconnect"} {
 		t.Run(action, func(t *testing.T) {
