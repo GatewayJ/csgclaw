@@ -318,3 +318,82 @@ func TestFeishuCLIDisconnectClearsUnavailableConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestCLIPublishesAuthorizationStagesBeforeCompletion(t *testing.T) {
+	for _, cancelAtUser := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancel=%v", cancelAtUser), func(t *testing.T) {
+			s, fixture, id := newCLIFixture(t)
+			userEntered, policyEntered := make(chan struct{}), make(chan struct{})
+			allowUser, allowPolicy := make(chan struct{}), make(chan struct{})
+			s.options.CLI.Run = func(ctx context.Context, client connectorcli.Client, input io.Reader, args ...string) ([]byte, error) {
+				var entered, release chan struct{}
+				switch strings.Join(args, " ") {
+				case "auth login --device-code private-code --json":
+					entered, release = userEntered, allowUser
+				case "config strict-mode off --global":
+					entered, release = policyEntered, allowPolicy
+				}
+				if entered != nil {
+					close(entered)
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				}
+				return fixture.run(ctx, client, input, args...)
+			}
+			op := startCLITest(t, s, id, "connect", "stages")
+			assertStage := func(entered chan struct{}, user bool) Installation {
+				t.Helper()
+				select {
+				case <-entered:
+				case <-time.After(5 * time.Second):
+					t.Fatal("authorization stage timeout")
+				}
+				item, err := s.Get(context.Background(), "", id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var status struct {
+					Identities struct {
+						Bot, User struct{ Available, Verified bool }
+					}
+				}
+				if err := json.Unmarshal(item.AuthStatus, &status); err != nil {
+					t.Fatal(err)
+				}
+				if !status.Identities.Bot.Available || !status.Identities.Bot.Verified || status.Identities.User.Verified != user {
+					t.Fatalf("unexpected stage identities: %s", item.AuthStatus)
+				}
+				if item.Authorized || item.Status != "connecting" || item.Operation.Status != "running" || item.CheckedAt.IsZero() || item.Revision != op.Revision {
+					t.Fatalf("stage prematurely committed: %+v", item)
+				}
+				return item
+			}
+			bot := assertStage(userEntered, false)
+			if cancelAtUser {
+				if _, err := s.CancelCLI(context.Background(), id, op.SessionID); err != nil {
+					t.Fatal(err)
+				}
+				if got := waitCLIOperation(t, s, id, op); got.Status != "cancelled" {
+					t.Fatalf("cancel=%+v", got)
+				}
+				return
+			}
+			close(allowUser)
+			personal := assertStage(policyEntered, true)
+			if !personal.CheckedAt.After(bot.CheckedAt) {
+				t.Fatal("personal authorization did not refresh check time")
+			}
+			close(allowPolicy)
+			if got := waitCLIOperation(t, s, id, op); got.Status != "completed" {
+				t.Fatalf("completion=%+v", got)
+			}
+			item, err := s.Get(context.Background(), "", id)
+			if err != nil || !item.Authorized || item.Status != "connected" {
+				t.Fatalf("completed resource=%+v err=%v", item, err)
+			}
+		})
+	}
+}

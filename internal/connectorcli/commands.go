@@ -239,6 +239,8 @@ type Workflow struct {
 	Device          *DeviceAuthorization
 	SaveDevice      func(*DeviceAuthorization) error
 	Stage           func(string) error
+	// StageCompleted runs after a named stage succeeds, including an already satisfied Unless check.
+	StageCompleted func(context.Context) error
 }
 
 func (w *Workflow) args(args []string) []string {
@@ -296,6 +298,9 @@ func (w *Workflow) Run(ctx context.Context, commands Commands) error {
 				return err
 			}
 			if matched {
+				if err := w.completeStage(ctx, command); err != nil {
+					return err
+				}
 				continue
 			}
 		}
@@ -307,8 +312,20 @@ func (w *Workflow) Run(ctx context.Context, commands Commands) error {
 		if err := w.run(ctx, command); err != nil {
 			return err
 		}
+		if err := w.completeStage(ctx, command); err != nil {
+			return err
+		}
 	}
 	return ctx.Err()
+}
+func (w *Workflow) completeStage(ctx context.Context, command Command) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if command.Stage != "" && w.StageCompleted != nil {
+		return w.StageCompleted(ctx)
+	}
+	return nil
 }
 func (w *Workflow) run(ctx context.Context, command Command) error {
 	client := w.Client

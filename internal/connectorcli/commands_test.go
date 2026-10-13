@@ -178,3 +178,47 @@ func TestCommandAcceptsOnlyConfiguredErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkflowStageCompletion(t *testing.T) {
+	for _, mode := range []string{"success", "already authorized", "failed", "cancelled", "unnamed", "callback failed"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			command := Command{Args: []string{"login"}, Stage: "authorization"}
+			if mode == "already authorized" {
+				command.Unless = &Check{Args: []string{"status"}, MatchJSON: JSONMatch{{"/ready": true}}}
+			}
+			if mode == "unnamed" {
+				command.Stage = ""
+			}
+			workflow := Workflow{Client: Client{Runner: func(_ context.Context, _ Client, _ io.Reader, args ...string) ([]byte, error) {
+				if mode == "failed" {
+					return nil, errors.New("authorization failed")
+				}
+				if mode == "cancelled" {
+					cancel()
+				}
+				if mode == "already authorized" && args[0] != "status" {
+					t.Fatal("repeated authorization")
+				}
+				return []byte(`{"ready":true}`), nil
+			}}, StageCompleted: func(context.Context) error {
+				calls++
+				if mode == "callback failed" {
+					return errors.New("save failed")
+				}
+				return nil
+			}}
+			err := workflow.Run(ctx, Commands{command})
+			wantCalls := 0
+			if mode == "success" || mode == "already authorized" || mode == "callback failed" {
+				wantCalls = 1
+			}
+			wantError := mode == "failed" || mode == "cancelled" || mode == "callback failed"
+			if calls != wantCalls || (err != nil) != wantError {
+				t.Fatalf("calls=%d err=%v", calls, err)
+			}
+		})
+	}
+}

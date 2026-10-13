@@ -48,6 +48,23 @@ func (s *Service) authorizeCLI(ctx context.Context, id string, r record) (bool, 
 		return s.editCLI(id, func(r *record) error { r.CLI.Operation.Stage = value; r.CLI.Operation.URL = ""; return nil })
 	}
 	workflow := connectorcli.Workflow{Client: s.cliClient(id, r), RequestedScopes: spec.RequestedScopes, Device: r.CLI.Operation.Device, Stage: stage,
+		StageCompleted: func(ctx context.Context) error {
+			_, status, err := s.checkCLIStatus(ctx, id, r)
+			if err != nil {
+				return err
+			}
+			return s.editCLI(id, func(r *record) error {
+				if r.CLI.Operation.Cancelled || ctx.Err() != nil {
+					return context.Canceled
+				}
+				// Publish observed identities while the operation retains ownership of readiness and worker updates.
+				r.AuthStatus = status
+				r.RequestedScopes = spec.RequestedScopes
+				r.CheckedAt = time.Now().UTC()
+				r.CLI.Operation.URL = ""
+				return nil
+			})
+		},
 		SaveDevice: func(device *connectorcli.DeviceAuthorization) error {
 			return s.editCLI(id, func(r *record) error {
 				r.CLI.Operation.Device = device

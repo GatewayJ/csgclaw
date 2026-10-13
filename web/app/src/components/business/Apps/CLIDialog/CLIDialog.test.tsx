@@ -53,6 +53,38 @@ const definition: AppDefinition = {
 };
 
 describe("Feishu CLI authorization", () => {
+  it.each([
+    ["user_authorization", false, false],
+    ["user_authorization", true, false],
+    ["applying", true, true],
+  ] as const)(
+    "shows identities and retains cancellation during %s (user=%s, authorized=%s)",
+    async (stage, user, authorized) => {
+      const progress: AppInstallation = {
+        ...resource,
+        authorized,
+        operation: { ...resource.operation!, stage },
+        auth_status: {
+          appId: "cli_test",
+          defaultAs: "auto",
+          identities: {
+            bot: { status: "ready", available: true, verified: true, appName: "Test bot" },
+            user: { status: user ? "ready" : "pending", available: user, verified: user, userName: "Test user" },
+          },
+        },
+      };
+      vi.mocked(fetchAppResource).mockResolvedValue(progress);
+      vi.mocked(cancelCLIOperation).mockResolvedValue(progress.operation!);
+      render(<CLIDialog definition={definition} existing={resource} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
+      expect(await screen.findByText(`Test bot · ${t("feishuCLIAvailable")}`)).toBeInTheDocument();
+      expect(
+        screen.getByText(`Test user · ${t(user ? "feishuCLIAvailable" : "feishuCLIUnauthorized")}`),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+      await userEvent.setup().click(screen.getByRole("button", { name: "Cancel" }));
+      expect(cancelCLIOperation).toHaveBeenCalledWith("global-cli", "session-1");
+    },
+  );
   it("disconnects both identities through one action", async () => {
     const connected: AppInstallation = {
       ...resource,
