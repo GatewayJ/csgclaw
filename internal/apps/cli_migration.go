@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"csgclaw/internal/connectorcli"
 	"csgclaw/internal/larkcli"
 	"csgclaw/internal/localstore"
 	agentruntime "csgclaw/internal/runtime"
@@ -197,13 +198,13 @@ func (s *Service) executeMigration(ctx context.Context) error {
 	if m == nil || m.Status == "completed" {
 		return nil
 	}
-	if s.options.CLI == nil || s.options.CLI.Runtime == nil {
+	if s.options.Runtime == nil {
 		return errors.New("migration runtime is unavailable")
 	}
 	if err := larkcli.RecoverProcess(m.Process); err != nil {
 		return err
 	}
-	rt := s.options.CLI.Runtime
+	rt := s.options.Runtime
 	legacyRT, ok := rt.(CLIMigrationRuntime)
 	if !ok {
 		return errors.New("migration runtime is unavailable")
@@ -218,7 +219,7 @@ func (s *Service) executeMigration(ctx context.Context) error {
 				w.ErrorCode = "migration_failed"
 			} else if id != "" {
 				m.Status = "pending"
-				s.scheduleCLI()
+				s.scheduleConnectorWork()
 			}
 			return nil
 		})
@@ -289,7 +290,7 @@ func (s *Service) executeMigration(ctx context.Context) error {
 		}); err != nil {
 			return fail(id, err)
 		}
-		if err := s.applyCLIBinding(ctx, worker.BindingID); err != nil {
+		if err := s.applyBinding(ctx, worker.BindingID); err != nil {
 			restoreErr := s.restoreMigrationWorker(ctx, id, legacyRT)
 			return fail(id, errors.Join(err, restoreErr))
 		}
@@ -396,19 +397,24 @@ func (s *Service) prepareMigrationGlobal(ctx context.Context) error {
 	if len(m.SourceConfig) == 0 {
 		return s.editMigration(func(m *cliMigration) error { m.GlobalReady = true; return nil })
 	}
-	install := s.options.CLI.Install
+	var options CLIOptions
+	if s.options.CLI != nil {
+		options = *s.options.CLI
+	}
+	install := options.Install
 	if install == nil {
-		install = func(ctx context.Context, root string, progress func(string)) (larkcli.Package, error) {
-			return (larkcli.Installer{Root: root}).Install(ctx, progress)
+		install = func(ctx context.Context, root string, progress func(string)) (connectorcli.Package, error) {
+			return (connectorcli.Installer{Root: root, Spec: s.packages["feishu"].CLI.Install}).Install(ctx, progress)
 		}
 	}
 	pkg, err := install(ctx, filepath.Join(s.dataRoot, m.ResourceID, "package"), nil)
 	if err != nil {
 		return err
 	}
-	client := larkcli.Client{Executable: pkg.Executable, ConfigDir: r.CLI.ConfigDir, Runner: s.options.CLI.Run, OperationID: "migration", Process: func(ref larkcli.ProcessRef) error {
+	client := larkcli.Client{Executable: pkg.Executable, ConfigDir: r.CLI.ConfigDir, OperationID: "migration", Process: func(ref larkcli.ProcessRef) error {
 		return s.editMigration(func(m *cliMigration) error { m.Process = ref; return nil })
 	}}
+	client = client.WithRunner(options.Run)
 	_, identity, err := larkcli.SelectConfig(m.SourceConfig)
 	if err != nil {
 		return err
@@ -426,10 +432,10 @@ func (s *Service) prepareMigrationGlobal(ctx context.Context) error {
 		_ = json.Unmarshal(identity.Secret, &ref)
 		if ref.Source != "keychain" {
 			if json.Unmarshal(identity.Secret, &secret) != nil {
-				if s.options.CLI.LegacySecret == nil {
+				if options.LegacySecret == nil {
 					return errors.New("legacy app credential resolver is unavailable")
 				}
-				secret, err = s.options.CLI.LegacySecret(ctx, m.Selected, identity.AppID)
+				secret, err = options.LegacySecret(ctx, m.Selected, identity.AppID)
 				if err != nil {
 					return err
 				}
@@ -443,9 +449,10 @@ func (s *Service) prepareMigrationGlobal(ctx context.Context) error {
 	if err = s.editCLI(m.ResourceID, func(r *record) error {
 		r.CLI.Executable = pkg.Executable
 		r.CLI.SkillsDir = pkg.SkillsDir
-		r.AuthStatus = &status
+		r.AuthStatus, _ = json.Marshal(status)
+		r.CLI.Ready = status.Identities.Bot.Available || status.Identities.User.Available
 		r.PackageVersion = pkg.Version
-		r.SkillVersion = larkcli.SkillsCommit
+		r.SkillVersion = s.packages["feishu"].CLI.Install.Skills.Version
 		r.Revision++
 		return nil
 	}); err != nil {
@@ -467,7 +474,7 @@ func (s *Service) restoreMigrationWorker(ctx context.Context, id string, rt CLIM
 	}); err != nil {
 		return err
 	}
-	err := s.options.CLI.Runtime.Update(ctx, id, worker.Running, func(ctx context.Context) error {
+	err := s.options.Runtime.Update(ctx, id, worker.Running, func(ctx context.Context) error {
 		s.mu.Lock()
 		binding := s.entries[worker.BindingID]
 		var plan *skill.SkillPlan
@@ -480,7 +487,7 @@ func (s *Service) restoreMigrationWorker(ctx context.Context, id string, rt CLIM
 		s.mu.Unlock()
 		if plan != nil {
 			reverse := skill.SkillPlan{Before: plan.After, After: plan.Before}
-			if err := s.options.CLI.Runtime.ApplySkills(ctx, id, reverse); err != nil {
+			if err := s.options.Runtime.ApplySkills(ctx, id, reverse); err != nil {
 				return err
 			}
 		}
@@ -519,7 +526,7 @@ func (s *Service) cleanupMigration(ctx context.Context) error {
 	if m == nil || m.Status != "completed" {
 		return nil
 	}
-	rt, ok := s.options.CLI.Runtime.(CLIMigrationRuntime)
+	rt, ok := s.options.Runtime.(CLIMigrationRuntime)
 	if !ok {
 		return nil
 	}

@@ -2,13 +2,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "@/shared/i18n";
-import type { AppInstallation } from "@/api/apps";
-import { fetchAppResource, cancelCLIOperation, startCLIOperation } from "@/api/apps";
-import { FeishuCLIDialog } from "./FeishuCLIDialog";
+import type { AppInstallation, AppDefinition } from "@/api/apps";
+import { createAppResource, fetchAppResource, cancelCLIOperation, startCLIOperation } from "@/api/apps";
+import { CLIDialog } from "./CLIDialog";
 
 vi.mock("@/api/apps", () => ({
   fetchAppResource: vi.fn(),
-  ensureFeishuResource: vi.fn(),
+  createAppResource: vi.fn(),
   startCLIOperation: vi.fn(),
   cancelCLIOperation: vi.fn(),
 }));
@@ -40,11 +40,24 @@ const resource: AppInstallation = {
   },
 };
 afterEach(() => vi.resetAllMocks());
+const definition: AppDefinition = {
+  app_id: "feishu",
+  kind: "cli",
+  name: "Feishu",
+  description: "Feishu CLI",
+  version: "0.1.0",
+  interface: {},
+  config_schema: {},
+  auth_methods: ["command"],
+  oauth_supported: true,
+};
+
 describe("Feishu CLI authorization", () => {
   it("disconnects both identities through one action", async () => {
     const connected: AppInstallation = {
       ...resource,
       status: "connected",
+      authorized: true,
       operation: undefined,
       auth_status: {
         appId: "cli_test",
@@ -57,26 +70,44 @@ describe("Feishu CLI authorization", () => {
     };
     vi.mocked(fetchAppResource).mockResolvedValue(connected);
     vi.mocked(startCLIOperation).mockResolvedValue({ ...resource.operation!, action: "disconnect" });
-    render(<FeishuCLIDialog existing={connected} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
+    render(<CLIDialog definition={definition} existing={connected} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
     await userEvent.setup().click(screen.getByRole("button", { name: "Disconnect" }));
     expect(startCLIOperation).toHaveBeenCalledWith(connected, "disconnect", expect.any(String));
+  });
+  it("uses the connector authorization result for connection actions", async () => {
+    const unverified: AppInstallation = {
+      ...resource,
+      authorized: false,
+      status: "needs_configuration",
+      operation: undefined,
+      auth_status: {
+        appId: "cli_test",
+        defaultAs: "auto",
+        identities: { bot: { status: "unknown", available: true }, user: { status: "unknown", available: false } },
+      },
+    };
+    vi.mocked(fetchAppResource).mockResolvedValue(unverified);
+    render(<CLIDialog definition={definition} existing={unverified} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Connect Feishu" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
   });
   it.each([null, []])("renders completed migration with workers %j", async (workers) => {
     const completed: AppInstallation = {
       ...resource,
       status: "connected",
+      authorized: true,
       operation: undefined,
       migration: { status: "completed", workers },
     };
     vi.mocked(fetchAppResource).mockResolvedValue(completed);
-    render(<FeishuCLIDialog existing={completed} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
+    render(<CLIDialog definition={definition} existing={completed} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
     expect(await screen.findByRole("button", { name: "Close" })).toBeEnabled();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("restores the active authorization and keeps it running when the dialog closes", async () => {
     vi.mocked(fetchAppResource).mockResolvedValue(resource);
     const close = vi.fn();
-    render(<FeishuCLIDialog existing={resource} t={t} onClose={close} onChanged={vi.fn()} />);
+    render(<CLIDialog definition={definition} existing={resource} t={t} onClose={close} onChanged={vi.fn()} />);
     expect(await screen.findByRole("link", { name: "Open Feishu authorization" })).toHaveAttribute(
       "href",
       "https://open.feishu.cn/device",
@@ -93,7 +124,7 @@ describe("Feishu CLI authorization", () => {
       status: "cancelled",
       authorization_url: undefined,
     });
-    render(<FeishuCLIDialog existing={resource} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
+    render(<CLIDialog definition={definition} existing={resource} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
     await userEvent.setup().click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(cancelCLIOperation).toHaveBeenCalledWith("global-cli", "session-1"));
     expect(screen.queryByRole("link", { name: "Open Feishu authorization" })).not.toBeInTheDocument();
@@ -112,8 +143,46 @@ describe("Feishu CLI authorization", () => {
       },
     };
     vi.mocked(fetchAppResource).mockResolvedValue(failed);
-    render(<FeishuCLIDialog existing={failed} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
+    render(<CLIDialog definition={definition} existing={failed} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Historical configuration migration needs repair.");
     expect(screen.getByRole("button", { name: "Connect Feishu" })).toBeEnabled();
   });
+});
+
+it("creates and authorizes the selected CLI package", async () => {
+  const custom: AppInstallation = {
+    ...resource,
+    app_id: "fixture",
+    name: "Fixture CLI",
+    status: "needs_configuration",
+    operation: undefined,
+  };
+  vi.mocked(createAppResource).mockResolvedValue(custom);
+  vi.mocked(fetchAppResource).mockResolvedValue(custom);
+  vi.mocked(startCLIOperation).mockResolvedValue({
+    ...resource.operation!,
+    authorization_url: "https://example.com/authorize",
+  });
+  render(
+    <CLIDialog
+      definition={{ ...definition, app_id: "fixture", name: "Fixture CLI", description: "Use fixture commands." }}
+      existing={null}
+      t={t}
+      onClose={vi.fn()}
+      onChanged={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "Fixture CLI" })).toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button", { name: "Connect" }));
+  await waitFor(() =>
+    expect(createAppResource).toHaveBeenCalledWith({
+      app_id: "fixture",
+      kind: "cli",
+      name: "Fixture CLI",
+      config: {},
+      credentials: {},
+      connect: false,
+    }),
+  );
+  expect(startCLIOperation).toHaveBeenCalledWith(custom, "connect", expect.any(String));
 });

@@ -2,30 +2,26 @@ package apps
 
 import (
 	"context"
-	"io"
+	"encoding/json"
 	"time"
 
-	"csgclaw/internal/larkcli"
-	projection "csgclaw/internal/runtimeextension/larkcli"
+	"csgclaw/internal/connectorcli"
+	projection "csgclaw/internal/runtimeextension/connectorcli"
 	skill "csgclaw/internal/skill/state"
 )
 
 const KindMCP = "mcp"
 const KindCLI = "cli"
 
-type CLIRuntime interface {
-	State(context.Context, string) (bool, error)
-	Update(context.Context, string, bool, func(context.Context) error) error
-	Configure(context.Context, string, *projection.Payload) error
-	PlanSkills(string, string, string, []skill.ManagedSkill, bool) (skill.SkillPlan, error)
-	ApplySkills(context.Context, string, skill.SkillPlan) error
+type CLIProjection struct {
+	projection.Payload
+	Status json.RawMessage
 }
 
 type CLIOptions struct {
-	Runtime      CLIRuntime
 	LegacySecret func(context.Context, string, string) (string, error)
-	Install      func(context.Context, string, func(string)) (larkcli.Package, error)
-	Run          func(context.Context, larkcli.Client, io.Reader, ...string) ([]byte, error)
+	Install      func(context.Context, string, func(string)) (connectorcli.Package, error)
+	Run          connectorcli.Runner
 }
 
 type CLIRequest struct {
@@ -50,17 +46,19 @@ type CLIOperation struct {
 
 type cliOperation struct {
 	CLIOperation
-	Process       larkcli.ProcessRef `json:"process,omitempty"`
-	DeviceCode    string             `json:"device_code,omitempty"`
-	Workers       map[string]bool    `json:"workers,omitempty"`
-	BackupTaken   bool               `json:"backup_taken,omitempty"`
-	ConfigExisted bool               `json:"config_existed,omitempty"`
-	Committed     bool               `json:"committed,omitempty"`
-	Settled       bool               `json:"settled,omitempty"`
-	Cancelled     bool               `json:"cancelled,omitempty"`
+	CommandsStarted bool                              `json:"commands_started,omitempty"`
+	Process         connectorcli.ProcessRef           `json:"process,omitempty"`
+	Device          *connectorcli.DeviceAuthorization `json:"device,omitempty"`
+	Workers         map[string]bool                   `json:"workers,omitempty"`
+	BackupTaken     bool                              `json:"backup_taken,omitempty"`
+	ConfigExisted   bool                              `json:"config_existed,omitempty"`
+	Committed       bool                              `json:"committed,omitempty"`
+	Settled         bool                              `json:"settled,omitempty"`
+	Cancelled       bool                              `json:"cancelled,omitempty"`
 }
 
 type cliRecord struct {
+	Ready      bool                    `json:"ready"`
 	ConfigDir  string                  `json:"config_dir"`
 	Executable string                  `json:"executable"`
 	SkillsDir  string                  `json:"skills_dir"`

@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"csgclaw/internal/larkcli"
-	projection "csgclaw/internal/runtimeextension/larkcli"
+	"csgclaw/internal/connectorcli"
 )
 
 func (s *Service) isCLI(agentID, id string) bool {
@@ -21,11 +19,19 @@ func (s *Service) isCLI(agentID, id string) bool {
 	return err == nil && e.record.Kind == KindCLI
 }
 
-func (s *Service) EnsureFeishuCLI(context.Context) (Installation, error) {
+func (s *Service) EnsureFeishuCLI(ctx context.Context) (Installation, error) {
+	return s.ensureCLI(ctx, "feishu")
+}
+
+func (s *Service) ensureCLI(_ context.Context, appID string) (Installation, error) {
+	pkg, ok := s.packages[appID]
+	if !ok || pkg.CLI == nil {
+		return Installation{}, ErrNotFound
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, e := range s.entries {
-		if e.record.AgentID == "" && e.record.Kind == KindCLI && e.record.AppID == "feishu" {
+		if e.record.AgentID == "" && e.record.Kind == KindCLI && e.record.AppID == appID {
 			return s.viewLocked(e), nil
 		}
 	}
@@ -34,7 +40,7 @@ func (s *Service) EnsureFeishuCLI(context.Context) (Installation, error) {
 		return Installation{}, err
 	}
 	now := time.Now().UTC()
-	r := record{Installation: Installation{Kind: KindCLI, InstallationID: id, AppID: "feishu", Name: "Feishu", Enabled: true, ResourceEnabled: true, Revision: 1, Status: "needs_configuration", CreatedAt: now, UpdatedAt: now}, CLI: &cliRecord{ConfigDir: filepath.Join(s.dataRoot, id, "lark-cli"), Completed: map[string]CLIOperation{}}}
+	r := record{Installation: Installation{Kind: KindCLI, InstallationID: id, AppID: appID, Name: pkg.Manifest.Interface.DisplayName, Enabled: true, ResourceEnabled: true, Revision: 1, Status: "needs_configuration", CreatedAt: now, UpdatedAt: now}, Package: pkg, CLI: &cliRecord{ConfigDir: filepath.Join(s.dataRoot, id, "config"), Completed: map[string]CLIOperation{}}}
 	if err = s.persistLocked(id, &r); err != nil {
 		return Installation{}, err
 	}
@@ -47,10 +53,10 @@ func (s *Service) bindCLI(ctx context.Context, agentID, id string) (Installation
 	if strings.TrimSpace(agentID) == "" {
 		return Installation{}, ErrInvalid
 	}
-	if s.options.CLI == nil || s.options.CLI.Runtime == nil {
+	if s.options.Runtime == nil {
 		return Installation{}, ErrInvalid
 	}
-	if _, err := s.options.CLI.Runtime.State(ctx, agentID); err != nil {
+	if _, err := s.options.Runtime.State(ctx, agentID, KindCLI); err != nil {
 		return Installation{}, err
 	}
 	s.mu.Lock()
@@ -82,7 +88,7 @@ func (s *Service) bindCLI(ctx context.Context, agentID, id string) (Installation
 	s.entries[bid] = e
 	out := s.viewLocked(e)
 	s.mu.Unlock()
-	s.scheduleCLI()
+	s.scheduleConnectorWork()
 	return out, nil
 }
 func (s *Service) SetCLIEnabled(_ context.Context, agentID, id string, enabled bool) (Installation, error) {
@@ -132,12 +138,12 @@ func (s *Service) SetCLIEnabled(_ context.Context, agentID, id string, enabled b
 	}
 	out := s.viewLocked(e)
 	s.mu.Unlock()
-	s.scheduleCLI()
+	s.scheduleConnectorWork()
 	return out, nil
 }
 func (s *Service) deleteCLIBinding(ctx context.Context, agentID, id string) error {
 	if agentID == "" {
-		return fmt.Errorf("%w: disconnect the global Feishu connector", ErrInvalid)
+		return fmt.Errorf("%w: disconnect the global CLI connector", ErrInvalid)
 	}
 	if _, err := s.SetCLIEnabled(ctx, agentID, id, false); err != nil {
 		return err
@@ -155,7 +161,7 @@ func (s *Service) deleteCLIBinding(ctx context.Context, agentID, id string) erro
 		return err
 	}
 	e.record = next
-	s.scheduleCLI()
+	s.scheduleConnectorWork()
 	return nil
 }
 
@@ -222,10 +228,10 @@ func (s *Service) StartCLI(_ context.Context, id string, in CLIRequest) (CLIOper
 			return CLIOperation{}, err
 		}
 		e.record = next
-		if s.cliCancel != nil {
+		if s.cliCancel != nil && s.cliCancelSession == state.Operation.SessionID {
 			s.cliCancel()
 		}
-		s.scheduleCLI()
+		s.scheduleConnectorWork()
 		return next.CLI.Queued.CLIOperation, nil
 	}
 	session, err := newInstallationID()
@@ -256,7 +262,7 @@ func (s *Service) StartCLI(_ context.Context, id string, in CLIRequest) (CLIOper
 		}
 		s.cliMigration = migration
 	}
-	s.scheduleCLI()
+	s.scheduleConnectorWork()
 	return op.CLIOperation, nil
 }
 func (s *Service) CLISession(_ context.Context, id, session string) (CLIOperation, error) {
@@ -302,16 +308,11 @@ func (s *Service) CancelCLI(_ context.Context, id, session string) (CLIOperation
 		return CLIOperation{}, err
 	}
 	e.record = next
-	if s.cliCancel != nil {
+	if s.cliCancel != nil && s.cliCancelSession == op.SessionID {
 		s.cliCancel()
 	}
-	s.scheduleCLI()
+	s.scheduleConnectorWork()
 	return next.CLI.Operation.CLIOperation, nil
-}
-
-// cliBindingNeedsConfiguration includes unfinished removal of a previous configuration.
-func cliBindingNeedsConfiguration(r record) bool {
-	return r.Enabled || (r.CLIApply != nil && r.CLIApply.Pending)
 }
 
 func (s *Service) CheckCLIReady(agentID string) error {
@@ -324,27 +325,27 @@ func (s *Service) CheckCLIReady(agentID string) error {
 		return errors.New("Feishu CLI migration is pending")
 	}
 	for _, e := range s.entries {
-		if e.record.AgentID != agentID || e.record.Kind != KindCLI || !cliBindingNeedsConfiguration(e.record) {
+		if e.record.AgentID != agentID || (e.record.Kind != KindCLI && e.record.CLIApply == nil) || !bindingNeedsConfiguration(e.record) {
 			continue
 		}
 		if e.record.CLIApply != nil && e.record.CLIApply.Pending {
-			return errors.New("Feishu connector configuration is pending")
+			return errors.New("Connector configuration is pending")
 		}
 		resource := s.entries[e.record.ResourceID]
 		if resource != nil && resource.record.CLI != nil {
 			op := resource.record.CLI.Operation
 			if op != nil && !op.Settled {
-				return errors.New("Feishu connector operation is pending")
+				return errors.New("CLI connector operation is pending")
 			}
 		}
 	}
 	return nil
 }
-func (s *Service) CLIProjection(agentID string) (*projection.Payload, uint64, error) {
+func (s *Service) CLIProjection(agentID, resourceID string) (*CLIProjection, uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, e := range s.entries {
-		if e.record.AgentID != agentID || e.record.Kind != KindCLI || !e.record.Enabled {
+		if e.record.AgentID != agentID || e.record.ResourceID != resourceID || e.record.Kind != KindCLI || !e.record.Enabled {
 			continue
 		}
 		resource := s.entries[e.record.ResourceID]
@@ -352,20 +353,20 @@ func (s *Service) CLIProjection(agentID string) (*projection.Payload, uint64, er
 			return nil, 0, ErrNotFound
 		}
 		r := resource.record
-		if r.Disconnected || !cliHasIdentity(r.AuthStatus) || r.AuthStatus.AppID == "" {
+		if r.Disconnected || !cliReady(r) {
 			return nil, r.Revision, nil
 		}
-		return &projection.Payload{AgentID: agentID, ResourceID: r.InstallationID, AppID: r.AuthStatus.AppID, ConfigDir: r.CLI.ConfigDir, Executable: r.CLI.Executable}, r.Revision, nil
+		return cliPayload(agentID, r), r.Revision, nil
 	}
 	return nil, 0, nil
 }
-func (s *Service) scheduleCLI() {
+func (s *Service) scheduleConnectorWork() {
 	select {
 	case s.cliWake <- struct{}{}:
 	default:
 	}
 }
-func (s *Service) runCLI() {
+func (s *Service) runConnectorWork() {
 	defer s.cliWG.Done()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -413,7 +414,7 @@ func (s *Service) runCLI() {
 		}
 		for _, id := range bindings {
 			if s.ctx.Err() == nil {
-				_ = s.applyCLIBinding(s.ctx, id)
+				_ = s.applyBinding(s.ctx, id)
 			}
 		}
 		s.cliWorkMu.Unlock()
@@ -463,11 +464,18 @@ func (s *Service) executeCLI(id string) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.mu.Lock()
 	s.cliCancel = cancel
-	s.mu.Unlock()
-	defer func() { cancel(); s.mu.Lock(); s.cliCancel = nil; s.mu.Unlock() }()
-	if r.CLI.Operation.Cancelled {
+	s.cliCancelSession = r.CLI.Operation.SessionID
+	if s.entries[id].record.CLI.Operation.Cancelled {
 		cancel()
 	}
+	s.mu.Unlock()
+	defer func() {
+		cancel()
+		s.mu.Lock()
+		s.cliCancel = nil
+		s.cliCancelSession = ""
+		s.mu.Unlock()
+	}()
 	err = s.performCLI(ctx, id)
 	if s.ctx.Err() != nil {
 		return
@@ -495,7 +503,7 @@ func (s *Service) executeCLI(id string) {
 			op.Settled = settled
 			op.Status = "failed"
 			op.ErrorCode = "cli_operation_failed"
-			var commandErr *larkcli.OperationError
+			var commandErr *connectorcli.OperationError
 			if errors.As(err, &commandErr) {
 				op.ErrorCode = commandErr.Code
 				if settled && commandErr.Code == "authorization_expired" {
@@ -513,9 +521,9 @@ func (s *Service) executeCLI(id string) {
 				op.ErrorCode = "cleanup_pending"
 			}
 			op.URL = ""
-			op.DeviceCode = ""
+			op.Device = nil
 			r.LastErrorCode = op.ErrorCode
-			r.LastError = "Feishu connector operation could not be completed; retry the operation."
+			r.LastError = "CLI connector operation could not be completed; retry the operation."
 			if r.CLI.Completed == nil {
 				r.CLI.Completed = map[string]CLIOperation{}
 			}
@@ -531,7 +539,7 @@ func (s *Service) executeCLI(id string) {
 		op.Status = "completed"
 		op.Stage = "completed"
 		op.URL = ""
-		op.DeviceCode = ""
+		op.Device = nil
 		op.ErrorCode = ""
 		r.LastErrorCode = ""
 		r.LastError = ""
@@ -551,7 +559,7 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 		return errors.New("waiting_for_legacy_callers")
 	}
 	op := r.CLI.Operation
-	if err = larkcli.RecoverProcess(op.Process); err != nil {
+	if err = connectorcli.RecoverProcess(op.Process); err != nil {
 		return err
 	}
 	if err = ctx.Err(); err != nil {
@@ -559,7 +567,7 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 	}
 	if err = s.editCLI(id, func(r *record) error {
 		r.CLI.Operation.Status = "running"
-		r.CLI.Operation.Process = larkcli.ProcessRef{}
+		r.CLI.Operation.Process = connectorcli.ProcessRef{}
 		return nil
 	}); err != nil {
 		return err
@@ -568,7 +576,7 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 		return err
 	}
 	if r.CLI.Recovery != nil {
-		if err = larkcli.RecoverProcess(r.CLI.Recovery.Process); err != nil {
+		if err = connectorcli.RecoverProcess(r.CLI.Recovery.Process); err != nil {
 			return err
 		}
 		if err = s.restoreCLIFile(id, r, r.CLI.Recovery); err != nil {
@@ -581,12 +589,9 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 	if op.Committed {
 		return s.applyCLIWorkers(ctx, id)
 	}
-	if err = s.backupCLIConfig(id); err != nil {
-		return err
-	}
 	if op.Action != "disconnect" {
-		install := func(ctx context.Context, root string, progress func(string)) (larkcli.Package, error) {
-			return (larkcli.Installer{Root: root}).Install(ctx, progress)
+		install := func(ctx context.Context, root string, progress func(string)) (connectorcli.Package, error) {
+			return (connectorcli.Installer{Root: root, Spec: r.Package.CLI.Install}).Install(ctx, progress)
 		}
 		if s.options.CLI != nil && s.options.CLI.Install != nil {
 			install = s.options.CLI.Install
@@ -601,7 +606,7 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 			r.CLI.Executable = pkg.Executable
 			r.CLI.SkillsDir = pkg.SkillsDir
 			r.PackageVersion = pkg.Version
-			r.SkillVersion = larkcli.SkillsCommit
+			r.SkillVersion = r.Package.CLI.Install.Skills.Version
 			return nil
 		}); err != nil {
 			return err
@@ -611,109 +616,25 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	client := larkcli.Client{Executable: r.CLI.Executable, ConfigDir: r.CLI.ConfigDir, OperationID: op.ID, Process: func(ref larkcli.ProcessRef) error {
-		return s.editCLI(id, func(r *record) error { r.CLI.Operation.Process = ref; return nil })
-	}, URL: func(url string) { _ = s.editCLI(id, func(r *record) error { r.CLI.Operation.URL = url; return nil }) }}
-	if s.options.CLI != nil {
-		client.Runner = s.options.CLI.Run
-	}
-	var status *larkcli.Status
-	if op.Action == "disconnect" {
-		if _, configErr := os.Stat(client.ConfigPath()); configErr == nil {
-			if err = client.Logout(ctx); err != nil {
-				return err
-			}
-		} else if !errors.Is(configErr, os.ErrNotExist) {
-			return configErr
-		}
-		if err = client.Disconnect(); err != nil {
-			return err
-		}
-	} else {
-		current, statusErr := client.Status(ctx, true)
-		switch op.Action {
-		case "connect", "repair":
-			if statusErr != nil {
-				if _, configErr := larkcli.ReadConfigIdentity(client.ConfigPath()); configErr == nil {
-					return statusErr
-				}
-			}
-			if statusErr != nil || !current.Identities.Bot.Available {
-				if err = s.editCLI(id, func(r *record) error { r.CLI.Operation.Stage = "app_authorization"; return nil }); err != nil {
-					return err
-				}
-				if err = client.Init(ctx); err != nil {
-					return err
-				}
-				current, statusErr = client.Status(ctx, true)
-				if statusErr == nil {
-					if err := s.keepCLIApplication(id, current); err != nil {
-						return err
-					}
-				}
-			}
-			if statusErr != nil {
-				return statusErr
-			}
-			fallthrough
-		case "login":
-			if statusErr != nil {
-				return statusErr
-			}
-			if !current.Identities.User.Available || current.Identities.User.Verified == nil || !*current.Identities.User.Verified {
-				if err = s.editCLI(id, func(r *record) error {
-					r.CLI.Operation.Stage = "user_authorization"
-					r.CLI.Operation.URL = ""
-					return nil
-				}); err != nil {
-					return err
-				}
-				device := larkcli.DeviceAuthorization{DeviceCode: op.DeviceCode, URL: op.URL, ExpiresIn: int64(time.Until(op.ExpiresAt).Seconds()), RequestedScope: r.RequestedScopes}
-				if device.DeviceCode == "" || device.ExpiresIn <= 0 || !larkcli.CurrentUserAuthorizationScopes(device.RequestedScope) {
-					device, err = client.Login(ctx)
-					if err != nil {
-						return err
-					}
-				}
-				if err = s.editCLI(id, func(r *record) error {
-					r.RequestedScopes = device.RequestedScope
-					r.CLI.Operation.URL = device.URL
-					r.CLI.Operation.DeviceCode = device.DeviceCode
-					r.CLI.Operation.ExpiresAt = time.Now().Add(time.Duration(device.ExpiresIn) * time.Second)
-					return nil
-				}); err != nil {
-					return err
-				}
-				authCtx, cancel := context.WithTimeout(ctx, time.Duration(device.ExpiresIn)*time.Second)
-				err = client.WaitLogin(authCtx, device.DeviceCode)
-				cancel()
-				if err != nil {
-					if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-						return &larkcli.OperationError{Code: "authorization_expired"}
-					}
-					return err
-				}
-			}
-			current, err = client.Status(ctx, true)
-			if err != nil {
-				return err
-			}
-			if !current.Identities.User.Available || current.Identities.User.OpenID == "" || current.Identities.User.Verified == nil || !*current.Identities.User.Verified {
-				return errors.New("personal authorization is unavailable")
-			}
-			if err = client.EnablePersonalIdentity(ctx); err != nil {
-				return err
-			}
-		case "logout":
-			if err = client.Logout(ctx); err != nil {
-				return err
-			}
-		}
-		current, err = client.Status(ctx, true)
+	if len(r.Package.SkillFiles) > 0 && op.Action != "disconnect" {
+		bundle, err := s.packageSkills(r)
 		if err != nil {
 			return err
 		}
-		status = &current
+		if err = s.editCLI(id, func(r *record) error {
+			r.CLI.SkillsDir = bundle
+			r.SkillVersion = r.Package.Manifest.Version
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	if err = s.editCLI(id, func(r *record) error { r.CLI.Operation.CommandsStarted = true; return nil }); err != nil {
+		return err
+	}
+	ready, status, err := s.authorizeCLI(ctx, id, r)
+	if err != nil {
+		return err
 	}
 	if err = ctx.Err(); err != nil {
 		return err
@@ -723,6 +644,8 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 			return context.Canceled
 		}
 		r.AuthStatus = status
+		r.RequestedScopes = r.Package.CLI.RequestedScopes
+		r.CLI.Ready = ready
 		r.CheckedAt = time.Now().UTC()
 		r.Disconnected = op.Action == "disconnect"
 		if r.Disconnected {
@@ -732,7 +655,7 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 		r.CLI.Operation.Committed = true
 		r.CLI.Operation.Stage = "applying"
 		r.CLI.Operation.URL = ""
-		r.CLI.Operation.DeviceCode = ""
+		r.CLI.Operation.Device = nil
 		return nil
 	}); err != nil {
 		return err
@@ -743,7 +666,7 @@ func (s *Service) suspendCLIWorkers(ctx context.Context, id string) error {
 	s.mu.Lock()
 	var workers []string
 	for _, e := range s.entries {
-		if e.record.ResourceID == id && cliBindingNeedsConfiguration(e.record) {
+		if e.record.ResourceID == id && bindingNeedsConfiguration(e.record) {
 			workers = append(workers, e.record.AgentID)
 		}
 	}
@@ -752,17 +675,17 @@ func (s *Service) suspendCLIWorkers(ctx context.Context, id string) error {
 	if len(workers) == 0 {
 		return nil
 	}
-	if s.options.CLI == nil || s.options.CLI.Runtime == nil {
+	if s.options.Runtime == nil {
 		return errors.New("CLI runtime support is unavailable")
 	}
-	rt := s.options.CLI.Runtime
+	rt := s.options.Runtime
 	for _, worker := range workers {
 		r, err := s.cliSnapshot(id)
 		if err != nil {
 			return err
 		}
 		if _, ok := r.CLI.Operation.Workers[worker]; !ok {
-			running, err := rt.State(ctx, worker)
+			running, err := rt.State(ctx, worker, KindCLI)
 			s.mu.Lock()
 			for _, b := range s.entries {
 				if b.record.AgentID == worker && b.record.ResourceID == id && b.record.CLIApply != nil && b.record.CLIApply.ResumeRecorded {
@@ -795,60 +718,12 @@ func (s *Service) suspendCLIWorkers(ctx context.Context, id string) error {
 	}
 	return nil
 }
-func (s *Service) backupCLIConfig(id string) error {
-	r, err := s.cliSnapshot(id)
-	if err != nil {
-		return err
-	}
-	if r.CLI.Operation.BackupTaken {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(r.CLI.ConfigDir, "config.json"))
-	exists := err == nil
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if exists {
-		if err = larkcli.AtomicWrite(filepath.Join(s.dataRoot, id, "operations", r.CLI.Operation.SessionID, "config.json"), data); err != nil {
-			return err
-		}
-	}
-	return s.editCLI(id, func(r *record) error {
-		r.CLI.Operation.BackupTaken = true
-		r.CLI.Operation.ConfigExisted = exists
-		return nil
-	})
-}
-func (s *Service) restoreCLIConfig(id string) error {
-	r, err := s.cliSnapshot(id)
-	if err != nil {
-		return err
-	}
-	return s.restoreCLIFile(id, r, r.CLI.Operation)
-}
-func (s *Service) restoreCLIFile(id string, r record, op *cliOperation) error {
-	var err error
-	if !op.BackupTaken || op.Committed {
-		return nil
-	}
-	if err = larkcli.RecoverProcess(op.Process); err != nil {
-		return err
-	}
-	target := filepath.Join(r.CLI.ConfigDir, "config.json")
-	if !op.ConfigExisted {
-		return (larkcli.Client{ConfigDir: r.CLI.ConfigDir}).Disconnect()
-	}
-	data, err := os.ReadFile(filepath.Join(s.dataRoot, id, "operations", op.SessionID, "config.json"))
-	if err != nil {
-		return err
-	}
-	return larkcli.AtomicWrite(target, data)
-}
+
 func (s *Service) applyCLIWorkers(ctx context.Context, id string) error {
 	s.mu.Lock()
 	var bindings []string
 	for bid, e := range s.entries {
-		if e.record.ResourceID != id || !cliBindingNeedsConfiguration(e.record) {
+		if e.record.ResourceID != id || !bindingNeedsConfiguration(e.record) {
 			continue
 		}
 		next := copyJSON(e.record)
@@ -876,7 +751,7 @@ func (s *Service) applyCLIWorkers(ctx context.Context, id string) error {
 	sort.Strings(bindings)
 	var errs []error
 	for _, bid := range bindings {
-		if err := s.applyCLIBinding(ctx, bid); err != nil {
+		if err := s.applyBinding(ctx, bid); err != nil {
 			s.mu.Lock()
 			exists := s.entries[bid] != nil
 			s.mu.Unlock()
@@ -887,137 +762,6 @@ func (s *Service) applyCLIWorkers(ctx context.Context, id string) error {
 	}
 	return errors.Join(errs...)
 }
-func (s *Service) applyCLIBinding(ctx context.Context, id string) (result error) {
-	s.mu.Lock()
-	e := s.entries[id]
-	if e == nil || e.record.CLIApply == nil || !e.record.CLIApply.Pending {
-		s.mu.Unlock()
-		return nil
-	}
-	r := copyJSON(e.record)
-	resource := copyJSON(s.entries[r.ResourceID].record)
-	s.mu.Unlock()
-	defer func() {
-		if result == nil {
-			return
-		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if e := s.entries[id]; e != nil {
-			e.record.LastErrorCode = "configuration_failed"
-			e.record.LastError = "Feishu connector configuration needs repair."
-			e.record.Status = "error"
-			_ = s.persistLocked(id, &e.record)
-		}
-	}()
-	if s.options.CLI == nil || s.options.CLI.Runtime == nil {
-		return errors.New("CLI runtime support is unavailable")
-	}
-	rt := s.options.CLI.Runtime
-	if !r.CLIApply.ResumeRecorded {
-		running, err := rt.State(ctx, r.AgentID)
-		if err != nil {
-			return err
-		}
-		r.CLIApply.Resume = running
-		r.CLIApply.ResumeRecorded = true
-		s.mu.Lock()
-		e = s.entries[id]
-		if e == nil {
-			s.mu.Unlock()
-			return ErrNotFound
-		}
-		e.record.CLIApply = r.CLIApply
-		err = s.persistLocked(id, &e.record)
-		s.mu.Unlock()
-		if err != nil {
-			return err
-		}
-	}
-	configured := r.Enabled && !resource.Disconnected && cliHasIdentity(resource.AuthStatus)
-	err := rt.Update(ctx, r.AgentID, r.CLIApply.Resume, func(ctx context.Context) error {
-		previous := r.Skills
-		if r.CLIApply.Plan != nil && (r.CLIApply.PlannedEnabled != configured || r.CLIApply.PlannedRevision != resource.Revision) {
-			if err := rt.ApplySkills(ctx, r.AgentID, *r.CLIApply.Plan); err != nil {
-				return err
-			}
-			previous = r.CLIApply.Plan.After
-			r.CLIApply.Plan = nil
-		}
-		if r.CLIApply.Plan == nil {
-			plan, err := rt.PlanSkills(r.AgentID, resource.CLI.SkillsDir, resource.SkillVersion, previous, configured)
-			if err != nil {
-				return err
-			}
-			r.CLIApply.Plan = &plan
-			r.CLIApply.PlannedEnabled = configured
-			r.CLIApply.PlannedRevision = resource.Revision
-			s.mu.Lock()
-			e = s.entries[id]
-			if e == nil {
-				s.mu.Unlock()
-				return ErrNotFound
-			}
-			e.record.CLIApply = r.CLIApply
-			err = s.persistLocked(id, &e.record)
-			s.mu.Unlock()
-			if err != nil {
-				return err
-			}
-		}
-		if m := s.migrationSnapshot(); m != nil && m.Workers[r.AgentID] != nil && !m.Workers[r.AgentID].Committed {
-			if err := s.editMigration(func(m *cliMigration) error {
-				if w := m.Workers[r.AgentID]; w != nil {
-					w.Plan = copyJSON(r.CLIApply.Plan)
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-		}
-		if err := rt.ApplySkills(ctx, r.AgentID, *r.CLIApply.Plan); err != nil {
-			return err
-		}
-		var p *projection.Payload
-		if configured {
-			p = &projection.Payload{AgentID: r.AgentID, ResourceID: r.ResourceID, AppID: resource.AuthStatus.AppID, ConfigDir: resource.CLI.ConfigDir, Executable: resource.CLI.Executable}
-		}
-		return rt.Configure(ctx, r.AgentID, p)
-	})
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e = s.entries[id]
-	if e == nil {
-		return ErrNotFound
-	}
-	next := copyJSON(e.record)
-	if next.CLIApply.Remove && !configured {
-		if err := s.persistLocked(id, nil); err != nil {
-			return err
-		}
-		delete(s.entries, id)
-		return nil
-	}
-	next.AppliedRevision = resource.Revision
-	next.Skills = r.CLIApply.Plan.After
-	next.CLIApply = &cliBinding{}
-	next.LastErrorCode = ""
-	next.LastError = ""
-	next.Status = "needs_configuration"
-	if configured {
-		next.Status = "connected"
-	}
-	next.UpdatedAt = time.Now().UTC()
-	if err = s.persistLocked(id, &next); err != nil {
-		return err
-	}
-	e.record = next
-	return nil
-}
-
 func (s *Service) cliViewLocked(e *entry) Installation {
 	item := view(e)
 	resource := e
@@ -1029,10 +773,8 @@ func (s *Service) cliViewLocked(e *entry) Installation {
 	}
 	r := resource.record
 	item.AuthStatus = copyJSON(r.AuthStatus)
+	item.Authorized = cliReady(r) && !r.Disconnected
 	item.Revision = r.Revision
-	if r.AuthStatus != nil {
-		item.FeishuAppID = r.AuthStatus.AppID
-	}
 	if r.CLI != nil && r.CLI.Operation != nil {
 		op := r.CLI.Operation.CLIOperation
 		item.Operation = &op
@@ -1045,7 +787,7 @@ func (s *Service) cliViewLocked(e *entry) Installation {
 			}
 		} else if !item.Enabled {
 			item.Status = "disabled"
-		} else if !cliHasIdentity(r.AuthStatus) || r.Disconnected {
+		} else if !cliReady(r) || r.Disconnected {
 			item.Status = "needs_configuration"
 		} else if item.AppliedRevision == r.Revision {
 			item.Status = "connected"
@@ -1059,7 +801,7 @@ func (s *Service) cliViewLocked(e *entry) Installation {
 	item.ResourceID = item.InstallationID
 	item.ResourceEnabled = true
 	item.Status = "needs_configuration"
-	if cliHasIdentity(r.AuthStatus) && !r.Disconnected {
+	if cliReady(r) && !r.Disconnected {
 		item.Status = "connected"
 	}
 	if r.CLI != nil && activeCLI(r.CLI.Operation) {
@@ -1083,7 +825,7 @@ func (s *Service) cliResourceSettledLocked(id string) bool {
 		return false
 	}
 	e := s.entries[id]
-	return e != nil && e.record.CLI != nil && (e.record.CLI.Operation == nil || e.record.CLI.Operation.Settled)
+	return e != nil && (e.record.Kind == KindMCP || (e.record.CLI != nil && (e.record.CLI.Operation == nil || e.record.CLI.Operation.Settled)))
 }
 
 func (s *Service) promoteQueuedCLI(id string) {
@@ -1114,64 +856,7 @@ func (s *Service) promoteQueuedCLI(id string) {
 		return
 	}
 	e.record = next
-	s.scheduleCLI()
-}
-
-func (s *Service) keepCLIApplication(id string, status larkcli.Status) error {
-	r, err := s.cliSnapshot(id)
-	if err != nil {
-		return err
-	}
-	data, err := os.ReadFile(filepath.Join(r.CLI.ConfigDir, "config.json"))
-	if err != nil {
-		return err
-	}
-	if err := larkcli.AtomicWrite(filepath.Join(s.dataRoot, id, "operations", r.CLI.Operation.SessionID, "config.json"), data); err != nil {
-		return err
-	}
-	return s.editCLI(id, func(r *record) error {
-		r.CLI.Operation.BackupTaken = true
-		r.CLI.Operation.ConfigExisted = true
-		r.AuthStatus = &status
-		r.Disconnected = false
-		r.Revision++
-		return nil
-	})
-}
-
-func (s *Service) recoverCLIStatus(ctx context.Context, id string) error {
-	r, err := s.cliSnapshot(id)
-	if err != nil {
-		return err
-	}
-	if !r.CLI.Operation.BackupTaken {
-		return nil
-	}
-	var status *larkcli.Status
-	if _, err := os.Stat(filepath.Join(r.CLI.ConfigDir, "config.json")); err == nil {
-		client := larkcli.Client{Executable: r.CLI.Executable, ConfigDir: r.CLI.ConfigDir, OperationID: r.CLI.Operation.ID, Process: func(ref larkcli.ProcessRef) error {
-			return s.editCLI(id, func(r *record) error { r.CLI.Operation.Process = ref; return nil })
-		}}
-		if s.options.CLI != nil {
-			client.Runner = s.options.CLI.Run
-		}
-		current, err := client.Status(ctx, false)
-		if err != nil {
-			return err
-		}
-		if r.AuthStatus != nil && r.AuthStatus.AppID == current.AppID {
-			if current.Identities.Bot.Verified == nil {
-				current.Identities.Bot.Verified = r.AuthStatus.Identities.Bot.Verified
-			}
-			if current.Identities.User.Verified == nil && current.Identities.User.OpenID != "" && current.Identities.User.OpenID == r.AuthStatus.Identities.User.OpenID {
-				current.Identities.User.Verified = r.AuthStatus.Identities.User.Verified
-			}
-		}
-		status = &current
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return s.editCLI(id, func(r *record) error { r.AuthStatus = status; r.CheckedAt = time.Now().UTC(); return nil })
+	s.scheduleConnectorWork()
 }
 
 func (s *Service) hasCLIBinding(resourceID, agentID string) bool {
@@ -1183,14 +868,4 @@ func (s *Service) hasCLIBinding(resourceID, agentID string) bool {
 		}
 	}
 	return false
-}
-
-func cliHasIdentity(status *larkcli.Status) bool {
-	if status == nil {
-		return false
-	}
-	available := func(identity larkcli.Identity) bool {
-		return identity.Available && (identity.Verified == nil || *identity.Verified)
-	}
-	return available(status.Identities.Bot) || available(status.Identities.User)
 }

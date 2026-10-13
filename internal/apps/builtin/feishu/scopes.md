@@ -1,7 +1,9 @@
 # Feishu authorization permissions
 
-`auto_approve_scopes.json` defines the permission requests made by the managed
-connector. The `tenant` and `user` lists are separate, sorted and deduplicated.
+`cli.json` defines the permission requests made by the managed connector.
+`init[].url_rewrite.gzip_query.addons.scopes` contains separate, sorted and
+deduplicated `tenant` and `user` lists. `requested_scopes` supplies the user list
+to the login command through `${REQUESTED_SCOPES}`.
 The policy targets permissions that can be granted without administrator review.
 
 The selection starts from the Feishu CLI 1.0.97 business-domain scope catalogue

@@ -18,14 +18,15 @@ import (
 	agentruntime "csgclaw/internal/runtime"
 	runtimecodex "csgclaw/internal/runtime/codex"
 	runtimedsh "csgclaw/internal/runtime/dsh"
-	projection "csgclaw/internal/runtimeextension/larkcli"
+	cliprojection "csgclaw/internal/runtimeextension/connectorcli"
 )
 
 // EnableConnectors wires the same installation service into HTTP administration and
 // the Agent-scoped MCP endpoint. Call before accepting requests.
 func (h *Handler) EnableConnectors(statePath string) error {
 	service, err := apps.NewService(statePath, apps.Options{
-		CLI: &apps.CLIOptions{Runtime: connectorCLIRuntime{h: h}, LegacySecret: func(ctx context.Context, id, appID string) (string, error) {
+		Runtime: connectorRuntime{h: h},
+		CLI: &apps.CLIOptions{LegacySecret: func(ctx context.Context, id, appID string) (string, error) {
 			info, err := h.feishuBotAppInfoForAgent(id)
 			if err != nil {
 				return "", err
@@ -76,7 +77,7 @@ func (h *Handler) EnableConnectors(statePath string) error {
 	if registrar, ok := h.agentEngine.(interface {
 		RegisterRuntimeExtensionSource(string, agentengine.RuntimeExtensionSource) error
 	}); ok {
-		if err := registrar.RegisterRuntimeExtensionSource(projection.ConnectorSourceProvider, connectorCLISource{service: service, h: h}); err != nil {
+		if err := registrar.RegisterRuntimeExtensionSource(cliprojection.SourceProvider, connectorCLISource{service: service, h: h}); err != nil {
 			_ = service.Close()
 			return err
 		}
@@ -620,11 +621,11 @@ func (h *Handler) connectorResourceView(item apps.Installation) apps.Installatio
 		return item
 	}
 	if item.Kind == apps.KindCLI && item.AgentID != "" {
-		item.RuntimeStatus = h.connectorCLIRuntimeStatus(item.AgentID)
+		item.RuntimeStatus = h.connectorRuntimeStatus(item.AgentID, item.ResourceID)
 	}
 	for i, binding := range item.Bindings {
 		if item.Kind == apps.KindCLI {
-			item.Bindings[i].RuntimeStatus = h.connectorCLIRuntimeStatus(binding.AgentID)
+			item.Bindings[i].RuntimeStatus = h.connectorRuntimeStatus(binding.AgentID, item.InstallationID)
 		}
 		if a, ok := h.svc.Agent(binding.AgentID); ok {
 			item.Bindings[i].AgentName = a.Name

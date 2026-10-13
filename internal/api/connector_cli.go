@@ -13,13 +13,14 @@ import (
 	"csgclaw/internal/agentengine"
 	agent "csgclaw/internal/agentengine/agents"
 	"csgclaw/internal/apps"
+	cliprojection "csgclaw/internal/runtimeextension/connectorcli"
 	projection "csgclaw/internal/runtimeextension/larkcli"
 	skill "csgclaw/internal/skill/state"
 )
 
-type connectorCLIRuntime struct{ h *Handler }
+type connectorRuntime struct{ h *Handler }
 
-func (b connectorCLIRuntime) State(_ context.Context, id string) (bool, error) {
+func (b connectorRuntime) State(_ context.Context, id, kind string) (bool, error) {
 	if b.h.svc == nil {
 		return false, fmt.Errorf("Agent service is unavailable")
 	}
@@ -27,12 +28,12 @@ func (b connectorCLIRuntime) State(_ context.Context, id string) (bool, error) {
 	if !ok {
 		return false, apps.ErrNotFound
 	}
-	if a.SandboxEnabled || (a.RuntimeKind != agent.RuntimeKindCodex && a.RuntimeKind != agent.RuntimeKindDSH) {
-		return false, fmt.Errorf("Feishu CLI requires a Codex or DSH host runtime")
+	if kind == apps.KindCLI && (a.SandboxEnabled || (a.RuntimeKind != agent.RuntimeKindCodex && a.RuntimeKind != agent.RuntimeKindDSH)) {
+		return false, fmt.Errorf("CLI connectors require a Codex or DSH host runtime")
 	}
 	return a.Status == "running", nil
 }
-func (b connectorCLIRuntime) Update(ctx context.Context, id string, resume bool, apply func(context.Context) error) error {
+func (b connectorRuntime) Update(ctx context.Context, id string, resume bool, apply func(context.Context) error) error {
 	owner, ok := b.h.agentEngine.(interface {
 		UpdateRuntimeConfiguration(context.Context, string, bool, func(context.Context) error) error
 	})
@@ -41,19 +42,23 @@ func (b connectorCLIRuntime) Update(ctx context.Context, id string, resume bool,
 	}
 	return owner.UpdateRuntimeConfiguration(ctx, id, resume, apply)
 }
-func (b connectorCLIRuntime) Configure(ctx context.Context, id string, p *projection.Payload) error {
+func (b connectorRuntime) Configure(ctx context.Context, id, resourceID string, p *apps.CLIProjection) error {
 	extensions := b.h.agentEngine.RuntimeExtensions(id)
+	name, err := b.h.apps.CLIExtensionName(resourceID)
+	if err != nil {
+		return err
+	}
 	if p == nil {
-		err := extensions.Delete(ctx, projection.Name)
+		err := extensions.Delete(ctx, name)
 		if agentengine.ErrorCodeOf(err) == agentengine.ErrorRuntimeExtensionNotFound {
 			return nil
 		}
 		return err
 	}
-	_, err := extensions.Apply(ctx, agentengine.RuntimeExtensionApplyRequest{Spec: agentengine.RuntimeExtensionSpec{Name: projection.Name, Kind: projection.Kind, Source: agentengine.RuntimeExtensionSourceRef{Provider: projection.ConnectorSourceProvider, Ref: p.ResourceID}, FailurePolicy: agentengine.RuntimeExtensionBlockRuntime}})
+	_, err = extensions.Apply(ctx, agentengine.RuntimeExtensionApplyRequest{Spec: agentengine.RuntimeExtensionSpec{Name: name, Kind: cliprojection.Kind, Source: agentengine.RuntimeExtensionSourceRef{Provider: cliprojection.SourceProvider, Ref: p.ResourceID}, FailurePolicy: agentengine.RuntimeExtensionBlockRuntime}})
 	return err
 }
-func (b connectorCLIRuntime) PlanSkills(id, bundle, version string, previous []skill.ManagedSkill, enabled bool) (skill.SkillPlan, error) {
+func (b connectorRuntime) PlanSkills(id, bundle, version string, previous []skill.ManagedSkill, enabled bool) (skill.SkillPlan, error) {
 	owner, ok := b.h.svc.(interface {
 		PlanConnectorSkills(string, string, string, []skill.ManagedSkill, bool) (skill.SkillPlan, error)
 	})
@@ -62,7 +67,7 @@ func (b connectorCLIRuntime) PlanSkills(id, bundle, version string, previous []s
 	}
 	return owner.PlanConnectorSkills(id, bundle, version, previous, enabled)
 }
-func (b connectorCLIRuntime) ApplySkills(ctx context.Context, id string, plan skill.SkillPlan) error {
+func (b connectorRuntime) ApplySkills(ctx context.Context, id string, plan skill.SkillPlan) error {
 	owner, ok := b.h.svc.(interface {
 		ApplyConnectorSkills(context.Context, string, skill.SkillPlan) error
 	})
@@ -78,20 +83,24 @@ type connectorCLISource struct {
 }
 
 func (s connectorCLISource) Resolve(_ context.Context, agentID, ref string) (agentengine.ResolvedRuntimeExtension, error) {
-	p, revision, err := s.service.CLIProjection(agentID)
+	p, revision, err := s.service.CLIProjection(agentID, ref)
 	if err != nil {
 		return agentengine.ResolvedRuntimeExtension{}, err
 	}
 	if p == nil || p.ResourceID != ref {
-		return agentengine.ResolvedRuntimeExtension{}, fmt.Errorf("Feishu connector binding is unavailable")
+		return agentengine.ResolvedRuntimeExtension{}, fmt.Errorf("CLI connector binding is unavailable")
 	}
-	if s.h != nil {
-		if info, infoErr := s.h.feishuBotAppInfoForAgent(agentID); infoErr == nil && info.AppID == p.AppID {
-			p.HistoricalAttachments = true
+	if p.ConnectorID == "feishu" && s.h != nil {
+		var status struct {
+			AppID string `json:"appId"`
+		}
+		_ = json.Unmarshal(p.Status, &status)
+		if info, err := s.h.feishuBotAppInfoForAgent(agentID); err == nil && info.AppID == status.AppID && status.AppID != "" {
+			p.Instructions = projection.HistoricalAttachmentInstructions()
 		}
 	}
-	payload, err := projection.Encode(*p)
-	return agentengine.ResolvedRuntimeExtension{SourceRevision: strconv.FormatUint(revision, 10) + "-" + strconv.FormatBool(p.HistoricalAttachments), Payload: payload}, err
+	payload, err := json.Marshal(p.Payload)
+	return agentengine.ResolvedRuntimeExtension{SourceRevision: strconv.FormatUint(revision, 10) + "-" + strconv.FormatBool(p.Instructions != ""), Payload: payload}, err
 }
 func (h *Handler) handleConnectorCLI(w http.ResponseWriter, r *http.Request) {
 	if h.apps == nil {
@@ -129,9 +138,13 @@ func (h *Handler) handleConnectorCLI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, result)
 }
 
-func (b connectorCLIRuntime) RestoreLegacy(ctx context.Context, id string, raw json.RawMessage) error {
+func (b connectorRuntime) RestoreLegacy(ctx context.Context, id string, raw json.RawMessage) error {
 	if len(raw) == 0 {
-		return b.Configure(ctx, id, nil)
+		err := b.h.agentEngine.RuntimeExtensions(id).Delete(ctx, projection.Name)
+		if agentengine.ErrorCodeOf(err) == agentengine.ErrorRuntimeExtensionNotFound {
+			return nil
+		}
+		return err
 	}
 	var previous agentengine.RuntimeExtension
 	if err := json.Unmarshal(raw, &previous); err != nil {
@@ -140,11 +153,11 @@ func (b connectorCLIRuntime) RestoreLegacy(ctx context.Context, id string, raw j
 	_, err := b.h.agentEngine.RuntimeExtensions(id).Apply(ctx, agentengine.RuntimeExtensionApplyRequest{Spec: previous.Spec})
 	return err
 }
-func (b connectorCLIRuntime) Verify(ctx context.Context, id string) (bool, error) {
+func (b connectorRuntime) Verify(ctx context.Context, id string) (bool, error) {
 	item, err := b.h.agentEngine.RuntimeExtensions(id).Get(ctx, projection.Name)
 	if agentengine.ErrorCodeOf(err) == agentengine.ErrorRuntimeExtensionNotFound {
 		// A running worker also verifies a migration that removed the extension.
-		return b.State(ctx, id)
+		return b.State(ctx, id, apps.KindCLI)
 	}
 	if err != nil {
 		return false, err
@@ -172,7 +185,7 @@ func (h *Handler) PrepareConnectorMigration(ctx context.Context) error {
 		extension, err := h.agentEngine.RuntimeExtensions(item.ID).Get(ctx, projection.Name)
 		found := false
 		if err == nil {
-			if extension.Spec.Source.Provider == projection.ConnectorSourceProvider {
+			if extension.Spec.Source.Provider == "connector-feishu" || extension.Spec.Source.Provider == cliprojection.SourceProvider {
 				continue
 			}
 			candidate.Extension, err = json.Marshal(extension)
@@ -239,7 +252,7 @@ func (s legacyConnectorSource) Resolve(ctx context.Context, id, ref string) (age
 	return s.source.Resolve(ctx, id, ref)
 }
 
-func (h *Handler) connectorCLIRuntimeStatus(id string) string {
+func (h *Handler) connectorRuntimeStatus(id, resourceID string) string {
 	if h.agentEngine == nil {
 		return "unavailable"
 	}
@@ -248,7 +261,11 @@ func (h *Handler) connectorCLIRuntimeStatus(id string) string {
 			return "pending"
 		}
 	}
-	current, err := h.agentEngine.RuntimeExtensions(id).Get(context.Background(), projection.Name)
+	name, err := h.apps.CLIExtensionName(resourceID)
+	if err != nil {
+		return "unconfigured"
+	}
+	current, err := h.agentEngine.RuntimeExtensions(id).Get(context.Background(), name)
 	if err != nil {
 		return "unconfigured"
 	}

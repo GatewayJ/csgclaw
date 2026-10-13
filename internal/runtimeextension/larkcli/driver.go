@@ -65,9 +65,6 @@ func (d *Driver) PrepareExtension(ctx context.Context, agentID string, desired a
 	if payload, err := Decode(desired.Payload); err == nil && payload.Legacy != nil {
 		return d.prepareLegacy(ctx, agentID, desired, payload)
 	}
-	if payload, err := Decode(desired.Payload); err == nil && payload.ResourceID != "" {
-		return d.prepareConnector(ctx, agentID, desired, payload)
-	}
 	checked := time.Now().UTC()
 	fail := func(reason, message string) (agentruntime.PreparedExtension, agentruntime.ExtensionResult, error) {
 		err := errors.New(message)
@@ -136,9 +133,6 @@ func (d *Driver) PrepareExtension(ctx context.Context, agentID string, desired a
 func (d *Driver) ObserveExtension(ctx context.Context, agentID string, desired agentruntime.ExtensionDesired) (agentruntime.ExtensionResult, error) {
 	if payload, err := Decode(desired.Payload); err == nil && payload.Legacy != nil {
 		return d.observeLegacy(ctx, agentID, desired, payload)
-	}
-	if payload, err := Decode(desired.Payload); err == nil && payload.ResourceID != "" {
-		return d.observeConnector(ctx, agentID, desired, payload)
 	}
 	checked := time.Now().UTC()
 	payload, err := decodePayload(agentID, desired.Payload)

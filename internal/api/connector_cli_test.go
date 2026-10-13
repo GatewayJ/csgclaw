@@ -15,7 +15,7 @@ func TestConnectorCLIVerifyDisabledConfiguration(t *testing.T) {
 			svc := mustNewSeededServiceWithOptions(t, []agent.Agent{{ID: "worker", Name: "worker", Role: agent.RoleWorker, RuntimeKind: agent.RuntimeKindCodex, Status: status}}, agent.WithRuntime(fakeCompatRuntime{kind: agent.RuntimeKindCodex, info: func(context.Context, agentruntime.Handle) (agentruntime.Info, error) {
 				return agentruntime.Info{State: agentruntime.State(status)}, nil
 			}}))
-			runtime := connectorCLIRuntime{h: &Handler{svc: svc, agentEngine: agentengine.New(svc)}}
+			runtime := connectorRuntime{h: &Handler{svc: svc, agentEngine: agentengine.New(svc)}}
 			loaded, err := runtime.Verify(context.Background(), "worker")
 			if err != nil {
 				t.Fatal(err)

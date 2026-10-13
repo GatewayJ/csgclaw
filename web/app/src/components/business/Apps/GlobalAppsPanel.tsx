@@ -29,7 +29,7 @@ import {
 import { localizeAPIError } from "@/shared/i18n";
 import { errorMessage } from "@/api/client";
 import type { TranslateFn } from "@/models/conversations";
-import { FeishuCLIDialog } from "./FeishuCLIDialog";
+import { CLIDialog } from "./CLIDialog";
 import { AppSettingsDialog } from "./AppSettingsDialog";
 import { AppIcon } from "./AgentAppsPanel";
 import { appName, appStatus, appDescription, appConnectionError } from "./appForm";
@@ -263,7 +263,7 @@ export function GlobalAppsPanel({
         </DialogContent>
       </DialogRoot>
       {definition && (editing?.kind === "cli" || (!editing && definition.kind === "cli")) ? (
-        <FeishuCLIDialog existing={editing} t={t} onClose={close} onChanged={reload} />
+        <CLIDialog definition={definition} existing={editing} t={t} onClose={close} onChanged={reload} />
       ) : definition ? (
         <AppSettingsDialog
           key={editing?.installation_id || definition.app_id}

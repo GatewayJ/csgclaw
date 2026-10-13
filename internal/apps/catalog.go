@@ -1,66 +1,12 @@
 package apps
 
 import (
-	"csgclaw/internal/larkcli"
 	"embed"
-	"encoding/json"
-	"fmt"
-	"io/fs"
-	"path"
 	"sort"
-	"strings"
 )
 
-//go:embed builtin/*/*.json
+//go:embed builtin
 var builtins embed.FS
-
-type pluginPackage struct {
-	Manifest Manifest                `json:"manifest"`
-	Apps     map[string]AppReference `json:"apps"`
-}
-
-func loadPackages() (map[string]pluginPackage, error) {
-	result := make(map[string]pluginPackage)
-	entries, err := fs.ReadDir(builtins, "builtin")
-	if err != nil {
-		return nil, err
-	}
-	for _, entry := range entries {
-		root := path.Join("builtin", entry.Name())
-		data, err := builtins.ReadFile(path.Join(root, "plugin.json"))
-		if err != nil {
-			return nil, err
-		}
-		var pkg pluginPackage
-		if err := json.Unmarshal(data, &pkg.Manifest); err != nil {
-			return nil, err
-		}
-		ref := strings.TrimPrefix(pkg.Manifest.Apps, "./")
-		if !fs.ValidPath(ref) || pkg.Manifest.Name == "" {
-			return nil, fmt.Errorf("invalid built-in App manifest")
-		}
-		data, err = builtins.ReadFile(path.Join(root, ref))
-		if err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(data, &pkg); err != nil {
-			return nil, err
-		}
-		if len(pkg.Apps) != 1 {
-			return nil, fmt.Errorf("built-in App must reference one service")
-		}
-		for _, app := range pkg.Apps {
-			if !app.Required || (app.ID != "gitlab" && app.ID != "feishu" && app.ID != "llm-wiki") {
-				return nil, fmt.Errorf("unknown built-in App service")
-			}
-			if _, exists := result[app.ID]; exists {
-				return nil, fmt.Errorf("duplicate built-in App service")
-			}
-			result[app.ID] = pkg
-		}
-	}
-	return result, nil
-}
 
 func (s *Service) Catalog() []Definition {
 	items := make([]Definition, 0, len(s.packages))
@@ -77,28 +23,30 @@ func (s *Service) Definition(appID string) (Definition, error) {
 	if !ok {
 		return Definition{}, ErrNotFound
 	}
-	if appID == "feishu" {
+	if pkg.Manifest.Kind == KindCLI {
+		methods := []string{"none"}
+		if len(pkg.CLI.Auth) > 0 {
+			methods = []string{"command"}
+		}
+
 		return Definition{
 			AppID: appID, Kind: KindCLI, Name: pkg.Manifest.Interface.DisplayName,
 			Description: pkg.Manifest.Description, Interface: pkg.Manifest.Interface,
-			Version: larkcli.Version, AuthMethods: []string{"device"}, OAuthSupported: true,
+			Version: pkg.Manifest.Version, AuthMethods: methods, OAuthSupported: len(pkg.CLI.AuthorizationDomains) > 0 && len(pkg.CLI.Auth) > 0,
 			ConfigSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		}, nil
 	}
-	authMethods := []string{"none", "bearer", "header", "env"}
-	if appID == "gitlab" {
-		authMethods = []string{"connector"}
-	}
+	authMethods := pkg.MCP.AuthMethods
 	return Definition{Kind: KindMCP, AppID: appID, Name: pkg.Manifest.Interface.DisplayName, Description: pkg.Manifest.Description,
-		Version: pkg.Manifest.Version, Interface: pkg.Manifest.Interface, ConfigSchema: configSchema(appID),
+		Version: pkg.Manifest.Version, Interface: pkg.Manifest.Interface, ConfigSchema: configSchema(appID, pkg.MCP.config()),
 		AuthMethods: authMethods, OAuthSupported: false}, nil
 }
 
-func configSchema(appID string) map[string]any {
+func configSchema(appID string, defaults Config) map[string]any {
 	field := func(title string, secret bool) map[string]any {
 		return map[string]any{"type": "string", "title": title, "writeOnly": secret}
 	}
-	config := normalizeConfig(Config{}, appID)
+	config := normalizeConfig(defaults, appID)
 	props := map[string]any{
 		"url": field("MCP URL", false), "token": field("Token / API Key", true),
 		"connector_id": field("Connector ID", false),
@@ -107,13 +55,18 @@ func configSchema(appID string) map[string]any {
 	}
 	// Editable installation defaults. Local knowledge bases may instead be selected
 	// through the knowledge picker; no credentials are embedded in these defaults.
-	props["url"].(map[string]any)["default"] = map[string]string{
-		"gitlab":   "https://u-agentichub-gitlab-mcp-1qq.public.opencsg.com/mcp",
-		"llm-wiki": "http://127.0.0.1:19093/mcp",
-	}[appID]
+	props["url"].(map[string]any)["default"] = defaults.URL
+	props["command"].(map[string]any)["default"] = defaults.Command
+	props["cwd"].(map[string]any)["default"] = defaults.CWD
+	props["args"] = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "default": defaults.Args}
+	props["transport"].(map[string]any)["default"] = config.Transport
+	if defaults.AuthMode != "" {
+		config.AuthMode = defaults.AuthMode
+	}
+
 	for key, value := range map[string]string{
 		"auth_mode": config.AuthMode, "token_header": config.TokenHeader,
-		"token_prefix": "Bearer ", "token_env": config.TokenEnv,
+		"token_prefix": config.TokenPrefix, "token_env": config.TokenEnv,
 		"app_id_env": config.AppIDEnv, "app_secret_env": config.AppSecretEnv,
 	} {
 		props[key] = map[string]any{"type": "string", "default": value}

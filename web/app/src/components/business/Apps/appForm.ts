@@ -66,6 +66,17 @@ function appConfigDefaults(definition: AppDefinition): AppConfig {
   };
   const defaults: AppConfig = {};
   for (const [key, field] of Object.entries(properties)) {
+    if (key === "args" && field && typeof field === "object") {
+      const schema = field as Record<string, unknown>;
+      if (
+        !schema.writeOnly &&
+        Array.isArray(schema.default) &&
+        schema.default.every((value) => typeof value === "string")
+      ) {
+        defaults.args = [...schema.default];
+      }
+      continue;
+    }
     if (!Object.hasOwn(types, key) || !field || typeof field !== "object") continue;
     const schema = field as Record<string, unknown>;
     if (schema.writeOnly || typeof schema.default !== types[key]) continue;

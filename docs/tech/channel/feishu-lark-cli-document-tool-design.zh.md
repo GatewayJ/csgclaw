@@ -151,7 +151,7 @@ lark-cli auth status --json
 
 ### 5.3 权限与身份
 
-CSGClaw 使用内置指定权限清单，以用户与租户均无需管理员审核为目标。清单保存在 `internal/larkcli/auto_approve_scopes.json`，分别维护 `user` 和 `tenant`。当前版本包含用户权限 133 项、租户权限 119 项；完整标识符见第 11 节。权限选择以对应身份的飞书授权页面和应用变更页面为依据，同时核查数据权限范围；官方推荐标记仅作为候选参考。CLI 升级和远程目录更新不会自动扩大申请范围。
+CSGClaw 使用内置指定权限清单，以用户与租户均无需管理员审核为目标。清单保存在 `internal/apps/builtin/feishu/cli.json` 的 `init[].url_rewrite.gzip_query.addons.scopes` 中，分别维护 `user` 和 `tenant`；`requested_scopes` 声明个人授权申请范围。当前版本包含用户权限 133 项、租户权限 119 项；完整标识符见第 11 节。权限选择以对应身份的飞书授权页面和应用变更页面为依据，同时核查数据权限范围；官方推荐标记仅作为候选参考。CLI 升级和远程目录更新不会自动扩大申请范围。
 
 应用注册由官方 `config init --new --brand feishu --lang zh` 发起。CSGClaw 将授权地址转换为官方支持自定义权限的 `/page/launcher`，设置 `from=sdk`、`source=csgclaw`、`tp=sdk`，通过 `addons.preset=false` 和 `addons.scopes.tenant/user` 指定权限。`addons` 按官方协议采用 JSON、gzip、无填充 base64url 编码；设备授权轮询和凭据保存由官方 CLI 完成。个人登录通过 `--scope` 传入同一份 user 清单。恢复未完成授权时，记录的申请权限必须与当前清单一致，否则重新生成授权请求。
 

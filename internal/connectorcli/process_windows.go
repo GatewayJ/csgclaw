@@ -1,6 +1,6 @@
 //go:build windows
 
-package larkcli
+package connectorcli
 
 import (
 	"csgclaw/internal/processgroup"

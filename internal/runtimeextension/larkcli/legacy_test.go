@@ -51,11 +51,8 @@ func TestLegacySnapshotSurvivesGenerationCleanupAndRetry(t *testing.T) {
 		t.Fatal("helper execution permission was removed")
 	}
 }
-func TestConnectorHistoricalInstructionsRequireMatchingChannelIdentity(t *testing.T) {
-	if got := connectorInstructions(Payload{}); got != "" {
-		t.Fatal("history instructions present without matching identity")
-	}
-	got := connectorInstructions(Payload{HistoricalAttachments: true})
+func TestHistoricalAttachmentInstructionsUseCurrentChat(t *testing.T) {
+	got := HistoricalAttachmentInstructions()
 	if !strings.Contains(got, "current_chat_id") || strings.Contains(got, "LARK_CHANNEL_HOME") {
 		t.Fatal("unexpected shared connector instructions")
 	}

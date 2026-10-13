@@ -1,4 +1,4 @@
-package larkcli
+package connectorcli
 
 import (
 	"archive/tar"
@@ -26,52 +26,44 @@ import (
 	skilllocal "csgclaw/internal/skill/local"
 )
 
-const Version = "1.0.97"
-const SkillsCommit = "9067ec079bfa0b1ae2266cd91d1c1ee4a1ce824d"
-const skillsSHA256 = "cdec7200b1ae9cc3c0ebc8a27428f359bf7236ef0b709e7c1c0206aab0185faa"
-
-var releaseSHA256 = map[string]string{
-	"darwin-amd64":  "1f5d3899138bc058662a027d0034ed69d21287d83322993afc01fee559b78de0",
-	"darwin-arm64":  "64e856a05c8dfdac5dbecd316766e4b05299f230f54833b674a623df3ac13f1c",
-	"linux-amd64":   "7ce11848724f0b0bc8204012140adbf76fe7c1fc8abd41c1878bc97b7228126b",
-	"linux-arm64":   "2dec3e362ecce05b535854a0205035bb4ccdb72dbbed9a321890c2089da16bc5",
-	"linux-riscv64": "497641f0a4bd53952a36bca9b452018df2259bdf32902d1f3de7803385516913",
-	"windows-amd64": "88ee81ec73be12432b2297df010098b5069e5ff0403123e1cd308ad0061f1397",
-	"windows-arm64": "4fef85e999fc54de1234b0bb622766f096870db2b86a396545e01a4156abfb3b",
-}
-
 type Package struct {
-	Executable string
-	SkillsDir  string
-	Version    string
+	Executable    string
+	SkillsDir     string
+	Version       string
+	SkillsVersion string
+	VersionArgs   []string
 }
 type Installer struct {
+	Spec   InstallSpec
 	Root   string
 	Client *http.Client
 }
 
 func (i Installer) Install(ctx context.Context, progress func(string)) (Package, error) {
+	if err := i.Spec.Validate(); err != nil {
+		return Package{}, err
+	}
 	report := func(stage string) {
 		if progress != nil {
 			progress(stage)
 		}
 	}
 	report("checking_environment")
-	name := "lark-cli"
+	name := i.Spec.Executable
 	suffix := ".tar.gz"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 		suffix = ".zip"
 	}
-	target := filepath.Join(i.Root, Version)
-	pkg := Package{Executable: filepath.Join(target, "bin", name), SkillsDir: filepath.Join(target, "skills"), Version: Version}
+	target := filepath.Join(i.Root, i.Spec.Version)
+	pkg := Package{Executable: filepath.Join(target, "bin", name), SkillsDir: filepath.Join(target, "skills"), Version: i.Spec.Version, SkillsVersion: i.Spec.Skills.Version, VersionArgs: i.Spec.VersionArgs}
 	if err := verifyPackage(ctx, pkg); err == nil {
 		return pkg, nil
 	}
 	platform := runtime.GOOS + "-" + runtime.GOARCH
-	sum, ok := releaseSHA256[platform]
+	release, ok := i.Spec.Releases[platform]
 	if !ok {
-		return Package{}, errors.New("lark-cli is unsupported on this platform")
+		return Package{}, errors.New("CLI is unsupported on this platform")
 	}
 	if err := os.MkdirAll(i.Root, 0700); err != nil {
 		return Package{}, err
@@ -81,9 +73,8 @@ func (i Installer) Install(ctx context.Context, progress func(string)) (Package,
 		return Package{}, err
 	}
 	defer os.RemoveAll(stage)
-	archiveName := "lark-cli-" + Version + "-" + platform + suffix
 	report("downloading_cli")
-	data, err := i.download(ctx, "https://github.com/larksuite/cli/releases/download/v"+Version+"/"+archiveName, sum, 128<<20)
+	data, err := i.download(ctx, release.URL, release.SHA256, 128<<20)
 	if err != nil {
 		return Package{}, err
 	}
@@ -91,20 +82,25 @@ func (i Installer) Install(ctx context.Context, progress func(string)) (Package,
 	if err != nil {
 		return Package{}, err
 	}
-	staged := Package{Executable: filepath.Join(stage, "bin", name), SkillsDir: filepath.Join(stage, "skills"), Version: Version}
+	staged := Package{Executable: filepath.Join(stage, "bin", name), SkillsDir: filepath.Join(stage, "skills"), Version: i.Spec.Version, SkillsVersion: i.Spec.Skills.Version, VersionArgs: i.Spec.VersionArgs}
 	if err := os.MkdirAll(filepath.Dir(staged.Executable), 0700); err != nil {
 		return Package{}, err
 	}
 	if err := os.WriteFile(staged.Executable, binary, 0700); err != nil {
 		return Package{}, err
 	}
-	report("installing_skills")
-	data, err = i.download(ctx, "https://codeload.github.com/larksuite/cli/tar.gz/"+SkillsCommit, skillsSHA256, 64<<20)
-	if err != nil {
+	if err := os.MkdirAll(staged.SkillsDir, 0700); err != nil {
 		return Package{}, err
 	}
-	if err := installSkills(staged.SkillsDir, data); err != nil {
-		return Package{}, err
+	if i.Spec.Skills.URL != "" {
+		report("installing_skills")
+		data, err = i.download(ctx, i.Spec.Skills.URL, i.Spec.Skills.SHA256, 64<<20)
+		if err != nil {
+			return Package{}, err
+		}
+		if err := installSkills(staged.SkillsDir, data, i.Spec.Skills.Prefix); err != nil {
+			return Package{}, err
+		}
 	}
 	if err := writePackageManifest(staged); err != nil {
 		return Package{}, err
@@ -150,13 +146,13 @@ func verifyPackage(ctx context.Context, p Package) error {
 	}
 	check, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	data, err = exec.CommandContext(check, p.Executable, "-v").Output()
-	if err != nil || !strings.Contains(string(data), Version) {
-		return errors.New("lark-cli version verification failed")
+	data, err = exec.CommandContext(check, p.Executable, p.VersionArgs...).Output()
+	if err != nil || !strings.Contains(string(data), p.Version) {
+		return errors.New("CLI version verification failed")
 	}
 	entries, err := os.ReadDir(p.SkillsDir)
-	if err != nil || len(entries) == 0 {
-		return errors.New("official Skills are missing")
+	if err != nil {
+		return errors.New("Skills are missing")
 	}
 	for _, entry := range entries {
 		if _, err := skilllocal.ResolveDir(p.SkillsDir, entry.Name()); err != nil {
@@ -181,7 +177,7 @@ func (i Installer) download(ctx context.Context, url, want string, limit int64) 
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("official package download returned HTTP %d", response.StatusCode)
+		return nil, fmt.Errorf("CLI package download returned HTTP %d", response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil {
@@ -191,8 +187,8 @@ func (i Installer) download(ctx context.Context, url, want string, limit int64) 
 		return nil, errors.New("package exceeds download limit")
 	}
 	sum := sha256.Sum256(data)
-	if hex.EncodeToString(sum[:]) != want {
-		return nil, errors.New("official package checksum mismatch")
+	if hex.EncodeToString(sum[:]) != strings.ToLower(want) {
+		return nil, errors.New("CLI package checksum mismatch")
 	}
 	return data, nil
 }
@@ -233,7 +229,7 @@ func extractBinary(data []byte, name, suffix string) ([]byte, error) {
 			}
 		}
 	}
-	return nil, errors.New("official package does not contain lark-cli")
+	return nil, errors.New("package does not contain the configured executable")
 }
 func readBounded(reader io.Reader, limit int64) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
@@ -246,7 +242,7 @@ func readBounded(reader io.Reader, limit int64) ([]byte, error) {
 	return data, nil
 }
 
-func installSkills(root string, data []byte) error {
+func installSkills(root string, data []byte, prefix string) error {
 	compressed, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return err
@@ -275,14 +271,14 @@ func installSkills(root string, data []byte) error {
 		}
 		rel := parts[2]
 		segments := strings.SplitN(rel, "/", 2)
-		if len(segments) != 2 || !strings.HasPrefix(segments[0], "lark-") {
+		if len(segments) != 2 || !strings.HasPrefix(segments[0], prefix) {
 			continue
 		}
 		if entry.Typeflag == tar.TypeDir {
 			continue
 		}
 		if entry.Typeflag != tar.TypeReg || path.Clean(rel) != rel || strings.Contains(rel, "\\") || strings.HasPrefix(rel, "/") {
-			return errors.New("unsafe official Skills archive")
+			return errors.New("unsafe Skills archive")
 		}
 		total += entry.Size
 		if entry.Size < 0 || total > 64<<20 {
@@ -307,7 +303,7 @@ func installSkills(root string, data []byte) error {
 	}
 	sort.Strings(names)
 	if len(names) == 0 {
-		return errors.New("official Skills archive is empty")
+		return errors.New("Skills archive is empty")
 	}
 	for _, name := range names {
 		if err := writers[name].Close(); err != nil {
@@ -342,7 +338,7 @@ func packageDigest(p Package) (packageManifest, error) {
 	}
 	sum := sha256.Sum256(binary)
 	skills, err := skillstate.DirectoryDigest(p.SkillsDir)
-	return packageManifest{Version: Version, SkillsCommit: SkillsCommit, ExecutableSHA256: hex.EncodeToString(sum[:]), SkillsSHA256: skills}, err
+	return packageManifest{Version: p.Version, SkillsCommit: p.SkillsVersion, ExecutableSHA256: hex.EncodeToString(sum[:]), SkillsSHA256: skills}, err
 }
 func writePackageManifest(p Package) error {
 	manifest, err := packageDigest(p)

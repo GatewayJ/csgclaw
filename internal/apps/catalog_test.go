@@ -1,7 +1,6 @@
 package apps
 
 import (
-	"csgclaw/internal/larkcli"
 	"slices"
 	"testing"
 )
@@ -39,13 +38,13 @@ func TestFeishuCatalogUsesCLI(t *testing.T) {
 	pkg.Manifest.Version = "manifest-version"
 	s.packages["feishu"] = pkg
 	d, err := s.Definition("feishu")
-	if err != nil || d.Kind != KindCLI || d.Version != larkcli.Version {
+	if err != nil || d.Kind != KindCLI || d.Version != pkg.Manifest.Version {
 		t.Fatalf("definition=%+v error=%v", d, err)
 	}
 	if d.Name != pkg.Manifest.Interface.DisplayName || d.Description != pkg.Manifest.Description {
 		t.Fatalf("catalog does not use manifest display metadata: %+v", d)
 	}
-	if !d.OAuthSupported || !slices.Equal(d.AuthMethods, []string{"device"}) {
+	if !d.OAuthSupported || !slices.Equal(d.AuthMethods, []string{"command"}) {
 		t.Fatalf("unexpected CLI authorization: %+v", d)
 	}
 	if len(d.ConfigSchema["properties"].(map[string]any)) != 0 {

@@ -47,21 +47,22 @@ type gateway struct {
 }
 
 type Service struct {
-	cliMigration  *cliMigration
-	cliWorkMu     sync.Mutex
-	cliCancel     context.CancelFunc
-	cliWake       chan struct{}
-	cliWG         sync.WaitGroup
-	mu            sync.Mutex
-	path          string
-	dataRoot      string
-	ephemeralData bool
-	options       Options
-	packages      map[string]pluginPackage
-	entries       map[string]*entry
-	gateways      map[string]*gateway
-	ctx           context.Context
-	cancel        context.CancelFunc
+	cliMigration     *cliMigration
+	cliWorkMu        sync.Mutex
+	cliCancel        context.CancelFunc
+	cliCancelSession string
+	cliWake          chan struct{}
+	cliWG            sync.WaitGroup
+	mu               sync.Mutex
+	path             string
+	dataRoot         string
+	ephemeralData    bool
+	options          Options
+	packages         map[string]pluginPackage
+	entries          map[string]*entry
+	gateways         map[string]*gateway
+	ctx              context.Context
+	cancel           context.CancelFunc
 }
 
 func NewService(statePath string, options Options) (*Service, error) {
@@ -73,6 +74,18 @@ func NewService(statePath string, options Options) (*Service, error) {
 	packages, err := loadPackages()
 	if err != nil {
 		return nil, err
+	}
+	if options.Packages != nil {
+		custom, loadErr := readPackages(options.Packages)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		for id, pkg := range custom {
+			if _, exists := packages[id]; exists {
+				return nil, fmt.Errorf("duplicate connector %s", id)
+			}
+			packages[id] = pkg
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{path: statePath, options: options, packages: packages, cliWake: make(chan struct{}, 1), entries: map[string]*entry{}, gateways: map[string]*gateway{}, ctx: ctx, cancel: cancel}
@@ -103,11 +116,19 @@ func NewService(statePath string, options Options) (*Service, error) {
 	}
 	s.cliMigration = migrations["v1"]
 	s.cliWG.Add(1)
-	go s.runCLI()
+	go s.runConnectorWork()
 	return s, nil
 }
 
 func (s *Service) persistLocked(id string, r *record) error {
+	if r != nil && r.Kind == KindMCP && r.AgentID != "" && len(r.Package.SkillFiles) > 0 {
+		old := s.entries[id]
+		if old == nil || old.record.Enabled != r.Enabled || old.record.Disconnected != r.Disconnected {
+			queueMCPSkills(r)
+			s.scheduleConnectorWork()
+		}
+	}
+
 	return localstore.UpdateObjectSection(s.path, installationsSection, func(values map[string]json.RawMessage) error {
 		if r == nil {
 			delete(values, id)
@@ -136,6 +157,13 @@ func view(e *entry) Installation {
 	result := copyJSON(e.record.Installation)
 	if result.AppID == "feishu" {
 		result.FeishuAppID = e.record.Credentials.AppID
+		if result.Kind == KindCLI {
+			var status struct {
+				AppID string `json:"appId"`
+			}
+			_ = json.Unmarshal(result.AuthStatus, &status)
+			result.FeishuAppID = status.AppID
+		}
 	}
 	result.Tools = []*mcp.Tool{}
 	if e.connection != nil {
@@ -272,8 +300,12 @@ func clearConnectorOwnedCredentials(config Config, credentials *Credentials) {
 // Create is a convenience for creating a resource and optionally binding it.
 // Public Agent management uses Bind so it cannot implicitly change shared resources.
 func (s *Service) Create(ctx context.Context, agentID string, in CreateRequest) (Installation, error) {
-	if in.AppID == "feishu" && in.Kind != KindMCP {
-		resource, err := s.EnsureFeishuCLI(ctx)
+	if pkg, ok := s.packages[in.AppID]; ok && in.Kind != "" && in.Kind != pkg.Manifest.Kind && !(in.AppID == "feishu" && in.Kind == KindMCP) {
+		return Installation{}, ErrInvalid
+	}
+
+	if pkg, ok := s.packages[in.AppID]; ok && pkg.Manifest.Kind == KindCLI && in.Kind != KindMCP {
+		resource, err := s.ensureCLI(ctx, in.AppID)
 		if err != nil || agentID == "" {
 			return resource, err
 		}
@@ -298,8 +330,18 @@ func (s *Service) Create(ctx context.Context, agentID string, in CreateRequest) 
 	if !ok {
 		return Installation{}, ErrNotFound
 	}
+	if pkg.CLI != nil {
+		// Explicit MCP requests preserve the legacy service-reference package.
+		pkg = copyJSON(pkg)
+		pkg.Manifest.Kind = KindMCP
+		pkg.Manifest.CLI = ""
+		pkg.Manifest.Apps = "./apps.json"
+		pkg.Manifest.Skills = ""
+		pkg.CLI = nil
+		pkg.Apps = map[string]AppReference{in.AppID: {ID: in.AppID, Required: true}}
+	}
 	in.Name = strings.TrimSpace(in.Name)
-	in.Config = normalizeConfig(in.Config, in.AppID, in.Credentials)
+	in.Config = s.packageConfig(in.AppID, in.Config, in.Credentials)
 	clearConnectorOwnedCredentials(in.Config, &in.Credentials)
 	protect(&in.Config, &in.Credentials)
 	clearReferencedPlatformCredentials(in.Config, &in.Credentials)
@@ -313,7 +355,7 @@ func (s *Service) Create(ctx context.Context, agentID string, in CreateRequest) 
 		return Installation{}, err
 	}
 	now := time.Now().UTC()
-	r := record{Installation: Installation{Kind: KindMCP, InstallationID: id, AgentID: agentID, ResourceEnabled: true, AppID: in.AppID, Name: in.Name, Enabled: true, Status: "needs_configuration", Config: in.Config, CreatedAt: now, UpdatedAt: now}, Package: pkg, Credentials: in.Credentials}
+	r := record{Installation: Installation{Kind: KindMCP, Revision: 1, SkillVersion: pkg.Manifest.Version, InstallationID: id, AgentID: agentID, ResourceEnabled: true, AppID: in.AppID, Name: in.Name, Enabled: true, Status: "needs_configuration", Config: in.Config, CreatedAt: now, UpdatedAt: now}, Package: pkg, Credentials: in.Credentials}
 	s.mu.Lock()
 	if err := s.uniqueNameLocked(agentID, in.Name, ""); err != nil {
 		s.mu.Unlock()
@@ -415,7 +457,7 @@ func (s *Service) connectWithRecovery(ctx context.Context, agentID, id string, e
 	if e.record.Kind == KindCLI {
 		out := s.viewLocked(e)
 		s.mu.Unlock()
-		s.scheduleCLI()
+		s.scheduleConnectorWork()
 		return out, nil
 	}
 	if !explicit && (e.record.Disconnected || !e.record.active() || !e.record.ConnectRequested) {
@@ -558,6 +600,13 @@ func (s *Service) Delete(ctx context.Context, agentID, id string) error {
 	if agentID == "" {
 		return s.deleteResource(ctx, id)
 	}
+	if handled, err := s.removeMCPSkills(ctx, agentID, id); handled || err != nil {
+		return err
+	}
+	return s.removeBinding(agentID, id)
+}
+
+func (s *Service) removeBinding(agentID, id string) error {
 	s.mu.Lock()
 	e, err := s.findLocked(agentID, id)
 	if err != nil {
@@ -580,19 +629,7 @@ func (s *Service) Delete(ctx context.Context, agentID, id string) error {
 func (s *Service) DeleteAgent(ctx context.Context, agentID string) error {
 	items, _ := s.List(ctx, agentID)
 	for _, item := range items {
-		if item.Kind == KindCLI {
-			s.mu.Lock()
-			err := s.persistLocked(item.InstallationID, nil)
-			if err == nil {
-				delete(s.entries, item.InstallationID)
-			}
-			s.mu.Unlock()
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		if err := s.Delete(ctx, agentID, item.InstallationID); err != nil {
+		if err := s.removeBinding(agentID, item.InstallationID); err != nil {
 			return err
 		}
 	}
@@ -636,7 +673,7 @@ func (s *Service) Probe(ctx context.Context, agentID string, in ProbeRequest) (P
 	if _, ok := s.packages[in.AppID]; !ok {
 		return ProbeResult{}, ErrNotFound
 	}
-	in.Config = normalizeConfig(in.Config, in.AppID, in.Credentials)
+	in.Config = s.packageConfig(in.AppID, in.Config, in.Credentials)
 	protect(&in.Config, &in.Credentials)
 	if err := validateConfig(in.Config, in.AppID); err != nil {
 		return ProbeResult{}, err
@@ -673,7 +710,7 @@ func (s *Service) Restore(ctx context.Context, agentID string) error {
 }
 
 func (s *Service) RestoreAll(ctx context.Context) error {
-	s.scheduleCLI()
+	s.scheduleConnectorWork()
 	s.mu.Lock()
 	agents := map[string]bool{}
 	for _, e := range s.entries {

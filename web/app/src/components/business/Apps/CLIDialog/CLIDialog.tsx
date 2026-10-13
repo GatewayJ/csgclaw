@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
-  ensureFeishuResource,
+  createAppResource,
+  type AppDefinition,
   fetchAppResource,
   startCLIOperation,
   cancelCLIOperation,
@@ -26,13 +27,15 @@ import { appStatus } from "../appForm";
 import styles from "../AgentAppsPanel.module.css";
 
 type Props = {
+  definition: AppDefinition;
   existing: AppInstallation | null;
   t: TranslateFn;
   onClose: () => void;
   onChanged: () => Promise<unknown>;
 };
 
-export function FeishuCLIDialog({ existing, t, onClose, onChanged }: Props) {
+export function CLIDialog({ definition, existing, t, onClose, onChanged }: Props) {
+  const feishu = definition.app_id === "feishu";
   const [resource, setResource] = useState(existing);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -68,7 +71,16 @@ export function FeishuCLIDialog({ existing, t, onClose, onChanged }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const current = resource ?? (await ensureFeishuResource());
+      const current =
+        resource ??
+        (await createAppResource({
+          app_id: definition.app_id,
+          kind: "cli",
+          name: definition.name,
+          config: {},
+          credentials: {},
+          connect: false,
+        }));
       setResource(current);
       if (retry.current?.action !== action || retry.current.revision !== current.revision) {
         retry.current = {
@@ -104,14 +116,10 @@ export function FeishuCLIDialog({ existing, t, onClose, onChanged }: Props) {
   }
   const operation = resource?.operation;
   const active = operation?.status === "running" || operation?.status === "pending";
-  const ready = Boolean(
-    resource?.auth_status &&
-    !resource.disconnected &&
-    Object.values(resource.auth_status.identities).some(
-      (identity) => identity.available && identity.verified !== false,
-    ),
-  );
+  const ready = Boolean(resource?.authorized && !resource.disconnected);
   const stages: Record<string, string> = {
+    authorization: "cliAuthorization",
+    checking_authorization: "cliCheckingAuthorization",
     pending: "feishuCLIPreparing",
     checking_environment: "feishuCLIPreparing",
     downloading_cli: "feishuCLIInstalling",
@@ -141,8 +149,8 @@ export function FeishuCLIDialog({ existing, t, onClose, onChanged }: Props) {
       <DialogContent className={styles.settingsDialog}>
         <DialogHeader>
           <div>
-            <DialogTitle>{t("appFeishuName")}</DialogTitle>
-            <DialogDescription>{t("feishuCLIIntro")}</DialogDescription>
+            <DialogTitle>{definition.name}</DialogTitle>
+            <DialogDescription>{feishu ? t("feishuCLIIntro") : definition.description}</DialogDescription>
           </div>
           <DialogCloseButton label={t("close")} variant="tertiaryGray" size="sm" iconOnly />
         </DialogHeader>
@@ -170,7 +178,7 @@ export function FeishuCLIDialog({ existing, t, onClose, onChanged }: Props) {
                 value={operation.authorization_url}
                 size={168}
                 marginSize={2}
-                title={t("feishuCLIAuthorize")}
+                title={t(feishu ? "feishuCLIAuthorize" : "cliAuthorize")}
               />
               <a
                 href={operation.authorization_url}
@@ -178,34 +186,35 @@ export function FeishuCLIDialog({ existing, t, onClose, onChanged }: Props) {
                 rel="noopener noreferrer"
                 className="btn btn-primary"
               >
-                {t("feishuCLIAuthorize")}
+                {t(feishu ? "feishuCLIAuthorize" : "cliAuthorize")}
               </a>
-              <p className={styles.hint}>{t("feishuCLIWaitHint")}</p>
+              <p className={styles.hint}>{t(feishu ? "feishuCLIWaitHint" : "cliWaitHint")}</p>
             </div>
           ) : null}
-          {(["bot", "user"] as const).map((identity) => {
-            const info = resource?.auth_status?.identities[identity];
-            return (
-              <div key={identity} className={styles.resourceDetails}>
-                <strong>{t(identity === "bot" ? "feishuCLIBot" : "feishuCLIUser")}</strong>
-                <p>
-                  {info?.appName || info?.userName || resource?.auth_status?.appId || "—"} ·{" "}
-                  {t(info?.available && info.verified !== false ? "feishuCLIAvailable" : "feishuCLIUnauthorized")}
-                </p>
-                {identity === "user" ? (
-                  <>
-                    <p className={styles.hint}>{t("feishuCLIRequestedScopes")}</p>
-                    {resource?.requested_scopes ? <p className="break-words">{resource.requested_scopes}</p> : null}
-                    {info?.scope ? (
-                      <p className="break-words">
-                        {t("feishuCLIGrantedScopes")}: {info.scope}
-                      </p>
-                    ) : null}
-                  </>
-                ) : null}
-              </div>
-            );
-          })}
+          {feishu &&
+            (["bot", "user"] as const).map((identity) => {
+              const info = resource?.auth_status?.identities[identity];
+              return (
+                <div key={identity} className={styles.resourceDetails}>
+                  <strong>{t(identity === "bot" ? "feishuCLIBot" : "feishuCLIUser")}</strong>
+                  <p>
+                    {info?.appName || info?.userName || resource?.auth_status?.appId || "—"} ·{" "}
+                    {t(info?.available && info.verified === true ? "feishuCLIAvailable" : "feishuCLIUnauthorized")}
+                  </p>
+                  {identity === "user" ? (
+                    <>
+                      <p className={styles.hint}>{t("feishuCLIRequestedScopes")}</p>
+                      {resource?.requested_scopes ? <p className="break-words">{resource.requested_scopes}</p> : null}
+                      {info?.scope ? (
+                        <p className="break-words">
+                          {t("feishuCLIGrantedScopes")}: {info.scope}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+              );
+            })}
           {resource?.migration && migrationWorkers.length > 0 ? (
             <div>
               <p>
@@ -271,7 +280,7 @@ export function FeishuCLIDialog({ existing, t, onClose, onChanged }: Props) {
             <>
               {ready ? (
                 <>
-                  {!resource?.auth_status?.identities.user.available ? (
+                  {feishu && resource?.auth_status?.identities.user.verified !== true ? (
                     <Button disabled={busy} onClick={() => void run("login")}>
                       {t("feishuCLILogin")}
                     </Button>
@@ -283,7 +292,7 @@ export function FeishuCLIDialog({ existing, t, onClose, onChanged }: Props) {
               ) : null}
               {!ready ? (
                 <Button variant="primary" disabled={busy} onClick={() => void run("connect")}>
-                  {t("feishuCLIConnect")}
+                  {t(feishu ? "feishuCLIConnect" : "appConnect")}
                 </Button>
               ) : null}
             </>

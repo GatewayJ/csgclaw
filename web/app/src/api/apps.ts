@@ -56,6 +56,7 @@ export type AppInstallation = {
   applied_revision?: number;
   package_version?: string;
   skill_version?: string;
+  authorized?: boolean;
   auth_status?: { appId: string; defaultAs: string; identities: { bot: CLIIdentity; user: CLIIdentity } };
   operation?: CLIOperation;
   skills?: { skill_name: string; bundle_version: string; content_digest: string; managed: boolean }[];

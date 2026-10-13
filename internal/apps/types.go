@@ -4,10 +4,10 @@ package apps
 
 import (
 	"context"
-	"csgclaw/internal/larkcli"
 	skill "csgclaw/internal/skill/state"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -41,6 +41,9 @@ type Interface struct {
 }
 
 type Manifest struct {
+	Kind        string            `json:"kind,omitempty"`
+	MCP         string            `json:"mcp,omitempty"`
+	CLI         string            `json:"cli,omitempty"`
 	Name        string            `json:"name"`
 	Version     string            `json:"version,omitempty"`
 	Description string            `json:"description,omitempty"`
@@ -51,9 +54,7 @@ type Manifest struct {
 	Keywords    []string          `json:"keywords,omitempty"`
 	Apps        string            `json:"apps,omitempty"`
 	Interface   Interface         `json:"interface"`
-	MCPServers  json.RawMessage   `json:"mcpServers,omitempty"`
-	Skills      json.RawMessage   `json:"skills,omitempty"`
-	Hooks       json.RawMessage   `json:"hooks,omitempty"`
+	Skills      string            `json:"skills,omitempty"`
 }
 
 type AppReference struct {
@@ -110,6 +111,7 @@ type Credentials struct {
 func (Credentials) String() string { return "[redacted]" }
 
 type Installation struct {
+	Authorized      bool                 `json:"authorized,omitempty"`
 	RuntimeStatus   string               `json:"runtime_status,omitempty"`
 	Migration       *CLIMigrationStatus  `json:"migration,omitempty"`
 	RequestedScopes string               `json:"requested_scopes,omitempty"`
@@ -118,7 +120,7 @@ type Installation struct {
 	AppliedRevision uint64               `json:"applied_revision,omitempty"`
 	PackageVersion  string               `json:"package_version,omitempty"`
 	SkillVersion    string               `json:"skill_version,omitempty"`
-	AuthStatus      *larkcli.Status      `json:"auth_status,omitempty"`
+	AuthStatus      json.RawMessage      `json:"auth_status,omitempty"`
 	Skills          []skill.ManagedSkill `json:"skills,omitempty"`
 	Operation       *CLIOperation        `json:"operation,omitempty"`
 	CheckedAt       time.Time            `json:"checked_at,omitempty"`
@@ -182,7 +184,18 @@ type ConnectorHTTPConfig struct {
 	Headers     http.Header
 }
 
+type ConnectorRuntime interface {
+	State(context.Context, string, string) (bool, error)
+	Update(context.Context, string, bool, func(context.Context) error) error
+	Configure(context.Context, string, string, *CLIProjection) error
+	PlanSkills(string, string, string, []skill.ManagedSkill, bool) (skill.SkillPlan, error)
+	ApplySkills(context.Context, string, skill.SkillPlan) error
+}
+
 type Options struct {
+	Runtime  ConnectorRuntime
+	Packages fs.FS
+
 	CLI                  *CLIOptions
 	OpenCSGCredentials   func(context.Context) (OpenCSGCredentials, error)
 	FeishuTokenSource    func(string, string) feishutransport.TenantTokenSource

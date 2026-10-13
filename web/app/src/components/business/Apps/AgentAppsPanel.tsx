@@ -143,7 +143,7 @@ export function AgentAppsPanel({
           />
         </article>
         {controller.items
-          .filter((app) => app.kind !== "cli")
+          .filter((app) => app.kind !== "cli" || app.app_id !== "feishu")
           .map((app) => (
             <button
               key={app.installation_id}
@@ -204,7 +204,7 @@ export function AgentAppsPanel({
                     ) : selected.runtime_status === "loaded" ? (
                       <p>{t("feishuCLILoadedRuntime")}</p>
                     ) : null}
-                    <p className={styles.hint}>{t("feishuCLISkillsSource")}</p>
+                    {selected.app_id === "feishu" ? <p className={styles.hint}>{t("feishuCLISkillsSource")}</p> : null}
                     <ul>
                       {selected.skills?.map((skill) => (
                         <li key={skill.skill_name}>

@@ -1,4 +1,4 @@
-package larkcli
+package connectorcli
 
 import (
 	"archive/tar"
@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 )
 
@@ -62,12 +63,12 @@ func TestSkillsArchiveRejectsTraversalAndSymlinks(t *testing.T) {
 		name string
 		kind byte
 	}{{"repo/skills/lark-test/../../outside", tar.TypeReg}, {"repo/skills/lark-test/SKILL.md", tar.TypeSymlink}} {
-		if err := installSkills(t.TempDir(), skillArchive(t, tc.name, tc.kind)); err == nil {
+		if err := installSkills(t.TempDir(), skillArchive(t, tc.name, tc.kind), "lark-"); err == nil {
 			t.Fatalf("accepted %s", tc.name)
 		}
 	}
 	root := t.TempDir()
-	if err := installSkills(root, skillArchive(t, "repo/skills/lark-test/SKILL.md", tar.TypeReg)); err != nil {
+	if err := installSkills(root, skillArchive(t, "repo/skills/lark-test/SKILL.md", tar.TypeReg), "lark-"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "lark-test", "SKILL.md")); err != nil {
@@ -79,14 +80,14 @@ func TestInstalledPackageDetectsModifiedSkills(t *testing.T) {
 		t.Skip("shell executable fixture")
 	}
 	root := t.TempDir()
-	p := Package{Executable: filepath.Join(root, "bin", "lark-cli"), SkillsDir: filepath.Join(root, "skills"), Version: Version}
+	p := Package{Executable: filepath.Join(root, "bin", "lark-cli"), SkillsDir: filepath.Join(root, "skills"), Version: testVersion, VersionArgs: []string{"-v"}}
 	if err := os.MkdirAll(filepath.Dir(p.Executable), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p.Executable, []byte("#!/bin/sh\nprintf 'lark-cli "+Version+"\\n'\n"), 0700); err != nil {
+	if err := os.WriteFile(p.Executable, []byte("#!/bin/sh\nprintf 'lark-cli "+testVersion+"\\n'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := installSkills(p.SkillsDir, skillArchive(t, "repo/skills/lark-test/SKILL.md", tar.TypeReg)); err != nil {
+	if err := installSkills(p.SkillsDir, skillArchive(t, "repo/skills/lark-test/SKILL.md", tar.TypeReg), "lark-"); err != nil {
 		t.Fatal(err)
 	}
 	if err := writePackageManifest(p); err != nil {
@@ -102,21 +103,55 @@ func TestInstalledPackageDetectsModifiedSkills(t *testing.T) {
 		t.Fatal("modified Skills were accepted")
 	}
 }
-func TestPinnedOfficialPackage(t *testing.T) {
-	if os.Getenv("CSGCLAW_TEST_OFFICIAL_CLI") != "1" {
-		t.Skip("official package download opt-in")
+
+const testVersion = "1.0.97"
+
+func TestInstallerUsesDeclaredDistribution(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell executable fixture")
 	}
-	root := t.TempDir()
-	installer := Installer{Root: root}
-	p, err := installer.Install(context.Background(), nil)
+	var archive bytes.Buffer
+	gz := gzip.NewWriter(&archive)
+	writer := tar.NewWriter(gz)
+	binary := []byte("#!/bin/sh\nprintf 'fixture 2.0.0\\n'\n")
+	if err := writer.WriteHeader(&tar.Header{Name: "release/fixture", Mode: 0700, Typeflag: tar.TypeReg, Size: int64(len(binary))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(binary); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var downloads atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { downloads.Add(1); _, _ = w.Write(archive.Bytes()) }))
+	defer server.Close()
+	digest := sha256.Sum256(archive.Bytes())
+	spec := InstallSpec{Version: "2.0.0", Executable: "fixture", VersionArgs: []string{"--version"}, Releases: map[string]Archive{runtime.GOOS + "-" + runtime.GOARCH: {URL: server.URL + "/fixture.tar.gz", SHA256: hex.EncodeToString(digest[:])}}}
+	installer := Installer{Root: t.TempDir(), Client: server.Client(), Spec: spec}
+	installed, err := installer.Install(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyPackage(context.Background(), p); err != nil {
+	if filepath.Base(installed.Executable) != "fixture" || installed.Version != "2.0.0" {
+		t.Fatalf("package=%+v", installed)
+	}
+	if _, err := installer.Install(context.Background(), nil); err != nil {
 		t.Fatal(err)
 	}
-	second, err := installer.Install(context.Background(), nil)
-	if err != nil || second != p {
-		t.Fatalf("repeat=%+v error=%v", second, err)
+	if downloads.Load() != 1 {
+		t.Fatal("unchanged package was downloaded again")
+	}
+	if err := os.WriteFile(installed.Executable, []byte("changed"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installer.Install(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if downloads.Load() != 2 {
+		t.Fatal("modified executable was not repaired")
 	}
 }

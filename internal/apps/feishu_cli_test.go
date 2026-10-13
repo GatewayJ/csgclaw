@@ -12,20 +12,20 @@ import (
 	"testing"
 	"time"
 
+	"csgclaw/internal/connectorcli"
 	"csgclaw/internal/larkcli"
-	projection "csgclaw/internal/runtimeextension/larkcli"
 	skill "csgclaw/internal/skill/state"
 )
 
 type cliRuntimeStub struct {
 	mu         sync.Mutex
 	running    map[string]bool
-	configured map[string]*projection.Payload
+	configured map[string]*CLIProjection
 	fail       string
 	events     []string
 }
 
-func (r *cliRuntimeStub) State(_ context.Context, id string) (bool, error) {
+func (r *cliRuntimeStub) State(_ context.Context, id, kind string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.running[id], nil
@@ -55,7 +55,7 @@ func (r *cliRuntimeStub) Update(ctx context.Context, id string, resume bool, fn 
 	}
 	return nil
 }
-func (r *cliRuntimeStub) Configure(_ context.Context, id string, p *projection.Payload) error {
+func (r *cliRuntimeStub) Configure(_ context.Context, id, resourceID string, p *CLIProjection) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.running[id] {
@@ -80,7 +80,7 @@ type cliFixture struct {
 	wait    func(context.Context) error
 }
 
-func (f *cliFixture) run(ctx context.Context, c larkcli.Client, _ io.Reader, args ...string) ([]byte, error) {
+func (f *cliFixture) run(ctx context.Context, c connectorcli.Client, _ io.Reader, args ...string) ([]byte, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, strings.Join(args, " "))
 	f.mu.Unlock()
@@ -94,10 +94,12 @@ func (f *cliFixture) run(ctx context.Context, c larkcli.Client, _ io.Reader, arg
 	f.runtime.mu.Unlock()
 	switch strings.Join(args[:2], " ") {
 	case "config init":
-		return nil, larkcli.AtomicWrite(c.ConfigPath(), []byte(`{"apps":[{"appId":"cli_test"}]}`))
+		return nil, larkcli.AtomicWrite(filepath.Join(c.ConfigDir, "config.json"), []byte(`{"apps":[{"appId":"cli_test"}]}`))
+	case "config remove":
+		return nil, os.Remove(filepath.Join(c.ConfigDir, "config.json"))
 	case "auth status":
-		if _, err := os.Stat(c.ConfigPath()); err != nil {
-			return nil, err
+		if _, err := os.Stat(filepath.Join(c.ConfigDir, "config.json")); err != nil {
+			return []byte(`{"error":{"subtype":"not_configured"}}`), err
 		}
 		verified := true
 		s := larkcli.Status{AppID: "cli_test"}
@@ -132,13 +134,13 @@ func (f *cliFixture) run(ctx context.Context, c larkcli.Client, _ io.Reader, arg
 }
 func newCLIFixture(t *testing.T) (*Service, *cliFixture, string) {
 	t.Helper()
-	rt := &cliRuntimeStub{running: map[string]bool{}, configured: map[string]*projection.Payload{}}
+	rt := &cliRuntimeStub{running: map[string]bool{}, configured: map[string]*CLIProjection{}}
 	f := &cliFixture{runtime: rt}
 	path := filepath.Join(t.TempDir(), "state.json")
-	options := CLIOptions{Runtime: rt, Run: f.run, Install: func(_ context.Context, root string, _ func(string)) (larkcli.Package, error) {
-		return larkcli.Package{Executable: filepath.Join(root, "bin", "lark-cli"), SkillsDir: filepath.Join(root, "skills"), Version: larkcli.Version}, nil
+	options := CLIOptions{Run: f.run, Install: func(_ context.Context, root string, _ func(string)) (connectorcli.Package, error) {
+		return connectorcli.Package{Executable: filepath.Join(root, "bin", "lark-cli"), SkillsDir: filepath.Join(root, "skills"), Version: "1.0.97"}, nil
 	}}
-	s, err := NewService(path, Options{CLI: &options})
+	s, err := NewService(path, Options{Runtime: rt, CLI: &options})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +213,7 @@ func TestFeishuCLIGlobalConnectAndWorkerLifecycle(t *testing.T) {
 		t.Fatalf("connect=%+v", got)
 	}
 	item, err := s.Get(ctx, "worker", binding.InstallationID)
-	if err != nil || item.Status != "connected" || item.AppliedRevision != 3 {
+	if err != nil || item.Status != "connected" || item.AppliedRevision != item.Revision {
 		t.Fatalf("binding=%+v err=%v", item, err)
 	}
 	f.runtime.mu.Lock()
@@ -323,7 +325,7 @@ func TestFeishuCLIDisconnectCancelsAuthorizationAndRunsOnce(t *testing.T) {
 
 func TestFeishuCLIPersonalDenialKeepsBotConfiguration(t *testing.T) {
 	s, f, id := newCLIFixture(t)
-	f.wait = func(context.Context) error { return &larkcli.OperationError{Code: "authorization_denied"} }
+	f.wait = func(context.Context) error { return &connectorcli.OperationError{Code: "authorization_denied"} }
 	op := startCLITest(t, s, id, "connect", "denied-personal")
 	if got := waitCLIOperation(t, s, id, op); got.Status != "denied" || got.ErrorCode != "authorization_denied" {
 		t.Fatalf("operation=%+v", got)
@@ -332,7 +334,9 @@ func TestFeishuCLIPersonalDenialKeepsBotConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.AuthStatus == nil || !r.AuthStatus.Identities.Bot.Available || r.AuthStatus.Identities.User.Available {
+	var status larkcli.Status
+	_ = json.Unmarshal(r.AuthStatus, &status)
+	if r.AuthStatus == nil || !status.Identities.Bot.Available || status.Identities.User.Available {
 		t.Fatal("bot-only authorization was not preserved")
 	}
 	f.wait = nil
@@ -370,7 +374,7 @@ func TestFeishuCLIRestartResumesPersistedAuthorization(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	restored.scheduleCLI()
+	restored.scheduleConnectorWork()
 	if got := waitCLIOperation(t, restored, id, op); got.Status != "completed" {
 		t.Fatalf("restored=%+v", got)
 	}
@@ -421,7 +425,7 @@ func TestFeishuCLIRecoveryDoesNotReuseAnotherUserVerification(t *testing.T) {
 	}
 	s.cliWorkMu.Lock()
 	defer s.cliWorkMu.Unlock()
-	s.options.CLI.Run = func(context.Context, larkcli.Client, io.Reader, ...string) ([]byte, error) {
+	s.options.CLI.Run = func(context.Context, connectorcli.Client, io.Reader, ...string) ([]byte, error) {
 		return []byte(`{"appId":"cli_test","identities":{"bot":{"available":true},"user":{"available":true,"openId":"ou_other"}}}`), nil
 	}
 	if err := s.recoverCLIStatus(context.Background(), id); err != nil {
@@ -431,7 +435,9 @@ func TestFeishuCLIRecoveryDoesNotReuseAnotherUserVerification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.AuthStatus.Identities.User.Verified != nil {
+	var status larkcli.Status
+	_ = json.Unmarshal(r.AuthStatus, &status)
+	if status.Identities.User.Verified != nil || r.CLI.Ready {
 		t.Fatal("recovery reused verification from a different user")
 	}
 }
@@ -441,7 +447,7 @@ type cliStateHookRuntime struct {
 	state func(context.Context, string) (bool, error)
 }
 
-func (r cliStateHookRuntime) State(ctx context.Context, id string) (bool, error) {
+func (r cliStateHookRuntime) State(ctx context.Context, id, kind string) (bool, error) {
 	return r.state(ctx, id)
 }
 
@@ -453,10 +459,10 @@ func TestFeishuCLIDeletedWorkerBindingIsNotPersistedAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.options.CLI.Runtime = cliStateHookRuntime{cliRuntimeStub: f.runtime, state: func(ctx context.Context, worker string) (bool, error) {
+	s.options.Runtime = cliStateHookRuntime{cliRuntimeStub: f.runtime, state: func(ctx context.Context, worker string) (bool, error) {
 		return false, s.DeleteAgent(ctx, worker)
 	}}
-	_ = s.applyCLIBinding(context.Background(), binding.InstallationID)
+	_ = s.applyBinding(context.Background(), binding.InstallationID)
 	data, err := os.ReadFile(s.path)
 	if err != nil {
 		t.Fatal(err)
@@ -473,7 +479,7 @@ func TestFeishuCLIDisconnectPreservesConfigWhenLogoutFails(t *testing.T) {
 		t.Fatalf("connect=%+v", got)
 	}
 	run := s.options.CLI.Run
-	s.options.CLI.Run = func(ctx context.Context, client larkcli.Client, input io.Reader, args ...string) ([]byte, error) {
+	s.options.CLI.Run = func(ctx context.Context, client connectorcli.Client, input io.Reader, args ...string) ([]byte, error) {
 		if strings.Join(args, " ") == "auth logout" {
 			return nil, errors.New("logout failed")
 		}

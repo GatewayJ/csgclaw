@@ -70,7 +70,19 @@ func (s *Service) persistAllLocked() error {
 	})
 }
 func (s *Service) loadResources(stored map[string]record) error {
+	converted := false
+	upgradedCLI := map[string]bool{}
 	for id, r := range stored {
+		if r.Kind == KindCLI && (r.Package.Manifest.Kind == "" || r.Package.CLI == nil || (r.AppID == "feishu" && len(r.Package.CLI.Status) == 0)) {
+			r.Package = s.packages[r.AppID]
+			if r.CLI != nil && r.Package.CLI != nil && r.AgentID == "" {
+				r.CLI.Ready, _, _ = r.Package.CLI.ReadStatus(r.AuthStatus)
+				r.Revision++
+				upgradedCLI[id] = true
+			}
+			converted = true
+			stored[id] = r
+		}
 		if r.Kind == "" {
 			r.Kind = KindMCP
 			stored[id] = r
@@ -81,7 +93,6 @@ func (s *Service) loadResources(stored map[string]record) error {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	converted := false
 	names := map[string]bool{}
 	for _, r := range stored {
 		if r.AgentID == "" {
@@ -118,6 +129,12 @@ func (s *Service) loadResources(stored map[string]record) error {
 				return fmt.Errorf("App binding has no global resource")
 			}
 			hydrateBinding(&r, resource)
+			if upgradedCLI[r.ResourceID] {
+				if r.CLIApply == nil {
+					r.CLIApply = &cliBinding{}
+				}
+				r.CLIApply.Pending = true
+			}
 		}
 		r.Tools, r.CredentialsSet, r.Bindings = nil, nil, nil
 		if r.Kind != KindCLI {
@@ -141,6 +158,12 @@ func (s *Service) viewLocked(e *entry) Installation {
 		return s.cliViewLocked(e)
 	}
 	if e.record.AgentID != "" {
+		if e.record.CLIApply != nil && e.record.CLIApply.Pending {
+			item.Status = "applying"
+			if item.LastErrorCode != "" {
+				item.Status = "error"
+			}
+		}
 		if !e.record.ResourceEnabled {
 			item.Status = "disabled"
 			item.Tools = []*mcp.Tool{}
@@ -308,6 +331,14 @@ func (s *Service) updateResource(ctx context.Context, id string, in UpdateReques
 		revision := s.detachLocked(e)
 		e.generation++
 		hydrateBinding(&e.record, next)
+		queueMCPSkills(&e.record)
+		if e.record.CLIApply != nil && e.record.CLIApply.Pending {
+			if err := s.persistLocked(bindingID, &e.record); err != nil {
+				s.mu.Unlock()
+				return Installation{}, err
+			}
+			s.scheduleConnectorWork()
+		}
 		e.record.LastError, e.record.LastErrorCode, e.record.LastErrorHTTPStatus = "", "", 0
 		e.record.Status = "needs_configuration"
 		if e.record.Disconnected {
@@ -334,6 +365,20 @@ func (s *Service) updateResource(ctx context.Context, id string, in UpdateReques
 }
 
 func (s *Service) deleteResource(ctx context.Context, id string) error {
+	s.mu.Lock()
+	var skillBindings []Installation
+	for _, e := range s.entries {
+		if e.record.ResourceID == id && len(e.record.Package.SkillFiles) > 0 {
+			skillBindings = append(skillBindings, e.record.Installation)
+		}
+	}
+	s.mu.Unlock()
+	for _, binding := range skillBindings {
+		if err := s.Delete(ctx, binding.AgentID, binding.InstallationID); err != nil {
+			return err
+		}
+	}
+
 	s.mu.Lock()
 	resource, err := s.findLocked("", id)
 	if err != nil {
@@ -379,6 +424,9 @@ func (s *Service) deleteResource(ctx context.Context, id string) error {
 		if err := s.removeInstallationData(c.id); err != nil {
 			failures = append(failures, err)
 		}
+	}
+	if err := s.removeInstallationData(id); err != nil {
+		failures = append(failures, err)
 	}
 	return errors.Join(failures...)
 
