@@ -616,8 +616,6 @@ export const messages = {
     feishuCLIUser: "个人身份",
     feishuCLIAvailable: "已授权",
     feishuCLIUnauthorized: "待授权",
-    feishuCLIRequestedScopes: "申请权限：仅申请免审权限，具体内容显示在飞书授权页面。",
-    feishuCLIGrantedScopes: "已获批权限",
     feishuCLIVersion: "官方 CLI 版本：{version}",
     feishuCLIRepairHint: "配置未完成，请重试或修复。受影响的 worker 会在配置验证通过后恢复运行。",
     feishuCLICheck: "检查状态",
@@ -3467,9 +3465,6 @@ export const messages = {
     feishuCLIUser: "Personal identity",
     feishuCLIAvailable: "Authorized",
     feishuCLIUnauthorized: "Authorization required",
-    feishuCLIRequestedScopes:
-      "Requested permissions: only permissions that do not require approval, shown on the Feishu authorization page.",
-    feishuCLIGrantedScopes: "Granted permissions",
     feishuCLIVersion: "Official CLI version: {version}",
     feishuCLIRepairHint: "Configuration is incomplete. Retry or repair; affected workers resume after verification.",
     feishuCLICheck: "Check status",
