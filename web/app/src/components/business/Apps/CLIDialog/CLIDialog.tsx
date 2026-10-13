@@ -201,17 +201,6 @@ export function CLIDialog({ definition, existing, t, onClose, onChanged }: Props
                     {info?.appName || info?.userName || resource?.auth_status?.appId || "—"} ·{" "}
                     {t(info?.available && info.verified === true ? "feishuCLIAvailable" : "feishuCLIUnauthorized")}
                   </p>
-                  {identity === "user" ? (
-                    <>
-                      <p className={styles.hint}>{t("feishuCLIRequestedScopes")}</p>
-                      {resource?.requested_scopes ? <p className="break-words">{resource.requested_scopes}</p> : null}
-                      {info?.scope ? (
-                        <p className="break-words">
-                          {t("feishuCLIGrantedScopes")}: {info.scope}
-                        </p>
-                      ) : null}
-                    </>
-                  ) : null}
                 </div>
               );
             })}
