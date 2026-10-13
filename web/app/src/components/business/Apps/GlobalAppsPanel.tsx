@@ -29,6 +29,7 @@ import {
 import { localizeAPIError } from "@/shared/i18n";
 import { errorMessage } from "@/api/client";
 import type { TranslateFn } from "@/models/conversations";
+import { CLIDialog } from "./CLIDialog";
 import { AppSettingsDialog } from "./AppSettingsDialog";
 import { AppIcon } from "./AgentAppsPanel";
 import { appName, appStatus, appDescription, appConnectionError } from "./appForm";
@@ -94,7 +95,11 @@ export function GlobalAppsPanel({
     };
   }, [reload]);
   const editing = items.find((item) => item.installation_id === (embedded ? localEditingID : resourceId)) || null;
-  const availableDefinitions = definitions.filter((definition) => definition.app_id !== "llm-wiki");
+  const availableDefinitions = definitions.filter(
+    (definition) =>
+      definition.app_id !== "llm-wiki" &&
+      !(definition.kind === "cli" && items.some((item) => item.kind === "cli" && item.app_id === definition.app_id)),
+  );
   const definition =
     adding ||
     (editing
@@ -157,10 +162,28 @@ export function GlobalAppsPanel({
           {t("loading")}
         </p>
       ) : null}
-      {loaded && !filteredItems.length ? (
+      {loaded && !filteredItems.length && !definitions.some((d) => d.kind === "cli") ? (
         <p className={styles.hint}>{t(query ? "workspaceSearchNoResults" : "appEmptyTitle")}</p>
       ) : null}
       <div className={styles.applicationGrid}>
+        {loaded &&
+        !items.some((item) => item.kind === "cli" && item.app_id === "feishu") &&
+        matches(appName("feishu", t), t("feishuCLIIntro")) ? (
+          <button
+            type="button"
+            className={styles.connectorCard}
+            onClick={() => setAdding(definitions.find((d) => d.app_id === "feishu") ?? null)}
+          >
+            <span className={styles.connectorIcon}>
+              <AppIcon appID="feishu" />
+            </span>
+            <span className={styles.connectorCopy}>
+              <strong>{appName("feishu", t)}</strong>
+              <span className={styles.connectorDescription}>{t("feishuCLIIntro")}</span>
+            </span>
+            <span className={styles.status}>{t("appStatusNeedsConfiguration")}</span>
+          </button>
+        ) : null}
         {filteredItems.map((app) => (
           <article key={app.installation_id} className={`${styles.connectorCard} ${styles.resourceConnectorCard}`}>
             <button
@@ -206,15 +229,21 @@ export function GlobalAppsPanel({
                 >
                   {t("appSettings")}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={busy}
-                  onSelect={() => void mutate(() => updateAppResource(app.installation_id, { enabled: !app.enabled }))}
-                >
-                  {t(app.enabled ? "appDisable" : "appEnable")}
-                </DropdownMenuItem>
-                <DropdownMenuItem danger disabled={busy} onSelect={() => setRemoving(app)}>
-                  {t("appRemove")}
-                </DropdownMenuItem>
+                {app.kind !== "cli" ? (
+                  <>
+                    <DropdownMenuItem
+                      disabled={busy}
+                      onSelect={() =>
+                        void mutate(() => updateAppResource(app.installation_id, { enabled: !app.enabled }))
+                      }
+                    >
+                      {t(app.enabled ? "appDisable" : "appEnable")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem danger disabled={busy} onSelect={() => setRemoving(app)}>
+                      {t("appRemove")}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenuRoot>
           </article>
@@ -252,7 +281,9 @@ export function GlobalAppsPanel({
           </DialogBody>
         </DialogContent>
       </DialogRoot>
-      {definition ? (
+      {definition && (editing?.kind === "cli" || (!editing && definition.kind === "cli")) ? (
+        <CLIDialog definition={definition} existing={editing} t={t} onClose={close} onChanged={reload} />
+      ) : definition ? (
         <AppSettingsDialog
           key={editing?.installation_id || definition.app_id}
           globalResource
@@ -301,7 +332,7 @@ export function GlobalAppsPanel({
           }
           onSave={async (payload) => {
             if (editing && !adding) await updateAppResource(editing.installation_id, payload);
-            else await createAppResource({ ...payload, app_id: definition.app_id, connect: false });
+            else await createAppResource({ ...payload, app_id: definition.app_id, connect: false, kind: "mcp" });
             await reload();
           }}
         />
