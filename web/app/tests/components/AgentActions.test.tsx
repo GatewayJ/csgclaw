@@ -761,11 +761,6 @@ describe("agent action visibility", () => {
       <AgentDetailPane
         item={{
           ...worker,
-          lark_cli: {
-            available: true,
-            bound: true,
-            state: "bound",
-          },
           participants: [
             {
               agent_id: worker.id,

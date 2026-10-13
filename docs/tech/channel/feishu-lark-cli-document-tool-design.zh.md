@@ -32,28 +32,21 @@
 
 本次包含安装、授权、绑定、Skills、状态恢复、断开、Agent 删除清理和迁移。其他服务的 CLI 适配、连接器市场、BoxLite 执行环境适配以及全部 MCP 服务的替换，属于独立需求。
 
-## 2. 现有机制与复用位置
+## 2. 模块职责
 
-下列路径均相对于上述 CSGClaw commit。
+| 模块 | 职责 |
+|-|-|
+| `internal/apps` | 加载 MCP / CLI 包，管理全局资源、worker binding、授权操作、Skills 来源和迁移记录 |
+| `internal/connectorcli` | 校验声明式 CLI 配置，安装程序及 Skills，执行命令和设备码授权，管理子进程 |
+| `internal/larkcli` | 导入已有飞书 CLI 配置，读取并验证迁移后的应用身份 |
+| `internal/api/connector_cli.go` | 提供 CLI 管理接口，将资源操作接入 Agent Engine 和 RuntimeExtension |
+| `internal/agentengine/agents` | 在 Agent 生命周期保护下停止进程、更新配置及 Skills，并按运行意图恢复 worker |
+| `internal/runtimeextension/connectorcli` | 将 CLI 路径、环境变量和指令保存为 RuntimeExtension projection |
+| `internal/runtimeextension/larkcli` | 保存及恢复历史飞书配置，提供历史附件恢复指令 |
+| `internal/runtime/codex`、`internal/runtime/dsh` | 加载 projection，管理运行进程及相关子进程 |
+| `web/app/src/components/business/Apps` | 展示全局配置、授权会话、worker 开关及配置状态 |
 
-| 现有位置 | 已确认行为 | 本次处理 |
-|-|-|-|
-| `internal/apps/types.go`、`resources.go` | 全局资源保存配置和凭证，Agent binding 保存 `ResourceID`、启用状态和连接意图 | 保留资源与绑定模型，增加接入形态、CLI 状态和飞书全局唯一限制 |
-| `internal/apps/catalog.go`、`connector.go` | 连接器定义、配置校验和连接流程以 MCP 为中心；飞书需要应用凭证和 MCP 配置 | 按 `kind` 分发配置校验、连接、状态检查和释放逻辑 |
-| `internal/api/connectors.go:347` | `handleConnectorOAuthStart` 返回不支持 OAuth | 接入资源级授权会话，并将 Agent 入口转向资源授权 |
-| `internal/api/feishu_registration.go` | 已有注册申请、轮询、凭证接收；完成后写入 Participant，并自动初始化 lark-cli | 保留渠道注册流程，移除其中的 lark-cli 调用；连接器通过官方 CLI 完成应用设置 |
-| `internal/channel/feishu/larkcli/source.go` | `Source.Resolve` 从当前 Agent 的 Participant 解析应用，检查归属 | 新增连接器 Source，通过 Agent binding 解析 CLI 账号引用；旧 Source 用于迁移识别及失败记录的兼容恢复 |
-| `internal/runtimeextension/larkcli/driver.go` | 检测二进制、生成私有配置、执行 `config bind`、观察配置版本；默认 `bot-only` | 复用 Driver 生命周期，引用 CLI 管理的账号配置，增加安装路径、全局配置目录引用和授权后状态更新 |
-| `internal/agentengine/runtime_extension_manager.go`、`runtime_adapter.go`、`internal/runtime/extensionstate` | 已有配置准备、启用和 runtime 更新；Source 变更失败会清理旧配置，启用后的 Cleanup 会删除旧版本目录 | 连接器更新通过 Engine 内部入口组织停止、配置更新与启动，复用 Driver 和 projection；历史迁移保留恢复材料，延迟清理至运行验证完成 |
-| `internal/skill/local/upload.go` | `InstallArchiveWithOptions` 校验并安装技能目录 | 安装官方 Skills 到全局资源 |
-| `internal/agentengine/agents/skills.go`、`workspace_skills_transaction.go` | 已有目录校验、复制和生命周期保护；ReplaceSkills 从全局来源重建整个集合 | 复用校验与生命周期保护，仅更新连接器拥有的目录，保存其他目录原有内容 |
-| `internal/runtime/codex/extensions.go`、`internal/runtime/dsh/extensions.go` | Codex、DSH 已实现 ExtensionDriver 和指令加载 | 继续使用对应 Runtime Adapter |
-| `web/app/src/components/business/Apps` | 已有全局连接器页面、Agent 绑定页面和配置表单 | 全局页面配置唯一飞书机器人；worker profile 提供独立开启开关 |
-
-两个现有事实需要保留在设计中：
-
-- `internal/connectors` 主要承担 GitHub / GitLab 账号认证；页面中的应用连接器资源归 `internal/apps` 管理。本次资源模型继续位于 `internal/apps`。
-- CSGClaw 的 exec secret provider 在 `config bind` 时提供 App Secret。官方 CLI 随后将其保存到自身 keychain；后续命令可能使用缓存凭证。因此，撤销 provider token 不能单独代表 CLI 调用已停用。[官方 binder 源码](https://github.com/larksuite/cli/blob/9067ec079bfa0b1ae2266cd91d1c1ee4a1ce824d/cmd/config/binder.go)
+`internal/connectors` 负责 GitHub / GitLab 账号认证。应用连接器的全局资源与 worker 绑定由 `internal/apps` 管理。消息渠道的注册、Participant 和 IM 生命周期由渠道模块管理。
 
 ## 3. 业内实现依据与设计选择
 
@@ -68,42 +61,29 @@ CSGClaw 负责资源、安装、绑定与状态；lark-cli 负责应用设置、
 
 ## 4. 资源模型与模块职责
 
-### 4.1 对现有模型的扩展
+### 4.1 资源与操作记录
 
-以下字段为设计新增，具体 Go 类型遵循当前 `internal/apps` 风格。
-
-| 对象 | 新增内容 | 保存原则 |
+| 对象 | 字段 | 保存方式 |
 |-|-|-|
-| `Definition` | `kind` | 目录 API 描述接入类型、展示信息和授权方式；CLI 版本由安装器提供 |
-| 全局 `Installation` | `kind`、`package_version`、`skill_version`、`auth_account_ref`、`cli_config_dir`、`revision`、`auth_status` | 继续使用全局资源记录；列表仅返回脱敏身份和状态 |
-| Agent binding | `applied_revision`、`skills` | 继续引用 `ResourceID`；复用 `Installation.LastErrorCode` 及现有错误处理；不复制长期凭证 |
-| `AuthSession` | `session_id`、`resource_id`、`stage`、`status`、`expires_at`、`resource_revision` | 敏感轮询信息仅保存于后端私有目录 |
-| `binding.skills[]` | `skill_name`、`bundle_version`、`content_digest`、`managed` | 随 binding 保存于 `app_installations`，通过其 `ResourceID` 关联来源 |
+| `Definition` | `kind`、版本、授权方式、配置 schema | 从连接器包生成目录信息 |
+| 全局 `Installation` | `kind`、`revision`、`package_version`、`skill_version`、`auth_status`、`requested_scopes`、`checked_at` | 保存于 `app_installations`；状态响应仅包含允许展示的身份字段 |
+| worker binding | `resource_id`、`enabled`、`applied_revision`、`skills` | 引用全局资源并记录配置应用结果 |
+| `CLIOperation` | `operation_id`、`session_id`、`resource_id`、`resource_revision`、`action`、`stage`、`status`、`authorization_url`、`expires_at` | 供界面轮询；设备码、进程身份和恢复记录保存在后端私有状态中 |
+| `skills[]` | `skill_name`、`bundle_version`、`content_digest`、`managed` | 记录技能来源及内容摘要 |
 
-旧记录缺少 `kind` 时按 `mcp` 读取；新建飞书资源明确写入 `cli`。`Config.Transport` 继续描述 MCP 的 HTTP / stdio，CLI 使用独立配置结构。CLI 的配置校验不要求 MCP URL、工具发现或 MCP session。
+全局记录的 `cli_state` 保存配置目录、程序路径、Skills 路径及操作记录；binding 的 `cli_apply` 保存待处理状态、Skills 更新计划及恢复运行意图。旧 MCP 记录缺少 `kind` 时按 `mcp` 读取。
 
-内置包继续使用 `plugin.json` 和 `apps.json`。`plugin.json` 保存名称、说明、图标等展示信息，`apps.json` 引用内置服务。飞书目录由这些展示信息与 CLI 类型、Device Flow 授权方式组合生成。飞书 CLI 版本、Skills commit、平台下载地址及 SHA-256 由 `internal/larkcli` 安装器统一管理，飞书 `plugin.json` 不保存 CLI 版本。
+每个实例为每种 CLI 包保存一个全局资源。飞书对应一个机器人及其个人授权，各个 worker 通过独立 binding 引用该资源。首次开启创建 binding，后续开关复用该记录；新 worker 默认关闭。
 
-安装器根据主机平台下载并校验官方二进制与 Skills，保存到 `package/<version>/bin` 和 `package/<version>/skills`，并生成 `package.json`，记录 `version`、`skills_commit`、`executable_sha256`、`skills_sha256`。`Installation` 保存已安装版本和授权状态；worker binding 引用全局资源，安装对应 Skills 并配置 CLI 路径及共享配置目录。当前支持 Codex、DSH host runtime。
+### 4.2 连接器包与运行配置
 
-`Manifest.Skills` 保留为原始 JSON 元信息；飞书 Skills 由专用安装器处理。当前连接器目录仅加载程序内置包，自定义 CLI 包格式和上传安装入口尚未提供。
+`plugin.json` 声明名称、版本、展示信息、`kind`，以及 `mcp` 或 `cli` 配置引用。MCP 包通过 `mcp.json` 的 `mcpServers` 定义一个服务；CLI 包通过 `cli.json` 定义安装、授权、状态检查、退出、清理及运行环境。`Manifest.Skills` 是可选的包内目录路径。
 
-历史 MCP 记录继续按现有规则加载，保留显式 `kind=mcp` 创建、配置校验、凭证处理、连接和迁移路径。
+内置包与 `Options.Packages` 提供的目录使用同一个加载器。MCP 与 CLI 共用资源、绑定和 Skills 管理。历史 `plugin.json + apps.json` 服务引用及显式 `kind=mcp` 创建继续受支持。当前界面没有包上传入口。
 
-每个 CSGClaw 实例只有一个全局飞书连接器，配置一个飞书机器人，对应一个 App ID。全局页面固定展示飞书连接器入口，首次配置时创建唯一资源记录，未配置时显示待配置状态。`internal/apps` 在资源写入的同一临界区检查飞书资源唯一性；重复或并发初始化复用该记录及授权会话。已断开的资源仍保留该唯一记录。
+飞书的程序版本、平台下载地址、SHA256、Skills 来源和授权命令均由 `internal/apps/builtin/feishu/cli.json` 声明。`internal/connectorcli` 执行这些声明，`internal/larkcli` 处理历史飞书配置导入。
 
-每个 worker 在 profile 的连接器页面独立开启或关闭飞书连接器。继续复用现有 Agent binding 保存 `ResourceID`、`Enabled` 和连接意图，每个 worker 最多一条飞书 binding，全部引用同一个全局资源。首次开启创建 binding，后续开关复用该记录；新 worker 默认关闭。全局连接已配置且该 worker 开启时，按第 6.3 节生成运行环境。机器人及个人授权设置在全局连接器页面统一管理。
-
-### 4.2 模块分工
-
-- **`internal/apps`**：资源、绑定、接入类型分发、授权会话、资源 revision、恢复和迁移记录。现有 MCP 逻辑与 CLI 逻辑共用资源入口。
-- **CLI 授权适配器**：运行官方配置、登录、状态和退出命令，解析授权地址与结果，将进程状态转换为连接器会话状态。渠道注册代码继续归渠道模块管理。
-- **连接器 Source**：注册 `Source.Provider=connector-feishu`，根据 Agent ID 及第 9.2 节的操作阶段解析 binding，生成临时运行参数。Source 不执行下载和浏览器授权。
-- **`internal/runtimeextension/larkcli`**：生成运行环境、提供官方 CLI 路径、观察配置加载状态；复用 Extension 生命周期。
-- **`internal/skill` 与 Agent Skills Controller**：安装全局技能包，并按来源记录更新 Agent 中由连接器管理的技能目录。
-- **API / Web UI**：创建会话、展示状态和用户操作，不保存 App Secret、user token 或 refresh token。
-
-连接器服务通过已有装配入口调用 Agent Engine；Runtime Driver 不回调渠道配置。网络授权期间不持有 Agent 生命周期锁；准备就绪后，检查 resource revision 并执行配置更新。
+连接器 Source 使用 `Provider=connector-cli`、`Ref=<resource-id>`，根据 Agent binding 生成 CLI 路径、环境变量与指令。`internal/runtimeextension/connectorcli` 保存 projection，Codex 和 DSH 在启动时加载。字段说明及包示例参见 [Connector packages](../apps.md#connector-packages)。
 
 ## 5. 连接流程与授权管理
 
@@ -180,7 +160,7 @@ CSGClaw 使用内置指定权限清单，以用户与租户均无需管理员审
 
 授权会话状态为 `installing → app_authorization → user_authorization → applying → completed`，已有步骤满足时直接跳过；终止状态包括 `cancelled`、`expired`、`denied`、`failed`。
 
-同一资源同时只有一个有效授权会话。重复点击返回原会话；每次结果提交检查 `session_id + resource_revision`。取消授权、断开连接或替换账号时，持久化取消意图并使旧会话失效，按第 6.3 节停止受影响 runtime，终止关联管理 CLI 子进程及其子进程组并等待退出，然后重新读取配置和账号状态。CLI 可能在收到取消信号前已经写入配置或凭证，必须核对并恢复一致状态后，才能启动下一次管理操作或恢复 worker 调用。无法确认进程退出或恢复失败时保持 runtime 停止或使用未配置环境，显示具体原因并允许重试。
+同一资源同时只有一个有效授权会话。新操作检查 `operation_id` 和 `resource_revision`，重复请求返回已有进度，取消请求通过 `session_id` 定位对应会话。取消授权或断开连接时，持久化取消意图，终止关联管理 CLI 子进程及其子进程组并等待退出，然后重新读取配置和账号状态。CLI 可能在收到取消信号前已经写入配置或凭证，必须核对当前状态后才能执行后续管理操作或恢复 worker 调用。无法确认进程退出或恢复失败时保留错误及启动限制，允许通过修复操作继续处理。
 
 后端重启后，恢复任务检查操作记录、CLI 已保存配置及残留进程；残留进程身份使用进程启动标识与操作 ID 核对，不能只使用 PID。确认旧进程结束后继续校验与恢复。已经完成且校验通过的阶段直接继续，个人授权可用未过期的 `device_code` 恢复等待；应用初始化进程中断且未保存有效配置时，重新开始该步骤。网络授权等待期间不持有 Agent 生命周期锁；对稳定配置目录具有写入能力的 CLI 进程由全局管理操作独占，直到进程退出且配置检查完成。
 
@@ -209,21 +189,19 @@ CSGClaw 使用内置指定权限清单，以用户与租户均无需管理员审
 
 ### 6.1 安装与版本
 
-CSGClaw 直接从 `larksuite/cli` 官方 GitHub Release 下载与 OS / architecture 对应的预编译二进制包，当前固定版本为 `1.0.97`。下载后核对内置 SHA256，解压到临时目录，下载并校验固定 commit 的官方 Skills，验证文件摘要与 CLI 版本后启用。下载、安装与运行均无需 Node.js、npm 或本地编译工具。
+`internal/connectorcli.Installer` 按 `cli.json` 的平台清单下载原生二进制，核对 SHA256 并运行版本检查命令。飞书内置版本为 `1.0.97`，官方 Skills 使用指定 commit 的归档和校验值。安装流程使用临时目录完成校验后启用目标版本。
 
-CLI、Skills 来源 commit、校验值和最低兼容版本共同进入 CSGClaw 内置包清单。运行时不解析 `latest`。安装目录与授权数据目录分开；同一版本只下载一次，使用临时目录校验后原子启用。保留上一可用版本，升级失败继续使用它。
+安装位置为状态文件同级的 `apps/<resource_id>/package/<version>/bin/lark-cli`；Windows 程序名为 `lark-cli.exe`。Skills 位于同一版本目录的 `skills/`。`package.json` 记录版本、Skills 版本和文件摘要；复用已安装内容前检查这些记录。
 
-lark-cli 与 DSH 均由 CSGClaw 提供自动安装、进度展示和版本检查，分别使用 `internal/larkcli` 与 `internal/dshcli` 安装代码。lark-cli 直接下载原生二进制；DSH 通过 npm 安装 `@deepseek-ai/dsh`，需要 Node.js 和 npm，CSGClaw 会复用符合版本要求的环境，缺少时自动安装 Node.js 24。lark-cli 安装流程不修改用户 shell 配置。
-
-lark-cli 默认安装位置为 `~/.csgclaw/apps/{resource_id}/package/{version}/bin/lark-cli`，Windows 可执行文件名为 `lark-cli.exe`，配套 Skills 位于同一版本目录的 `skills/`。二进制放在 Agent 实际执行命令的主机；授权配置单独保存于实例持久化目录。DSH 默认安装目录为 `~/.local/share/deepseek-harness`，启动入口位于 `~/.local/bin`。
+CLI 包可以声明远程 Skills 归档，也可以在 `plugin.json` 中声明包内 Skills 目录。安装与授权配置使用独立目录。
 
 ### 6.2 RuntimeExtension 配置
 
-保留每个 Agent 的 `feishu-lark-cli` Extension 名称和 `lark-cli` Kind，将 Source 改为 `connector-feishu`，`Ref` 为 Agent ID。正常运行时，Source 解析该 Agent 唯一已提交的飞书 CLI binding；历史迁移切换期间，依据第 9.2 节持久化操作记录中的阶段解析候选或原配置。runtime 启动及重启恢复使用同一解析规则。
+飞书的 Extension 名称为 `feishu-lark-cli`，`Kind` 和 `Source.Provider` 均为 `connector-cli`，`Source.Ref` 为全局 `ResourceID`，失败策略为 `block_runtime`。其他 CLI 包通过 `CLIExtensionName` 生成各自的 Extension 名称。
 
-Driver 生成连接器 ID、revision、官方 CLI 路径和 `LARKSUITE_CLI_CONFIG_DIR`，由 Runtime Adapter 在启动进程时注入。worker 开关、全局配置同步、连接器 Skills 更新和历史迁移统一通过第 6.3 节的 Engine 内部配置更新入口执行；迁移的配置恢复与清理规则见第 9.2 节。配置归属见第 7.1 节，身份规则见第 5.3 节。
+Source 根据 worker binding 和全局授权状态返回 `Executable`、`Environment`、`VersionArgs` 与可选指令。飞书环境声明包含 `LARKSUITE_CLI_CONFIG_DIR`，执行程序所在目录加入 worker 的 PATH。Driver 验证程序后保存 projection，Runtime Adapter 加载环境和技能目录。
 
-worker 开关及连接器 Skills 更新复用 Agent 生命周期保护，状态保存于现有资源和 binding。运行中的 Codex、DSH 按第 6.3 节重启，直到新进程加载完成才报告生效；停止的 worker 保持停止，下次启动使用当前配置。revision 用于配置同步及加载验证。
+历史迁移恢复使用 `feishu-participant` Source 和保存的旧 projection。完成配置迁移后，worker 使用其全局资源对应的 `connector-cli` Source。
 
 ### 6.3 worker 开关与 runtime 重启
 
@@ -239,9 +217,9 @@ Codex、DSH 的 Stop 在现有 runtime 进程管理代码中完成主进程、�
 
 应用配置、个人授权和断开操作由全局连接器页面管理；worker 的正常任务按 Skills 使用官方业务命令。CLI 子进程继承当前 runtime 环境、工作目录及标准输入输出。
 
-资源及 binding 是开关状态的持久化来源。服务启动先恢复未完成的管理操作，再由 Runtime Adapter 生成环境。global revision 与 binding.applied_revision 在配置应用和启动验证时核对；失败状态及恢复进度继续保存在现有管理记录中。
+资源及 binding 是开关状态的持久化来源。服务开始接受请求后，完成历史迁移恢复并等待 connector 后台配置处理结束，随后调用 `OnReady` 启动需要自动运行的 worker。等待期间服务取消启动时跳过该回调。配置失败的 worker 继续受 `CheckCLIReady` 检查限制，错误及恢复进度保存在管理记录中。
 
-全局断开或修改共享配置时，`internal/apps` 按资源管理流程串行处理，并通过同一 Engine 配置更新入口停止全部受影响 runtime；确认主进程和相关 CLI 子进程结束后更新共享配置，再分别更新环境与 Skills，并按原运行意图启动。授权等待期间释放 Agent 生命周期锁，管理操作记录保留启动限制；自动恢复、手动启动和任务触发的启动均检查该记录，操作未完成时保持等待。处理完成后使用最新全局状态生成环境。
+全局断开或修改共享配置时，`internal/apps` 按资源管理流程串行处理，并通过同一 Engine 配置更新入口停止全部受影响 runtime；确认主进程和相关 CLI 子进程结束后更新共享配置，再分别更新环境与 Skills，并按原运行意图启动。授权等待期间释放 Agent 生命周期锁，管理操作记录保留启动限制；服务自动启动等待恢复处理结束；手动启动和任务触发的启动通过配置检查拒绝尚未完成的操作。处理完成后使用最新全局状态生成环境。
 
 上述设置管理 CSGClaw 提供的连接器使用方式。host runtime 仍遵循同一操作系统账号的访问权限；拥有相应主机权限的任务可以显式指定其他 CLI 路径或配置。严格隔离需要操作系统权限或隔离环境支持。
 
@@ -266,13 +244,13 @@ Codex、DSH 的 Stop 在现有 runtime 进程管理代码中完成主进程、�
 
 官方 UAT 使用 `app_id + user_open_id` 作为存储键；`LARKSUITE_CLI_CONFIG_DIR` 只隔离配置。不同平台的凭证存储方式也有差异，不能依据配置目录不同就判定凭证完全独立。[Token 存储实现](https://github.com/larksuite/cli/blob/9067ec079bfa0b1ae2266cd91d1c1ee4a1ce824d/internal/auth/token_store.go)、[Windows 凭证实现](https://github.com/larksuite/cli/blob/9067ec079bfa0b1ae2266cd91d1c1ee4a1ce824d/internal/keychain/keychain_windows.go)
 
-全局连接器记录继续保存在 `app_installations`，其 CLI 配置目录使用现有状态文件同级的 `apps/<resource_id>/lark-cli/`。全局资源保存目录引用、应用与账号标识及身份状态。官方 CLI 负责该目录中的配置文件以及原生凭证存储中的 App Secret、token 和 DPoP 密钥；凭证并非全部位于配置目录内。
+全局连接器记录继续保存在 `app_installations`，其 CLI 配置目录使用现有状态文件同级的 `apps/<resource_id>/config/`。全局资源保存目录引用、应用与账号标识及身份状态。官方 CLI 负责该目录中的配置文件以及原生凭证存储中的 App Secret、token 和 DPoP 密钥；凭证并非全部位于配置目录内。
 
 全局连接器保存一个机器人的配置和对应个人授权。初始化、授权、状态检查及全部 worker 调用通过 `LARKSUITE_CLI_CONFIG_DIR` 使用同一稳定目录，共用官方刷新锁。Agent 目录仅保存配置引用、运行环境和 Skills 副本。[官方刷新锁实现](https://github.com/larksuite/cli/blob/9067ec079bfa0b1ae2266cd91d1c1ee4a1ce824d/internal/auth/token_lock.go)
 
 配置目录路径保持稳定，更新文件采用原子替换。登录、退出、断开和重新配置复用资源级串行管理，修改共享配置前按第 6.3 节停止受影响的 runtime 及相关 CLI 子进程。授权等待期间不持有 Agent 生命周期锁，后端保留管理操作状态；配置完成后按原运行意图恢复 runtime。日常 token 刷新由官方 CLI 的同目录刷新锁协调。
 
-全局机器人或个人账号更新前保存可恢复配置，验证成功后增加 revision，并更新已开启 worker 的环境和 Skills，再启动原来运行中的 runtime。启动失败的 worker 保持停止并提供修复入口，其他已验证的 worker 正常运行。配置验证失败时恢复原配置，核对身份及 revision 后按原运行意图启动；原配置无效时使用第 6.3 节的未配置环境。迁移与管理操作仅在修改共享配置期间互斥，等待配置、授权修复或首次启动时允许更新；后续同步读取最新 revision，提交前发生变化则重新准备。
+全局配置或个人授权变更后，后端重新读取 CLI 状态，更新 revision，并同步已开启 worker 的环境和 Skills。操作失败或取消时，等待关联进程结束，读取 CLI 当前保存的身份与授权状态，再应用相应的 worker 配置。恢复失败时保留操作错误及启动限制，用户通过修复入口继续处理。
 
 ### 7.2 管理操作
 
@@ -285,37 +263,31 @@ Codex、DSH 的 Stop 在现有 runtime 进程管理代码中完成主进程、�
 | 修改应用或个人账号 | 全局配置验证成功后增加 revision，更新所有已开启 worker 的运行配置；旧任务不得写回 |
 | 修改或删除飞书渠道 | 仅影响渠道；连接器已经保存的应用配置保持独立 |
 
-worker 关闭仅改变自身 binding 和运行环境；全局断开影响全部使用该连接器的 worker。已经被飞书接受的业务请求可能完成，任务记录保留实际结果。断开保留官方账号授权；退出个人授权由明确的 `auth logout` 操作处理。
+worker 关闭仅改变自身 binding 和运行环境；全局断开影响全部使用该连接器的 worker。已经被飞书接受的业务请求可能完成，任务记录保留实际结果。全局断开执行包中声明的退出授权及配置清理命令；退出个人授权执行 `un_auth`，保留应用配置。
 
-**全局断开飞书连接：**页面展示受影响 worker，后端持久化断开意图，使旧授权会话失效并结束相关管理进程；停止受影响的 Codex、DSH 及 CLI 子进程，确认结束后清理当前应用和账号的生效配置、完成标记与状态缓存，更新所有相关 worker 为未配置环境，并按第 6.4 节清理受管理 Skills。唯一资源记录、目录路径和 worker 开关意图保留；原来运行中的 worker 以未配置环境重新启动，原来停止的 worker 保持停止。官方凭证存储中的授权保留，重新配置时按目标身份验证。
+**全局断开飞书连接：**页面展示受影响 worker，后端持久化断开意图，使旧授权会话失效并结束相关管理进程；停止受影响的 Codex、DSH 及 CLI 子进程，确认结束后清理当前应用和账号的生效配置、完成标记与状态缓存，更新所有相关 worker 为未配置环境，并按第 6.4 节清理受管理 Skills。唯一资源记录、目录路径和 worker 开关意图保留；原来运行中的 worker 以未配置环境重新启动，原来停止的 worker 保持停止。飞书通过 `auth logout` 和 `config remove` 清理当前账号授权及应用配置。配置不存在时，将官方 `not_configured` 结果视为清理完成；其他错误仍需处理。
 
-断开进度复用现有资源管理记录。配置缺失、损坏或部分已清理时继续剩余步骤；停止失败显示处理中或失败，不能报告已断开；清理失败显示 `cleanup_pending`。旧进程结束后，尚未完成环境更新的 worker 保持停止。完成后显示待配置并提供重新配置入口；重新配置可继续剩余清理，成功后按 worker 开关及原运行意图恢复运行。
+断开进度复用现有资源管理记录。配置缺失或部分已清理时继续剩余步骤；停止或清理失败时保存操作错误及恢复状态。旧进程结束后，尚未完成环境更新的 worker 保持停止。完成后显示待配置并提供重新配置入口，成功后按 worker 开关及原运行意图恢复运行。
 
 授权文件与配置目录使用私有权限；前端响应、SSE、错误消息、日志和 Skills 均不得包含长期凭证。浏览器地址限定为官方允许的 HTTPS 域名。新增管理接口沿用当前应用管理访问规则，并校验 Origin。
 
 ## 8. API 与页面状态
 
-保留当前 `/api/v1/connectors/resources` 和 `/api/v1/agents/{id}/connectors` 资源、绑定接口。飞书资源创建在服务层保证全局唯一；worker 开启时由后端解析唯一资源并创建或启用 binding，关闭时复用现有 binding 启停操作。全局页面提供机器人配置，worker profile 的连接器页面提供飞书开关和生效状态。新增接口如下，名称为设计建议：
+以下路径位于 `/api/v1` 下。
 
-| 接口 | 作用与关键约束 |
+| API | 行为 |
 |-|-|
-| `POST /connectors/resources/{id}/auth-sessions` | 启动或恢复连接；请求包含阶段、operation_id、目标 resource_revision 及后端允许的配置目标字段，不接收前端拼装的执行命令；按第 5.5 节处理重复请求 |
-| `GET /connectors/resources/{id}/auth-sessions/{session_id}` | 返回阶段、状态、授权地址、有效期和脱敏错误 |
-| `DELETE /connectors/resources/{id}/auth-sessions/{session_id}` | 记录取消意图并阻止迟到结果提交；等待关联 CLI 进程结束并检查配置，完成前返回处理中 |
-| `POST /connectors/resources/{id}/auth/logout` | 退出个人授权；响应包含受影响 worker 与最新身份状态 |
-| `POST /connectors/resources/{id}/repair` | 按 operation_id 幂等重试安装、技能同步、清理和配置恢复；返回恢复阶段及待处理原因 |
+| `POST /connectors/resources` | 创建或复用 CLI 全局资源 |
+| `POST /connectors/resources/{resource_id}/cli/{action}` | 开始 `connect`、`login`、`logout`、`disconnect`、`repair` 或 `check` 操作 |
+| `GET /connectors/resources/{resource_id}/cli/sessions/{session_id}` | 读取操作进度 |
+| `DELETE /connectors/resources/{resource_id}/cli/sessions/{session_id}` | 取消指定会话 |
+| Agent connector binding 接口 | 创建绑定、修改开启状态或解除绑定 |
 
-上述路径均位于 `/api/v1` 下。现有 Agent OAuth start 接口解析唯一全局资源后进入同一授权会话逻辑；worker 页面通过全局设置入口进行授权。
+管理操作携带 `operation_id` 与 `resource_revision`。后端检查重复请求、目标版本和现有操作状态，返回 `CLIOperation`。取消操作仅终止对应资源和会话的进程；另一资源的授权继续执行。断开操作可等待当前授权取消及配置检查结束后执行。
 
-CLI 连接器返回 `package_status`、`auth_status.bot`、`auth_status.user`、`skills_status`、`runtime_status`；现有 `Status` 用于展示综合状态。`Tools` 对 CLI 返回空集合，页面显示官方 Skills 和能力说明，不用工具数量判断是否连接成功。
+全局资源响应包含 `authorized`、`auth_status`、`operation`、`checked_at` 和版本信息。飞书的身份信息位于 `auth_status.identities.bot` 与 `auth_status.identities.user`，仅返回包中 `status_fields` 允许的字段。binding 展示 `applied_revision`、`skills` 与 `runtime_status`。CLI 的 `Tools` 为空集合。
 
-区分三种完成结果：全局资源已授权、Agent 配置已生成、运行进程已加载。全局连接器首次配置的个人授权尚未完成时显示“机器人可用，个人账号待授权”；正常首次配置流程在个人授权完成后才进入完成状态。历史机器人配置迁移后显示“机器人可用”，个人身份显示“未配置”，不作为待完成授权任务提示用户。
-
-页面状态由后端配置检查结果生成；缓存状态携带 revision 和检查时间，过期或与当前 revision 不符时显示待检查。普通页面加载读取缓存；用户主动点击“刷新状态”调用 `POST /connectors/resources/{id}/status-check`，合并同一 revision 的进行中检查并限制重复请求频率，重新读取配置、账号和阶段结果，按需验证凭证。检查结果提交前核对 revision，旧结果不得覆盖新配置。配置错误时更新为待修复，保留重新配置及断开连接入口；网络检查失败单独展示检查失败原因。
-
-`POST /connectors/resources/{id}/disconnect` 执行第 7.2 节的全局断开连接，接收 operation_id 和 resource_revision，返回操作阶段、受影响 worker 和最新状态。重新配置由 auth-sessions 入口进入第 5.5 节流程，必要时继续未完成清理。repair、disconnect 和 auth-sessions 共用资源级管理操作记录及串行控制；同一操作可重复提交，其他目标在已有管理操作结束后执行。处理中返回现有操作及可轮询入口，revision 冲突返回最新状态供页面刷新。
-
-修改文件主要为 `api/apps.ts`、`GlobalAppsPanel`、`AppSettingsDialog`、`AgentAppsPanel` 以及 Agent profile 的渠道页面。全局连接器页面负责 lark-cli 安装、应用设置、个人授权、状态检查和修复；worker profile 的连接器页面负责开启、关闭及展示该 worker 的生效状态。渠道页面移除 lark-cli 安装、初始化、清理与状态展示；后端同步移除渠道注册、更新、删除流程中的 CLI 调用。旧的 Agent lark-cli 管理接口停止从 Participant 创建配置，兼容入口返回连接器管理地址。界面继续遵循现有前端目录、国际化和部署子路径规则。
+`GlobalAppsPanel` 与 `CLIDialog` 展示应用设置、授权链接和二维码、个人授权、状态检查及修复操作；`AgentAppsPanel` 管理 worker 开关。页面轮询资源与会话状态，关闭窗口后有效会话继续由后端执行。渠道页面管理 IM 连接。旧 Agent CLI 管理地址返回 HTTP 410 及全局连接器管理地址。
 
 ## 9. 自动迁移与故障恢复
 
@@ -341,14 +313,14 @@ Source 在准备阶段读取历史配置；进入切换前，持久化目标全�
 
 原来仅配置飞书渠道的 worker 在全局配置准备完成后创建 Extension；准备阶段保持连接器待配置，失败时保留开启意图并显示待修复状态。其渠道 IM 持续使用原配置。
 
-1. 保存一次性的全局选择结果及迁移目标清单。每个 worker 使用由 Agent ID 和 Extension 名称确定的稳定 `migration_key`，记录原运行状态、Source、执行路径、身份设置和技能目录恢复信息。
+1. 保存一次性的全局选择结果及迁移目标清单。迁移记录以 Agent ID 索引 worker，记录原运行状态、Extension、projection、执行阶段和 Skills 更新计划。
 2. 创建或复用唯一全局资源，准备所选 CLI 配置和官方 Skills；准备各个目标 worker 的配置引用和技能副本。候选 binding 引用同一个 ResourceID，待配置生效后提交开启状态。保留官方授权存储中的现有有效凭证。
 3. 检查所选配置的 App ID、账号、身份设置、CLI 和 Skills，验证凭证可访问性；授权过期如实展示。迁移准备失败时保留原配置及错误状态，重试仍使用已记录的选择结果。
 4. 在各个 Agent 生命周期保护下停止旧 runtime 及相关子进程，更新环境和连接器 Skills；确认同一凭证涉及的旧 runtime 和 CLI 子进程全部结束、目录切换完成后，按原运行意图启动 Codex、DSH，验证实际加载的全局资源及 revision 后提交 binding 和 applied_revision。提交 binding 前切换或加载失败时，按操作记录恢复该 worker 原运行配置和本次修改的技能，保留重试入口。
-5. 原来停止的 worker 保持停止，完成配置检查后提交开启的 binding，并记录 `runtime_verification=pending`。下次启动时读取全局配置最新 revision 并验证；失败时保留已提交的全局引用，保持 runtime 停止并重试当前配置。
+5. 原来停止的 worker 保持停止，完成配置检查后提交开启的 binding，并记录 `verification_pending=true`。下次启动时读取全局配置最新 revision 并验证；失败时保留已提交的全局引用，保持 runtime 停止并重试当前配置。
 6. 同一凭证涉及的旧 runtime 和 CLI 子进程全部结束、运行配置完成目录切换后，才允许相关 runtime 使用全局配置启动。中断恢复继续检查此条件。全部对应配置通过检查后清理恢复材料；待首次运行验证的记录继续保留材料。清理只处理 CLI 迁移文件及本次管理的 Skills，保留渠道 IM 配置、全局凭证及其他仍在使用的文件。
 
-迁移记录逐步保存资源写入、worker 配置、技能更新和恢复进度。`runtime_adapter.go` 以 binding 提交为界：提交前失败按操作记录恢复旧 projection，提交后失败保留全局引用并重试最新配置。兼容 Source 仅服务尚未提交 binding 的历史记录，读取保存的配置与凭证引用；恢复进度在重启后继续执行。连接器配置更新统一遵循第 6.3 节的停止及启动顺序；普通 Extension 的 Source 失效处理与 generation 清理规则保持原有职责，迁移恢复材料按本节管理。
+迁移记录逐步保存资源写入、worker 配置、技能更新和恢复进度。`internal/apps/cli_migration.go` 根据 worker 的提交状态恢复：提交前失败按操作记录恢复旧 projection，提交后失败保留全局引用并重试最新配置。兼容 Source 仅服务尚未提交 binding 的历史记录，读取保存的配置与凭证引用；恢复进度在重启后继续执行。连接器配置更新统一遵循第 6.3 节的停止及启动顺序；普通 Extension 的 Source 失效处理与 generation 清理规则保持原有职责，迁移恢复材料按本节管理。
 
 迁移状态分别展示全局配置结果与各个 worker 的结果。失败显示 `migration_failed`，清理失败显示 `cleanup_pending`，重试复用原资源 ID 和选择结果。授权存储保留最近一次有效刷新结果，恢复时不使用旧 token 副本覆盖已更新的凭证。迁移尚未完成的 worker 关闭连接器时，记录其最新开关意图，后续重试保留该选择。
 

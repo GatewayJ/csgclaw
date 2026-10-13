@@ -108,25 +108,6 @@ describe("AgentDetailPane metadata editing", () => {
     expect(screen.getByRole("switch", { name: "reviewer" })).not.toBeChecked();
   });
 
-  it("keeps channel actions independent of connector cleanup", async () => {
-    const user = userEvent.setup();
-    const onDisconnectFeishu = vi.fn();
-    render(
-      <Harness
-        item={{
-          ...agent,
-          lark_cli: { state: "mismatch", bound: false, available: true, runtime_loaded: false, cleanup_pending: true },
-        }}
-        onDisconnectFeishu={onDisconnectFeishu}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: "agentChannelsTitle" }));
-    expect(screen.getByText("feishuDisconnected")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "feishuDisconnect" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "feishuCleanupRetry" })).not.toBeInTheDocument();
-    expect(onDisconnectFeishu).not.toHaveBeenCalled();
-  });
-
   it("places a dismiss button on the right side of a notice", async () => {
     const user = userEvent.setup();
     const onDismissNotice = vi.fn();

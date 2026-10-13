@@ -201,7 +201,7 @@ If projections cannot be safely removed from a live Runtime, it is stopped and c
 
 ## Feishu integration
 
-The Feishu CLI connector uses `feishu-lark-cli / lark-cli / connector-feishu / <resource-id>` with `block_runtime` failure policy. One global resource owns the official CLI installation, shared configuration and authorization sessions; Agent bindings own enablement and managed Skills metadata.
+The Feishu CLI connector uses `feishu-lark-cli / connector-cli / connector-cli / <resource-id>` with `block_runtime` failure policy. One global resource owns the official CLI installation, shared configuration and authorization sessions; Agent bindings own enablement and managed Skills metadata.
 
 Global configuration changes stop affected runtimes before invoking the CLI. Engine coordinates configuration application and restores only previously running workers. Channel registration and Participant changes manage IM connections independently. The `feishu-participant` source remains available for migration recovery.
 

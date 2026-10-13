@@ -185,7 +185,7 @@ func (h *Handler) PrepareConnectorMigration(ctx context.Context) error {
 		extension, err := h.agentEngine.RuntimeExtensions(item.ID).Get(ctx, projection.Name)
 		found := false
 		if err == nil {
-			if extension.Spec.Source.Provider == "connector-feishu" || extension.Spec.Source.Provider == cliprojection.SourceProvider {
+			if extension.Spec.Source.Provider == cliprojection.SourceProvider {
 				continue
 			}
 			candidate.Extension, err = json.Marshal(extension)

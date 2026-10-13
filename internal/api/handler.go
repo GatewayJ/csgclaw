@@ -242,7 +242,6 @@ type agentResponse struct {
 	ParticipantIDs       []string                           `json:"participant_ids,omitempty"`
 	ParticipantNames     []string                           `json:"participant_names,omitempty"`
 	Participants         []apitypes.Participant             `json:"participants,omitempty"`
-	LarkCLI              *apitypes.AgentLarkCLIStatus       `json:"lark_cli,omitempty"`
 	SkippedResources     []mcp.SkippedTemplateResource      `json:"skipped_resources,omitempty"`
 }
 
@@ -277,7 +276,6 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 		ParticipantIDs:   apiAgent.ParticipantIDs,
 		ParticipantNames: apiAgent.ParticipantNames,
 		Participants:     apiAgent.Participants,
-		LarkCLI:          apiAgent.LarkCLI,
 	}
 	if len(apiAgent.Runtime.OptionSchemas) > 0 {
 		data, err := json.Marshal(apiAgent.Runtime.OptionSchemas)

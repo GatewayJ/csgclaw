@@ -132,11 +132,6 @@ export type FeishuRegistrationFinalizeResult = FeishuRegistration & {
   restart_error?: string;
   restart_status?: string;
   warnings?: string[];
-  lark_cli_status?: string;
-  lark_cli_error?: {
-    code?: string;
-    message?: string;
-  };
 };
 
 function modelPayload(draft: AgentProfileModelRequest): AgentProfileModelRequest {

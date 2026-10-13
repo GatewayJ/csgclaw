@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"csgclaw/internal/agentengine"
 	agent "csgclaw/internal/agentengine/agents"
 	"csgclaw/internal/apitypes"
@@ -12,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -153,140 +151,6 @@ func TestInternalSourceBaseURLUsesOnlyConfiguredOrDefaultAddress(t *testing.T) {
 
 	if got, want := (&Handler{}).internalSourceBaseURL(), strings.TrimRight(config.DefaultAPIBaseURL(), "/"); got != want {
 		t.Fatalf("default source base URL = %q, want %q", got, want)
-	}
-}
-
-func TestClassifyLarkCLIConfigureErrorReturnsActionableCodes(t *testing.T) {
-	for _, test := range []struct {
-		message string
-		status  int
-		code    string
-	}{
-		{"source_unavailable", http.StatusServiceUnavailable, "lark_cli_source_unavailable"},
-		{"bind_failed", http.StatusBadGateway, "lark_cli_bind_failed"},
-		{"extension_unsupported", http.StatusBadRequest, "unsupported_runtime"},
-		{"activate_failed", http.StatusInternalServerError, "lark_cli_config_failed"},
-	} {
-		status, code := classifyLarkCLIConfigureError(test.message)
-		if status != test.status || code != test.code {
-			t.Fatalf("classify(%q) = (%d, %q), want (%d, %q)", test.message, status, code, test.status, test.code)
-		}
-	}
-}
-
-func TestSupportsAgentLarkCLI(t *testing.T) {
-	for _, test := range []struct {
-		kind string
-		want bool
-	}{
-		{kind: agent.RuntimeKindCodex, want: true},
-		{kind: agent.RuntimeKindDSH, want: true},
-		{kind: agent.RuntimeKindPicoClawSandbox, want: false},
-		{kind: agent.RuntimeKindOpenClawSandbox, want: false},
-	} {
-		if got := supportsAgentLarkCLI(test.kind); got != test.want {
-			t.Fatalf("supportsAgentLarkCLI(%q) = %v, want %v", test.kind, got, test.want)
-		}
-	}
-}
-
-func TestAgentLarkCLIStatusWithoutExtensionIsUnbound(t *testing.T) {
-	originalLookPath := larkCLILookPath
-	originalCommandContext := larkCLICommandContext
-	t.Cleanup(func() {
-		larkCLILookPath = originalLookPath
-		larkCLICommandContext = originalCommandContext
-	})
-	t.Setenv("CSGCLAW_FAKE_LARK_CLI_COMMAND", "1")
-	t.Setenv("CSGCLAW_FAKE_LARK_RECORD_PATH", filepath.Join(t.TempDir(), "probe.json"))
-	t.Setenv("CSGCLAW_FAKE_LARK_EXIT_CODE", "1")
-	larkCLILookPath = func(string) (string, error) {
-		return "/opt/lark/bin/lark-cli", nil
-	}
-	larkCLICommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		helperArgs := append([]string{"-test.run=^TestLarkCLIFakeCommand$", "--"}, args...)
-		return exec.CommandContext(ctx, os.Args[0], helperArgs...)
-	}
-
-	target := agent.Agent{
-		ID:              "agent-dev",
-		Name:            "dev",
-		Role:            agent.RoleWorker,
-		RuntimeKind:     agent.RuntimeKindCodex,
-		ProfileComplete: true,
-		CreatedAt:       time.Now().UTC(),
-	}
-	svc := mustNewSeededServiceWithOptions(t, []agent.Agent{target}, agent.WithRuntime(fakeCompatRuntime{kind: agent.RuntimeKindCodex}))
-	srv := &Handler{svc: svc, agentEngine: agentengine.New(svc), workspace: svc.Workspace(), agentModels: svc.Models(), agentRuntime: svc}
-	target, _ = svc.Agent("agent-dev")
-	status := srv.agentLarkCLIStatus(target)
-	if status == nil || status.Available || status.State != larkCLIStatusUnbound || status.Error != "" {
-		t.Fatalf("status = %+v, want unbound resource state", status)
-	}
-}
-
-func TestAgentLarkCLIStatusDoesNotImplicitlyApplyConnectedBinding(t *testing.T) {
-	originalLookPath := larkCLILookPath
-	originalCommandContext := larkCLICommandContext
-	originalCurrentExe := larkCLICurrentExe
-	t.Cleanup(func() {
-		larkCLILookPath = originalLookPath
-		larkCLICommandContext = originalCommandContext
-		larkCLICurrentExe = originalCurrentExe
-	})
-	t.Setenv("CSGCLAW_FAKE_LARK_CLI_COMMAND", "1")
-	t.Setenv("CSGCLAW_FAKE_LARK_RECORD_PATH", filepath.Join(t.TempDir(), "bind.json"))
-	larkCLILookPath = func(string) (string, error) { return "/opt/lark/bin/lark-cli", nil }
-	larkCLICommandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
-		return exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestLarkCLIFakeCommand$", "--"}, args...)...)
-	}
-	larkCLICurrentExe = func() (string, error) { return "/opt/csgclaw/bin/csgclaw", nil }
-
-	target := agent.Agent{ID: "agent-dev", Name: "dev", Role: agent.RoleWorker, RuntimeKind: agent.RuntimeKindCodex, ProfileComplete: true, CreatedAt: time.Now().UTC()}
-	svc := mustNewSeededServiceWithOptions(t, []agent.Agent{target}, agent.WithRuntime(fakeCompatRuntime{kind: agent.RuntimeKindCodex}))
-	participantSvc := participant.NewService(participant.NewMemoryStore([]apitypes.Participant{{
-		ID: "pt-dev", Channel: participant.ChannelFeishu, Type: participant.TypeAgent, AgentID: "agent-dev",
-		ChannelUserKind:  participant.ChannelUserKindAppID,
-		ChannelAppConfig: map[string]any{"app_id": "cli_dev", "app_secret": "dev-secret"},
-	}}), participant.WithAgentEngine(agentengine.New(svc)))
-	srv := &Handler{svc: svc, participant: participantSvc, serverAccessToken: "server-secret", agentEngine: agentengine.New(svc), workspace: svc.Workspace(), agentModels: svc.Models(), agentRuntime: svc}
-	target, _ = svc.Agent("agent-dev")
-	status := srv.agentLarkCLIStatus(target)
-	if status == nil || status.Bound || status.State != larkCLIStatusUnbound {
-		t.Fatalf("status = %+v", status)
-	}
-	if _, err := srv.agentEngine.RuntimeExtensions("agent-dev").Get(context.Background(), "feishu-lark-cli"); agentengine.ErrorCodeOf(err) != agentengine.ErrorRuntimeExtensionNotFound {
-		t.Fatalf("status read created a RuntimeExtension: %v", err)
-	}
-}
-
-func waitForTestPath(t *testing.T, path string) {
-	t.Helper()
-	waitForTestCondition(t, func() bool {
-		_, err := os.Stat(path)
-		return err == nil
-	})
-}
-
-func waitForTestCondition(t *testing.T, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for test condition")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func waitForTestResponse(t *testing.T, responses <-chan *httptest.ResponseRecorder) *httptest.ResponseRecorder {
-	t.Helper()
-	select {
-	case rec := <-responses:
-		return rec
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for HTTP response")
-		return nil
 	}
 }
 

@@ -206,7 +206,7 @@ Delete 先记录删除意图，移除 Runtime 投影后才删除 desired resourc
 
 ## 飞书集成
 
-飞书 CLI 连接器使用 `feishu-lark-cli / lark-cli / connector-feishu / <resource-id>`，策略为 `block_runtime`。全局资源负责官方 CLI 安装、共享配置与授权会话；Agent binding 保存开启状态和 Skills 来源。
+飞书 CLI 连接器使用 `feishu-lark-cli / connector-cli / connector-cli / <resource-id>`，策略为 `block_runtime`。全局资源负责官方 CLI 安装、共享配置与授权会话；Agent binding 保存开启状态和 Skills 来源。
 
 全局配置更新会停止受影响的 Runtime，随后执行 CLI 操作。Engine 协调配置更新，并恢复原来运行的 worker。渠道注册及 Participant 更新独立管理 IM 连接。`feishu-participant` Source 支持历史迁移恢复。
 
