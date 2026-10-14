@@ -1152,11 +1152,10 @@ export function useConversationController({
     const senderID = data.current_user_id;
     const attachments = attachmentDrafts.map((draft) => draft.file);
     const serializedDraft = serializeComposerSegments(draftSegments);
-    const normalized = normalizeSlashShorthandForPayload(serializedDraft);
     const { content, resource_refs } =
       resourceAgentID || draftSegments.some((segment) => segment.type === "resource")
-        ? resourceMessageInput(draftSegments, normalized)
-        : { content: normalized, resource_refs: [] };
+        ? resourceMessageInput(draftSegments, serializedDraft)
+        : { content: normalizeSlashShorthandForPayload(serializedDraft), resource_refs: [] };
     const fingerprint = messageFingerprint(content, attachmentDrafts, resource_refs);
     if (sendLocksRef.current[roomID]) {
       return;
@@ -1338,11 +1337,10 @@ export function useConversationController({
       return;
     }
     const serializedDraft = serializeComposerSegments(activeThreadDraftSegments);
-    const normalized = normalizeSlashShorthandForPayload(serializedDraft);
     const input =
       resourceAgentID || activeThreadDraftSegments.some((segment) => segment.type === "resource")
-        ? resourceMessageInput(activeThreadDraftSegments, normalized)
-        : { content: normalized, resource_refs: [] };
+        ? resourceMessageInput(activeThreadDraftSegments, serializedDraft)
+        : { content: normalizeSlashShorthandForPayload(serializedDraft), resource_refs: [] };
     const text = input.content;
     const selection = activeThreadSelectionRef.current;
     if (

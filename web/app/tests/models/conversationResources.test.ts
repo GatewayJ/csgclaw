@@ -10,6 +10,9 @@ import {
 } from "@/models/conversationResources";
 import {
   areComposerSegmentsEqual,
+  getComposerSlashQueryAtSelection,
+  placeCaretAtEnd,
+  replaceComposerSlashWithSegments,
   parseComposerSegments,
   renderComposerSegments,
   serializeComposerSegments,
@@ -73,4 +76,28 @@ describe("会话资源选择", () => {
     expect(resourcesMatchAgent(parseComposerSegments(root), "agent-b")).toBe(false);
     expect(canSendComposer([...segments, { type: "slash", text: "/new" }], 0)).toBe(false);
   });
+});
+
+it("资源标签之后可以选择 slash 技能，已有正文仍然保留查询限制", () => {
+  const root = document.createElement("div");
+  root.contentEditable = "true";
+  document.body.append(root);
+  try {
+    renderComposerSegments(root, [resourceSegment(app, "agent"), { type: "text", text: " /rev" }]);
+    placeCaretAtEnd(root);
+    expect(getComposerSlashQueryAtSelection(root)).toBe("rev");
+    expect(replaceComposerSlashWithSegments(root, [resourceSegment(skill, "agent"), { type: "text", text: " " }])).toBe(
+      true,
+    );
+    expect(resourceMessageInput(parseComposerSegments(root)).resource_refs).toEqual([
+      { source: "app", id: app.id },
+      { source: "skill", id: skill.id },
+    ]);
+    renderComposerSegments(root, [resourceSegment(app, "agent"), { type: "text", text: "已有正文 /rev" }]);
+    placeCaretAtEnd(root);
+    expect(getComposerSlashQueryAtSelection(root)).toBeNull();
+  } finally {
+    root.remove();
+    window.getSelection()?.removeAllRanges();
+  }
 });

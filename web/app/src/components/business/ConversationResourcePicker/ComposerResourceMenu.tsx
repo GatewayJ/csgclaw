@@ -1,5 +1,4 @@
-import { useRef, useState } from "react";
-import { ComposerAddMenu, type TaskResourceKind } from "@/components/business/ConversationPane/ComposerAddMenu";
+import { ComposerAddMenu } from "@/components/business/ConversationPane/ComposerAddMenu";
 import type { TranslateFn } from "@/models/conversations";
 import type { ResourceSnapshot } from "@/models/conversationResources";
 import { ConversationResourcePicker } from "./ConversationResourcePicker";
@@ -12,6 +11,7 @@ export type ComposerResourceProps = {
 export function ComposerResourceMenu({
   resourceAgentID,
   onPickResources,
+  onManage,
   selected = [],
   disabled,
   t,
@@ -21,35 +21,40 @@ export function ComposerResourceMenu({
   disabled: boolean;
   t: TranslateFn;
   onAddFiles: () => void;
+  onManage?: () => void;
 }) {
-  const [kind, setKind] = useState<TaskResourceKind | null>(null);
-  const root = useRef<HTMLDivElement>(null);
-  const close = () => {
-    setKind(null);
-    root.current?.querySelector("button")?.focus();
-  };
   return (
-    <div className="relative" ref={root}>
-      <ComposerAddMenu
-        disabled={disabled}
-        t={t}
-        onAddFiles={onAddFiles}
-        onOpenResourcePicker={resourceAgentID && onPickResources ? setKind : undefined}
-      />
-      {kind && resourceAgentID && !disabled ? (
-        <ConversationResourcePicker
-          key={`${resourceAgentID}:${kind}`}
-          agentID={resourceAgentID}
-          kind={kind}
-          t={t}
-          existing={selected}
-          onClose={close}
-          onPick={(refs) => {
-            onPickResources?.(refs);
-            close();
-          }}
-        />
-      ) : null}
-    </div>
+    <ComposerAddMenu
+      key={`${resourceAgentID}:${disabled}`}
+      disabled={disabled}
+      t={t}
+      onAddFiles={onAddFiles}
+      renderResourcePicker={
+        resourceAgentID && onPickResources
+          ? (kind, close) => (
+              <ConversationResourcePicker
+                key={`${resourceAgentID}:${kind}`}
+                agentID={resourceAgentID}
+                kind={kind}
+                t={t}
+                existing={selected}
+                onClose={close}
+                onManage={
+                  onManage
+                    ? () => {
+                        close();
+                        onManage();
+                      }
+                    : undefined
+                }
+                onPick={(refs) => {
+                  onPickResources(refs);
+                  close();
+                }}
+              />
+            )
+          : undefined
+      }
+    />
   );
 }

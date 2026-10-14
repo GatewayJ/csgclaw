@@ -562,7 +562,9 @@ export function getComposerSlashQueryAtSelection(root: HTMLElement | null | unde
   const prefixRange = document.createRange();
   prefixRange.selectNodeContents(root);
   prefixRange.setEnd(state.textNode, state.startOffset);
-  if (prefixRange.toString().trim()) {
+  const prefix = prefixRange.cloneContents();
+  prefix.querySelectorAll("[data-composer-resource]").forEach((element) => element.remove());
+  if (prefix.textContent?.trim()) {
     return null;
   }
   return state.query.toLowerCase();

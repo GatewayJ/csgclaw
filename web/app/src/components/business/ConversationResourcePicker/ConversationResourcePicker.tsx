@@ -48,19 +48,14 @@ export function ConversationResourcePicker({
         : "composerResourceKnowledge",
   );
   return (
-    <aside
+    <section
       className={styles.picker}
-      role="dialog"
       aria-label={label}
       onKeyDown={(event) => {
         if (isComposerKeyboardEventComposing(event)) return;
         if (event.key === "Enter" && event.target instanceof HTMLInputElement && event.target.type === "checkbox") {
           event.preventDefault();
           event.target.click();
-        }
-        if (event.key === "Escape") {
-          event.stopPropagation();
-          onClose();
         }
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           const inputs = Array.from(
@@ -143,12 +138,14 @@ export function ConversationResourcePicker({
             {t("taskRuntimeEditAgent")}
           </Button>
         ) : (
-          <Link to={pathForPane({ type: WorkspacePaneTypes.agent, id: agentID })}>{t("taskRuntimeEditAgent")}</Link>
+          <Link to={pathForPane({ type: WorkspacePaneTypes.agent, id: agentID })} onClick={onClose}>
+            {t("taskRuntimeEditAgent")}
+          </Link>
         )}
         <Button size="sm" disabled={!selected.length} onClick={() => onPick(selected)}>
           {t("addAttachmentResource")}
         </Button>
       </footer>
-    </aside>
+    </section>
   );
 }
