@@ -41,12 +41,16 @@ export function GlobalAppsPanel({
   search = "",
   catalogOpen,
   onCatalogOpenChange,
+  onCountChange,
+  showHeading = true,
 }: {
   t: TranslateFn;
   embedded?: boolean;
   search?: string;
   catalogOpen?: boolean;
   onCatalogOpenChange?: (open: boolean) => void;
+  onCountChange?: (count: number) => void;
+  showHeading?: boolean;
 }) {
   const [items, setItems] = useState<AppInstallation[]>([]);
   const [definitions, setDefinitions] = useState<AppDefinition[]>([]);
@@ -60,6 +64,10 @@ export function GlobalAppsPanel({
   const [loaded, setLoaded] = useState(false);
   const seq = useRef(0);
   const navigate = useNavigate();
+  const [localEditingID, setLocalEditingID] = useState("");
+  useEffect(() => {
+    onCountChange?.(items.length);
+  }, [items.length, onCountChange]);
   const { resourceId } = useParams();
   const [searchParams] = useSearchParams();
   const reload = useCallback(async (signal?: AbortSignal) => {
@@ -86,7 +94,7 @@ export function GlobalAppsPanel({
       clearInterval(interval);
     };
   }, [reload]);
-  const editing = items.find((item) => item.installation_id === resourceId) || null;
+  const editing = items.find((item) => item.installation_id === (embedded ? localEditingID : resourceId)) || null;
   const availableDefinitions = definitions.filter(
     (definition) =>
       definition.app_id !== "llm-wiki" &&
@@ -99,7 +107,8 @@ export function GlobalAppsPanel({
       : availableDefinitions.find((d) => d.app_id === searchParams.get("add_connector")));
   const close = () => {
     setAdding(null);
-    void navigate("/connectors");
+    if (embedded) setLocalEditingID("");
+    else void navigate("/connectors");
   };
   async function mutate(operation: () => Promise<unknown>) {
     setBusy(true);
@@ -128,7 +137,9 @@ export function GlobalAppsPanel({
   return (
     <section className={embedded ? styles.applicationSection : `entity-pane ${styles.resourcePage}`}>
       {embedded ? (
-        <h2 className={styles.sectionTitle}>{t("connectorsApplications")}</h2>
+        showHeading ? (
+          <h2 className={styles.sectionTitle}>{t("connectorsApplications")}</h2>
+        ) : null
       ) : (
         <div className={styles.heading}>
           <div>
@@ -178,7 +189,11 @@ export function GlobalAppsPanel({
             <button
               type="button"
               className={styles.resourceConnectorOpen}
-              onClick={() => void navigate(`/connectors/${encodeURIComponent(app.installation_id)}`)}
+              onClick={() =>
+                embedded
+                  ? setLocalEditingID(app.installation_id)
+                  : void navigate(`/connectors/${encodeURIComponent(app.installation_id)}`)
+              }
             >
               <span className={styles.connectorIcon}>
                 <AppIcon appID={app.app_id} />
@@ -206,7 +221,11 @@ export function GlobalAppsPanel({
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem
-                  onSelect={() => void navigate(`/connectors/${encodeURIComponent(app.installation_id)}`)}
+                  onSelect={() =>
+                    embedded
+                      ? setLocalEditingID(app.installation_id)
+                      : void navigate(`/connectors/${encodeURIComponent(app.installation_id)}`)
+                  }
                 >
                   {t("appSettings")}
                 </DropdownMenuItem>

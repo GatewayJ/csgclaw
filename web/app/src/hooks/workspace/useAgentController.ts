@@ -232,6 +232,7 @@ const FEISHU_REGISTRATION_MIN_POLL_SECONDS = 1;
 const FEISHU_REGISTRATION_MAX_POLL_SECONDS = 30;
 const AGENT_CREATE_NAME_RETRY_LIMIT = 20;
 const noopRefreshWorkspaceModelProviders = async (): Promise<null> => null;
+const noopRefreshWorkspaceHubTemplates = async (): Promise<HubTemplate[]> => [];
 const noopSelectModelProvider = (): void => undefined;
 
 function feishuActionKey(agentID: string, action: FeishuActionKind): string {
@@ -478,7 +479,7 @@ function draftWithModelProviderFallback(draft: AgentDraft, options: readonly Mod
 export function shouldReturnToAgentOverviewAfterAgentMissing(
   activePane: { type?: string; id?: string | undefined } | null | undefined,
 ) {
-  return activePane?.type === WorkspacePaneTypes.agent;
+  return activePane?.type === WorkspacePaneTypes.agent && Boolean(activePane.id?.trim());
 }
 
 export function agentSelectionAfterDelete(
@@ -519,11 +520,13 @@ export function useAgentController({
   openCSGAuthGuard,
   onAgentDeleted,
   profileDetailAgentID = "",
+  redirectToIncompleteManagerProfile = true,
   refreshMCPServers = async () => null,
   refreshHubTemplates,
   refreshWorkspaceAgents,
   refreshWorkspaceBootstrap,
   refreshWorkspaceBootstrapConfig,
+  refreshWorkspaceHubTemplates = noopRefreshWorkspaceHubTemplates,
   refreshWorkspaceManagerProfile,
   refreshWorkspaceModelProviders = noopRefreshWorkspaceModelProviders,
   rooms,
@@ -657,10 +660,19 @@ export function useAgentController({
   const managerCodexRuntimeUnavailable = bootstrapConfig?.manager_runtime?.installed === false;
   const managerAgentRuntimeUnavailable = isAgentRuntimeUnavailable(managerProfile);
   const managerRuntimeUnavailable = managerCodexRuntimeUnavailable || managerAgentRuntimeUnavailable;
+  const managerRuntimeMessageCode = String(bootstrapConfig?.manager_runtime?.message_code || "").trim();
+  const localizedManagerRuntimeMessage = managerRuntimeMessageCode ? t(`errors.${managerRuntimeMessageCode}`) : "";
+  const managerRuntimeMessage = String(bootstrapConfig?.manager_runtime?.message || "").trim();
+  const translatedLegacyManagerRuntimeMessage =
+    managerRuntimeMessage === "Bundled Codex CLI is unavailable" ? t("errors.bundled_codex_unavailable") : "";
   const managerRuntimeWarning = managerRuntimeUnavailable
     ? managerCodexRuntimeUnavailable
       ? String(
-          bootstrapConfig?.manager_runtime?.message ||
+          (managerRuntimeMessageCode && localizedManagerRuntimeMessage !== `errors.${managerRuntimeMessageCode}`
+            ? localizedManagerRuntimeMessage
+            : "") ||
+            translatedLegacyManagerRuntimeMessage ||
+            managerRuntimeMessage ||
             bootstrapConfig?.manager_runtime?.install_guidance ||
             t("managerCodexMissingWarning"),
         )
@@ -963,7 +975,7 @@ export function useAgentController({
   );
   useEffect(() => {
     if (agentPageModelError && modelProviderConfigUsesOpenCSG(agentPageDraft)) {
-      handleOpenCSGAuthenticationError(agentPageModelError);
+      handleOpenCSGAuthenticationError(agentPageModelError, { openDialog: false });
     }
   }, [agentPageDraft, agentPageModelError, handleOpenCSGAuthenticationError]);
   const agentModelBusy = Boolean(showAgentModal && !modelProvidersLoaded);
@@ -1194,7 +1206,7 @@ export function useAgentController({
   }, [clearAgentPageNotice, managerProfileIncomplete]);
 
   useEffect(() => {
-    if (!managerProfileIncomplete) {
+    if (!redirectToIncompleteManagerProfile || !managerProfileIncomplete) {
       return;
     }
     if (activePane.type === WorkspacePaneTypes.agent && activePane.id === MANAGER_AGENT_ID) {
@@ -1202,7 +1214,15 @@ export function useAgentController({
     }
     showAgentPageNotice(t("profileIncompleteRedirectNotice"), "warning", 5000, null);
     selectAgent({ id: MANAGER_AGENT_ID }, { replace: true });
-  }, [activePane.id, activePane.type, managerProfileIncomplete, selectAgent, showAgentPageNotice, t]);
+  }, [
+    activePane.id,
+    activePane.type,
+    managerProfileIncomplete,
+    redirectToIncompleteManagerProfile,
+    selectAgent,
+    showAgentPageNotice,
+    t,
+  ]);
 
   useEffect(() => {
     if (!activePane || activePane.type !== WorkspacePaneTypes.agent) {
@@ -1526,18 +1546,20 @@ export function useAgentController({
     setRuntimeInstallation(null);
     setAgentBillingURL("");
     setAgentProgress(null);
-    const [refreshedBootstrapConfig, refreshedModelProviders] = await Promise.all([
+    const [refreshedBootstrapConfig, refreshedModelProviders, refreshedHubTemplates] = await Promise.all([
       refreshWorkspaceBootstrapConfig(),
       refreshWorkspaceModelProviders(),
+      refreshWorkspaceHubTemplates(),
     ]);
     const effectiveBootstrapConfig = refreshedBootstrapConfig || bootstrapConfig;
+    const effectiveHubTemplates = refreshedHubTemplates.length ? refreshedHubTemplates : hubTemplates;
     const createModelOptions = modelProviderOptionsFromCatalog(
       modelProviderCatalogForAgentAvailability(refreshedModelProviders, {
         codexAvailable: effectiveBootstrapConfig?.manager_runtime?.installed !== false,
       }),
     );
     setAgentModalBootstrapConfig(effectiveBootstrapConfig);
-    const createWorkerTemplates = createAgentSelectableTemplates(hubTemplates);
+    const createWorkerTemplates = createAgentSelectableTemplates(effectiveHubTemplates);
     const preferredRuntimeKind = "codex";
     const selectedTemplate =
       template === undefined
@@ -1551,7 +1573,7 @@ export function useAgentController({
       let draft = agentToDraft({
         avatar: selectUnusedAgentAvatar(createParticipantAvatarSources),
         image: defaultWorkerImageForRuntime(
-          hubTemplates,
+          effectiveHubTemplates,
           initialRuntime.runtime_kind,
           effectiveBootstrapConfig,
           managerAgent?.image || "",
@@ -1573,7 +1595,7 @@ export function useAgentController({
       let draft = agentToDraft({
         avatar: selectUnusedAgentAvatar(createParticipantAvatarSources),
         image: defaultWorkerImageForRuntime(
-          hubTemplates,
+          effectiveHubTemplates,
           initialRuntime.runtime_kind,
           effectiveBootstrapConfig,
           managerAgent?.image || "",
@@ -2586,6 +2608,7 @@ export function useAgentController({
     setTeamActionError("");
     try {
       await updateTeamRequest(editingTeam.id, {
+        title: createTeamTitle.trim() || editingTeam.title,
         member_agent_ids: createTeamMemberIDs.filter(
           (memberID) => !localIdentitiesMatch(memberID, editingTeam.lead_agent_id),
         ),
