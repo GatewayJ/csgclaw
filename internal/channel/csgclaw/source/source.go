@@ -471,11 +471,12 @@ func botThreadContext(value *im.ParticipantThreadContext) *channel.ThreadContext
 			createdAt = message.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		}
 		out.Context = append(out.Context, channel.ThreadContextMessage{
-			ID:          message.ID,
-			SenderID:    message.SenderID,
-			Content:     message.Content,
-			CreatedAt:   createdAt,
-			Attachments: append([]channel.MessageAttachment(nil), message.Attachments...),
+			ResourceSelection: apitypes.ResourceSelectionFromMetadata(message.Metadata),
+			ID:                message.ID,
+			SenderID:          message.SenderID,
+			Content:           message.Content,
+			CreatedAt:         createdAt,
+			Attachments:       append([]channel.MessageAttachment(nil), message.Attachments...),
 		})
 	}
 	return out

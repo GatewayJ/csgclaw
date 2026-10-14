@@ -32,11 +32,12 @@ type ThreadContext struct {
 }
 
 type ThreadContextMessage struct {
-	ID          string              `json:"id,omitempty"`
-	SenderID    string              `json:"sender_id,omitempty"`
-	Content     string              `json:"content,omitempty"`
-	CreatedAt   string              `json:"created_at,omitempty"`
-	Attachments []MessageAttachment `json:"attachments,omitempty"`
+	ResourceSelection *apitypes.ResourceSelection `json:"resource_selection,omitempty"`
+	ID                string                      `json:"id,omitempty"`
+	SenderID          string                      `json:"sender_id,omitempty"`
+	Content           string                      `json:"content,omitempty"`
+	CreatedAt         string                      `json:"created_at,omitempty"`
+	Attachments       []MessageAttachment         `json:"attachments,omitempty"`
 }
 
 type ThreadContextSummary struct {

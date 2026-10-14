@@ -170,7 +170,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
     [t],
   );
 
-  useConversationDraftEditorSync(editorRef, draftSegments);
+  useConversationDraftEditorSync(editorRef, draftSegments, t("remove"));
 
   useEffect(() => {
     setClearMessagesDialogOpen(false);

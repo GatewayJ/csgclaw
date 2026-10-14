@@ -1,3 +1,4 @@
+import { ResourceTag } from "@/components/business/ResourceTag";
 import {
   effectiveConversationProfile,
   supportsTaskConfiguration,
@@ -241,19 +242,18 @@ function StartTaskForm({
               {resources.length ? (
                 <div className="flex flex-wrap gap-2">
                   {resources.map((resource) => (
-                    <Button
+                    <ResourceTag
                       key={resourceKey(resource)}
-                      variant="tertiaryGray"
-                      size="sm"
-                      disabled={busy}
-                      aria-label={`${t("remove")} ${resource.name}`}
-                      onClick={() =>
-                        setResources((current) => current.filter((item) => resourceKey(item) !== resourceKey(resource)))
-                      }
-                    >
-                      {resource.name}
-                      <X size={14} />
-                    </Button>
+                      resource={resource}
+                      removal={{
+                        label: t("remove"),
+                        disabled: busy,
+                        onRemove: () =>
+                          setResources((current) =>
+                            current.filter((item) => resourceKey(item) !== resourceKey(resource)),
+                          ),
+                      }}
+                    />
                   ))}
                 </div>
               ) : null}

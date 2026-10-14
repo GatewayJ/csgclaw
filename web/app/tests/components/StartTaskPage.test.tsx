@@ -225,3 +225,31 @@ it("StartTask 支持单个 skill 的空正文输入", async () => {
     expect.objectContaining({ content: "", resource_refs: [{ source: "skill", id: "review" }] }),
   );
 });
+
+it("removes a selected resource while preserving the task text", async () => {
+  vi.mocked(fetchConversationResourceBatch).mockResolvedValue({
+    items: [{ source: "mcp", id: "search", type: "connector", name: "Search", enabled: true, available: true }],
+    total: 1,
+    list_revision: "r",
+    has_more: false,
+  });
+  vi.mocked(sendMessageRequest)
+    .mockReset()
+    .mockResolvedValue({} as never);
+  const { open } = setup("/new?agent=u-worker");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "composerAddContent" }));
+  await user.click(screen.getByRole("button", { name: "composerResourceConnector" }));
+  await user.click(await screen.findByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "addAttachmentResource" }));
+  await user.type(screen.getByRole("textbox", { name: "taskEntryPrompt" }), "Check project");
+  const remove = screen.getByRole("button", { name: "remove Search" });
+  expect(remove.closest(".resource-tag")).toHaveAttribute("data-resource-type", "connector");
+  await user.click(remove);
+  expect(screen.getByRole("textbox", { name: "taskEntryPrompt" })).toHaveValue("Check project");
+  await user.click(screen.getByRole("button", { name: "taskEntryStart" }));
+  await waitFor(() => expect(open).toHaveBeenCalledWith(room));
+  expect(sendMessageRequest).toHaveBeenCalledWith(
+    expect.objectContaining({ content: "Check project", resource_refs: [] }),
+  );
+});

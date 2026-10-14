@@ -1,3 +1,4 @@
+import "@/components/business/ResourceTag";
 import { messageResources, resourceMessageText } from "@/models/conversationResources";
 import { ComposerResourceMenu, type ComposerResourceProps } from "@/components/business/ConversationResourcePicker";
 import { canSendComposer, selectedResources } from "@/models/conversationResources";
@@ -31,7 +32,9 @@ import {
   parseComposerSegments,
   placeCaretAtEnd,
   removeAdjacentMentionToken,
+  removeComposerResourceToken,
   renderComposerSegments,
+  updateComposerResourceLabels,
   replaceMentionQueryWithToken,
   segmentsToPlainText,
   type ComposerSegment,
@@ -211,17 +214,18 @@ export function ConversationThreadPanel({
     if (!editor) {
       return;
     }
+    updateComposerResourceLabels(editor, t("remove"));
     const currentSegments = parseComposerSegments(editor);
     if (!areComposerSegmentsEqual(currentSegments, displayDraftSegments)) {
       const currentText = segmentsToPlainText(currentSegments);
       const nextText = segmentsToPlainText(displayDraftSegments);
       const selectionOffset = getCollapsedSelectionTextOffset(editor);
-      renderComposerSegments(editor, displayDraftSegments);
+      renderComposerSegments(editor, displayDraftSegments, t("remove"));
       if (currentText === nextText && selectionOffset === currentText.length) {
         placeCaretAtEnd(editor);
       }
     }
-  }, [displayDraftSegments]);
+  }, [displayDraftSegments, t]);
 
   function syncThreadDraft(target = threadEditorRef.current) {
     if (!target) {
@@ -432,9 +436,18 @@ export function ConversationThreadPanel({
             className={`thread-composer-editor ${disabled ? "disabled" : ""}`}
             data-placeholder={disabled ? t("profileIncomplete") : t("threadComposerPlaceholder")}
             onInput={(event) => syncThreadDraft(event.currentTarget)}
-            onClick={(event) => syncThreadQueryState(event.currentTarget)}
+            onClick={(event) => {
+              if (!disabled && removeComposerResourceToken(event.currentTarget, event.target)) {
+                syncThreadDraft(event.currentTarget);
+              } else {
+                syncThreadQueryState(event.currentTarget);
+              }
+            }}
             onKeyDown={(event) => {
-              if (disabled) {
+              if (
+                disabled ||
+                (event.target instanceof Element && event.target.closest("[data-composer-resource-remove]"))
+              ) {
                 return;
               }
               if (event.key === "Backspace" && removeAdjacentMentionToken(threadEditorRef.current, "backward")) {

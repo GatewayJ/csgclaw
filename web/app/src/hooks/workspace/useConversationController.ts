@@ -65,6 +65,7 @@ import {
   normalizeComposerSegmentsForDisplay,
   removeAdjacentMentionToken,
   renderComposerSegments,
+  updateComposerResourceLabels,
   replaceComposerSlashWithSegments,
   replaceMentionQueryWithToken,
   segmentsToPlainText,
@@ -1099,11 +1100,12 @@ export function useConversationController({
     if (!editor) {
       return;
     }
+    updateComposerResourceLabels(editor, t("remove"));
     if (!areComposerSegmentsEqual(parseComposerSegments(editor), draftSegments)) {
-      renderComposerSegments(editor, draftSegments);
+      renderComposerSegments(editor, draftSegments, t("remove"));
     }
     setComposerMentionState(null);
-  }, [activeConversationId, draftSegments]);
+  }, [activeConversationId, draftSegments, t]);
 
   useEffect(() => {
     if (!activeConversationId || showCreateRoom || showInvite) {
@@ -1645,8 +1647,8 @@ export function useConversationController({
       onCommit(segments);
       return;
     }
-    if (!replaceComposerSlashWithSegments(editor, segments)) {
-      renderComposerSegments(editor, segments);
+    if (!replaceComposerSlashWithSegments(editor, segments, t("remove"))) {
+      renderComposerSegments(editor, segments, t("remove"));
       placeCaretAtEnd(editor);
     }
     editor.focus();

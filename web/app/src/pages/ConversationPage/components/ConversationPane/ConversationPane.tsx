@@ -378,7 +378,7 @@ function ConversationPaneContent({
     [messageControls.byMessage, onStopWorkingTurn, t],
   );
 
-  useConversationDraftEditorSync(editorRef, draftSegments);
+  useConversationDraftEditorSync(editorRef, draftSegments, t("remove"));
 
   useEffect(() => {
     setClearMessagesDialogOpen(false);

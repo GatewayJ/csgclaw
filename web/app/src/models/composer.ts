@@ -79,15 +79,54 @@ export function createSlashTokenElement(value: unknown): HTMLSpanElement {
   return token;
 }
 
-export function createResourceTokenElement(resource: ResourceSnapshot, agentID?: string): HTMLSpanElement {
+export function createResourceTokenElement(
+  resource: ResourceSnapshot,
+  agentID?: string,
+  removeLabel?: string,
+): HTMLSpanElement {
   const token = document.createElement("span");
-  token.className = "composer-slash-token";
+  token.className = "resource-tag";
+  token.dataset.resourceType = resource.type;
   token.dataset.composerResource = JSON.stringify(resource);
   if (agentID) token.dataset.resourceAgentId = agentID;
   token.contentEditable = "false";
-  token.textContent = resource.name;
   token.title = `${resource.source}:${resource.id}`;
+  const label = document.createElement("span");
+  label.className = "resource-tag-label";
+  label.textContent = resource.name;
+  token.append(label);
+  if (removeLabel) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "resource-tag-remove";
+    button.dataset.composerResourceRemove = "true";
+    button.setAttribute("aria-label", `${removeLabel} ${resource.name}`);
+    token.append(button);
+  }
   return token;
+}
+
+export function updateComposerResourceLabels(root: HTMLElement, removeLabel: string): void {
+  for (const token of root.querySelectorAll<HTMLElement>("[data-composer-resource]")) {
+    const button = token.querySelector("[data-composer-resource-remove]");
+    const name = token.querySelector(".resource-tag-label")?.textContent ?? "";
+    button?.setAttribute("aria-label", `${removeLabel} ${name}`);
+  }
+}
+
+export function removeComposerResourceToken(root: HTMLElement | null | undefined, target: EventTarget | null): boolean {
+  const button = target instanceof Element ? target.closest("[data-composer-resource-remove]") : null;
+  const token = button?.closest("[data-composer-resource]");
+  if (!root || !token || !root.contains(token)) return false;
+  const range = document.createRange();
+  range.setStartBefore(token);
+  range.collapse(true);
+  token.remove();
+  root.focus();
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return true;
 }
 
 export function normalizeComposerSegmentsForDisplay(
@@ -118,6 +157,7 @@ export function normalizeComposerSegmentsForDisplay(
 export function appendComposerSegments(
   parent: ParentNode | null | undefined,
   segments: readonly (ComposerSegment | null | undefined)[] | null | undefined,
+  resourceRemoveLabel?: string,
 ): void {
   if (!parent) {
     return;
@@ -127,7 +167,7 @@ export function appendComposerSegments(
       continue;
     }
     if (segment.type === "resource") {
-      parent.append(createResourceTokenElement(segment.resource, segment.agentID));
+      parent.append(createResourceTokenElement(segment.resource, segment.agentID, resourceRemoveLabel));
       continue;
     }
     if (segment.type === "mention") {
@@ -158,12 +198,13 @@ export function appendComposerSegments(
 export function renderComposerSegments(
   root: HTMLElement | null | undefined,
   segments: readonly (ComposerSegment | null | undefined)[] | null | undefined,
+  resourceRemoveLabel?: string,
 ): void {
   if (!root) {
     return;
   }
   root.replaceChildren();
-  appendComposerSegments(root, segments);
+  appendComposerSegments(root, segments, resourceRemoveLabel);
 }
 
 export function parseComposerSegments(root: Node | null | undefined): ComposerSegment[] {
@@ -705,6 +746,7 @@ export function insertComposerSegmentsAtSelection(segments: readonly ComposerSeg
 export function replaceComposerSlashWithSegments(
   root: HTMLElement | null | undefined,
   segments: readonly ComposerSegment[] | null | undefined,
+  resourceRemoveLabel?: string,
 ): boolean {
   const slashState = getComposerSlashState(root);
   if (!slashState) {
@@ -725,7 +767,7 @@ export function replaceComposerSlashWithSegments(
 
   const marker = document.createTextNode("");
   const fragment = document.createDocumentFragment();
-  appendComposerSegments(fragment, segments);
+  appendComposerSegments(fragment, segments, resourceRemoveLabel);
   fragment.append(marker);
   range.insertNode(fragment);
 

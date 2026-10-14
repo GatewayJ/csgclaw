@@ -1,3 +1,4 @@
+import "@/components/business/ResourceTag";
 import { ComposerResourceMenu, type ComposerResourceProps } from "@/components/business/ConversationResourcePicker";
 import { canSendComposer, selectedResources } from "@/models/conversationResources";
 import type { SkillContinuation } from "@/models/slashCommands";
@@ -16,6 +17,7 @@ import {
   insertComposerSegmentsAtSelection,
   insertPlainTextAtSelection,
   normalizeTextMentions,
+  removeComposerResourceToken,
   type ComposerMentionUser,
   type ComposerSegment,
 } from "@/models/composer";
@@ -222,8 +224,14 @@ export const ConversationComposer = memo(function ConversationComposer({
             aria-describedby={composerHelpId}
             aria-disabled={interactionDisabled}
             onInput={onSyncComposer}
-            onClick={onSyncComposer}
-            onKeyDown={onComposerKeyDown}
+            onClick={(event) => {
+              if (!interactionDisabled) removeComposerResourceToken(event.currentTarget, event.target);
+              onSyncComposer();
+            }}
+            onKeyDown={(event) => {
+              if (event.target instanceof Element && event.target.closest("[data-composer-resource-remove]")) return;
+              onComposerKeyDown(event);
+            }}
             onCompositionStart={onComposerCompositionStart}
             onCompositionEnd={onComposerCompositionEnd}
             onKeyUp={onSyncComposer}

@@ -45,14 +45,22 @@ func TestResourceInputUsesExistingTurnAndRevalidates(t *testing.T) {
 				t.Fatalf("技能选择未进入 Run：%+v", engine.request)
 			}
 			event.MessageID, event.ResourceSelection, event.Text = "ordinary", nil, "下一条消息"
+			reader.disabled = true
+			event.ThreadRootID = "selected"
+			event.ThreadContext = &channel.ThreadContext{RootMessageID: "selected", Context: []channel.ThreadContextMessage{{
+				ID: "selected", ResourceSelection: selection,
+			}}}
+
 			if _, err = adapter.Handle(t.Context(), binding, event); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(engine.request.Input[len(engine.request.Input)-1].Text, `"resources":[]`) {
 				t.Fatal("普通消息没有清空选择")
 			}
+			if !strings.Contains(engine.request.Input[0].Text, `"id":"review"`) || !strings.Contains(engine.request.Input[0].Text, "context only") {
+				t.Fatal("historical resource context was lost")
+			}
 			engine.request.Input = nil
-			reader.disabled = true
 			event.MessageID, event.ResourceSelection, event.Text = "removed", selection, ""
 			if _, err = adapter.Handle(t.Context(), binding, event); err != nil {
 				t.Fatal(err)

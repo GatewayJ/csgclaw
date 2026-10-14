@@ -54,7 +54,8 @@ describe("会话资源选择", () => {
   it("编辑器往返保持引用，正文序列化排除标签", () => {
     const root = document.createElement("div");
     const segments = addResources([{ type: "text", text: "正文" }], [{ ...app, name: '<script>"名称"</script>' }]);
-    renderComposerSegments(root, segments);
+    renderComposerSegments(root, segments, "移除");
+    expect(root.querySelector("button")).toHaveAttribute("aria-label", '移除 <script>"名称"</script>');
     expect(root.querySelector("script")).toBeNull();
     const parsed = parseComposerSegments(root);
     expect(areComposerSegmentsEqual(parsed, segments)).toBe(true);

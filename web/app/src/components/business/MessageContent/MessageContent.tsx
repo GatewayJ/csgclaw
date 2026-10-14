@@ -1,3 +1,4 @@
+import { ResourceTag } from "@/components/business/ResourceTag";
 import { messageResources, resourceKey } from "@/models/conversationResources";
 import { TurnProgress } from "@/components/business/TurnProgress";
 import { parseTurnProgress } from "@/models/turnProgress";
@@ -45,9 +46,7 @@ export const MessageContent = memo(function MessageContent(props: MessageContent
       {resources.length ? (
         <div className="flex flex-wrap gap-2" aria-label={t?.("composerAddResources")}>
           {resources.map((resource) => (
-            <span className="composer-slash-token" key={resourceKey(resource)} title={resourceKey(resource)}>
-              {resource.name}
-            </span>
+            <ResourceTag key={resourceKey(resource)} resource={resource} />
           ))}
         </div>
       ) : null}
