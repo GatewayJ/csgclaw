@@ -190,6 +190,7 @@ export function MCPDetailDialog({
                         value={draft}
                         invalid={Boolean(draftError)}
                         minRows={8}
+                        t={t}
                         onChange={(value) => {
                           setDraft(value);
                           setDraftError("");

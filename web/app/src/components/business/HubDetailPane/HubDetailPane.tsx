@@ -805,52 +805,59 @@ const jsonHighlightStyle = HighlightStyle.define([
   { tag: tags.punctuation, color: "var(--hub-json-editor-punctuation)" },
 ]);
 
-function jsonSyntaxLinter(view: EditorView): Diagnostic[] {
-  const source = view.state.doc.toString();
-  try {
-    JSON.parse(source);
-    return [];
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Invalid JSON";
-    const positionMatch = /position\s+(\d+)/i.exec(message);
-    const parsedPosition = positionMatch ? Number(positionMatch[1]) : source.length;
-    if (source.length === 0) {
+function createJsonSyntaxLinter(t: TranslateFn) {
+  return function jsonSyntaxLinter(view: EditorView): Diagnostic[] {
+    const source = view.state.doc.toString();
+    try {
+      JSON.parse(source);
+      return [];
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "";
+      const positionMatch = /position\s+(\d+)/i.exec(detail);
+      const message = positionMatch
+        ? t("resourcesJSONSyntaxInvalidAtPosition", { position: positionMatch[1] })
+        : t("resourcesJSONSyntaxInvalid");
+      const parsedPosition = positionMatch ? Number(positionMatch[1]) : source.length;
+      if (source.length === 0) {
+        return [
+          {
+            from: 0,
+            message,
+            severity: "error",
+            to: 0,
+          },
+        ];
+      }
+      const position = Number.isFinite(parsedPosition) ? Math.max(0, Math.min(source.length, parsedPosition)) : 0;
+      const from = Math.max(0, Math.min(source.length, position || source.length) - 1);
+      const to = Math.min(source.length, Math.max(from + 1, position + 1));
       return [
         {
-          from: 0,
+          from,
           message,
           severity: "error",
-          to: 0,
+          to,
         },
       ];
     }
-    const position = Number.isFinite(parsedPosition) ? Math.max(0, Math.min(source.length, parsedPosition)) : 0;
-    const from = Math.max(0, Math.min(source.length, position || source.length) - 1);
-    const to = Math.min(source.length, Math.max(from + 1, position + 1));
-    return [
-      {
-        from,
-        message,
-        severity: "error",
-        to,
-      },
-    ];
-  }
+  };
 }
 
-const jsonEditorExtensions: Extension[] = [
-  lineNumbers(),
-  highlightActiveLineGutter(),
-  highlightActiveLine(),
-  history(),
-  json(),
-  syntaxHighlighting(jsonHighlightStyle),
-  linter(jsonSyntaxLinter, { delay: 250 }),
-  keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
-  EditorState.tabSize.of(2),
-  EditorView.lineWrapping,
-  jsonEditorTheme,
-];
+function jsonEditorExtensions(t: TranslateFn): Extension[] {
+  return [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightActiveLine(),
+    history(),
+    json(),
+    syntaxHighlighting(jsonHighlightStyle),
+    linter(createJsonSyntaxLinter(t), { delay: 250 }),
+    keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+    EditorState.tabSize.of(2),
+    EditorView.lineWrapping,
+    jsonEditorTheme,
+  ];
+}
 
 export function JSONConfigEditor({
   hideLabel = false,
@@ -858,6 +865,7 @@ export function JSONConfigEditor({
   label,
   minRows = 12,
   onChange,
+  t,
   value,
 }: {
   hideLabel?: boolean;
@@ -865,6 +873,7 @@ export function JSONConfigEditor({
   label: string;
   minRows?: number;
   onChange: (value: string) => void;
+  t: TranslateFn;
   value: string;
 }) {
   const editorId = useId();
@@ -872,6 +881,7 @@ export function JSONConfigEditor({
   const editorViewRef = useRef<EditorView | null>(null);
   const initialValueRef = useRef(value);
   const onChangeRef = useRef(onChange);
+  const editorExtensions = useMemo(() => jsonEditorExtensions(t), [t]);
   const minHeight = `${Math.max(minRows, 6) * 19.2 + 28}px`;
 
   useEffect(() => {
@@ -886,7 +896,7 @@ export function JSONConfigEditor({
       state: EditorState.create({
         doc: initialValueRef.current,
         extensions: [
-          ...jsonEditorExtensions,
+          ...editorExtensions,
           EditorView.contentAttributes.of({
             "aria-label": label,
             id: editorId,
@@ -905,7 +915,7 @@ export function JSONConfigEditor({
       editorViewRef.current = null;
       view.destroy();
     };
-  }, [editorId, label]);
+  }, [editorExtensions, editorId, label]);
 
   useEffect(() => {
     const view = editorViewRef.current;
@@ -2704,6 +2714,7 @@ export function HubDetailPane({
                   onChange={handleMCPDetailDocumentChange}
                   invalid={Boolean(mcpDetailError)}
                   minRows={12}
+                  t={t}
                 />
                 {mcpDetailError ? (
                   <div className={moduleClassNames("form-error hub-json-editor-error")}>{mcpDetailError}</div>
@@ -3327,6 +3338,7 @@ export function HubDetailPane({
                     onChange={handleMCPDetailDocumentChange}
                     invalid={Boolean(mcpDetailError)}
                     minRows={12}
+                    t={t}
                   />
                   {mcpDetailError ? (
                     <div className={moduleClassNames("form-error hub-json-editor-error")}>{mcpDetailError}</div>
@@ -3601,6 +3613,7 @@ export function HubDetailPane({
                   onChange={handleMCPDraftDocumentChange}
                   invalid={Boolean(mcpFormError)}
                   minRows={12}
+                  t={t}
                 />
                 {mcpFormError || mcpCreateError ? (
                   <div className={moduleClassNames("form-error hub-json-editor-error")}>
@@ -3917,6 +3930,7 @@ export function MCPServerCreateDialog({
                 onChange={changeDocument}
                 invalid={Boolean(parseError)}
                 minRows={12}
+                t={t}
               />
               {parseError || createError ? (
                 <div className={moduleClassNames("form-error hub-json-editor-error")}>{parseError || createError}</div>

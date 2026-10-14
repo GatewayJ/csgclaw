@@ -1186,6 +1186,7 @@ export function useWorkspaceController() {
       ? {
           busy: createModelProviderBusy,
           error: createModelProviderError,
+          locale,
           modelProviders,
           onClose: () => {
             if (!createModelProviderBusy) {

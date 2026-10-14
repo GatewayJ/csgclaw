@@ -532,6 +532,7 @@ export type ManagerRuntimeLike = {
   docs_url?: string | null;
   install_guidance?: string | null;
   message?: string | null;
+  message_code?: string | null;
 };
 
 export type RuntimeChoiceLike = {
