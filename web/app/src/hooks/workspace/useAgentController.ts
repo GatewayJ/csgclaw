@@ -522,7 +522,7 @@ function draftWithModelProviderFallback(draft: AgentDraft, options: readonly Mod
 export function shouldReturnToAgentOverviewAfterAgentMissing(
   activePane: { type?: string; id?: string | undefined } | null | undefined,
 ) {
-  return activePane?.type === WorkspacePaneTypes.agent;
+  return activePane?.type === WorkspacePaneTypes.agent && Boolean(activePane.id?.trim());
 }
 
 export function agentSelectionAfterDelete(
@@ -563,6 +563,7 @@ export function useAgentController({
   openCSGAuthGuard,
   onAgentDeleted,
   profileDetailAgentID = "",
+  redirectToIncompleteManagerProfile = true,
   refreshMCPServers = async () => null,
   refreshHubTemplates,
   refreshWorkspaceAgents,
@@ -1009,7 +1010,7 @@ export function useAgentController({
   );
   useEffect(() => {
     if (agentPageModelError && modelProviderConfigUsesOpenCSG(agentPageDraft)) {
-      handleOpenCSGAuthenticationError(agentPageModelError);
+      handleOpenCSGAuthenticationError(agentPageModelError, { openDialog: false });
     }
   }, [agentPageDraft, agentPageModelError, handleOpenCSGAuthenticationError]);
   const agentModelBusy = Boolean(showAgentModal && !modelProvidersLoaded);
@@ -1240,7 +1241,7 @@ export function useAgentController({
   }, [clearAgentPageNotice, managerProfileIncomplete]);
 
   useEffect(() => {
-    if (!managerProfileIncomplete) {
+    if (!redirectToIncompleteManagerProfile || !managerProfileIncomplete) {
       return;
     }
     if (activePane.type === WorkspacePaneTypes.agent && activePane.id === MANAGER_AGENT_ID) {
@@ -1248,7 +1249,15 @@ export function useAgentController({
     }
     showAgentPageNotice(t("profileIncompleteRedirectNotice"), "warning", 5000, null);
     selectAgent({ id: MANAGER_AGENT_ID }, { replace: true });
-  }, [activePane.id, activePane.type, managerProfileIncomplete, selectAgent, showAgentPageNotice, t]);
+  }, [
+    activePane.id,
+    activePane.type,
+    managerProfileIncomplete,
+    redirectToIncompleteManagerProfile,
+    selectAgent,
+    showAgentPageNotice,
+    t,
+  ]);
 
   useEffect(() => {
     if (!activePane || activePane.type !== WorkspacePaneTypes.agent) {
@@ -2716,6 +2725,7 @@ export function useAgentController({
     setTeamActionError("");
     try {
       await updateTeamRequest(editingTeam.id, {
+        title: createTeamTitle.trim() || editingTeam.title,
         member_agent_ids: createTeamMemberIDs.filter(
           (memberID) => !localIdentitiesMatch(memberID, editingTeam.lead_agent_id),
         ),
