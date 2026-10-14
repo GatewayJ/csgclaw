@@ -3,7 +3,7 @@
   bottom: calc(100% + 8px);
   left: 0;
   z-index: var(--z-page-popover);
-  width: min(370px, 100%);
+  width: min(370px, calc(100vw - 32px));
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
