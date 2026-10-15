@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CircleAlert } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   createAppResource,
@@ -19,12 +20,16 @@ import {
   DialogBody,
   DialogFooter,
   DialogCloseButton,
+  DismissibleAlert,
 } from "@/components/ui";
 import type { TranslateFn } from "@/models/conversations";
 import { localizeAPIError } from "@/shared/i18n";
 import { errorMessage } from "@/api/client";
 import { appStatus } from "../appForm";
 import styles from "../AgentAppsPanel.module.css";
+import stepPending from "./assets/step-pending.svg";
+import stepCurrent from "./assets/step-current.svg";
+import stepCompleted from "./assets/step-completed.svg";
 
 type Props = {
   definition: AppDefinition;
@@ -39,6 +44,7 @@ export function CLIDialog({ definition, existing, t, onClose, onChanged }: Props
   const [resource, setResource] = useState(existing);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [showQRCode, setShowQRCode] = useState(false);
   const retry = useRef<{ action: CLIAction; id: string; revision: number | undefined } | null>(null);
   const resourceID = resource?.installation_id;
   const migrationWorkers = resource?.migration?.workers ?? [];
@@ -62,9 +68,16 @@ export function CLIDialog({ definition, existing, t, onClose, onChanged }: Props
     const timer = window.setInterval(() => {
       if (!document.hidden) void refresh();
     }, 1500);
+    const refreshOnReturn = () => {
+      if (!document.hidden) void refresh();
+    };
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
     return () => {
       abort.abort();
       window.clearInterval(timer);
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
     };
   }, [resourceID]);
   async function run(action: CLIAction) {
@@ -108,6 +121,7 @@ export function CLIDialog({ definition, existing, t, onClose, onChanged }: Props
     try {
       const operation = await cancelCLIOperation(resource.installation_id, resource.operation.session_id);
       setResource({ ...resource, operation });
+      await onChanged();
     } catch (failure) {
       setError(failure);
     } finally {
@@ -117,6 +131,12 @@ export function CLIDialog({ definition, existing, t, onClose, onChanged }: Props
   const operation = resource?.operation;
   const active = operation?.status === "running" || operation?.status === "pending";
   const ready = Boolean(resource?.authorized && !resource.disconnected);
+  const identityAuthorized = (identity: "bot" | "user") => {
+    const value = resource?.auth_status?.identities[identity];
+    return Boolean(value?.available && value.verified === true);
+  };
+  const activeIdentity =
+    operation?.stage === "app_authorization" ? "bot" : operation?.stage === "user_authorization" ? "user" : undefined;
   const stages: Record<string, string> = {
     authorization: "cliAuthorization",
     checking_authorization: "cliCheckingAuthorization",
@@ -139,6 +159,9 @@ export function CLIDialog({ definition, existing, t, onClose, onChanged }: Props
     cleanup_pending: "feishuCLICleanupPending",
     migration_failed: "feishuCLIMigrationFailed",
   };
+  const requestError = error ? localizeAPIError(error, t) || errorMessage(error) : "";
+  const storedError =
+    resource?.last_error_code && !active ? t(errorLabels[resource.last_error_code] ?? "feishuCLIRepairHint") : "";
   return (
     <DialogRoot
       open
@@ -155,55 +178,111 @@ export function CLIDialog({ definition, existing, t, onClose, onChanged }: Props
           <DialogCloseButton label={t("close")} variant="tertiaryGray" size="sm" iconOnly />
         </DialogHeader>
         <DialogBody className={styles.settingsBody}>
-          {error ? (
-            <p role="alert" className="form-error">
-              {localizeAPIError(error, t) || errorMessage(error)}
+          <div className={styles.cliStatus}>
+            {requestError ? (
+              <DismissibleAlert
+                className={`${styles.cliError} ${styles.resourceError}`}
+                messageKey={requestError}
+                closeLabel={t("close")}
+              >
+                <CircleAlert size={16} aria-hidden="true" />
+                <span role="alert">{requestError}</span>
+              </DismissibleAlert>
+            ) : null}
+            {storedError ? (
+              <DismissibleAlert
+                className={`${styles.cliError} ${styles.resourceError}`}
+                messageKey={`${resource?.last_error_code}:${storedError}`}
+                closeLabel={t("close")}
+              >
+                <CircleAlert size={16} aria-hidden="true" />
+                <span role="alert">{storedError}</span>
+              </DismissibleAlert>
+            ) : null}
+            <p role="status" aria-live="polite">
+              {active
+                ? t(stages[operation?.stage ?? ""] ?? "feishuCLIPreparing")
+                : resource
+                  ? appStatus(resource, t)
+                  : t("appStatusNeedsConfiguration")}
             </p>
+          </div>
+          {feishu ? (
+            <section className={styles.authorizationSteps} aria-label={t("feishuCLIAuthorizationSteps")}>
+              <div className={styles.authorizationStepsHeader}>
+                <strong>{t("feishuCLIAuthorizationSteps")}</strong>
+                <p>{t("feishuCLIAuthorizationStepsHint")}</p>
+              </div>
+              {(["bot", "user"] as const).map((identity) => {
+                const info = resource?.auth_status?.identities[identity];
+                const completed = identityAuthorized(identity);
+                const current = active && !completed && activeIdentity === identity;
+                const state = completed ? "completed" : current ? "current" : "pending";
+                const label = t(identity === "bot" ? "feishuCLIBot" : "feishuCLIUser");
+                return (
+                  <div key={identity} className={styles.authorizationStep} data-state={state}>
+                    <span className={styles.authorizationStepNumber} aria-hidden="true">
+                      <img src={completed ? stepCompleted : current ? stepCurrent : stepPending} alt="" />
+                    </span>
+                    <span className={styles.authorizationStepCopy}>
+                      <strong>
+                        {label}
+                        <span className={styles.authorizationStepState}>
+                          {t(
+                            completed
+                              ? "feishuCLIStepCompleted"
+                              : current
+                                ? "feishuCLIStepCurrent"
+                                : "feishuCLIStepPending",
+                          )}
+                        </span>
+                      </strong>
+                      <span>
+                        {info?.appName ||
+                          info?.userName ||
+                          t(identity === "bot" ? "feishuCLIBotHint" : "feishuCLIUserHint")}
+                      </span>
+                    </span>
+                    {current && operation?.authorization_url ? (
+                      <span className={styles.authorizationStepActions}>
+                        {feishu ? (
+                          <button
+                            type="button"
+                            className="btn btn-tertiary-gray btn-sm"
+                            aria-expanded={showQRCode}
+                            onClick={() => setShowQRCode((visible) => !visible)}
+                          >
+                            {t(showQRCode ? "feishuCLIHideQRCode" : "feishuCLIShowQRCode")}
+                          </button>
+                        ) : null}
+                        <a
+                          href={operation.authorization_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-primary btn-sm"
+                        >
+                          {t(identity === "bot" ? "feishuCLIAuthorizeBot" : "feishuCLIAuthorizeUser")}
+                        </a>
+                      </span>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </section>
           ) : null}
-          {resource?.last_error_code ? (
-            <p role="alert" className="form-error">
-              {t(errorLabels[resource.last_error_code] ?? "feishuCLIRepairHint")}
-            </p>
-          ) : null}
-          <p role="status" aria-live="polite">
-            {active
-              ? t(stages[operation?.stage ?? ""] ?? "feishuCLIPreparing")
-              : resource
-                ? appStatus(resource, t)
-                : t("appStatusNeedsConfiguration")}
-          </p>
           {operation?.authorization_url && active ? (
             <div className="flex flex-col items-start gap-3">
-              <QRCodeSVG
-                value={operation.authorization_url}
-                size={168}
-                marginSize={2}
-                title={t(feishu ? "feishuCLIAuthorize" : "cliAuthorize")}
-              />
-              <a
-                href={operation.authorization_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-primary"
-              >
-                {t(feishu ? "feishuCLIAuthorize" : "cliAuthorize")}
-              </a>
+              {(!feishu || showQRCode) && (
+                <QRCodeSVG
+                  value={operation.authorization_url}
+                  size={168}
+                  marginSize={2}
+                  title={t(feishu ? "feishuCLIAuthorize" : "cliAuthorize")}
+                />
+              )}
               <p className={styles.hint}>{t(feishu ? "feishuCLIWaitHint" : "cliWaitHint")}</p>
             </div>
           ) : null}
-          {feishu &&
-            (["bot", "user"] as const).map((identity) => {
-              const info = resource?.auth_status?.identities[identity];
-              return (
-                <div key={identity} className={styles.resourceDetails}>
-                  <strong>{t(identity === "bot" ? "feishuCLIBot" : "feishuCLIUser")}</strong>
-                  <p>
-                    {info?.appName || info?.userName || resource?.auth_status?.appId || "—"} ·{" "}
-                    {t(info?.available && info.verified === true ? "feishuCLIAvailable" : "feishuCLIUnauthorized")}
-                  </p>
-                </div>
-              );
-            })}
           {resource?.migration && migrationWorkers.length > 0 ? (
             <div>
               <p>
@@ -260,27 +339,46 @@ export function CLIDialog({ definition, existing, t, onClose, onChanged }: Props
             ))}
           </ul>
         </DialogBody>
-        <DialogFooter>
+        <DialogFooter className={styles.cliFooter}>
           {active ? (
-            <Button disabled={busy} onClick={() => void cancel()}>
-              {t("cancel")}
-            </Button>
+            <>
+              <Button disabled={busy} onClick={() => void cancel()}>
+                {t("cancel")}
+              </Button>
+              {!feishu && operation?.authorization_url ? (
+                <div className={styles.cliFooterActions}>
+                  <a
+                    href={operation.authorization_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary btn-sm"
+                  >
+                    {t("cliAuthorize")}
+                  </a>
+                </div>
+              ) : null}
+            </>
           ) : (
             <>
               {ready ? (
-                <>
+                <div className={styles.cliFooterActions}>
                   {feishu && resource?.auth_status?.identities.user.verified !== true ? (
                     <Button disabled={busy} onClick={() => void run("login")}>
                       {t("feishuCLILogin")}
                     </Button>
                   ) : null}
-                  <Button disabled={busy} onClick={() => void run("disconnect")}>
+                  <Button variant="danger" disabled={busy} onClick={() => void run("disconnect")}>
                     {t("appDisconnect")}
                   </Button>
-                </>
+                </div>
               ) : null}
               {!ready ? (
-                <Button variant="primary" disabled={busy} onClick={() => void run("connect")}>
+                <Button
+                  className={styles.cliConnectAction}
+                  variant="primary"
+                  disabled={busy}
+                  onClick={() => void run("connect")}
+                >
                   {t(feishu ? "feishuCLIConnect" : "appConnect")}
                 </Button>
               ) : null}

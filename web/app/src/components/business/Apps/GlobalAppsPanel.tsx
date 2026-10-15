@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Plus, MoreHorizontal } from "lucide-react";
+import { CircleAlert, Plus } from "lucide-react";
 import {
   createAppResource,
-  deleteAppResource,
   fetchAppDefinitions,
   fetchAppResources,
   probeAppResource,
@@ -13,18 +12,14 @@ import {
 } from "@/api/apps";
 import {
   Button,
-  DropdownMenuRoot,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
   DialogRoot,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
   DialogBody,
-  DialogFooter,
   DialogCloseButton,
+  DismissibleAlert,
 } from "@/components/ui";
 import { localizeAPIError } from "@/shared/i18n";
 import { errorMessage } from "@/api/client";
@@ -58,9 +53,7 @@ export function GlobalAppsPanel({
   const [localCatalog, setLocalCatalog] = useState(false);
   const catalog = catalogOpen ?? localCatalog;
   const setCatalog = onCatalogOpenChange ?? setLocalCatalog;
-  const [removing, setRemoving] = useState<AppInstallation | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const seq = useRef(0);
   const navigate = useNavigate();
@@ -107,29 +100,24 @@ export function GlobalAppsPanel({
       : availableDefinitions.find((d) => d.app_id === searchParams.get("add_connector")));
   const close = () => {
     setAdding(null);
+    void reload();
     if (embedded) setLocalEditingID("");
     else void navigate("/connectors");
   };
-  async function mutate(operation: () => Promise<unknown>) {
-    setBusy(true);
-    setError(null);
-    try {
-      await operation();
-      await reload();
-      return true;
-    } catch (e) {
-      setError(e);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
   const query = search.trim().toLocaleLowerCase();
   const matches = (name: string, description: string) =>
     !query || `${name} ${description}`.toLocaleLowerCase().includes(query);
   const describe = (item: AppInstallation) => {
     const entry = definitions.find((candidate) => candidate.app_id === item.app_id);
     return entry ? appDescription(entry, t) : item.config.url || item.config.command || appName(item.app_id, t);
+  };
+  const description = (item: AppInstallation) => {
+    const operationInProgress =
+      item.status === "connecting" ||
+      item.status === "applying" ||
+      item.operation?.status === "running" ||
+      item.operation?.status === "pending";
+    return operationInProgress ? appStatus(item, t) : item.last_error ? appConnectionError(item, t) : describe(item);
   };
   const filteredItems = items.filter((item) =>
     matches(item.name, `${appName(item.app_id, t)} ${describe(item)} ${item.config.url || item.config.command || ""}`),
@@ -171,24 +159,26 @@ export function GlobalAppsPanel({
         matches(appName("feishu", t), t("feishuCLIIntro")) ? (
           <button
             type="button"
-            className={styles.connectorCard}
+            className={`${styles.connectorCard} ${styles.connectorOpen}`}
             onClick={() => setAdding(definitions.find((d) => d.app_id === "feishu") ?? null)}
           >
             <span className={styles.connectorIcon}>
               <AppIcon appID="feishu" />
             </span>
             <span className={styles.connectorCopy}>
-              <strong>{appName("feishu", t)}</strong>
+              <span className={styles.connectorTitle}>{appName("feishu", t)}</span>
               <span className={styles.connectorDescription}>{t("feishuCLIIntro")}</span>
             </span>
             <span className={styles.status}>{t("appStatusNeedsConfiguration")}</span>
           </button>
         ) : null}
-        {filteredItems.map((app) => (
-          <article key={app.installation_id} className={`${styles.connectorCard} ${styles.resourceConnectorCard}`}>
+        {filteredItems.map((app) => {
+          const cardDescription = description(app);
+          return (
             <button
+              key={app.installation_id}
               type="button"
-              className={styles.resourceConnectorOpen}
+              className={`${styles.connectorCard} ${styles.resourceConnectorCard}`}
               onClick={() =>
                 embedded
                   ? setLocalEditingID(app.installation_id)
@@ -202,54 +192,27 @@ export function GlobalAppsPanel({
                 <span className={styles.connectorTitle} title={app.name}>
                   {app.name}
                 </span>
-                <span
-                  className={styles.connectorDescription}
-                  title={app.last_error ? appConnectionError(app, t) : describe(app)}
-                >
-                  {app.last_error ? appConnectionError(app, t) : describe(app)}
+                <span className={styles.connectorDescription} title={cardDescription}>
+                  {cardDescription}
                 </span>
               </span>
               <span className={styles.status} data-status={app.enabled ? app.status : "disabled"}>
                 {appStatus(app, t)}
               </span>
             </button>
-            <DropdownMenuRoot>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="tertiaryGray" aria-label={t("connectorsActions", { name: app.name })}>
-                  <MoreHorizontal size={16} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem
-                  onSelect={() =>
-                    embedded
-                      ? setLocalEditingID(app.installation_id)
-                      : void navigate(`/connectors/${encodeURIComponent(app.installation_id)}`)
-                  }
-                >
-                  {t("appSettings")}
-                </DropdownMenuItem>
-                {app.kind !== "cli" ? (
-                  <>
-                    <DropdownMenuItem
-                      disabled={busy}
-                      onSelect={() =>
-                        void mutate(() => updateAppResource(app.installation_id, { enabled: !app.enabled }))
-                      }
-                    >
-                      {t(app.enabled ? "appDisable" : "appEnable")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem danger disabled={busy} onSelect={() => setRemoving(app)}>
-                      {t("appRemove")}
-                    </DropdownMenuItem>
-                  </>
-                ) : null}
-              </DropdownMenuContent>
-            </DropdownMenuRoot>
-          </article>
-        ))}
+          );
+        })}
       </div>
-      {resourceId && loaded && !editing ? <p className="form-error">{t("appNotFound")}</p> : null}
+      {resourceId && loaded && !editing ? (
+        <DismissibleAlert
+          className={`${styles.cliError} ${styles.resourceError}`}
+          messageKey={t("appNotFound")}
+          closeLabel={t("close")}
+        >
+          <CircleAlert size={16} aria-hidden="true" />
+          <span role="alert">{t("appNotFound")}</span>
+        </DismissibleAlert>
+      ) : null}
       <DialogRoot open={catalog} onOpenChange={setCatalog}>
         <DialogContent className={styles.catalogDialog}>
           <DialogHeader>
@@ -337,50 +300,6 @@ export function GlobalAppsPanel({
           }}
         />
       ) : null}
-      <DialogRoot
-        open={!!removing}
-        onOpenChange={(open) => {
-          if (!open) setRemoving(null);
-        }}
-      >
-        <DialogContent className={styles.catalogDialog}>
-          <DialogHeader>
-            <div>
-              <DialogTitle>{t("appRemoveConfirmTitle", { name: removing?.name || "" })}</DialogTitle>
-              <DialogDescription>{t("appDeleteResourceDescription")}</DialogDescription>
-            </div>
-            <DialogCloseButton label={t("close")} variant="tertiaryGray" size="sm" iconOnly />
-          </DialogHeader>
-          <DialogBody>
-            <p>{t("appResourceUsers", { count: removing?.bindings?.length || 0 })}</p>
-            <ul>
-              {removing?.bindings?.map((b) => (
-                <li key={b.installation_id}>{b.agent_name || b.agent_id}</li>
-              ))}
-            </ul>
-          </DialogBody>
-          <DialogFooter>
-            <Button disabled={busy} onClick={() => setRemoving(null)}>
-              {t("cancel")}
-            </Button>
-            <Button
-              variant="danger"
-              disabled={busy}
-              onClick={() => {
-                if (removing)
-                  void mutate(() => deleteAppResource(removing.installation_id)).then((ok) => {
-                    if (ok) {
-                      setRemoving(null);
-                      close();
-                    }
-                  });
-              }}
-            >
-              {t("appRemove")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </DialogRoot>
     </section>
   );
 }

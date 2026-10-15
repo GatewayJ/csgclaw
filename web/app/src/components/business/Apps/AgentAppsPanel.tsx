@@ -117,31 +117,42 @@ export function AgentAppsPanel({
         </p>
       ) : null}
       <div className={styles.agentGrid}>
-        <article className={styles.connectorCard}>
+        <article
+          className={`${styles.connectorCard} ${feishu ? styles.connectorOpen : ""}`}
+          role={feishu ? "button" : undefined}
+          tabIndex={feishu ? 0 : undefined}
+          onClick={() => feishu && onSelect(feishu.installation_id)}
+          onKeyDown={(event) => {
+            if (!feishu || (event.key !== "Enter" && event.key !== " ")) return;
+            event.preventDefault();
+            onSelect(feishu.installation_id);
+          }}
+        >
           <span className={styles.connectorIcon}>
             <AppIcon appID="feishu" />
           </span>
           <span className={styles.connectorCopy}>
-            <strong>{appName("feishu", t)}</strong>
+            <span className={styles.connectorTitle}>{appName("feishu", t)}</span>
             <span className={styles.connectorDescription}>
               {!cliSupported ? t("feishuCLIUnsupported") : feishu ? appStatus(feishu, t) : t("feishuCLIWorkerHint")}
             </span>
-            {feishu ? (
-              <Button size="sm" variant="tertiaryGray" onClick={() => onSelect(feishu.installation_id)}>
-                {t("appSettings")}
-              </Button>
-            ) : null}
           </span>
-          <Switch
-            aria-label={t("feishuCLIWorkerSwitch")}
-            checked={Boolean(feishu?.enabled)}
-            disabled={!cliSupported || Boolean(controller.busyID) || feishu?.status === "applying"}
-            onCheckedChange={(enabled) =>
-              void run(() =>
-                feishu ? controller.update(feishu.installation_id, { enabled }) : controller.bindFeishu(),
-              )
-            }
-          />
+          <span
+            className={styles.connectorToggle}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <Switch
+              aria-label={t("feishuCLIWorkerSwitch")}
+              checked={Boolean(feishu?.enabled)}
+              disabled={!cliSupported || Boolean(controller.busyID) || feishu?.status === "applying"}
+              onCheckedChange={(enabled) =>
+                void run(() =>
+                  feishu ? controller.update(feishu.installation_id, { enabled }) : controller.bindFeishu(),
+                )
+              }
+            />
+          </span>
         </article>
         {controller.items
           .filter((app) => app.kind !== "cli" || app.app_id !== "feishu")
