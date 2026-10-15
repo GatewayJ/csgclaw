@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CircleAlert, Plus } from "lucide-react";
 import {
   createAppResource,
@@ -57,25 +57,33 @@ export function GlobalAppsPanel({
   const [loaded, setLoaded] = useState(false);
   const seq = useRef(0);
   const navigate = useNavigate();
+  const location = useLocation();
   const [localEditingID, setLocalEditingID] = useState("");
   useEffect(() => {
     onCountChange?.(items.length);
   }, [items.length, onCountChange]);
   const { resourceId } = useParams();
   const [searchParams] = useSearchParams();
-  const reload = useCallback(async (signal?: AbortSignal) => {
-    const request = ++seq.current;
-    try {
-      const [resources, catalog] = await Promise.all([fetchAppResources(signal), fetchAppDefinitions(signal)]);
-      if (!signal?.aborted && request === seq.current) {
-        setItems(resources);
-        setDefinitions(catalog);
-        setLoaded(true);
+  const reload = useCallback(
+    async (signal?: AbortSignal) => {
+      const request = ++seq.current;
+      try {
+        const [resources, catalog] = await Promise.all([fetchAppResources(signal), fetchAppDefinitions(signal)]);
+        if (!signal?.aborted && request === seq.current) {
+          setItems(resources);
+          setDefinitions(catalog);
+          setLoaded(true);
+          setError(null);
+          if (!embedded && resourceId && !resources.some((item) => item.installation_id === resourceId)) {
+            void navigate("/connectors", { replace: true, state: { missingConnectorId: resourceId } });
+          }
+        }
+      } catch (e) {
+        if (!signal?.aborted && request === seq.current) setError(e);
       }
-    } catch (e) {
-      if (!signal?.aborted) setError(e);
-    }
-  }, []);
+    },
+    [embedded, navigate, resourceId],
+  );
   useEffect(() => {
     const abort = new AbortController();
     void reload(abort.signal);
@@ -84,6 +92,7 @@ export function GlobalAppsPanel({
     }, 15000);
     return () => {
       abort.abort();
+      seq.current += 1;
       clearInterval(interval);
     };
   }, [reload]);
@@ -203,10 +212,10 @@ export function GlobalAppsPanel({
           );
         })}
       </div>
-      {resourceId && loaded && !editing ? (
+      {!embedded && location.state?.missingConnectorId ? (
         <DismissibleAlert
           className={`${styles.cliError} ${styles.resourceError}`}
-          messageKey={t("appNotFound")}
+          messageKey={location.state.missingConnectorId}
           closeLabel={t("close")}
         >
           <CircleAlert size={16} aria-hidden="true" />
