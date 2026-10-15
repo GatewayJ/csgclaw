@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "@/shared/i18n";
@@ -58,7 +58,7 @@ describe("Feishu CLI authorization", () => {
     ["user_authorization", true, false],
     ["applying", true, true],
   ] as const)(
-    "shows identities and retains cancellation during %s (user=%s, authorized=%s)",
+    "shows authorization progress and retains cancellation during %s (user=%s, authorized=%s)",
     async (stage, user, authorized) => {
       const progress: AppInstallation = {
         ...resource,
@@ -76,15 +76,42 @@ describe("Feishu CLI authorization", () => {
       vi.mocked(fetchAppResource).mockResolvedValue(progress);
       vi.mocked(cancelCLIOperation).mockResolvedValue(progress.operation!);
       render(<CLIDialog definition={definition} existing={resource} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
-      expect(await screen.findByText(`Test bot · ${t("feishuCLIAvailable")}`)).toBeInTheDocument();
-      expect(
-        screen.getByText(`Test user · ${t(user ? "feishuCLIAvailable" : "feishuCLIUnauthorized")}`),
-      ).toBeInTheDocument();
+      const progressPanel = await screen.findByLabelText("Authorization progress");
+      expect(within(progressPanel).getByText("Test bot")).toBeInTheDocument();
+      expect(within(progressPanel).getByText("Test user")).toBeInTheDocument();
+      expect(within(progressPanel).getAllByText("Completed")).toHaveLength(user ? 2 : 1);
+      if (!user) expect(within(progressPanel).getByText("In progress")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
       await userEvent.setup().click(screen.getByRole("button", { name: "Cancel" }));
       expect(cancelCLIOperation).toHaveBeenCalledWith("global-cli", "session-1");
     },
   );
+  it("makes the bot the current step before personal authorization begins", async () => {
+    const appAuthorization: AppInstallation = {
+      ...resource,
+      operation: {
+        ...resource.operation!,
+        stage: "app_authorization",
+        authorization_url: "https://feishu.example/app",
+      },
+      auth_status: {
+        appId: "cli_test",
+        defaultAs: "auto",
+        identities: {
+          bot: { status: "pending", available: false },
+          user: { status: "pending", available: false },
+        },
+      },
+    };
+    vi.mocked(fetchAppResource).mockResolvedValue(appAuthorization);
+    render(
+      <CLIDialog definition={definition} existing={appAuthorization} t={t} onClose={vi.fn()} onChanged={vi.fn()} />,
+    );
+
+    const progressPanel = await screen.findByLabelText("Authorization progress");
+    expect(within(progressPanel).getByText("In progress")).toBeInTheDocument();
+    expect(within(progressPanel).getByText("Authorization required")).toBeInTheDocument();
+  });
   it("disconnects both identities through one action", async () => {
     const connected: AppInstallation = {
       ...resource,
@@ -140,7 +167,7 @@ describe("Feishu CLI authorization", () => {
     vi.mocked(fetchAppResource).mockResolvedValue(resource);
     const close = vi.fn();
     render(<CLIDialog definition={definition} existing={resource} t={t} onClose={close} onChanged={vi.fn()} />);
-    expect(await screen.findByRole("link", { name: "Open Feishu authorization" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Authorize account" })).toHaveAttribute(
       "href",
       "https://open.feishu.cn/device",
     );
@@ -159,7 +186,7 @@ describe("Feishu CLI authorization", () => {
     render(<CLIDialog definition={definition} existing={resource} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
     await userEvent.setup().click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(cancelCLIOperation).toHaveBeenCalledWith("global-cli", "session-1"));
-    expect(screen.queryByRole("link", { name: "Open Feishu authorization" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Authorize account" })).not.toBeInTheDocument();
   });
   it("shows migration failures and offers reconnection", async () => {
     const failed = {
@@ -178,6 +205,30 @@ describe("Feishu CLI authorization", () => {
     render(<CLIDialog definition={definition} existing={failed} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Historical configuration migration needs repair.");
     expect(screen.getByRole("button", { name: "Connect Feishu" })).toBeEnabled();
+  });
+  it("hides an expired authorization error after a new authorization starts", async () => {
+    const expired: AppInstallation = {
+      ...resource,
+      authorized: false,
+      status: "authorization_required",
+      last_error_code: "authorization_expired",
+      operation: undefined,
+    };
+    vi.mocked(fetchAppResource).mockResolvedValue(expired);
+    vi.mocked(startCLIOperation).mockResolvedValue(resource.operation!);
+    render(<CLIDialog definition={definition} existing={expired} t={t} onClose={vi.fn()} onChanged={vi.fn()} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Authorization expired. Authorize again; the bot configuration is preserved.",
+    );
+    await userEvent
+      .setup()
+      .click(within(screen.getByRole("alert").parentElement!).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Connect Feishu" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Authorize account" })).toBeInTheDocument();
   });
 });
 
