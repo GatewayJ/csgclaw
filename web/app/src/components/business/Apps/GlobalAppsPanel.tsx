@@ -24,6 +24,7 @@ import {
 import { localizeAPIError } from "@/shared/i18n";
 import { errorMessage } from "@/api/client";
 import type { TranslateFn } from "@/models/conversations";
+import { pathForPane } from "@/models/routing";
 import { CLIDialog } from "./CLIDialog";
 import { AppSettingsDialog } from "./AppSettingsDialog";
 import { AppIcon } from "./AgentAppsPanel";
@@ -74,15 +75,18 @@ export function GlobalAppsPanel({
           setDefinitions(catalog);
           setLoaded(true);
           setError(null);
-          if (!embedded && resourceId && !resources.some((item) => item.installation_id === resourceId)) {
-            void navigate("/connectors", { replace: true, state: { missingConnectorId: resourceId } });
+          if (resourceId && !resources.some((item) => item.installation_id === resourceId)) {
+            void navigate(pathForPane({ type: "apps", id: "" }), {
+              replace: true,
+              state: { missingConnectorId: resourceId },
+            });
           }
         }
       } catch (e) {
         if (!signal?.aborted && request === seq.current) setError(e);
       }
     },
-    [embedded, navigate, resourceId],
+    [navigate, resourceId],
   );
   useEffect(() => {
     const abort = new AbortController();
@@ -96,7 +100,7 @@ export function GlobalAppsPanel({
       clearInterval(interval);
     };
   }, [reload]);
-  const editing = items.find((item) => item.installation_id === (embedded ? localEditingID : resourceId)) || null;
+  const editing = items.find((item) => item.installation_id === (resourceId ?? localEditingID)) || null;
   const availableDefinitions = definitions.filter(
     (definition) =>
       definition.app_id !== "llm-wiki" &&
@@ -109,9 +113,9 @@ export function GlobalAppsPanel({
       : availableDefinitions.find((d) => d.app_id === searchParams.get("add_connector")));
   const close = () => {
     setAdding(null);
+    setLocalEditingID("");
     void reload();
-    if (embedded) setLocalEditingID("");
-    else void navigate("/connectors");
+    if (resourceId || !embedded) void navigate(pathForPane({ type: "apps", id: "" }));
   };
   const query = search.trim().toLocaleLowerCase();
   const matches = (name: string, description: string) =>
@@ -191,7 +195,7 @@ export function GlobalAppsPanel({
               onClick={() =>
                 embedded
                   ? setLocalEditingID(app.installation_id)
-                  : void navigate(`/connectors/${encodeURIComponent(app.installation_id)}`)
+                  : void navigate(pathForPane({ type: "apps", id: app.installation_id }))
               }
             >
               <span className={styles.connectorIcon}>
@@ -212,7 +216,7 @@ export function GlobalAppsPanel({
           );
         })}
       </div>
-      {!embedded && location.state?.missingConnectorId ? (
+      {location.state?.missingConnectorId ? (
         <DismissibleAlert
           className={`${styles.cliError} ${styles.resourceError}`}
           messageKey={location.state.missingConnectorId}

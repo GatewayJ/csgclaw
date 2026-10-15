@@ -222,10 +222,10 @@ describe("Feishu CLI authorization", () => {
           await vi.advanceTimersByTimeAsync(100);
         });
       }
+      await waitFor(() => expect(changed).toHaveBeenCalledOnce());
       expect(screen.queryByText("In progress")).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Authorize account" })).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Connect Feishu" })).toBeEnabled();
-      expect(changed).toHaveBeenCalledOnce();
     },
   );
 
