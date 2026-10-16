@@ -5,7 +5,6 @@ import { ResourceLoadMore } from "../ResourceLoadMore";
 import type { ResourceContinuation } from "@/hooks/workspace/useInfiniteAgentResources";
 import { mcpManagedKnowledgeBaseSource } from "@/models/mcp";
 import {
-  AlertCircle,
   Check,
   CheckCircle2,
   CircleDashed,

@@ -49,23 +49,23 @@ type gateway struct {
 
 type Service struct {
 	credentialGeneration uint64
-	cliMigration     *cliMigration
-	cliWorkMu        sync.Mutex
-	cliCancel        context.CancelFunc
-	cliCancelSession string
-	cliWake          chan struct{}
-	cliDrain         chan chan struct{}
-	cliWG            sync.WaitGroup
-	mu               sync.Mutex
-	path             string
-	dataRoot         string
-	ephemeralData    bool
-	options          Options
-	packages         map[string]pluginPackage
-	entries          map[string]*entry
-	gateways         map[string]*gateway
-	ctx              context.Context
-	cancel           context.CancelFunc
+	cliMigration         *cliMigration
+	cliWorkMu            sync.Mutex
+	cliCancel            context.CancelFunc
+	cliCancelSession     string
+	cliWake              chan struct{}
+	cliDrain             chan chan struct{}
+	cliWG                sync.WaitGroup
+	mu                   sync.Mutex
+	path                 string
+	dataRoot             string
+	ephemeralData        bool
+	options              Options
+	packages             map[string]pluginPackage
+	entries              map[string]*entry
+	gateways             map[string]*gateway
+	ctx                  context.Context
+	cancel               context.CancelFunc
 }
 
 func NewService(statePath string, options Options) (*Service, error) {

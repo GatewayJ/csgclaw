@@ -505,9 +505,13 @@ func (s *Service) executeCLI(id string) {
 		settled := false
 		migration := s.migrationSnapshot()
 		migrationReady := migration == nil || migration.ResourceID != id || migration.Status == "completed"
-		if migrationReady && latest.CLI != nil && latest.CLI.Recovery == nil && !latest.CLI.Operation.Committed {
+		if migrationReady && latest.CLI != nil && latest.CLI.Recovery == nil && (!latest.CLI.Operation.Committed || cancelled) {
 			recovery, stop := context.WithTimeout(s.ctx, 30*time.Second)
-			restoreErr := s.recoverCLIStatus(recovery, id)
+			var restoreErr error
+			if !latest.CLI.Operation.Committed {
+				restoreErr = s.recoverCLIStatus(recovery, id)
+			}
+			// Committed authorization remains authoritative while cancellation finishes worker updates.
 			if restoreErr == nil {
 				restoreErr = s.applyCLIWorkers(recovery, id)
 			}

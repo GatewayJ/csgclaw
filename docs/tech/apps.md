@@ -251,6 +251,8 @@ policy, status checks, logout, and configuration removal through these fields.
 and DSH receive the generic CLI runtime extension. Failed or cancelled commands
 are followed by a status check, preserving completed CLI changes and reporting
 actual authorization. Historical channel migration retains its import support.
+Cancellation completes worker updates for committed authorization state and honors
+each worker's current desired state. A failed recovery remains pending repair.
 The catalog's version is the connector package version; `package_version` on a CLI
 resource reports the installed executable version.
 

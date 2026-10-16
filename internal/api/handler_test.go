@@ -8639,6 +8639,10 @@ func TestPublishParticipantEventStartsStoppedWorker(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for missed worker start")
 	}
+	// Runtime Start returns before the lifecycle operation persists the running state.
+	if err := svc.WithAgentLifecycle(t.Context(), "u-worker", func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestHandleBotEventsRequeuesWhenSSEWriteFails(t *testing.T) {

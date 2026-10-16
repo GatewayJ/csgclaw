@@ -18,11 +18,12 @@ import (
 )
 
 type cliRuntimeStub struct {
-	mu         sync.Mutex
-	running    map[string]bool
-	configured map[string]*CLIProjection
-	fail       string
-	events     []string
+	mu          sync.Mutex
+	running     map[string]bool
+	configured  map[string]*CLIProjection
+	fail        string
+	events      []string
+	beforeApply func(context.Context) error
 }
 
 func (r *cliRuntimeStub) State(_ context.Context, id, kind string) (bool, error) {
@@ -38,8 +39,14 @@ func (r *cliRuntimeStub) Update(ctx context.Context, id string, resume bool, fn 
 		return errors.New("injected stop failure")
 	}
 	r.running[id] = false
+	beforeApply := r.beforeApply
 	r.mu.Unlock()
 	if fn != nil {
+		if beforeApply != nil {
+			if err := beforeApply(ctx); err != nil {
+				return err
+			}
+		}
 		if err := fn(ctx); err != nil {
 			return err
 		}
@@ -55,6 +62,7 @@ func (r *cliRuntimeStub) Update(ctx context.Context, id string, resume bool, fn 
 	}
 	return nil
 }
+
 func (r *cliRuntimeStub) Configure(_ context.Context, id, resourceID string, p *CLIProjection) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -570,5 +578,83 @@ func TestFeishuCLILoginCompletesFailedDisable(t *testing.T) {
 	defer f.runtime.mu.Unlock()
 	if !f.runtime.running["worker"] || f.runtime.configured["worker"] != nil {
 		t.Fatalf("running=%v configured=%v", f.runtime.running, f.runtime.configured)
+	}
+}
+
+func TestCLICancelAfterAuthorizationCommitRestoresWorkers(t *testing.T) {
+	for _, scenario := range []struct{ action, failure string }{
+		{action: "connect"},
+		{action: "disconnect"},
+		{action: "connect", failure: "configure:running"},
+	} {
+		t.Run(scenario.action+"/"+scenario.failure, func(t *testing.T) {
+			s, f, id := newCLIFixture(t)
+			for _, worker := range []string{"running", "stopped"} {
+				binding, err := s.Bind(t.Context(), worker, BindRequest{ResourceID: id})
+				if err != nil {
+					t.Fatal(err)
+				}
+				waitCLIBinding(t, s, binding.InstallationID, worker)
+			}
+			if got := waitCLIOperation(t, s, id, startCLITest(t, s, id, "connect", "initial")); got.Status != "completed" {
+				t.Fatalf("initial operation=%+v", got)
+			}
+			applying := make(chan struct{})
+			var once sync.Once
+			f.runtime.mu.Lock()
+			f.runtime.running["running"] = true
+			f.runtime.fail = scenario.failure
+			f.runtime.beforeApply = func(ctx context.Context) (err error) {
+				once.Do(func() {
+					close(applying)
+					<-ctx.Done()
+					err = ctx.Err()
+				})
+				return err
+			}
+			f.runtime.mu.Unlock()
+			op := startCLITest(t, s, id, scenario.action, "cancel-applying")
+			select {
+			case <-applying:
+			case <-time.After(3 * time.Second):
+				t.Fatal("worker configuration did not start")
+			}
+			if _, err := s.CancelCLI(t.Context(), id, op.SessionID); err != nil {
+				t.Fatal(err)
+			}
+			got := waitCLIOperation(t, s, id, op)
+			if scenario.failure != "" {
+				if got.Status != "failed" || got.ErrorCode != "cleanup_pending" {
+					t.Fatalf("failed recovery=%+v", got)
+				}
+				if err := s.CheckCLIReady("running"); err == nil {
+					t.Fatal("worker startup was allowed after failed recovery")
+				}
+				f.runtime.mu.Lock()
+				defer f.runtime.mu.Unlock()
+				if f.runtime.running["running"] {
+					t.Fatal("worker resumed after failed recovery")
+				}
+				return
+			}
+			if got.Status != "cancelled" || got.ErrorCode != "" {
+				t.Fatalf("cancelled operation=%+v", got)
+			}
+			for _, worker := range []string{"running", "stopped"} {
+				if err := s.CheckCLIReady(worker); err != nil {
+					t.Fatalf("worker %s cannot start: %v", worker, err)
+				}
+			}
+			f.runtime.mu.Lock()
+			defer f.runtime.mu.Unlock()
+			if !f.runtime.running["running"] || f.runtime.running["stopped"] {
+				t.Fatalf("worker states=%v", f.runtime.running)
+			}
+			for _, worker := range []string{"running", "stopped"} {
+				if configured := f.runtime.configured[worker] != nil; configured != (scenario.action == "connect") {
+					t.Fatalf("worker %s configured=%v after %s", worker, configured, scenario.action)
+				}
+			}
+		})
 	}
 }

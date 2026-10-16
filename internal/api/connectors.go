@@ -498,7 +498,12 @@ func (h *Handler) handleConnectorResources(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		req.Connect = false
-		if req.AppID == "feishu" && req.Kind != apps.KindMCP {
+		definition, definitionErr := h.apps.Definition(req.AppID)
+		if definitionErr != nil {
+			writeConnectorError(w, definitionErr)
+			return
+		}
+		if definition.Kind == apps.KindCLI && req.Kind != apps.KindMCP {
 			result, err = h.apps.Create(r.Context(), "", req)
 			status = http.StatusCreated
 			break

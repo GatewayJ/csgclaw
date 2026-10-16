@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAgentResourceLists } from "./useAgentResourceLists";
 import { useAgentResourceEnablement } from "./useAgentResourceEnablement";
 import { useBlocker } from "react-router-dom";
-import { apiErrorBillingURL, apiErrorCode, errorMessage as apiErrorMessage, type ApiError } from "@/api/client";
+import { apiErrorBillingURL, apiErrorCode, errorMessage as apiErrorMessage } from "@/api/client";
 import { loginCLIProxyProviderRequest } from "@/api/cliproxy";
 import {
   batchAddAgentMCPServersRequest,

@@ -2,12 +2,57 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"testing/fstest"
 
 	"csgclaw/internal/agentengine"
 	agent "csgclaw/internal/agentengine/agents"
+	"csgclaw/internal/apps"
+	"csgclaw/internal/connectorcli"
 	agentruntime "csgclaw/internal/runtime"
 )
+
+func TestCreateDeclarativeCLIResourceAPI(t *testing.T) {
+	spec := connectorcli.Spec{
+		Install: connectorcli.InstallSpec{
+			Version: "1.0.0", Executable: "fixture", VersionArgs: []string{"--version"},
+			Releases: map[string]connectorcli.Archive{"test": {URL: "https://example.com/fixture.tar.gz", SHA256: strings.Repeat("0", 64)}},
+		},
+		Status: []string{"status"}, StatusMatch: "ready",
+	}
+	data, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := apps.NewService("", apps.Options{Packages: fstest.MapFS{
+		"fixture/plugin.json": {Data: []byte(`{"name":"fixture","version":"1.0.0","kind":"cli","cli":"./cli.json","interface":{"displayName":"Fixture"}}`)},
+		"fixture/cli.json":    {Data: data},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	h := &Handler{apps: service}
+	for _, kind := range []string{"", "cli"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/connectors/resources", strings.NewReader(`{"app_id":"fixture","kind":"`+kind+`"}`))
+		response := httptest.NewRecorder()
+		h.handleConnectorResources(response, req)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("kind=%q: status=%d body=%s", kind, response.Code, response.Body)
+		}
+		var resource apps.Installation
+		if err := json.Unmarshal(response.Body.Bytes(), &resource); err != nil {
+			t.Fatal(err)
+		}
+		if resource.Kind != apps.KindCLI || resource.AppID != "fixture" || resource.Status != "needs_configuration" {
+			t.Fatalf("resource=%+v", resource)
+		}
+	}
+}
 
 func TestConnectorCLIVerifyDisabledConfiguration(t *testing.T) {
 	for _, status := range []string{"stopped", "running"} {

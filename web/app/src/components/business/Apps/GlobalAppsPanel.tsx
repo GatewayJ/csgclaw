@@ -258,7 +258,14 @@ export function GlobalAppsPanel({
         </DialogContent>
       </DialogRoot>
       {definition && (editing?.kind === "cli" || (!editing && definition.kind === "cli")) ? (
-        <CLIDialog definition={definition} existing={editing} t={t} onClose={close} onChanged={reload} />
+        <CLIDialog
+          key={editing?.installation_id || definition.app_id}
+          definition={definition}
+          existing={editing}
+          t={t}
+          onClose={close}
+          onChanged={reload}
+        />
       ) : definition ? (
         <AppSettingsDialog
           key={editing?.installation_id || definition.app_id}

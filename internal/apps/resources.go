@@ -136,10 +136,10 @@ func (s *Service) loadResources(stored map[string]record) error {
 }
 
 func (s *Service) viewLocked(e *entry) Installation {
-	item := view(e)
 	if e.record.Kind == KindCLI {
 		return s.cliViewLocked(e)
 	}
+	item := view(e)
 	if e.record.AgentID != "" {
 		if e.record.CLIApply != nil && e.record.CLIApply.Pending {
 			item.Status = "applying"

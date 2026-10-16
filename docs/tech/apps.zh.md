@@ -146,6 +146,8 @@ CLI 安装支持按平台声明原生程序的下载地址、SHA256 和版本检
 
 完整字段与示例参见 [Connector packages](apps.md#connector-packages)。
 
+取消操作会完成已经保存的授权状态对应的 worker 配置更新，并按照当前启停设置恢复 worker。恢复失败时显示待修复状态。
+
 ## 安装默认值与设置表单
 
 新增 App 表单读取目录中 `config_schema.properties.*.default` 声明的非秘密连接默认值。
