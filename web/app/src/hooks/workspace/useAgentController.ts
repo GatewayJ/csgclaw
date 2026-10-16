@@ -2321,6 +2321,9 @@ export function useAgentController({
             ...current,
             [agentID]: nextPending,
           }));
+          // Registration progress can lag behind a binding completed in another window.
+          // Keep the channel view synchronized without discarding an active reconnect.
+          await refreshAgentStateRef.current(agentID);
           if (options.showPendingNotice) {
             showAgentPageNotice(t("feishuConnectPending"), "warning", 5000, agentID);
           }
@@ -2357,6 +2360,9 @@ export function useAgentController({
             return next;
           });
         }
+        // The server may have saved the binding before the response was lost,
+        // or another client may already have consumed the registration.
+        await refreshAgentStateRef.current(agentID);
         if (!background) {
           setAgentPageSaveError(errorMessage(err, t("feishuConnectFailed")));
         }
