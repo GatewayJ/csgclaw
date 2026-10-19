@@ -1,13 +1,13 @@
 import { mcpOriginLabel as originLabel } from "./resourceOrigins";
 import { useEffect, useMemo, useState } from "react";
-import { LoaderCircle, Plus } from "lucide-react";
+import { ChevronDown, LoaderCircle, Plus } from "lucide-react";
 import { GlobalAppsPanel } from "@/components/business/Apps";
-import { Button } from "@/components/ui";
+import { Button, DropdownMenuContent, DropdownMenuItem, DropdownMenuRoot, DropdownMenuTrigger } from "@/components/ui";
 import { ResourceList, ResourceListCard } from "@/components/business/ResourceListCard";
 import { SidebarMcpIcon } from "@/components/ui/Icons";
 import { useWorkspaceControllerContext } from "@/hooks/workspace";
 import { isAuthenticated } from "@/models/auth";
-import { mcpServerDisplayName } from "@/models/mcp";
+import { isRemoteMCPInstalled, mcpServerDisplayName } from "@/models/mcp";
 import {
   MCPServerCreateDialog,
   ResourceFeaturedIcon,
@@ -41,11 +41,10 @@ export function ConnectorsSection() {
     setRemoteEnabled?.(tab === "market" && authed);
   }, [authed, setRemoteEnabled, tab]);
 
-  async function installAndReveal(item: NonNullable<typeof hub>["remoteMCPServers"][number]) {
+  async function installFromMarket(item: NonNullable<typeof hub>["remoteMCPServers"][number]) {
     const installed = await detail?.onInstallRemoteMCP?.(item);
     if (installed) {
       setTarget(null);
-      setTab("installed");
     }
   }
 
@@ -69,10 +68,26 @@ export function ConnectorsSection() {
       }
       description={t("iaSettingsCardConnectorsHint")}
       actions={
-        <Button variant="primary" size="md" onClick={() => setCreateOpen(true)}>
-          <Plus size={14} strokeWidth={2.2} aria-hidden="true" />
-          {t("resourcesMCPCreateTitle")}
-        </Button>
+        <DropdownMenuRoot>
+          <DropdownMenuTrigger asChild>
+            <Button variant="primary" size="md">
+              <Plus size={14} strokeWidth={2.2} aria-hidden="true" />
+              {t("connectorsAdd")}
+              <ChevronDown size={14} aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem onSelect={() => setCreateOpen(true)}>{t("resourcesMCPCreateTitle")}</DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                setTab("installed");
+                setAppCatalogOpen(true);
+              }}
+            >
+              {t("appAdd")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenuRoot>
       }
     >
       <ResourceFilterTabs label={t("iaSettingsCardConnectors")} tabs={tabs} value={tab} onChange={setTab} />
@@ -89,10 +104,6 @@ export function ConnectorsSection() {
             <h3 className={styles.groupTitle}>
               {t("iaConnectorsGroupApps")}
               <span className={styles.countBadge}>{appCount}</span>
-              <Button className="ml-auto" variant="tertiaryGray" size="sm" onClick={() => setAppCatalogOpen(true)}>
-                <Plus size={14} />
-                {t("appAdd")}
-              </Button>
             </h3>
             <GlobalAppsPanel
               embedded
@@ -162,7 +173,7 @@ export function ConnectorsSection() {
             authed={authed}
             hub={hub}
             installedServers={servers}
-            onInstall={(item) => void installAndReveal(item)}
+            onInstall={(item) => void installFromMarket(item)}
             onLogin={() => controller.sidebarProps?.onRequireOpenCSGAuthentication?.()}
             onOpenServer={(server) => setTarget({ variant: "market", server })}
             remoteServers={remoteServers}
@@ -204,9 +215,10 @@ export function ConnectorsSection() {
         market={
           target?.variant === "market"
             ? {
-                installed: servers.some((server) => server.name === target.server.id),
+                installed: isRemoteMCPInstalled(servers, target.server),
                 busy: hub?.remoteMCPInstallBusy === target.server.id,
-                onAction: () => void installAndReveal(target.server),
+                error: hub?.remoteMCPInstallFailure?.id === target.server.id ? hub.remoteMCPInstallFailure.message : "",
+                onAction: () => void installFromMarket(target.server),
               }
             : undefined
         }

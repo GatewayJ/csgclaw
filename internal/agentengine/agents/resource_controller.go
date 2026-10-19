@@ -877,6 +877,7 @@ func modelToService(spec contract.ModelSpec) AgentProfile {
 		Description:     strings.TrimSpace(spec.Description),
 		Provider:        strings.TrimSpace(spec.Provider),
 		ModelProviderID: strings.TrimSpace(spec.ProviderID),
+		APIProtocol:     spec.APIProtocol,
 		BaseURL:         strings.TrimSpace(spec.BaseURL),
 		APIKey:          spec.APIKey,
 		Headers:         maps.Clone(spec.Headers),
@@ -897,6 +898,7 @@ func modelFromService(profile AgentProfile) contract.ModelSpec {
 		Description:     profile.Description,
 		Provider:        profile.Provider,
 		ProviderID:      profile.ModelProviderID,
+		APIProtocol:     profile.APIProtocol,
 		BaseURL:         profile.BaseURL,
 		APIKey:          profile.APIKey,
 		Headers:         maps.Clone(profile.Headers),
@@ -1088,6 +1090,10 @@ func (f *Controller) convert(selected Agent) (contract.Agent, error) {
 		}
 	}
 	message := ""
+	if err := f.RuntimeConfigurationReady(selected.ID); err != nil {
+		ready = false
+		message = err.Error()
+	}
 	if f.extensions != nil {
 		if err := f.extensions.RuntimeReady(selected.ID); err != nil {
 			ready = false

@@ -823,6 +823,7 @@ describe("AgentProfileModal", () => {
             {
               id: "Agentic/feishu-assistant",
               name: "feishu-assistant",
+              display_name: "飞书助手",
               role: "worker",
               runtime_kind: "openclaw_sandbox",
               description: "Remote OpenClaw template.",
@@ -860,7 +861,9 @@ describe("AgentProfileModal", () => {
     expect(await screen.findByRole("combobox", { name: "Template" })).toHaveTextContent("Codex Worker");
     await userEvent.setup().click(screen.getByRole("combobox", { name: "Template" }));
     expect(screen.queryByRole("option", { name: "OpenClaw Worker" })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "feishu-assistant" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "飞书助手" })).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("option", { name: "飞书助手" }));
+    expect(screen.getByRole("combobox", { name: "Template" })).toHaveTextContent("飞书助手");
   });
 
   it("warns when the selected sandbox runtime is unavailable", () => {
@@ -1503,8 +1506,9 @@ describe("AgentProfileModal", () => {
     expect(screen.getByLabelText("MCP Servers")).toBeInTheDocument();
   });
 
-  it("shows provider logos only in the provider field, not in the model field", () => {
-    const { container } = render(
+  it("shows provider details once in the form and includes them in searchable model choices", async () => {
+    const user = userEvent.setup();
+    render(
       <AgentProfileModal
         t={t}
         agentModalMode="edit"
@@ -1566,14 +1570,13 @@ describe("AgentProfileModal", () => {
       />,
     );
 
-    const fields = container.querySelectorAll(".agent-model-config-grid .field");
-    const providerField = fields[0];
-    const modelField = fields[1];
-    expect(providerField?.querySelector(".model-option-avatar")).not.toBeNull();
-    expect(modelField?.querySelector(".model-option-avatar")).toBeNull();
-    expect(modelField?.querySelector(".model-option-provider")).toBeNull();
-    expect(modelField?.textContent).toContain("MiniMax-M2.5");
-    expect(modelField?.textContent).not.toContain("OpenCSG AIGateway");
+    const provider = screen.getByRole("combobox", { name: "profileModelProvider" });
+    const model = screen.getByRole("combobox", { name: "Model" });
+    expect(provider).toHaveTextContent("OpenCSG AIGateway");
+    expect(model).toHaveTextContent("MiniMax-M2.5");
+    expect(model).not.toHaveTextContent("OpenCSG AIGateway");
+    await user.click(model);
+    expect(screen.getByRole("option", { name: /MiniMax-M2.5.*OpenCSG AIGateway/ })).toBeInTheDocument();
   });
 
   it("filters model choices inside the agent model selector", async () => {
@@ -1642,22 +1645,22 @@ describe("AgentProfileModal", () => {
     );
 
     await user.click(screen.getByRole("combobox", { name: "Model" }));
-    const searchInput = screen.getByRole("searchbox", { name: "Search models" });
+    const searchInput = screen.getByRole("combobox", { name: "Search models" });
     await user.type(searchInput, "qwen");
 
     expect(searchInput).toHaveFocus();
     expect(searchInput).toHaveValue("qwen");
-    expect(screen.getByRole("option", { name: "Qwen3-235B" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "MiniMax-M2.5" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "gpt-5-high" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Qwen3-235B/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /MiniMax-M2.5/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /gpt-5-high/ })).not.toBeInTheDocument();
 
     await user.keyboard("{Backspace}{Backspace}{Backspace}{Backspace}");
 
     expect(searchInput).toHaveFocus();
     expect(searchInput).toHaveValue("");
-    expect(screen.getByRole("option", { name: "MiniMax-M2.5" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Qwen3-235B" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "gpt-5-high" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /MiniMax-M2.5/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Qwen3-235B/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /gpt-5-high/ })).toBeInTheDocument();
   });
 
   it("allows choosing a directory runtime option path", async () => {

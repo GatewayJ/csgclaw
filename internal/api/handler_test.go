@@ -57,7 +57,7 @@ type fakeCompatRuntime struct {
 }
 
 func (f fakeCompatRuntime) RuntimeExtensionDriver(kind string) (agentruntime.ExtensionDriver, bool) {
-	if !supportsAgentLarkCLI(f.kind) || kind != larkextension.Kind {
+	if (f.kind != agent.RuntimeKindCodex && f.kind != agent.RuntimeKindDSH) || kind != larkextension.Kind {
 		return nil, false
 	}
 	return fakeLarkCLIExtensionDriver{runtimeKind: f.Kind()}, true
@@ -68,6 +68,7 @@ type fakeLarkCLIExtensionDriver struct {
 }
 
 var larkCLICommandContext = exec.CommandContext
+var larkCLILookPath = exec.LookPath
 
 func (fakeLarkCLIExtensionDriver) ObserveExtension(ctx context.Context, _ string, _ agentruntime.ExtensionDesired) (agentruntime.ExtensionResult, error) {
 	if _, err := testLarkCLIPath(ctx); err != nil {
@@ -3942,7 +3943,7 @@ func TestWriteHubTemplateErrorUsesStructuredContract(t *testing.T) {
 	writeHubTemplateError(
 		recorder,
 		http.StatusServiceUnavailable,
-		communityInstanceResourceUnavailableCode,
+		"RESOURCE-ERR-1",
 		"The resource is temporarily unavailable.",
 		"alice/reviewer",
 	)
@@ -3960,7 +3961,7 @@ func TestWriteHubTemplateErrorUsesStructuredContract(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Error.Code != communityInstanceResourceUnavailableCode ||
+	if payload.Error.Code != "RESOURCE-ERR-1" ||
 		payload.Error.PublishedTemplateID != "alice/reviewer" {
 		t.Fatalf("error payload = %+v", payload.Error)
 	}
@@ -5776,7 +5777,7 @@ func TestHandleHubTemplatesPublishesAgentSnapshot(t *testing.T) {
 	srv := &Handler{svc: svc, agentEngine: agentengine.New(svc), workspace: svc.Workspace(), agentModels: svc.Models(), agentRuntime: svc}
 	srv.SetHubService(hubSvc)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/hub/templates", strings.NewReader(
-		`{"agent_id":"u-alice","registry":"local","name":"ReviewBot_2","description":"Published review template"}`,
+		`{"agent_id":"u-alice","registry":"local","name":"ReviewBot_2","display_name":"代码审查助手","description":"Published review template","avatar":"avatars/custom.png","deploy":true}`,
 	))
 	rec := httptest.NewRecorder()
 
@@ -5798,6 +5799,12 @@ func TestHandleHubTemplatesPublishesAgentSnapshot(t *testing.T) {
 	if got.Role != hub.TemplateRoleWorker {
 		t.Fatalf("template role = %q, want %q", got.Role, hub.TemplateRoleWorker)
 	}
+	if got.Avatar != "avatars/custom.png" {
+		t.Fatalf("avatar = %q", got.Avatar)
+	}
+	if got.DisplayName != "代码审查助手" {
+		t.Fatalf("display name = %q", got.DisplayName)
+	}
 	if got.Source.Name != "local" || got.Source.Kind != "local" {
 		t.Fatalf("template source = %+v, want local/local", got.Source)
 	}
@@ -5814,6 +5821,21 @@ func TestHandleHubTemplatesPublishesAgentSnapshot(t *testing.T) {
 	if duplicateRec.Code != http.StatusConflict {
 		t.Fatalf("duplicate status = %d, want %d; body=%s", duplicateRec.Code, http.StatusConflict, duplicateRec.Body.String())
 	}
+	replacement := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(replacement, httptest.NewRequest(http.MethodPost, "/api/v1/hub/templates", strings.NewReader(
+		`{"agent_id":"u-alice","registry":"local","name":"ReviewBot_2","display_name":"新展示名","description":"Updated snapshot","replace_template_id":"local.ReviewBot_2"}`,
+	)))
+	if replacement.Code != http.StatusCreated {
+		t.Fatalf("replace status = %d; body=%s", replacement.Code, replacement.Body.String())
+	}
+	var updated apitypes.HubTemplate
+	if err := json.Unmarshal(replacement.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != "local.ReviewBot_2" || updated.Description != "Updated snapshot" || updated.DisplayName != "新展示名" {
+		t.Fatalf("replacement = %+v", updated)
+	}
+
 }
 
 func TestHandleHubTemplatesPublishesCodexRuntimeOptions(t *testing.T) {
@@ -5867,7 +5889,7 @@ func TestHandleHubTemplatesPublishesCodexRuntimeOptions(t *testing.T) {
 	if got.RuntimeOptions["execution_mode"] != "read_only" || got.RuntimeOptions["memory_mode"] != "disabled" {
 		t.Fatalf("runtime options = %#v, want execution_mode=read_only and memory_mode=disabled", got.RuntimeOptions)
 	}
-	manifestData, err := os.ReadFile(filepath.Join(registryRoot, "templates", created.Name, "agent.toml"))
+	manifestData, err := os.ReadFile(filepath.Join(registryRoot, "templates", publishSpec.Name, "agent.toml"))
 	if err != nil {
 		t.Fatalf("ReadFile(agent.toml) error = %v", err)
 	}
@@ -6080,8 +6102,8 @@ func TestHandleHubTemplatesPublishesAgentSnapshotToDefaultRegistryWhenOmitted(t 
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got.ID != "local.alice" {
-		t.Fatalf("template id = %q, want %q", got.ID, "local.alice")
+	if got.ID != "local."+created.ID {
+		t.Fatalf("template id = %q, want %q", got.ID, "local."+created.ID)
 	}
 	if got.Role != hub.TemplateRoleWorker {
 		t.Fatalf("template role = %q, want %q", got.Role, hub.TemplateRoleWorker)
@@ -8616,6 +8638,10 @@ func TestPublishParticipantEventStartsStoppedWorker(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for missed worker start")
+	}
+	// Runtime Start returns before the lifecycle operation persists the running state.
+	if err := svc.WithAgentLifecycle(t.Context(), "u-worker", func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
 	}
 }
 

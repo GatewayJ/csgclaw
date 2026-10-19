@@ -136,6 +136,18 @@ func TestConversationResourceHTTP(t *testing.T) {
 			if uploaded.Code != 201 || !strings.Contains(uploaded.Body.String(), "resource_selection") {
 				t.Fatalf("附件引用失败：%d %s", uploaded.Code, uploaded.Body)
 			}
+			var attachmentMessage apitypes.Message
+			if err = json.Unmarshal(uploaded.Body.Bytes(), &attachmentMessage); err != nil || len(attachmentMessage.Attachments) != 1 {
+				t.Fatalf("attachment fixture: %+v %v", attachmentMessage, err)
+			}
+			referenced := post(`{"room_id":"dm","sender_id":"user-admin","content":"","resource_refs":[{"source":"mcp","id":"search"}],"file_references":[{"source":"attachment","attachment_id":"` + attachmentMessage.Attachments[0].ID + `"}]}`)
+			var referencedMessage apitypes.Message
+			if err = json.Unmarshal(referenced.Body.Bytes(), &referencedMessage); err != nil || referenced.Code != http.StatusCreated {
+				t.Fatalf("resource with referenced attachment: %d %s %v", referenced.Code, referenced.Body, err)
+			}
+			if len(referencedMessage.Attachments) != 1 || apitypes.ResourceSelectionFromMetadata(referencedMessage.Metadata) == nil {
+				t.Fatalf("resource or attachment missing: %+v", referencedMessage)
+			}
 			if err = os.RemoveAll(dir); err != nil {
 				t.Fatal(err)
 			}

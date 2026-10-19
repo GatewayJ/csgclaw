@@ -48,6 +48,7 @@ export function MCPDetailDialog({
   market?: {
     installed: boolean;
     busy: boolean;
+    error?: string;
     onAction: () => void;
   };
   /** Enables or disables this resource for the current agent. */
@@ -64,7 +65,7 @@ export function MCPDetailDialog({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
-  const { probe, probing, run: runProbe, reset: resetProbe } = useMCPProbe();
+  const { probe, probing, error: probeError, run: runProbe, reset: resetProbe } = useMCPProbe();
 
   const [draft, setDraft] = useState("");
   // Compare against the saved draft because server serialization may reorder keys.
@@ -180,6 +181,16 @@ export function MCPDetailDialog({
                 </div>
               </DialogHeader>
               <DialogBody className={styles.body}>
+                {marketItem && market?.busy ? (
+                  <p role="status" className={styles.statusIdle}>
+                    {t("resourcesMCPRemoteInstalling")}
+                  </p>
+                ) : marketItem && market?.error ? (
+                  <p role="alert" className={styles.confirmError}>
+                    {market.error}
+                  </p>
+                ) : null}
+                <MCPProbeCards probe={probe} probing={probing} error={probeError} t={t} />
                 <section className={styles.card}>
                   <h3 className={styles.cardTitle}>{t("iaMCPConfigTitle")}</h3>
                   {installed && !readOnlyConfig ? (
@@ -190,6 +201,7 @@ export function MCPDetailDialog({
                         value={draft}
                         invalid={Boolean(draftError)}
                         minRows={8}
+                        t={t}
                         onChange={(value) => {
                           setDraft(value);
                           setDraftError("");
@@ -209,15 +221,13 @@ export function MCPDetailDialog({
                     </pre>
                   )}
                 </section>
-
-                <MCPProbeCards probe={probe} t={t} />
               </DialogBody>
               <DialogFooter className={styles.footer}>
                 {removeAction ? (
                   <Button
                     className={styles.footerDelete}
                     variant="danger"
-                    size="sm"
+                    size="md"
                     loading={removeAction.busy}
                     onClick={() => removeAction.onRemove()}
                   >
@@ -229,7 +239,7 @@ export function MCPDetailDialog({
                   <Button
                     className={styles.footerDelete}
                     variant="danger"
-                    size="sm"
+                    size="md"
                     disabled={Boolean(detail?.mcpMutationBusy)}
                     onClick={() => setConfirmOpen(true)}
                   >
@@ -238,24 +248,28 @@ export function MCPDetailDialog({
                   </Button>
                 ) : null}
                 {dirty ? (
-                  <Button variant="primary" size="sm" loading={saving} onClick={() => void saveConfig()}>
+                  <Button variant="primary" size="md" loading={saving} onClick={() => void saveConfig()}>
                     {t("save")}
                   </Button>
                 ) : null}
                 {installed ? (
-                  <Button variant="secondaryGray" size="sm" loading={probing} onClick={() => void runProbe(installed)}>
+                  <Button variant="secondaryGray" size="md" loading={probing} onClick={() => void runProbe(installed)}>
                     <RefreshCw size={15} strokeWidth={2} aria-hidden="true" />
-                    {t("iaMCPTestConnection")}
+                    {probing ? t("resourcesMCPTesting") : t("iaMCPTestConnection")}
                   </Button>
                 ) : null}
                 {marketItem && market ? (
-                  <Button variant="primary" size="sm" loading={market.busy} onClick={market.onAction}>
+                  <Button variant="primary" size="md" loading={market.busy} onClick={market.onAction}>
                     {market.installed ? (
                       <RefreshCw size={15} strokeWidth={2} aria-hidden="true" />
                     ) : (
                       <Plus size={15} strokeWidth={2.2} aria-hidden="true" />
                     )}
-                    {market.installed ? t("iaMCPUpdate") : t("resourcesMCPRemoteInstallAction")}
+                    {market.busy
+                      ? t("resourcesMCPRemoteInstalling")
+                      : market.installed
+                        ? t("resourcesMCPRemoteReplaceAction")
+                        : t("resourcesMCPRemoteInstallAction")}
                   </Button>
                 ) : null}
               </DialogFooter>
@@ -279,12 +293,12 @@ export function MCPDetailDialog({
             </p>
           ) : null}
           <DialogFooter>
-            <Button variant="secondaryGray" size="sm" onClick={() => setConfirmOpen(false)}>
+            <Button variant="secondaryGray" size="md" onClick={() => setConfirmOpen(false)}>
               {t("cancel")}
             </Button>
             <Button
               variant="danger"
-              size="sm"
+              size="md"
               loading={Boolean(detail?.mcpMutationBusy)}
               onClick={() => void handleDelete()}
             >
@@ -297,13 +311,30 @@ export function MCPDetailDialog({
   );
 }
 
-export function MCPProbeCards({ probe, t }: { probe: MCPProbeResult | null; t: TranslateFn }) {
+export function MCPProbeCards({
+  probe,
+  probing = false,
+  error = "",
+  t,
+}: {
+  probe: MCPProbeResult | null;
+  probing?: boolean;
+  error?: string;
+  t: TranslateFn;
+}) {
+  if (probing) {
+    return (
+      <p role="status" className={styles.statusIdle}>
+        {t("resourcesMCPTesting")}
+      </p>
+    );
+  }
   if (!probe) {
     return null;
   }
   return (
     <>
-      <section className={styles.card}>
+      <section className={styles.card} role={probe.connected ? "status" : "alert"}>
         <h3 className={styles.cardTitle}>{t("iaMCPStatusTitle")}</h3>
         {probe.connected ? (
           <div className={styles.statusLine}>
@@ -332,6 +363,7 @@ export function MCPProbeCards({ probe, t }: { probe: MCPProbeResult | null; t: T
             {t("iaMCPProbeFailed")}
           </p>
         )}
+        {error ? <p className={styles.confirmError}>{error}</p> : null}
       </section>
 
       {probe.connected && probe.tools.length ? (

@@ -79,9 +79,11 @@ func (s *WorkspaceService) HubPublishSpec(agentID string, includeMemory bool) (h
 		}
 	}
 	return hub.PublishSpec{
-		ID:             got.Name,
+		ID:             got.ID,
 		IncludeMemory:  includeMemory,
-		Name:           got.Name,
+		Name:           got.ID,
+		DisplayName:    got.Name,
+		Avatar:         got.Avatar,
 		Description:    got.Description,
 		RuntimeKind:    got.RuntimeConfig().Kind(),
 		Image:          got.Image,

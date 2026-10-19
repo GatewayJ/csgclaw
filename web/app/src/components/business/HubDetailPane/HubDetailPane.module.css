@@ -608,6 +608,15 @@
   gap: 8px;
 }
 
+.hub-json-editor.is-fill-available-height {
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
 .hub-json-editor-label {
   color: var(--text);
   font-size: 13px;
@@ -641,6 +650,14 @@
   border: 1px solid var(--hub-json-editor-border);
   border-radius: var(--radius-lg);
   background: var(--hub-json-editor-bg);
+}
+
+.hub-json-editor.is-fill-available-height .hub-json-editor-shell,
+.hub-json-editor.is-fill-available-height .hub-json-editor-shell :global(.cm-editor),
+.hub-json-editor.is-fill-available-height .hub-json-editor-shell :global(.cm-scroller) {
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
 }
 
 :root[data-theme="dark"] .hub-json-editor-shell {
@@ -686,13 +703,21 @@
 }
 
 .mcp-dialog {
-  width: min(960px, calc(100vw - 48px));
-  max-width: 960px;
+  display: flex;
+  flex-direction: column;
+  width: min(640px, calc(100vw - 32px));
+  height: min(640px, calc(100dvh - 32px));
+  max-width: none;
+  overflow: hidden;
 }
 
 .mcp-form {
-  display: grid;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
   gap: 14px;
+  overflow: hidden;
 }
 
 .mcp-form-mode {
@@ -987,10 +1012,6 @@
   .mcp-source-notice-actions :global(.btn) {
     width: 100%;
   }
-}
-
-.hub-publish-partial-message {
-  white-space: pre-line;
 }
 
 .hub-inspector-hero-row {
@@ -1290,6 +1311,31 @@
   /* Figma BACKGROUND_BLUR radius 16 exports as CSS blur(8px). */
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
+}
+
+.hub-template-avatar {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+}
+
+.hub-template-avatar,
+.hub-skill-featured-icon-glass,
+.hub-inspector-title-icon {
+  overflow: hidden;
+}
+
+.hub-template-avatar :global(.agent-avatar-image),
+.hub-skill-featured-icon-glass :global(.agent-avatar-image),
+.hub-inspector-title-icon :global(.agent-avatar-image) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  max-width: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 
 .hub-skill-featured-icon svg,

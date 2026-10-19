@@ -258,6 +258,7 @@ func (s *Service) PublishTemplate(ctx context.Context, id, registry string, incl
 		IncludeMemory:  includeMemory,
 		ID:             item.Name,
 		Name:           item.Name,
+		DisplayName:    item.DisplayName,
 		Description:    item.Description,
 		RuntimeKind:    item.RuntimeKind,
 		Version:        item.Version,
@@ -402,4 +403,26 @@ func isWritableKind(kind string) bool {
 	default:
 		return false
 	}
+}
+
+// ReplaceLocal refreshes only an explicitly identified local snapshot.
+func (s *Service) ReplaceLocal(ctx context.Context, id string, spec PublishSpec) (Template, error) {
+	store, templateID, err := s.resolveRead(id)
+	if err != nil {
+		return Template{}, err
+	}
+	if store.ref.Kind != RegistryKindLocal || spec.Registry != store.ref.Name {
+		return Template{}, fmt.Errorf("only local templates in the requested registry can be replaced")
+	}
+	replacer, ok := store.store.(interface {
+		Replace(context.Context, string, PublishSpec) (Template, error)
+	})
+	if !ok {
+		return Template{}, ErrRegistryNotWritable
+	}
+	item, err := replacer.Replace(ctx, templateID, spec)
+	if err != nil {
+		return Template{}, err
+	}
+	return decorateTemplate(store, item), nil
 }

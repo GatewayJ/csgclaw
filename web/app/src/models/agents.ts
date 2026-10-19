@@ -131,21 +131,6 @@ export type AgentRuntimeAvailabilityLike = {
   reason?: string | null;
 };
 
-export type AgentLarkCLIStatus = {
-  cleanup_pending?: boolean;
-  bound?: boolean | null;
-  available?: boolean | null;
-  state?: string | null;
-  error?: string | null;
-  app_id?: string | null;
-  generation?: number | null;
-  observed_generation?: number | null;
-  runtime_loaded?: boolean | null;
-  reason?: string | null;
-  checked_at?: string | null;
-  bound_at?: string | null;
-};
-
 export type AgentLike = AgentProfileLike & {
   skipped_resources?: Array<{ type?: "mcp" | "knowledge_base" | string; name?: string }> | null;
   agent_profile?: AgentProfileLike | null;
@@ -173,7 +158,6 @@ export type AgentLike = AgentProfileLike & {
   template_name?: string | null;
   user_id?: string | null;
   user_name?: string | null;
-  lark_cli?: AgentLarkCLIStatus | null;
   participants?:
     | {
         agent_id?: string | null;
@@ -488,6 +472,8 @@ type NullableAgentDraftFields = {
 export type AgentDraftSource = AgentLike & NullableAgentDraftFields;
 
 export type AgentTemplateLike = {
+  avatar?: string | null;
+  display_name?: string | null;
   description?: string | null;
   id?: string | null;
   image?: string | null;
@@ -532,6 +518,7 @@ export type ManagerRuntimeLike = {
   docs_url?: string | null;
   install_guidance?: string | null;
   message?: string | null;
+  message_code?: string | null;
 };
 
 export type RuntimeChoiceLike = {
@@ -1608,6 +1595,10 @@ export function pickDefaultAgentTemplate(
   return candidates[0];
 }
 
+export function agentTemplateDisplayName(template: AgentTemplateLike | null | undefined): string {
+  return String(template?.display_name ?? "").trim() || template?.name || "";
+}
+
 export function applyTemplateToDraft(
   draft: AgentDraft,
   template: AgentTemplateLike | null | undefined,
@@ -1645,7 +1636,7 @@ export function applyTemplateToDraft(
     ...draft,
     from_template: template.id || "",
     template_name: template.name || template.id || "",
-    name: template.name || draft.name || "",
+    name: agentTemplateDisplayName(template) || draft.name || "",
     runtime_kind: runtimeSelection.runtime_kind,
     runtime_name: runtimeSelection.runtime_name,
     sandbox_enabled: runtimeSelection.sandbox_enabled,

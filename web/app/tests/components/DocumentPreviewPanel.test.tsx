@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import JSZip from "jszip";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { DocumentPreviewPanel } from "@/components/business/DocumentPreviewPanel";
@@ -97,6 +98,31 @@ const t = (key: string, params?: Record<string, string | number>) => {
 };
 
 describe("DocumentPreviewPanel", () => {
+  it("shows media failures and reloads the preview without closing its tab", async () => {
+    render(
+      <DocumentPreviewPanel
+        index={0}
+        items={[
+          {
+            id: "broken-image",
+            name: "image.png",
+            mediaType: "image/png",
+            sizeBytes: 4,
+            file: new File(["test"], "image.png", { type: "image/png" }),
+          },
+        ]}
+        t={t}
+        onClose={() => {}}
+        onIndexChange={() => {}}
+      />,
+    );
+    const image = await screen.findByRole("img", { name: "image.png" });
+    fireEvent.error(image);
+    expect(await screen.findByText("Preview failed")).toBeInTheDocument();
+    const reload = screen.getAllByRole("button", { name: "chatPreviewReload" }).at(-1)!;
+    await userEvent.click(reload);
+    expect(await screen.findByRole("img", { name: "image.png" })).toBeInTheDocument();
+  });
   beforeEach(() => {
     pdfMock.pageCount = 1;
     mammothMock.html = "<p>Full-width document body</p>";
@@ -384,20 +410,26 @@ describe("DocumentPreviewPanel", () => {
   });
 
   it("resets PowerPoint navigation when switching to a shorter deck", async () => {
+    async function deck(name: string) {
+      const zip = new JSZip();
+      zip.file(
+        "ppt/presentation.xml",
+        '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:defaultTextStyle><a:lvl1pPr/></p:defaultTextStyle></p:presentation>',
+      );
+      return new File([await zip.generateAsync({ type: "arraybuffer" })], name, {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      });
+    }
     const items: AttachmentPreviewItem[] = [
       {
-        file: new File(["first deck"], "first.pptx", {
-          type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        }),
+        file: await deck("first.pptx"),
         id: "pptx-first",
         mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         name: "first.pptx",
         sizeBytes: 10,
       },
       {
-        file: new File(["short deck"], "short.pptx", {
-          type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        }),
+        file: await deck("short.pptx"),
         id: "pptx-short",
         mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         name: "short.pptx",
@@ -420,6 +452,15 @@ describe("DocumentPreviewPanel", () => {
     expect(await screen.findByText("Slide 1 of 3")).toBeInTheDocument();
     expect(container.querySelectorAll(".pptx-preview-slide-wrapper")).toHaveLength(3);
     expect(screen.queryByText("Slide 10 of 3")).not.toBeInTheDocument();
+    const scrollRoot = container.querySelector<HTMLElement>(".document-preview-ppt-stage-shell")!;
+    Object.defineProperties(scrollRoot, {
+      clientHeight: { value: 800 },
+      scrollHeight: { value: 1000 },
+      scrollTop: { value: 200 },
+    });
+    fireEvent.scroll(scrollRoot);
+    expect(screen.getByText("Slide 3 of 3")).toBeInTheDocument();
+    expect(nextSlide).toBeDisabled();
   });
 
   it("previews text past the old 2 MiB limit without truncating", async () => {
@@ -592,6 +633,14 @@ describe("DocumentPreviewPanel", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
     expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
     expect(await screen.findAllByTestId("mock-pdf-page")).toHaveLength(3);
+    Object.defineProperties(pdfMain!, {
+      clientHeight: { value: 800 },
+      scrollHeight: { value: 1000 },
+      scrollTop: { value: 200 },
+    });
+    fireEvent.scroll(pdfMain!);
+    expect(screen.getByText("Page 3 of 3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next file" })).toBeDisabled();
   });
 
   it("never renders a DOCX outline and always uses the full preview width", async () => {
@@ -620,5 +669,71 @@ describe("DocumentPreviewPanel", () => {
     expect(screen.queryByLabelText("Document outline")).not.toBeInTheDocument();
     expect(container.querySelector(".document-preview-docx-shell")).not.toBeInTheDocument();
     expect(container.querySelector(".document-preview-docx-outline")).not.toBeInTheDocument();
+  });
+
+  it("finishes loading an empty DOCX document", async () => {
+    mammothMock.html = "";
+    const { container } = render(
+      <DocumentPreviewPanel
+        index={0}
+        items={[
+          {
+            file: new File(["docx"], "empty.docx"),
+            id: "empty-docx",
+            mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            name: "empty.docx",
+            sizeBytes: 4,
+          },
+        ]}
+        t={t}
+        onClose={() => {}}
+        onIndexChange={() => {}}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector(".document-preview-docx")).toBeInTheDocument());
+    expect(screen.queryByText("Loading preview")).not.toBeInTheDocument();
+  });
+});
+
+describe("image preview sizing", () => {
+  it("fits both viewport dimensions and allocates scrollable layout space when zooming", async () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(560);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+    try {
+      render(
+        <DocumentPreviewPanel
+          mode="embedded"
+          index={0}
+          items={[
+            {
+              file: new File(["image"], "image.png", { type: "image/png" }),
+              id: "image-sizing",
+              name: "image.png",
+              mediaType: "image/png",
+              sizeBytes: 5,
+            },
+          ]}
+          t={t}
+          onClose={() => {}}
+          onIndexChange={() => {}}
+        />,
+      );
+      const image = await screen.findByRole("img", { name: "image.png" });
+      Object.defineProperties(image, { naturalWidth: { value: 1600 }, naturalHeight: { value: 1200 } });
+      fireEvent.load(image);
+      const fittedWidth = parseFloat(image.style.width);
+      const fittedHeight = parseFloat(image.style.height);
+      expect(fittedWidth).toBeLessThanOrEqual(512);
+      expect(fittedHeight).toBe(352);
+      await userEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+      expect(parseFloat(image.style.width)).toBeCloseTo(fittedWidth * 1.1);
+      expect(parseFloat(image.style.height)).toBeCloseTo(fittedHeight * 1.1);
+      await userEvent.click(screen.getByRole("button", { name: "Fit" }));
+      expect(parseFloat(image.style.width)).toBe(fittedWidth);
+      expect(parseFloat(image.style.height)).toBe(fittedHeight);
+    } finally {
+      width.mockRestore();
+      height.mockRestore();
+    }
   });
 });

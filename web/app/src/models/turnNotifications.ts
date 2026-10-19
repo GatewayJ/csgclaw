@@ -1,5 +1,8 @@
-import { isDirectConversation, normalizeComparable } from "@/models/conversations";
-import type { IMServerEvent, TranslateFn } from "@/models/conversations";
+import { Lexer, type Token, type Tokens } from "marked";
+import { formatMessagePreviewText, isDirectConversation, normalizeComparable } from "@/models/conversations";
+import type { IMMessage, IMServerEvent, TranslateFn } from "@/models/conversations";
+import { openClawDeliveryKind } from "@/models/agentActivity";
+import { parseTurnProgress } from "@/models/turnProgress";
 
 export const TurnNotificationModes = {
   off: "off",
@@ -12,6 +15,8 @@ export type TurnNotificationMode = (typeof TurnNotificationModes)[keyof typeof T
 export const DEFAULT_TURN_NOTIFICATION_MODE: TurnNotificationMode = TurnNotificationModes.whenUnfocused;
 
 const TURN_NOTIFICATION_TAG_PREFIX = "csgclaw-";
+const NOTIFICATION_PREVIEW_MAX_LENGTH = 160;
+const NOTIFICATION_PREVIEW_ELLIPSIS = "……";
 const FNV1A_64_OFFSET_BASIS = 0xcbf29ce484222325n;
 const FNV1A_64_PRIME = 0x100000001b3n;
 
@@ -43,6 +48,15 @@ export function isCompletedAgentTurnEvent(event: IMServerEvent | null | undefine
   );
 }
 
+export function isCompletedAgentTurnMessage(message: IMMessage): boolean {
+  const progress = parseTurnProgress(message);
+  if (progress) {
+    return progress.status === "succeeded";
+  }
+  const metadata = message.metadata as { csgclaw?: { delivery_kind?: unknown } } | undefined;
+  return (metadata?.csgclaw?.delivery_kind ?? openClawDeliveryKind(message)) === "final";
+}
+
 export function buildTurnNotificationTag(eventKey: string): string {
   // Chromium adds origin data to this value before passing it to the Windows
   // toast API, whose notification tag is limited to 64 characters.
@@ -64,6 +78,49 @@ export function resolveTurnNotificationRoomLabel(
     return "";
   }
   return title;
+}
+
+export function formatTurnNotificationPreview(content: unknown): string {
+  const source = formatMessagePreviewText(content, { preserveLineBreaks: true })
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .trim();
+  const lineBreak = source.search(/[\r\n]/);
+  const firstLine = lineBreak < 0 ? source : source.slice(0, lineBreak);
+  const text = notificationTokensText(Lexer.lex(firstLine, { gfm: true }))
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+
+  const characters = Array.from(text);
+  const hasMore = lineBreak >= 0 || characters.length > NOTIFICATION_PREVIEW_MAX_LENGTH;
+  return hasMore
+    ? `${characters
+        .slice(0, NOTIFICATION_PREVIEW_MAX_LENGTH - NOTIFICATION_PREVIEW_ELLIPSIS.length)
+        .join("")
+        .trimEnd()}${NOTIFICATION_PREVIEW_ELLIPSIS}`
+    : text;
+}
+
+function notificationTokensText(tokens: Token[]): string {
+  return tokens
+    .map((token): string => {
+      switch (token.type) {
+        case "html":
+        case "hr":
+        case "def":
+        case "checkbox":
+          return "";
+        case "space":
+        case "br":
+          return " ";
+        case "list":
+          return (token as Tokens.List).items.map((item) => notificationTokensText(item.tokens)).join(" ");
+        default:
+          if ("tokens" in token && token.tokens) return notificationTokensText(token.tokens);
+          return "text" in token ? token.text : "";
+      }
+    })
+    .join("");
 }
 
 export function formatTurnNotificationBody(

@@ -3,6 +3,8 @@ import {
   formatMCPServerDocument,
   hasMCPServerName,
   mcpServerDisplayName,
+  mcpServerDescription,
+  mcpServerOrigin,
   isRemoteMCPInstalled,
   managedMCPServerSnapshotDiffers,
   mcpManagedKnowledgeBaseSource,
@@ -31,12 +33,12 @@ describe("MCP catalog helpers", () => {
       {
         name: "filesystem",
         config: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem"], startup_timeout_sec: 60 },
-        description: "npx -y @modelcontextprotocol/server-filesystem",
+        description: "",
       },
       {
         name: "github",
         config: { url: "https://github.example/mcp" },
-        description: "https://github.example/mcp",
+        description: "",
       },
     ]);
   });
@@ -77,9 +79,18 @@ describe("MCP catalog helpers", () => {
       {
         name: "context7",
         config: { command: "npx", args: ["-y", "context7-mcp"] },
-        description: "npx -y context7-mcp",
+        description: "",
       },
     ]);
+  });
+
+  it("uses friendly descriptions for bundled desktop MCPs instead of their executable paths", () => {
+    expect(mcpServerDescription({ display_name: "computer-use", command: "/path/to/client" })).toBe(
+      "Control desktop apps and browsers.",
+    );
+    expect(mcpServerDescription({ display_name: "node_repl", command: "/path/to/node_repl" })).toBe(
+      "Run JavaScript for browser and desktop automation.",
+    );
   });
 
   it("reads published template MCP files in direct and legacy wrapped formats", () => {
@@ -196,6 +207,16 @@ describe("MCP catalog helpers", () => {
 });
 
 describe("MCP identities", () => {
+  it.each([
+    [{ command: "npx", args: ["local-server"] }, "manual"],
+    [{ source: "system" }, "builtin"],
+    [{ source: "official" }, "market"],
+    [{ _meta: { "com.opencsg/marketplace": { server_id: "42" } } }, "market"],
+    [{ _meta: { "com.opencsg/mcp": { type: "agentichub_mcp", resource_id: "42" } } }, "market"],
+    [{ _meta: { "com.opencsg/mcp": { type: "llm_wiki", resource_id: "142" } } }, "knowledge"],
+  ])("recognizes persisted source metadata %j as %s", (config, origin) => {
+    expect(mcpServerOrigin({ name: "mcp_fixed", config })).toBe(origin);
+  });
   it("keeps keys for actions and uses Unicode display names in the UI and rename payload", () => {
     const [server] = mcpServersFromMap({ mcp_fixed: { display_name: "必应 搜索", url: "https://example.test" } });
     expect(server.name).toBe("mcp_fixed");

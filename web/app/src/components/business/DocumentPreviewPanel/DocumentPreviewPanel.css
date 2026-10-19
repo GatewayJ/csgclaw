@@ -14,7 +14,7 @@
 }
 
 .chat-panel:has(> .document-preview-panel.is-panel) > .chat-header,
-.chat-panel:has(> .document-preview-panel.is-panel) > .messages,
+.chat-panel:has(> .document-preview-panel.is-panel) > .conversation-message-area,
 .chat-panel:has(> .document-preview-panel.is-panel) > .composer {
   min-width: 0;
   grid-column: 1;
@@ -125,7 +125,7 @@
   flex: 0 1 auto;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 3px;
   overflow-x: auto;
   scrollbar-width: none;
@@ -188,22 +188,25 @@
   color: var(--danger);
 }
 
+.document-preview-image-viewport {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+
 .document-preview-image-stage {
+  width: max-content;
   min-width: 100%;
   min-height: 100%;
   padding: 24px;
   display: grid;
   place-items: center;
-  overflow: auto;
 }
 
 .document-preview-image {
   display: block;
-  max-width: 100%;
-  max-height: calc(100dvh - 112px);
+  max-width: none;
   object-fit: contain;
-  transform-origin: center;
-  transition: transform 120ms ease;
 }
 
 .document-preview-markdown,
@@ -323,6 +326,7 @@
 }
 
 .document-preview-spreadsheet {
+  height: 100%;
   min-width: 100%;
   min-height: 100%;
   display: grid;
@@ -487,7 +491,6 @@
   width: 960px;
   min-height: 540px;
   margin: 0 auto;
-  transform-origin: top center;
 }
 
 @media (max-width: 960px) {
@@ -524,5 +527,34 @@
 
   .document-preview-shiki .shiki {
     padding: 18px 16px 48px;
+  }
+}
+
+.document-preview-reference {
+  opacity: 0;
+  pointer-events: none;
+}
+.document-preview-header:hover .document-preview-reference,
+.document-preview-header:focus-within .document-preview-reference {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: none) {
+  .document-preview-reference {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.document-preview-panel.is-embedded {
+  height: 100%;
+  container: embedded-document-preview / inline-size;
+}
+@container embedded-document-preview (max-width: 440px) {
+  .document-preview-header {
+    flex-wrap: wrap;
+  }
+  .document-preview-toolbar {
+    flex: 1 1 100%;
   }
 }

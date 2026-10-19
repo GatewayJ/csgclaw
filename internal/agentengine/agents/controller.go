@@ -221,6 +221,7 @@ type Controller struct {
 	startupProfileDetectOff       bool
 	connectorCapabilityKey        []byte
 	agentResourceCleanup          func(context.Context, string) error
+	runtimeConfigurationGuard     func(context.Context, string) error
 
 	// gatewayWorkPhase is set by createGatewayBox for bootstrap progress logs (best-effort if concurrent).
 	gatewayWorkPhase atomic.Uint32
@@ -812,7 +813,8 @@ func (s *Controller) persistManagerAgent(ctx context.Context, manager Agent, run
 	manager.DetectionResults = append([]ProfileDetectionResult(nil), manager.DetectionResults...)
 
 	s.mu.Lock()
-	if existing, ok := s.agents[ManagerUserID]; ok {
+	existing, exists := s.agents[ManagerUserID]
+	if exists {
 		if manager.RuntimeOptions == nil {
 			manager.RuntimeOptions = utils.CloneAnyMap(existing.RuntimeOptions)
 		}
@@ -839,7 +841,7 @@ func (s *Controller) persistManagerAgent(ctx context.Context, manager Agent, run
 	}
 	s.putAgentLocked(ManagerUserID, manager)
 	s.syncRuntimeRecordLocked(manager)
-	if manager.AgentProfile.ProfileComplete {
+	if manager.AgentProfile.ProfileComplete && !exists {
 		s.profileDefaults = profileDefaultsSnapshot(manager.AgentProfile)
 	}
 	s.detectionResults = append([]ProfileDetectionResult(nil), manager.DetectionResults...)
@@ -2442,10 +2444,12 @@ func (s *Controller) persistCreatedWorker(ctx context.Context, id, name, descrip
 	s.clearRuntimeAvailabilityLocked(worker.ID)
 	s.putAgentLocked(worker.ID, worker)
 	s.syncRuntimeRecordLocked(worker)
+	previousDefaults := cloneProfile(s.profileDefaults)
 	if worker.AgentProfile.ProfileComplete {
 		s.profileDefaults = profileDefaultsSnapshot(worker.AgentProfile)
 	}
 	if err := s.saveLocked(); err != nil {
+		s.profileDefaults = previousDefaults
 		if exists {
 			s.putAgentLocked(worker.ID, previous)
 			s.syncRuntimeRecordLocked(previous)

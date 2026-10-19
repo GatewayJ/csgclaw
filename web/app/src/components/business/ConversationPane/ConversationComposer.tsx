@@ -1,6 +1,8 @@
 import "@/components/business/ResourceTag";
 import { ComposerResourceMenu, type ComposerResourceProps } from "@/components/business/ConversationResourcePicker";
 import { canSendComposer, selectedResources } from "@/models/conversationResources";
+import type { ChatFileScope } from "@/components/business/ChatSidePanel/types";
+import { useFileMentions } from "./FileMentionPicker";
 import type { SkillContinuation } from "@/models/slashCommands";
 import { WorkingTurnControls } from "./WorkingTurnControls";
 import { memo, useId, useMemo, useRef } from "react";
@@ -37,6 +39,7 @@ import {
 } from "./types";
 
 export type ConversationComposerProps = ComposerResourceProps & {
+  fileScope?: ChatFileScope;
   authBusyProvider: string;
   authStatuses: CLIProxyAuthStatusMap;
   composerDisabled: boolean;
@@ -86,6 +89,7 @@ export type ConversationComposerProps = ComposerResourceProps & {
 export const ConversationComposer = memo(function ConversationComposer({
   resourceAgentID,
   onPickResources,
+  fileScope,
   authBusyProvider,
   authStatuses,
   composerDisabled,
@@ -131,6 +135,19 @@ export const ConversationComposer = memo(function ConversationComposer({
   onUndoRemoveAttachment,
   onWorkingAction,
 }: ConversationComposerProps) {
+  const fileMentions = useFileMentions({
+    scope: fileScope,
+    editorRef,
+    onSync: onSyncComposer,
+    people: mentionCandidates,
+    personIndex: mentionIndex,
+    onPerson: onApplyMention,
+    t,
+  });
+  const sync = () => {
+    onSyncComposer();
+    fileMentions.sync();
+  };
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerHelpId = useId();
   const isSending = sendStatus === "sending";
@@ -157,7 +174,9 @@ export const ConversationComposer = memo(function ConversationComposer({
           onSelect={(name) => onApplySlashCandidate(name)}
         />
       ) : null}
-      {mentionCandidates.length > 0 ? (
+      {fileScope ? (
+        fileMentions.picker
+      ) : mentionCandidates.length > 0 ? (
         <MentionPicker users={mentionCandidates} activeIndex={mentionIndex} t={t} onSelect={onApplyMention} />
       ) : null}
       {managerProfile &&
@@ -223,18 +242,18 @@ export const ConversationComposer = memo(function ConversationComposer({
             aria-label={t("inputPlaceholder")}
             aria-describedby={composerHelpId}
             aria-disabled={interactionDisabled}
-            onInput={onSyncComposer}
+            onInput={sync}
             onClick={(event) => {
               if (!interactionDisabled) removeComposerResourceToken(event.currentTarget, event.target);
-              onSyncComposer();
+              sync();
             }}
             onKeyDown={(event) => {
               if (event.target instanceof Element && event.target.closest("[data-composer-resource-remove]")) return;
-              onComposerKeyDown(event);
+              if (!fileMentions.handleKeyDown(event)) onComposerKeyDown(event);
             }}
             onCompositionStart={onComposerCompositionStart}
             onCompositionEnd={onComposerCompositionEnd}
-            onKeyUp={onSyncComposer}
+            onKeyUp={sync}
             onPaste={(event) => {
               const files = filesFromDataTransfer(event.clipboardData);
               const pasted = event.clipboardData?.getData("text/plain") ?? "";
@@ -253,7 +272,7 @@ export const ConversationComposer = memo(function ConversationComposer({
               } else {
                 insertPlainTextAtSelection(pasted);
               }
-              onSyncComposer();
+              sync();
             }}
           />
         </div>

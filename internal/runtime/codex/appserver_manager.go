@@ -6,6 +6,7 @@ import (
 	"csgclaw/internal/agentengine/contract"
 	"csgclaw/internal/diagnostics"
 	"csgclaw/internal/modelprovider"
+	"csgclaw/internal/processgroup"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,17 +125,28 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 			telemetry.close()
 		}
 	}()
-	cmd, err := appServerCommandContext(ctx, spec.BinaryPath, append(appServerOverrides(spec), telemetry.overrides()...))
-	if err != nil {
-		_ = stderrFile.Close()
-		return nil, fmt.Errorf("prepare codex app-server command: %w", err)
-	}
-	cmd.Dir = spec.WorkspaceDir
 	environment, extensionDigests, err := buildSessionEnvironment(spec)
 	if err != nil {
 		_ = stderrFile.Close()
 		return nil, fmt.Errorf("prepare Runtime extension environment: %w", err)
 	}
+	overrides := append(appServerOverrides(spec), telemetry.overrides()...)
+	if len(extensionDigests) > 0 && spec.ExecutionMode != ExecutionModeReadOnly {
+		// Keep managed commands independent of login scripts and shell snapshots.
+		overrides = append(overrides, "--config", "allow_login_shell=false")
+		for _, entry := range environment {
+			key, value, _ := strings.Cut(entry, "=")
+			if canonical := agentruntime.CanonicalEnvironmentKey(key); canonical == "PATH" || canonical == "LARKSUITE_CLI_CONFIG_DIR" {
+				overrides = append(overrides, "--config", "shell_environment_policy.set."+key+"="+tomlQuotedKey(value))
+			}
+		}
+	}
+	cmd, err := appServerCommandContext(ctx, spec.BinaryPath, overrides)
+	if err != nil {
+		_ = stderrFile.Close()
+		return nil, fmt.Errorf("prepare codex app-server command: %w", err)
+	}
+	cmd.Dir = spec.WorkspaceDir
 	cmd.Env = environment
 	if telemetry != nil {
 		// Keep completed-turn exports timely; this does not block the turn itself.
@@ -155,7 +167,7 @@ func (m *appServerManager) Start(ctx context.Context, spec SessionSpec) (*Sessio
 		_ = stderrFile.Close()
 		return nil, fmt.Errorf("codex app-server stdout pipe: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := processgroup.Start(cmd); err != nil {
 		_ = stderrFile.Close()
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}
@@ -316,7 +328,10 @@ func (m *appServerManager) Stop(ctx context.Context, handle SessionHandle) error
 	defer timeout.Stop()
 	select {
 	case <-live.done:
-		return nil
+		live.mu.Lock()
+		stopErr := live.stopErr
+		live.mu.Unlock()
+		return stopErr
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-timeout.C:
@@ -1963,13 +1978,15 @@ func (m *appServerManager) stopCanceledAppServerTurn(
 	reason string,
 ) (PromptResponse, error) {
 	if err := m.stopAppServerTurn(live, waiter, reason); err != nil {
-		return PromptResponse{}, fmt.Errorf("stop canceled Codex turn: %w", err)
+		return PromptResponse{}, errors.Join(ctx.Err(), fmt.Errorf("cancel Codex turn unconfirmed; worker preserved: %w", err))
 	}
 	return PromptResponse{StopReason: StopReasonInterrupted}, ctx.Err()
 }
 
 func (m *appServerManager) failTimedOutAppServerTurn(live *liveSession, waiter *appServerTurnWaiter, reason string, timeout time.Duration) error {
-	_ = m.stopAppServerTurn(live, waiter, reason)
+	if err := m.stopAppServerTurn(live, waiter, reason); err != nil {
+		return fmt.Errorf("Codex stopped responding after %s. Turn cancellation is unconfirmed; worker preserved: %w", timeout, err)
+	}
 	return fmt.Errorf("Codex stopped responding after %s. The turn was canceled; try again", timeout)
 }
 
@@ -1980,7 +1997,7 @@ func (m *appServerManager) stopAppServerTurn(live *liveSession, waiter *appServe
 	interruptErr := m.interruptAppServerTurn(live, waiter)
 	stderrTail := m.stderrTail(live.spec, 2048)
 	if live.appClient != nil {
-		live.appClient.logError("codex app-server turn stopped",
+		live.appClient.logError("codex app-server turn cancellation attempted",
 			"runtime_id", strings.TrimSpace(live.spec.RuntimeID),
 			"thread_id", strings.TrimSpace(waiter.threadID),
 			"turn_id", waiter.currentTurnID(),
@@ -1993,37 +2010,16 @@ func (m *appServerManager) stopAppServerTurn(live *liveSession, waiter *appServe
 	if interruptErr == nil {
 		return nil
 	}
-	stopFields := []any{
+	// A rejected or delayed interrupt does not establish that the process is
+	// unhealthy. Keep worker lifetime independent of individual turn failures.
+	slog.Warn("codex app-server turn interrupt failed; preserving runtime",
 		"runtime_id", live.spec.RuntimeID,
 		"thread_id", waiter.threadID,
 		"turn_id", waiter.currentTurnID(),
 		"reason", reason,
 		"interrupt_error", redactAppServerDiagnostic([]byte(interruptErr.Error()), live.spec),
-	}
-	if live.cmd != nil && live.cmd.Process != nil {
-		stopFields = append(stopFields, "pid", live.cmd.Process.Pid)
-	}
-	slog.Warn("stopping codex app-server after turn interrupt failure", stopFields...)
-	stopCtx, cancel := context.WithTimeout(context.Background(), appServerStopTimeout)
-	defer cancel()
-	stopErr := m.Stop(stopCtx, SessionHandle{RuntimeID: live.spec.RuntimeID})
-	if stopErr == nil || errors.Is(stopErr, os.ErrNotExist) {
-		// The worker log is closed when Stop completes, so record the result
-		// in the service log rather than writing through the closed logger.
-		slog.Info("codex app-server stop completed after turn interrupt failure",
-			append(stopFields, "already_absent", errors.Is(stopErr, os.ErrNotExist))...)
-		return nil
-	}
-	slog.Error("codex app-server stop failed after turn interrupt failure",
-		append(stopFields, "error", redactAppServerDiagnostic([]byte(stopErr.Error()), live.spec))...)
-	if live.appClient != nil {
-		live.appClient.logError(
-			"stop codex app-server after turn interrupt failure",
-			"runtime_id", strings.TrimSpace(live.spec.RuntimeID),
-			"error", stopErr,
-		)
-	}
-	return fmt.Errorf("interrupt turn: %v; stop app-server: %w", interruptErr, stopErr)
+	)
+	return interruptErr
 }
 
 func (m *appServerManager) interruptAppServerTurn(live *liveSession, waiter *appServerTurnWaiter) error {
@@ -2043,8 +2039,8 @@ func (m *appServerManager) interruptAppServerTurn(live *liveSession, waiter *app
 		"turnId":   turnID,
 	}); err != nil {
 		// Codex uses InvalidRequest for both inactive turns and active-turn
-		// ID mismatches. Only its explicit inactive-turn response is safe to
-		// treat as completed cancellation; other rejections need the stop fallback.
+		// ID mismatches. Only its explicit inactive-turn response confirms
+		// cancellation; other rejections are reported without stopping the worker.
 		var rpcErr appServerRPCError
 		if errors.As(err, &rpcErr) && rpcErr.Code == appServerRPCInvalidRequest && rpcErr.Message == "no active turn to interrupt" {
 			live.appClient.logInfo("codex app-server turn interrupt rejected; preserving runtime",
@@ -2135,6 +2131,10 @@ func (m *appServerManager) readAppServerStdout(runtimeID string, live *liveSessi
 
 func (m *appServerManager) waitAppServerSession(runtimeID string, live *liveSession) {
 	err := live.cmd.Wait()
+	cleanupErr := stopProcessTree(live.cmd.Process.Pid)
+	live.mu.Lock()
+	live.stopErr = cleanupErr
+	live.mu.Unlock()
 	live.telemetry.close()
 	exitCode := 0
 	if err != nil {
@@ -2152,9 +2152,14 @@ func (m *appServerManager) waitAppServerSession(runtimeID string, live *liveSess
 		)
 		live.appClient.closeAllPending(fmt.Errorf("codex app-server exited with code %d", exitCode))
 	}
-	isCurrent := m.detachSession(runtimeID, live)
+	isCurrent := false
+	if cleanupErr == nil {
+		isCurrent = m.detachSession(runtimeID, live)
+	}
 	if live.session != nil {
-		live.session.ProcessID = 0
+		if cleanupErr == nil {
+			live.session.ProcessID = 0
+		}
 		if isCurrent && m.deps.OnExit != nil {
 			m.deps.OnExit(live.session, exitCode)
 		}

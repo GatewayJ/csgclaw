@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { ArrowRight, ArrowUpRight, BookOpen, Plus, RefreshCw, ChevronDown, Server } from "lucide-react";
 import {
   Button,
+  LinkButton,
   DropdownMenuRoot,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -16,19 +17,21 @@ import {
   DialogBody,
   DialogFooter,
   DialogCloseButton,
+  useGlobalNotice,
 } from "@/components/ui";
 import { errorMessage } from "@/api/client";
 import { localizeAPIError } from "@/shared/i18n";
 import type { AppInstallation } from "@/api/apps";
 import type { TranslateFn } from "@/models/conversations";
 import { ConnectorBoxesIcon, ConnectorGitLabIcon } from "@/components/ui/Icons";
-import { appName, appStatus, appConnectionError } from "./appForm";
+import { appName, appStatus, appConnectionError, appDescription } from "./appForm";
 import { AppToolList } from "./AppToolList";
 import type { AgentAppsController } from "./useAgentApps";
 import styles from "./AgentAppsPanel.module.css";
 
 type Props = {
   agentID: string;
+  cliSupported?: boolean;
   children?: ReactNode;
   onAddTools?: () => void;
   controller: AgentAppsController;
@@ -40,6 +43,7 @@ type Props = {
 };
 
 export function AgentAppsPanel({
+  cliSupported = true,
   controller,
   t,
   portalContainer,
@@ -52,13 +56,24 @@ export function AgentAppsPanel({
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<AppInstallation | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const { showNotice } = useGlobalNotice();
+  const feishu = controller.items.find((app) => app.kind === "cli" && app.app_id === "feishu");
   const selected = controller.items.find((app) => app.installation_id === selectedID);
+  const selectedResource = selected?.resource_id
+    ? controller.resources.find((resource) => resource.installation_id === selected.resource_id)
+    : undefined;
+  const selectedCLISkills = selected?.skills?.length ? selected.skills : (selectedResource?.skills ?? []);
+  const selectedCLIRuntimeStatus = selected?.runtime_status || selectedResource?.runtime_status;
   const available = controller.resources.filter(
     (resource) =>
       !controller.items.some((item) => item.resource_id === resource.installation_id) &&
       (!addAppID || resource.app_id === addAppID),
   );
   const manageResourcesHref = addAppID ? `#/connectors?add_connector=${encodeURIComponent(addAppID)}` : "#/connectors";
+  const connectorDescription = (app: AppInstallation) => {
+    const definition = controller.definitions.find((item) => item.app_id === app.app_id);
+    return definition ? appDescription(definition, t) : "";
+  };
   async function run(operation: () => Promise<unknown>) {
     setError(null);
     try {
@@ -67,6 +82,18 @@ export function AgentAppsPanel({
     } catch (e) {
       setError(e);
       return false;
+    }
+  }
+  async function toggleConnector(app: AppInstallation | undefined, enabled: boolean, name: string) {
+    setError(null);
+    try {
+      const updated = app ? await controller.update(app.installation_id, { enabled }) : await controller.bindFeishu();
+      showNotice({
+        message: t(updated.enabled ? "resourceEnabledNotice" : "resourceDisabledNotice", { name }),
+        closeLabel: t("close"),
+      });
+    } catch (failure) {
+      setError(failure);
     }
   }
   const closePicker = () => {
@@ -113,29 +140,83 @@ export function AgentAppsPanel({
         </p>
       ) : null}
       <div className={styles.agentGrid}>
-        {controller.items.map((app) => (
-          <button
-            key={app.installation_id}
-            type="button"
-            className={`${styles.connectorCard} ${styles.connectorOpen}`}
-            onClick={() => onSelect(app.installation_id)}
+        <article
+          className={`${styles.connectorCard} ${feishu ? styles.connectorOpen : ""}`}
+          role={feishu ? "button" : undefined}
+          tabIndex={feishu ? 0 : undefined}
+          onClick={() => feishu && onSelect(feishu.installation_id)}
+          onKeyDown={(event) => {
+            if (!feishu || (event.key !== "Enter" && event.key !== " ")) return;
+            event.preventDefault();
+            onSelect(feishu.installation_id);
+          }}
+        >
+          <span className={styles.connectorIcon}>
+            <AppIcon appID="feishu" />
+          </span>
+          <span className={styles.connectorCopy}>
+            <span className={styles.connectorTitle}>{appName("feishu", t)}</span>
+            <span className={styles.connectorDescription}>
+              {!cliSupported
+                ? t("feishuCLIUnsupported")
+                : feishu
+                  ? connectorDescription(feishu)
+                  : t("feishuCLIWorkerHint")}
+            </span>
+          </span>
+          <span
+            className={styles.connectorToggle}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
           >
-            <span className={styles.connectorIcon}>
-              <AppIcon appID={app.app_id} />
-            </span>
-            <span className={styles.connectorCopy}>
-              <span className={styles.connectorTitle} title={app.name}>
-                {app.name}
+            <Switch
+              aria-label={t("feishuCLIWorkerSwitch")}
+              checked={Boolean(feishu?.enabled)}
+              size="sm"
+              disabled={!cliSupported || Boolean(controller.busyID) || feishu?.status === "applying"}
+              onCheckedChange={(enabled) => void toggleConnector(feishu, enabled, appName("feishu", t))}
+            />
+          </span>
+        </article>
+        {controller.items
+          .filter((app) => app.kind !== "cli" || app.app_id !== "feishu")
+          .map((app) => (
+            <article
+              key={app.installation_id}
+              className={`${styles.connectorCard} ${styles.connectorOpen}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(app.installation_id)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onSelect(app.installation_id);
+              }}
+            >
+              <span className={styles.connectorIcon}>
+                <AppIcon appID={app.app_id} />
               </span>
-              <span className={styles.connectorDescription}>
-                {appName(app.app_id, t)} · {app.config.url || app.config.command}
+              <span className={styles.connectorCopy}>
+                <span className={styles.connectorTitle} title={app.name}>
+                  {app.name}
+                </span>
+                <span className={styles.connectorDescription}>{connectorDescription(app)}</span>
               </span>
-            </span>
-            <span className={styles.status} data-status={app.enabled ? app.status : "disabled"}>
-              {appStatus(app, t)}
-            </span>
-          </button>
-        ))}
+              <span
+                className={styles.connectorToggle}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                <Switch
+                  aria-label={app.name}
+                  checked={app.enabled}
+                  size="sm"
+                  disabled={Boolean(controller.busyID) || (!app.enabled && app.resource_enabled === false)}
+                  onCheckedChange={(enabled) => void toggleConnector(app, enabled, app.name)}
+                />
+              </span>
+            </article>
+          ))}
       </div>
       {!controller.items.length && !controller.loading ? <p className={styles.hint}>{t("appEmptyTitle")}</p> : null}
       {children}
@@ -151,7 +232,17 @@ export function AgentAppsPanel({
               <DialogTitle>{selected?.name}</DialogTitle>
               <DialogDescription>{selected ? appStatus(selected, t) : ""}</DialogDescription>
             </div>
-            <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" iconOnly />
+            <div className="flex shrink-0 items-center gap-4">
+              <Switch
+                aria-label={selected?.name || t("appEnable")}
+                checked={Boolean(selected?.enabled)}
+                disabled={Boolean(controller.busyID) || (!selected?.enabled && selected?.resource_enabled === false)}
+                onCheckedChange={(enabled) =>
+                  selected ? void toggleConnector(selected, enabled, selected.name) : undefined
+                }
+              />
+              <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" iconOnly />
+            </div>
           </DialogHeader>
           <DialogBody className={styles.settingsBody}>
             {error ? (
@@ -166,53 +257,64 @@ export function AgentAppsPanel({
                 ) : null}
                 {selected.last_error ? <p className={styles.cardError}>{appConnectionError(selected, t)}</p> : null}
                 {selected.disconnected ? <p className={styles.hint}>{t("appDisconnectedHint")}</p> : null}
-                <AppToolList tools={selected.tools} t={t} />
-                <div className={styles.settingsActions}>
-                  <div className={styles.settingsActionGroup}>
-                    <a
-                      className={`btn btn-secondary-gray btn-sm ${styles.manageResourceLink}`}
-                      href={`#/connectors/${encodeURIComponent(selected.resource_id || "")}`}
-                    >
-                      {t("appManageResource")}
-                      <ArrowUpRight size={14} />
-                    </a>
-                    <Button
-                      size="sm"
-                      disabled={!!controller.busyID || !selected.enabled || selected.resource_enabled === false}
-                      onClick={() => void run(() => controller.connect(selected.installation_id))}
-                    >
-                      <RefreshCw size={14} />
-                      {selected.status === "connected" ? t("appReconnect") : t("appConnect")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      disabled={!!controller.busyID}
-                      onClick={() =>
-                        void run(() => controller.update(selected.installation_id, { enabled: !selected.enabled }))
-                      }
-                    >
-                      {selected.enabled ? t("appDisable") : t("appEnable")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      disabled={!!controller.busyID || selected.disconnected}
-                      onClick={() => void run(() => controller.disconnect(selected.installation_id))}
-                    >
-                      {t("appDisconnect")}
-                    </Button>
+                {selected.kind === "cli" ? (
+                  <div>
+                    {selectedCLIRuntimeStatus === "configured" ? (
+                      <p>{t("feishuCLIConfiguredRuntime")}</p>
+                    ) : selectedCLIRuntimeStatus === "loaded" ? (
+                      <p>{t("feishuCLILoadedRuntime")}</p>
+                    ) : null}
+                    {selected.app_id === "feishu" ? <p className={styles.hint}>{t("feishuCLISkillsSource")}</p> : null}
+                    <ul>
+                      {selectedCLISkills.map((skill) => (
+                        <li key={skill.skill_name}>
+                          {skill.skill_name} · {t(skill.managed ? "feishuCLIManagedSkill" : "feishuCLIUserSkill")}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outlineDanger"
-                    disabled={!!controller.busyID}
-                    onClick={() => setRemoving(selected)}
-                  >
-                    {t("appRemove")}
-                  </Button>
-                </div>
+                ) : (
+                  <AppToolList tools={selected.tools} t={t} fillAvailableHeight />
+                )}
               </>
             ) : null}
           </DialogBody>
+          {selected ? (
+            <DialogFooter className={styles.settingsFooter}>
+              <div className={styles.settingsActionGroup}>
+                <LinkButton
+                  size="md"
+                  variant="primary"
+                  className={`${styles.manageResourceLink} ${styles.settingsPrimaryAction}`}
+                  href={`#/connectors/${encodeURIComponent(selected.resource_id || "")}`}
+                >
+                  {t("appManageResource")}
+                  <ArrowUpRight size={14} />
+                </LinkButton>
+                {selected.kind !== "cli" && (selected.disconnected || selected.status !== "connected") ? (
+                  <Button
+                    size="md"
+                    disabled={!!controller.busyID || !selected.enabled || selected.resource_enabled === false}
+                    onClick={() => void run(() => controller.connect(selected.installation_id))}
+                  >
+                    <RefreshCw size={14} />
+                    {t("appReconnect")}
+                  </Button>
+                ) : null}
+              </div>
+              {selected.kind !== "cli" ? (
+                <Button
+                  size="md"
+                  variant="danger"
+                  className={styles.settingsRemoveButton}
+                  disabled={!!controller.busyID}
+                  onClick={() => setRemoving(selected)}
+                >
+                  {t("appRemove")}
+                </Button>
+              ) : null}
+            </DialogFooter>
+          ) : null}
         </DialogContent>
       </DialogRoot>
       <DialogRoot
@@ -235,7 +337,7 @@ export function AgentAppsPanel({
               <Button
                 key={resource.installation_id}
                 className={styles.catalogItem}
-                disabled={!resource.enabled || !!controller.busyID}
+                disabled={!resource.enabled || !!controller.busyID || (resource.kind === "cli" && !cliSupported)}
                 onClick={() =>
                   void run(() => controller.bind(resource.installation_id)).then((ok) => {
                     if (ok) closePicker();
@@ -262,22 +364,18 @@ export function AgentAppsPanel({
                   <strong>{t("appNoAvailableResourcesTitle")}</strong>
                   <p>{t("appNoAvailableResources")}</p>
                 </div>
-                <a className={`btn btn-secondary-gray btn-sm ${styles.catalogManageAction}`} href={manageResourcesHref}>
-                  <span className="btn-content">
-                    <ConnectorBoxesIcon size={16} />
-                    {t("appManageResources")}
-                    <ArrowRight size={14} />
-                  </span>
-                </a>
-              </div>
-            ) : (
-              <a className={`btn btn-secondary-gray btn-sm ${styles.catalogManageAction}`} href={manageResourcesHref}>
-                <span className="btn-content">
+                <LinkButton size="sm" className={styles.catalogManageAction} href={manageResourcesHref}>
                   <ConnectorBoxesIcon size={16} />
                   {t("appManageResources")}
                   <ArrowRight size={14} />
-                </span>
-              </a>
+                </LinkButton>
+              </div>
+            ) : (
+              <LinkButton size="sm" className={styles.catalogManageAction} href={manageResourcesHref}>
+                <ConnectorBoxesIcon size={16} />
+                {t("appManageResources")}
+                <ArrowRight size={14} />
+              </LinkButton>
             )}
           </DialogBody>
         </DialogContent>
@@ -326,11 +424,17 @@ export function AppManagedMCPRows({
 }: Pick<Props, "controller" | "t" | "onSelect" | "portalContainer"> & { disabled?: boolean }) {
   const [detailID, setDetailID] = useState("");
   const [error, setError] = useState<unknown>(null);
-  const selected = controller.items.find((app) => app.installation_id === detailID);
+  const { showNotice } = useGlobalNotice();
+  const items = controller.items.filter((app) => app.kind !== "cli");
+  const selected = items.find((app) => app.installation_id === detailID);
   async function toggle(app: AppInstallation) {
     setError(null);
     try {
-      await controller.update(app.installation_id, { enabled: !app.enabled });
+      const updated = await controller.update(app.installation_id, { enabled: !app.enabled });
+      showNotice({
+        message: t(updated.enabled ? "resourceEnabledNotice" : "resourceDisabledNotice", { name: updated.name }),
+        closeLabel: t("close"),
+      });
     } catch (failure) {
       setError(failure);
     }
@@ -341,11 +445,11 @@ export function AppManagedMCPRows({
       {localizeAPIError(error, t, t("agentResourceApplyFailed"))}
     </p>
   ) : null;
-  return controller.items.length ? (
+  return items.length ? (
     <>
       {selected ? null : feedback}
       <ResourceList>
-        {controller.items.map((app) => (
+        {items.map((app) => (
           <ResourceListCard
             key={app.installation_id}
             title={app.name}

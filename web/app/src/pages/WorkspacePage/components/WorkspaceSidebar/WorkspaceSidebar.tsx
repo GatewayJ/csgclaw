@@ -31,7 +31,8 @@ import styles from "./WorkspaceSidebar.module.css";
 import type { ComponentType } from "react";
 
 import type { PrimaryNavigationItem, PrimaryNavigationSection } from "./WorkspacePrimaryNavigation";
-import type { WorkspaceContextSectionId, WorkspaceSidebarProps } from "./types";
+import type { WorkspaceSidebarProps } from "@/hooks/workspace/contracts/sidebar";
+import { WorkspaceContextSectionId } from "./types";
 type SidebarNavigationIcon = ComponentType<{ size?: number | string }>;
 
 const WORKSPACE_NAVIGATION_ICONS = {
@@ -488,7 +489,7 @@ function LegacyWorkspaceSidebar({
                   className={styles.contextAction}
                   aria-label={contextCreateAction.label}
                   data-tooltip={contextCreateAction.label}
-                  onClick={contextCreateAction.onClick}
+                  onClick={() => void contextCreateAction.onClick()}
                 >
                   <Plus size={16} strokeWidth={2.2} aria-hidden="true" />
                 </button>

@@ -102,6 +102,7 @@ type Handler struct {
 	channelBindings            ChannelBindingReconciler
 	sessionBindings            *agentsession.Store
 	localDirectoryPicker       func(context.Context) (string, error)
+	workspaceOpener            func(context.Context, string, string, bool) error
 	feishuRegistrationStateDir string
 	runtimeExtensionSourcesSet bool
 	larkCLISigningOnce         sync.Once
@@ -200,6 +201,7 @@ type managerRuntimeResponse struct {
 	DocsURL         string `json:"docs_url"`
 	InstallGuidance string `json:"install_guidance,omitempty"`
 	Message         string `json:"message,omitempty"`
+	MessageCode     string `json:"message_code,omitempty"`
 }
 
 const sandboxRuntimeChoiceAvailabilityTimeout = 2 * time.Second
@@ -245,7 +247,6 @@ type agentResponse struct {
 	ParticipantIDs       []string                           `json:"participant_ids,omitempty"`
 	ParticipantNames     []string                           `json:"participant_names,omitempty"`
 	Participants         []apitypes.Participant             `json:"participants,omitempty"`
-	LarkCLI              *apitypes.AgentLarkCLIStatus       `json:"lark_cli,omitempty"`
 	SkippedResources     []mcp.SkippedTemplateResource      `json:"skipped_resources,omitempty"`
 }
 
@@ -280,7 +281,6 @@ func (r *agentResponse) UnmarshalJSON(data []byte) error {
 		ParticipantIDs:   apiAgent.ParticipantIDs,
 		ParticipantNames: apiAgent.ParticipantNames,
 		Participants:     apiAgent.Participants,
-		LarkCLI:          apiAgent.LarkCLI,
 	}
 	if len(apiAgent.Runtime.OptionSchemas) > 0 {
 		data, err := json.Marshal(apiAgent.Runtime.OptionSchemas)
@@ -610,6 +610,7 @@ func managerRuntimeReadiness() managerRuntimeResponse {
 	}
 	resp.Installed = false
 	resp.Message = "Bundled Codex CLI is unavailable"
+	resp.MessageCode = "bundled_codex_unavailable"
 	return resp
 }
 
@@ -659,6 +660,7 @@ func workerRuntimeChoices(ctx context.Context, cfg config.Config) []workerRuntim
 	if _, err := locateCodexCLI(); err != nil {
 		choices[0].Installed = false
 		choices[0].Message = "Bundled Codex CLI is unavailable"
+		choices[0].MessageCode = "bundled_codex_unavailable"
 	}
 	if _, err := (dshcli.Provider{}).Ensure(ctx); err != nil {
 		choices[1].Installed = false
@@ -797,6 +799,7 @@ func bootstrapRuntimeKind(runtime string) string {
 
 type createMessageRequest struct {
 	ResourceRefs    []apitypes.ResourceReference `json:"resource_refs,omitempty"`
+	FileReferences  []FileReference              `json:"file_references,omitempty"`
 	RoomID          string                       `json:"room_id"`
 	ClientMessageID string                       `json:"client_message_id,omitempty"`
 	SenderID        string                       `json:"sender_id"`
@@ -927,7 +930,7 @@ func (h *Handler) configureRuntimeExtensionSources() {
 	if err != nil {
 		return
 	}
-	if err := registrar.RegisterRuntimeExtensionSource("feishu-participant", source); err != nil {
+	if err := registrar.RegisterRuntimeExtensionSource("feishu-participant", legacyConnectorSource{h: h, source: source}); err != nil {
 		if !strings.Contains(err.Error(), "already registered") {
 			return
 		}
@@ -1916,10 +1919,6 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if req.Deploy && strings.TrimSpace(req.Registry) != config.DefaultOfficialHubRegistryName {
-			http.Error(w, "only community templates can be deployed", http.StatusBadRequest)
-			return
-		}
 		var item hub.Template
 		publishingTemplate := strings.TrimSpace(req.TemplateID) != ""
 		if publishingTemplate {
@@ -1929,9 +1928,15 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 			spec, err = h.workspace.HubPublishSpec(req.AgentID, req.IncludeMemory)
 			if err == nil {
 				spec.Registry = req.Registry
+				if req.Avatar != nil {
+					spec.Avatar = strings.TrimSpace(*req.Avatar)
+				}
 				if strings.TrimSpace(req.Name) != "" {
 					spec.ID = strings.TrimSpace(req.Name)
 					spec.Name = strings.TrimSpace(req.Name)
+				}
+				if req.DisplayName != nil {
+					spec.DisplayName = strings.TrimSpace(*req.DisplayName)
 				}
 				if req.Description != nil {
 					spec.Description = strings.TrimSpace(*req.Description)
@@ -1942,7 +1947,11 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if err == nil {
-				item, err = hubSvc.Publish(r.Context(), spec)
+				if req.ReplaceTemplateID != "" {
+					item, err = hubSvc.ReplaceLocal(r.Context(), req.ReplaceTemplateID, spec)
+				} else {
+					item, err = hubSvc.Publish(r.Context(), spec)
+				}
 			}
 		}
 		if err != nil {
@@ -1977,27 +1986,6 @@ func (h *Handler) handleHubTemplates(w http.ResponseWriter, r *http.Request) {
 			}
 			writeHubTemplateError(w, status, code, err.Error(), "")
 			return
-		}
-		if req.Deploy {
-			if err := createCommunityAgentInstance(r.Context(), item, authStatus); err != nil {
-				status := http.StatusBadGateway
-				code := ""
-				if errors.Is(err, errCommunityInstanceTemplatePending) {
-					status = http.StatusConflict
-					code = communityInstanceTemplatePendingCode
-				} else if errors.Is(err, errCommunityInstanceSensitiveCheck) {
-					status = http.StatusConflict
-					code = communityInstanceSensitiveCheckCode
-				} else if errors.Is(err, errCommunityInstanceResourceUnavailable) {
-					status = http.StatusServiceUnavailable
-					code = communityInstanceResourceUnavailableCode
-				}
-				if code == "" {
-					code = "template_deploy_failed"
-				}
-				writeHubTemplateError(w, status, code, communityInstanceUpstreamMessage(err), item.ID)
-				return
-			}
 		}
 		writeJSON(w, http.StatusCreated, presentHubTemplate(item))
 	default:
@@ -2122,6 +2110,8 @@ func presentHubTemplate(item hub.Template) apitypes.HubTemplate {
 		ID:             item.ID,
 		Namespace:      item.Namespace,
 		Name:           item.Name,
+		DisplayName:    item.DisplayName,
+		Avatar:         item.Avatar,
 		Description:    item.Description,
 		Role:           item.Role,
 		RuntimeKind:    bootstrapRuntimeKind(item.RuntimeKind),
@@ -2416,6 +2406,8 @@ func writeAPIError(w http.ResponseWriter, err error, fallbackStatus int) {
 
 func knownAPIError(err error, fallbackStatus int) (string, int) {
 	switch {
+	case errors.Is(err, errFileReference):
+		return "file_reference_unavailable", fallbackStatus
 	case errors.Is(err, im.ErrTitleRequired):
 		return "title_required", fallbackStatus
 	case errors.Is(err, im.ErrCreatorIDRequired):
@@ -3026,13 +3018,21 @@ func (h *Handler) handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var releaseReferences = func() {}
+	defer func() { releaseReferences() }()
+	if len(req.FileReferences) > 0 {
+		serviceReq.ResolveAttachments = func() ([]im.MessageAttachmentUpload, error) {
+			uploads, release, err := h.resolveFileReferences(serviceReq.RoomID, appRequestAgentID(r), req.FileReferences)
+			releaseReferences = release
+			return uploads, err
+		}
+	}
 	if err := h.prepareMessageResources(r.Context(), &serviceReq, req.ResourceRefs); err != nil {
 		if !writeConversationResourceError(w, err) {
 			writeAPIError(w, err, http.StatusBadRequest)
 		}
 		return
 	}
-
 	message, created, err := channel.SendMessageOnce(serviceReq)
 	if err != nil {
 		writeAPIError(w, err, http.StatusBadRequest)
@@ -3429,7 +3429,6 @@ func (h *Handler) presentAgentResponse(item agent.Agent) agentResponse {
 		resp.MemorySupported = h.svc.SupportsMemory(item.RuntimeKind)
 	}
 	resp.Runtime.OptionSchemas = runtimeOptionSchemasForAPI(resp.RuntimeOptionSchemas)
-	resp.LarkCLI = h.agentLarkCLIStatus(item)
 	return resp
 }
 

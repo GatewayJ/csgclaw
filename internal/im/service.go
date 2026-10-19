@@ -191,6 +191,7 @@ type Service struct {
 }
 
 var mentionPattern = regexp.MustCompile(`(^|[^\pL\pM\pN._-])@([\pL\pM\pN._-]+)`)
+var fileReferenceLiteralPattern = regexp.MustCompile(`@"(?:[^"\\]|\\.)*"`)
 var mentionTagPattern = regexp.MustCompile(`<at\s+user_id="([^"]+)">[^<]*</at>`)
 
 func MentionTagUserIDs(content string) []string {
@@ -2076,7 +2077,7 @@ func (s *Service) CreateMessageOnce(req CreateMessageRequest) (Message, bool, er
 	if senderID == "" {
 		return Message{}, false, fmt.Errorf("sender_id is required")
 	}
-	if content == "" && len(req.Attachments) == 0 && !req.ResourceSelection.SingleSkill() {
+	if content == "" && len(req.Attachments) == 0 && req.ResolveAttachments == nil && !req.ResourceSelection.SingleSkill() {
 		return Message{}, false, fmt.Errorf("content is required")
 	}
 
@@ -2086,6 +2087,13 @@ func (s *Service) CreateMessageOnce(req CreateMessageRequest) (Message, bool, er
 		return message, false, nil
 	}
 
+	if req.ResolveAttachments != nil {
+		referenced, err := req.ResolveAttachments()
+		if err != nil {
+			return Message{}, false, err
+		}
+		req.Attachments = append(req.Attachments, referenced...)
+	}
 	prepared, err := s.prepareMessageAttachments(req.Attachments)
 	if err != nil {
 		return Message{}, false, err
@@ -2726,6 +2734,9 @@ func (s *Service) User(userID string) (User, bool) {
 }
 
 func (s *Service) extractMentions(content string) []Mention {
+	// Quoted file paths are literal references, including paths containing an
+	// @handle or a first directory component that is also a participant name.
+	content = fileReferenceLiteralPattern.ReplaceAllString(content, "")
 	tagMatches := mentionTagPattern.FindAllStringSubmatch(content, -1)
 	handleMatches := mentionPattern.FindAllStringSubmatch(content, -1)
 	if len(tagMatches) == 0 && len(handleMatches) == 0 {

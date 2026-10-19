@@ -197,17 +197,16 @@ export function mcpServerDescription(config: JSONRecord | null | undefined): str
   if (explicit) {
     return explicit;
   }
-  const command = String(config.command ?? "").trim();
-  const args = Array.isArray(config.args) ? config.args.map((item) => String(item ?? "").trim()).filter(Boolean) : [];
-  if (command) {
-    return [command, ...args].join(" ");
+  const name = String(config.display_name ?? "")
+    .trim()
+    .toLowerCase();
+  if (name === "computer-use") {
+    return "Control desktop apps and browsers.";
   }
-  const url = String(config.url ?? "").trim();
-  if (url) {
-    return url;
+  if (name === "node_repl") {
+    return "Run JavaScript for browser and desktop automation.";
   }
-  const transport = String(config.transport ?? config.type ?? "").trim();
-  return transport;
+  return "";
 }
 
 export function mcpProbeResultFromResponse(response: unknown): MCPProbeResult | null {
@@ -371,6 +370,14 @@ export function mcpServerOrigin(server: MCPServer | null | undefined): MCPServer
   if (source === "system" || source === "builtin") {
     return "builtin";
   }
+  const meta = isJSONRecord(server?.config?._meta) ? server.config._meta : null;
+  const managed = meta && isJSONRecord(meta["com.opencsg/mcp"]) ? meta["com.opencsg/mcp"] : null;
+  if (managed?.type === "llm_wiki") {
+    return "knowledge";
+  }
+  if ((meta && isJSONRecord(meta["com.opencsg/marketplace"])) || managed?.type === "agentichub_mcp") {
+    return "market";
+  }
   if (source === "market" || source === "official") {
     return "market";
   }
@@ -381,4 +388,4 @@ export function isBuiltinMCPServer(server: MCPServer | null | undefined): boolea
   return mcpServerOrigin(server) === "builtin";
 }
 
-export type MCPServerOrigin = "builtin" | "market" | "manual";
+export type MCPServerOrigin = "builtin" | "market" | "manual" | "knowledge";

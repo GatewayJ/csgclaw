@@ -2,6 +2,8 @@ import "@/components/business/ResourceTag";
 import { messageResources, resourceMessageText } from "@/models/conversationResources";
 import { ComposerResourceMenu, type ComposerResourceProps } from "@/components/business/ConversationResourcePicker";
 import { canSendComposer, selectedResources } from "@/models/conversationResources";
+import type { ChatFileScope } from "@/components/business/ChatSidePanel/types";
+import { useFileMentions } from "./FileMentionPicker";
 import type { SkillContinuation } from "@/models/slashCommands";
 import { emptyCompletedProgress } from "@/models/turnProgress";
 import { messageListScrollKey, useMessageListAutoScroll } from "@/hooks/workspace/useMessageListAutoScroll";
@@ -27,6 +29,7 @@ import {
   insertComposerLineBreak,
   insertComposerSegmentsAtSelection,
   insertPlainTextAtSelection,
+  isComposerKeyboardEventComposing,
   normalizeComposerSegmentsForDisplay,
   normalizeTextMentions,
   parseComposerSegments,
@@ -77,6 +80,7 @@ type ThreadMentionState = {
 };
 
 export type ConversationThreadPanelProps = ComposerResourceProps & {
+  fileScope?: ChatFileScope;
   renderTurnControls?: (message: IMMessage) => ProgressControlSlots | null;
   agents?: AgentLike[];
   disabled: boolean;
@@ -116,6 +120,7 @@ export type ConversationThreadPanelProps = ComposerResourceProps & {
 export function ConversationThreadPanel({
   resourceAgentID,
   onPickResources,
+  fileScope,
   renderTurnControls,
   thread,
   agents = [],
@@ -198,6 +203,15 @@ export function ConversationThreadPanel({
     return getMentionCandidates(mentionableUsers, mentionState.query) as MentionPickerUser[];
   }, [mentionState, mentionableUsers]);
 
+  const fileMentions = useFileMentions({
+    scope: fileScope,
+    editorRef: threadEditorRef,
+    onSync: () => syncThreadDraft(),
+    people: threadMentionCandidates,
+    personIndex: mentionIndex,
+    onPerson: insertThreadMention,
+    t,
+  });
   const threadScrollKey = useMemo(
     () => messageListScrollKey([...(visibleRoot ? [visibleRoot] : []), ...displayReplies]),
     [visibleRoot, displayReplies],
@@ -235,6 +249,7 @@ export function ConversationThreadPanel({
     onDraftChange(segments);
     syncThreadMentionState(target);
     syncThreadSlashQuery(target);
+    fileMentions.sync();
   }
 
   function syncThreadSlashQuery(target = threadEditorRef.current) {
@@ -244,6 +259,7 @@ export function ConversationThreadPanel({
   function syncThreadQueryState(target = threadEditorRef.current) {
     syncThreadMentionState(target);
     syncThreadSlashQuery(target);
+    fileMentions.sync();
   }
 
   function syncThreadMentionState(target = threadEditorRef.current) {
@@ -410,7 +426,9 @@ export function ConversationThreadPanel({
               onSelect={(name) => onApplyThreadSlashCandidate(name)}
             />
           ) : null}
-          {threadMentionCandidates.length > 0 ? (
+          {fileScope ? (
+            fileMentions.picker
+          ) : threadMentionCandidates.length > 0 ? (
             <MentionPicker
               users={threadMentionCandidates}
               activeIndex={mentionIndex}
@@ -446,7 +464,9 @@ export function ConversationThreadPanel({
             onKeyDown={(event) => {
               if (
                 disabled ||
-                (event.target instanceof Element && event.target.closest("[data-composer-resource-remove]"))
+                isComposerKeyboardEventComposing(event) ||
+                (event.target instanceof Element && event.target.closest("[data-composer-resource-remove]")) ||
+                fileMentions.handleKeyDown(event)
               ) {
                 return;
               }

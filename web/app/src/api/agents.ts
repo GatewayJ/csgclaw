@@ -1,4 +1,5 @@
 import { del, get, requestWithResponse, patch, post, put, requestText, type ApiError } from "@/api/client";
+import { checkModelProvider } from "@/api/modelProviders";
 import { BOT_TYPE_NOTIFICATION, MANAGER_AGENT_ID } from "@/shared/constants/agents";
 import {
   isNotificationBotAgent,
@@ -14,6 +15,7 @@ import type { WorkspaceFile, WorkspaceListing } from "@/models/workspace";
 
 export type AgentProfileModelRequest = {
   agent_id?: string;
+  model_provider_id?: string;
   api_key?: string;
   base_url?: string;
   headers?: JSONRecord;
@@ -132,23 +134,6 @@ export type FeishuRegistrationFinalizeResult = FeishuRegistration & {
   restart_error?: string;
   restart_status?: string;
   warnings?: string[];
-  lark_cli_status?: string;
-  lark_cli_error?: {
-    code?: string;
-    message?: string;
-  };
-};
-
-export type AgentLarkCLIInitResult = {
-  agent_id?: string;
-  app_id?: string;
-  generation?: number;
-  runtime_loaded?: boolean;
-  warning?: string;
-  participant_id?: string;
-  restart_error?: string;
-  restart_status?: string;
-  status?: string;
 };
 
 function modelPayload(draft: AgentProfileModelRequest): AgentProfileModelRequest {
@@ -274,7 +259,15 @@ export function fetchAgentProfile(agentID: string): Promise<AgentProfileLike> {
   return get(`api/v1/agents/${encodeURIComponent(agentID)}/profile`);
 }
 
-export function fetchAgentProfileModels(draft: AgentProfileModelRequest): Promise<AgentProfileModelsResponse> {
+export async function fetchAgentProfileModels(draft: AgentProfileModelRequest): Promise<AgentProfileModelsResponse> {
+  const providerID = String(draft.model_provider_id || "").trim();
+  if (providerID) {
+    const result = await checkModelProvider(providerID);
+    if (result.status !== "connected") {
+      throw new Error(result.message || "Model provider check failed");
+    }
+    return { models: result.models };
+  }
   return post("api/v1/agent-profiles/models", modelPayload(draft));
 }
 
@@ -410,14 +403,6 @@ export function deleteAgentLikeRequest(item: AgentLike): Promise<void> {
 
 export function deleteFeishuParticipantRequest(participantID: string): Promise<void> {
   return del(`api/v1/channels/feishu/participants/${encodeURIComponent(participantID)}`);
-}
-
-export function initAgentLarkCLIRequest(agentID: string): Promise<AgentLarkCLIInitResult> {
-  return post(`api/v1/agents/${encodeURIComponent(agentID)}/lark-cli:init`, {});
-}
-
-export function cleanupAgentLarkCLIRequest(agentID: string): Promise<void> {
-  return post(`api/v1/agents/${encodeURIComponent(agentID)}/lark-cli:cleanup`, {});
 }
 
 export function runAgentActionRequest(agentID: string, action: string): Promise<AgentLike> {

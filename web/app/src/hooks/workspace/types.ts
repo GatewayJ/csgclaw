@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import type { Location, NavigateFunction } from "react-router-dom";
 import type { FetchAgentsOptions } from "@/api/agents";
 import type { FetchVersionOptions } from "@/api/app";
-import type { AgentDetailPaneProps } from "@/pages/AgentPage/components";
+import type { AgentDetailPaneProps } from "@/components/business/AgentDetails";
 import type { MessageAction, MessageActionFeedback, MessageLike } from "@/components/business/MessageContent/types";
 import type { AgentLike, AgentProfileLike, RuntimeBootstrapConfig } from "@/models/agents";
 import type { IMConversation, IMData, IMUser, LocaleCode, TranslateFn, UsersById } from "@/models/conversations";
@@ -70,7 +70,6 @@ export type UseWorkspaceShellControllerArgs = {
   setIsSidebarCollapsed: WorkspaceUiState["setIsSidebarCollapsed"];
   setWorkspaceTab: WorkspaceUiState["setWorkspaceTab"];
   t: TranslateFn;
-  theme: ThemeMode;
   workspaceTab: WorkspaceTab;
 };
 
@@ -271,6 +270,7 @@ export type UseAgentControllerArgs = {
   modelProvidersLoaded?: boolean;
   openCSGAuthGuard: OpenCSGAuthGuard;
   onAgentDeleted?: (item: AgentLike) => void;
+  onTemplatePublished?: (template: HubTemplate) => void;
   profileDetailAgentID?: string;
   redirectToIncompleteManagerProfile?: boolean;
   refreshMCPServers?: () => Promise<unknown>;
@@ -291,7 +291,6 @@ export type UseAgentControllerArgs = {
   setAgentsData: WorkspaceQuerySetter<AgentLike[]>;
   setBootstrapData: WorkspaceQuerySetter<IMData | null>;
   setManagerProfileData: WorkspaceQuerySetter<AgentProfileLike | null>;
-  setHubPublishError?: (message: string) => void;
   setSelectedHubTemplateId: WorkspaceUiState["setSelectedHubTemplateId"];
   t: TranslateFn;
 };

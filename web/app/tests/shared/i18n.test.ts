@@ -1,4 +1,9 @@
-import { createTranslator, localizeAPIError, localizeTemplateSourceTag } from "@/shared/i18n";
+import {
+  createTranslator,
+  localizeAPIError,
+  localizeTemplatePublishError,
+  localizeTemplateSourceTag,
+} from "@/shared/i18n";
 import { messages } from "@/shared/i18n/messages";
 
 describe("i18n messages", () => {
@@ -71,12 +76,44 @@ describe("i18n messages", () => {
     expect(Object.keys(messages.zh.errors).filter((key) => /\s/.test(key))).toEqual([]);
   });
 
-  it("preserves the upstream reason for generic template publishing failures", () => {
+  it.each([
+    ["zh", "file_reference_unavailable", "引用文件不可用，请检查文件是否存在以及来源 Agent 是否仍在会话中。"],
+    [
+      "en",
+      "file_reference_unavailable",
+      "Referenced file is unavailable. Check that it exists and its source agent is still in this conversation.",
+    ],
+    ["zh", "workspace_file_unavailable", "工作区文件不可用。"],
+    ["en", "workspace_file_unavailable", "Workspace file is unavailable."],
+  ] as const)("keeps the %s %s error distinct from the generic fallback", (locale, code, expected) => {
+    expect(localizeAPIError({ status: 400, code, message: "file read failed" }, createTranslator(locale))).toBe(
+      expected,
+    );
+  });
+
+  it("hides English diagnostics for generic template publishing failures in Chinese", () => {
     const message =
       'publish hub template to "official": remote hub request failed with status 500: failed to update repository path';
     expect(localizeAPIError({ status: 400, code: "template_publish_failed", message }, createTranslator("zh"))).toBe(
+      "模板发布失败，请稍后重试。",
+    );
+    expect(localizeAPIError({ status: 400, code: "template_publish_failed", message }, createTranslator("en"))).toBe(
       message,
     );
+  });
+
+  it("uses a Chinese fallback for unknown English API messages", () => {
+    expect(localizeAPIError({ status: 500, message: "remote hub request failed" }, createTranslator("zh"))).toBe(
+      "操作失败，请稍后重试。",
+    );
+    expect(
+      localizeAPIError(
+        { status: 500, message: "remote hub request failed" },
+        createTranslator("zh"),
+        "remote hub request failed",
+      ),
+    ).toBe("操作失败，请稍后重试。");
+    expect(localizeAPIError({ status: 500, message: "服务暂时不可用" }, createTranslator("zh"))).toBe("服务暂时不可用");
   });
 
   it("localizes unavailable Docker errors without exposing platform diagnostics", () => {
@@ -120,5 +157,33 @@ describe("i18n messages", () => {
       "智能体运行文件仍被占用。请启动 Docker 并等待其运行正常后重新删除；若 Docker 已启动，请重启 CSGClaw 后再试。",
     );
     expect(localizeAPIError(error, createTranslator("en"))).not.toContain("/Users/example");
+  });
+});
+
+describe("template publishing diagnostics", () => {
+  it.each(["zh", "en"] as const)("retains remote diagnostic context in %s", (locale) => {
+    const message = "create remote hub template: remote hub request failed with status 500: repository unavailable";
+    const formatted = localizeTemplatePublishError(
+      { status: 502, code: "template_publish_failed", message },
+      createTranslator(locale),
+    );
+    expect(formatted).toContain(message);
+    expect(formatted).toContain("HTTP 502 · template_publish_failed");
+    if (locale === "zh") expect(formatted).toContain("模板发布失败，请稍后重试。");
+    expect(formatted.split(message)).toHaveLength(2);
+  });
+  it("keeps details for translated remote error codes", () => {
+    expect(
+      localizeTemplatePublishError(
+        { code: "SYS-ERR-4", message: "template already exists: alice/guide" },
+        createTranslator("zh"),
+      ),
+    ).toContain("template already exists: alice/guide");
+  });
+  it("handles missing diagnostics", () => {
+    expect(localizeTemplatePublishError(null, createTranslator("zh"), "发布失败")).toBe("发布失败");
+    expect(localizeTemplatePublishError(new Error("connection refused"), createTranslator("zh"))).toContain(
+      "connection refused",
+    );
   });
 });

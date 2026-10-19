@@ -5,11 +5,15 @@ import type { LocaleCode, TranslateFn } from "@/models/conversations";
 type ErrorTranslationKey = keyof typeof messages.zh.errors;
 
 export function detectInitialLocale(): LocaleCode {
-  const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
-  if (stored === "zh" || stored === "en") {
-    return stored;
+  try {
+    const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (stored === "zh" || stored === "en") {
+      return stored;
+    }
+  } catch {
+    // Browser language remains available when local storage is restricted.
   }
-  return navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
+  return typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
 export function createTranslator(locale: LocaleCode): TranslateFn {
@@ -61,6 +65,9 @@ export function localizeTemplateSourceTag(source: unknown, locale: LocaleCode): 
 
 export function localizeError(raw: unknown, t: TranslateFn): string {
   const cleaned = String(raw ?? "").trim();
+  if (!cleaned) {
+    return "";
+  }
   const errorKeys = Object.keys(messages.zh.errors) as ErrorTranslationKey[];
   for (const key of errorKeys) {
     if (cleaned.includes(key)) {
@@ -80,27 +87,71 @@ export function localizeError(raw: unknown, t: TranslateFn): string {
 }
 
 export function localizeAPIError(error: unknown, t: TranslateFn, fallback = ""): string {
+  const defaultFallback = localizeErrorFallback(fallback, t) || defaultAPIError(t);
   if (error && typeof error === "object" && "code" in error) {
     const code = String((error as { code?: unknown }).code || "").trim();
     if (code) {
-      // This is a local fallback code used when the Hub did not provide a
-      // stable business code. Preserve its diagnostic message instead of
-      // replacing the only actionable reason with a generic translation.
+      const key = `errors.${code}`;
+      const localized = t(key);
+      const codeFallback = localized !== key ? localized : defaultFallback;
       if (code === "template_publish_failed" && "message" in error) {
-        const message = localizeError((error as { message?: unknown }).message, t);
+        const message = localizeUnknownError((error as { message?: unknown }).message, t, codeFallback);
         if (message) {
           return message;
         }
       }
-      const key = `errors.${code}`;
-      const localized = t(key);
       if (localized !== key) {
         return localized;
       }
     }
   }
   if (error && typeof error === "object" && "message" in error) {
-    return localizeError((error as { message?: unknown }).message, t) || fallback;
+    return localizeUnknownError((error as { message?: unknown }).message, t, defaultFallback);
   }
-  return localizeError(error, t) || fallback;
+  return localizeUnknownError(error, t, defaultFallback);
+}
+
+function localizeErrorFallback(fallback: unknown, t: TranslateFn): string {
+  const localized = localizeError(fallback, t);
+  if (isChineseTranslator(t) && isLikelyEnglishDiagnostic(localized)) {
+    return defaultAPIError(t);
+  }
+  return localized;
+}
+
+function localizeUnknownError(raw: unknown, t: TranslateFn, fallback: string): string {
+  const localized = localizeError(raw, t);
+  if (!localized) {
+    return fallback;
+  }
+  if (isChineseTranslator(t) && isLikelyEnglishDiagnostic(localized)) {
+    return fallback;
+  }
+  return localized;
+}
+
+function defaultAPIError(t: TranslateFn): string {
+  const key = "errors.unknown_api_error";
+  const localized = t(key);
+  return localized === key ? "" : localized;
+}
+
+function isChineseTranslator(t: TranslateFn): boolean {
+  return t("errors.unknown_api_error") === messages.zh.errors.unknown_api_error;
+}
+
+function isLikelyEnglishDiagnostic(value: string): boolean {
+  return /[A-Za-z]/.test(value) && !/[\u4e00-\u9fff]/.test(value);
+}
+
+// Publishing diagnostics are needed to resolve remote failures, including untranslated ones.
+export function localizeTemplatePublishError(error: unknown, t: TranslateFn, fallback = ""): string {
+  const summary = localizeAPIError(error, t, fallback);
+  if (!error || typeof error !== "object") return summary;
+  const value = error as { code?: unknown; message?: unknown; status?: unknown };
+  const message = typeof value.message === "string" ? value.message.trim() : "";
+  const code = typeof value.code === "string" ? value.code.trim() : "";
+  const status = typeof value.status === "number" ? `HTTP ${value.status}` : "";
+  const context = [status, code].filter(Boolean).join(" · ");
+  return [summary, context, message && message !== summary ? message : ""].filter(Boolean).join("\n");
 }

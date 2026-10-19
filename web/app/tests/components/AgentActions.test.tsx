@@ -2,10 +2,12 @@ import { createQueryWrapper } from "../helpers/queryClient";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { AgentDetailPane, AgentRow, AgentView, NotificationParticipantDetailPane } from "@/pages/AgentPage/components";
+import { AgentRow } from "@/pages/AgentPage/components";
+import { AgentDetailPane, AgentView, NotificationParticipantDetailPane } from "@/components/business/AgentDetails";
 import { agentToDraft, type AgentDraft } from "@/models/agents";
 import { AGENT_PROFILE_ACTIVE_TAB_STORAGE_KEY } from "@/shared/storage/keys";
 import { createTranslator } from "@/shared/i18n";
+import buttonStyles from "@/components/ui/Button/Button.module.css";
 
 const labels: Record<string, string> = {
   agentActivityTab: "Activity",
@@ -24,14 +26,23 @@ const labels: Record<string, string> = {
   agentUpgrade: "Upgrade",
   agentMoreActions: "More",
   agentSaveLocalTemplate: "Save as local template",
+  agentSaveAndPublishTemplate: "Save and publish to agentic hub",
   agentPublishCommunity: "Publish to community",
   agentPublishCommunityTemplateOnly: "Publish template only",
   agentPublishCommunityAndDeploy: "Publish and deploy",
   agentPublishLoginRequired: "Sign in to OpenCSG before publishing a template.",
+  agentTemplateLoginToPublish: "Sign in to publish",
   agentPublishTemplateTitle: "Publish agent template",
+  agentTemplateHubGuidance:
+    "Visit the agentic hub template library to view published templates and deploy them as cloud agents.",
+  agentTemplateHubManagementHint: "View and manage template review status and cloud deployments in agentic hub.",
+  agentTemplateOpenHub: "Go to agentic hub",
+  agentTemplateHubLinkPending: "The destination is awaiting configuration and is currently unavailable.",
+  agentTemplateHubPublishedRequired: "Sign in and publish the template to create a cloud agent in agentic hub.",
   agentPublishTemplateLocalSubtitle: "Save locally",
   agentPublishTemplateCommunitySubtitle: "Publish remotely",
   agentPublishTemplateName: "Template name",
+  agentPublishTemplateDisplayName: "Display name",
   agentPublishTemplateNameHint: "Use letters, numbers, and underscores.",
   agentPublishTemplateNameInvalid: "Invalid template name",
   agentPublishLocalNameExists: "A local template with this name already exists.",
@@ -196,22 +207,40 @@ describe("agent action visibility", () => {
     const saveLocal = screen.getByRole("menuitem", { name: "Save as local template" });
     expect(saveLocal).not.toHaveAttribute("aria-disabled", "true");
     await user.click(saveLocal);
-    expect(screen.getByRole("dialog", { name: "Publish agent template" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Template name" })).toHaveValue("Worker");
+    expect(screen.getByRole("dialog", { name: "Save as local template" })).toBeInTheDocument();
+    expect(screen.queryByText(labels.agentTemplateHubGuidance)).not.toBeInTheDocument();
+    expect(screen.queryByText(labels.agentTemplateHubManagementHint)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Go to agentic hub" })).not.toBeInTheDocument();
+    expect((screen.getByRole("textbox", { name: "Template name" }) as HTMLInputElement).value).toMatch(
+      new RegExp(`^${worker.id}-[a-z0-9]+$`),
+    );
+    expect(screen.getByRole("textbox", { name: "Display name" })).toHaveValue("Worker");
     expect(screen.getByRole("textbox", { name: "Template description" })).toHaveValue("Agent description");
     expect(screen.getByRole("checkbox", { name: "Include agent memory" })).not.toBeChecked();
     await user.click(screen.getByRole("button", { name: "Save as local template" }));
-    expect(onPublish).toHaveBeenCalledWith("local", "Worker", "Agent description", false);
-    expect(screen.queryByRole("dialog", { name: "Publish agent template" })).not.toBeInTheDocument();
+    expect(onPublish).toHaveBeenCalledWith(
+      "local",
+      expect.stringMatching(new RegExp(`^${worker.id}-[a-z0-9]+$`)),
+      "Agent description",
+      false,
+      "Worker",
+    );
+    expect(screen.queryByRole("dialog", { name: "Save as local template" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "More" }));
     await user.click(screen.getByRole("menuitem", { name: "Save as local template" }));
     await user.click(screen.getByRole("checkbox", { name: "Include agent memory" }));
     await user.click(screen.getByRole("button", { name: "Save as local template" }));
-    expect(onPublish).toHaveBeenLastCalledWith("local", "Worker", "Agent description", true);
+    expect(onPublish).toHaveBeenLastCalledWith(
+      "local",
+      expect.stringMatching(new RegExp(`^${worker.id}-[a-z0-9]+$`)),
+      "Agent description",
+      true,
+      "Worker",
+    );
 
     await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.queryByRole("menuitem", { name: "Publish to community" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Save and publish to agentic hub" })).not.toBeInTheDocument();
   });
 
   it.each(["codex", "dsh"] as const)(
@@ -239,22 +268,35 @@ describe("agent action visibility", () => {
 
       await user.click(screen.getByRole("button", { name: "More" }));
       expect(screen.getByRole("menuitem", { name: "Save as local template" })).toBeInTheDocument();
-      expect(screen.queryByRole("menuitem", { name: "Publish template only" })).not.toBeInTheDocument();
       expect(screen.queryByRole("menuitem", { name: "Publish and deploy" })).not.toBeInTheDocument();
-      await user.click(screen.getByRole("menuitem", { name: "Publish to community" }));
-      expect(screen.getByRole("button", { name: "Publish template only" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Publish and deploy" })).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Publish template only" }));
+      await user.click(screen.getByRole("menuitem", { name: "Save and publish to agentic hub" }));
+      expect(screen.getByText(labels.agentTemplateHubGuidance)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Go to agentic hub" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save and publish to agentic hub" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Publish and deploy" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Save and publish to agentic hub" }));
 
-      expect(onPublish).toHaveBeenCalledWith("official", "Worker", "Agent description", false);
+      expect(onPublish).toHaveBeenCalledWith(
+        "official",
+        expect.stringMatching(new RegExp(`^${worker.id}-[a-z0-9]+$`)),
+        "Agent description",
+        false,
+        "Worker",
+      );
 
       await user.click(screen.getByRole("button", { name: "More" }));
-      await user.click(screen.getByRole("menuitem", { name: "Publish to community" }));
+      await user.click(screen.getByRole("menuitem", { name: "Save and publish to agentic hub" }));
       const includeMemory = screen.queryByRole("checkbox", { name: "Include agent memory" });
       expect(includeMemory).toBeInTheDocument();
       await user.click(includeMemory!);
-      await user.click(screen.getByRole("button", { name: "Publish and deploy" }));
-      expect(onPublish).toHaveBeenCalledWith("official_deploy", "Worker", "Agent description", true);
+      await user.click(screen.getByRole("button", { name: "Save and publish to agentic hub" }));
+      expect(onPublish).toHaveBeenCalledWith(
+        "official",
+        expect.stringMatching(new RegExp(`^${worker.id}-[a-z0-9]+$`)),
+        "Agent description",
+        true,
+        "Worker",
+      );
     },
   );
 
@@ -283,11 +325,13 @@ describe("agent action visibility", () => {
     expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Recreate" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Save as local template" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Publish to community" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Save and publish to agentic hub" })).not.toBeInTheDocument();
   });
 
   it("requires sign-in for Codex community publishing without blocking local templates", async () => {
     const user = userEvent.setup();
+    const onPublish = vi.fn().mockResolvedValue(true);
+    const onPublishLogin = vi.fn();
     render(
       <AgentDetailPane
         item={{ ...worker, runtime_kind: "codex" }}
@@ -300,7 +344,8 @@ describe("agent action visibility", () => {
         onDraftChange={vi.fn()}
         onInvite={vi.fn()}
         onOpenDM={vi.fn()}
-        onPublish={vi.fn()}
+        onPublish={onPublish}
+        onPublishLogin={onPublishLogin}
         onRecreate={vi.fn()}
         onStart={vi.fn()}
         onStop={vi.fn()}
@@ -312,9 +357,25 @@ describe("agent action visibility", () => {
       "aria-disabled",
       "true",
     );
-    const publishCommunity = screen.getByRole("menuitem", { name: "Publish to community" });
-    expect(publishCommunity).toHaveAttribute("aria-disabled", "true");
+    const publishCommunity = screen.getByRole("menuitem", { name: "Save and publish to agentic hub" });
+    expect(publishCommunity).not.toHaveAttribute("aria-disabled", "true");
     expect(publishCommunity).toHaveAttribute("title", "Sign in to OpenCSG before publishing a template.");
+    await user.click(publishCommunity);
+    expect(screen.getByRole("status")).toHaveTextContent(labels.agentPublishLoginRequired);
+    expect(screen.queryByRole("button", { name: "Save and publish to agentic hub" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sign in to publish" }));
+    expect(onPublishLogin).toHaveBeenCalledOnce();
+    expect(onPublish).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await user.click(screen.getByRole("menuitem", { name: "Save as local template" }));
+    await user.click(screen.getByRole("button", { name: "Save as local template" }));
+    expect(onPublish).toHaveBeenCalledWith(
+      "local",
+      expect.stringMatching(new RegExp(`^${worker.id}-[a-z0-9]+$`)),
+      "Agent description",
+      false,
+      "Worker",
+    );
   });
 
   it("rejects an invalid template name before publishing", async () => {
@@ -341,7 +402,7 @@ describe("agent action visibility", () => {
     await user.click(screen.getByRole("button", { name: "More" }));
     await user.click(screen.getByRole("menuitem", { name: "Save as local template" }));
     const nameInput = screen.getByRole("textbox", { name: "Template name" });
-    expect(nameInput).toHaveAttribute("maxlength", "24");
+    expect(nameInput).toHaveAttribute("maxlength", "32");
     await user.clear(nameInput);
     await user.type(nameInput, "2-invalid");
     await user.click(screen.getByRole("button", { name: "Save as local template" }));
@@ -352,7 +413,7 @@ describe("agent action visibility", () => {
     await user.clear(nameInput);
     await user.type(nameInput, "review-bot_2");
     await user.click(screen.getByRole("button", { name: "Save as local template" }));
-    expect(onPublish).toHaveBeenCalledWith("local", "review-bot_2", "Agent description", false);
+    expect(onPublish).toHaveBeenCalledWith("local", "review-bot_2", "Agent description", false, "Worker");
   });
 
   it("keeps the publish dialog open and shows duplicate local template errors", async () => {
@@ -381,7 +442,7 @@ describe("agent action visibility", () => {
     await user.click(screen.getByRole("menuitem", { name: "Save as local template" }));
     await user.click(screen.getByRole("button", { name: "Save as local template" }));
 
-    expect(screen.getByRole("dialog", { name: "Publish agent template" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Save as local template" })).toBeInTheDocument();
     expect(screen.getByText("A local template with this name already exists.")).toBeInTheDocument();
   });
 
@@ -761,11 +822,6 @@ describe("agent action visibility", () => {
       <AgentDetailPane
         item={{
           ...worker,
-          lark_cli: {
-            available: true,
-            bound: true,
-            state: "bound",
-          },
           participants: [
             {
               agent_id: worker.id,
@@ -815,103 +871,12 @@ describe("agent action visibility", () => {
     const channelActionButtons = Array.from(document.querySelectorAll(".agent-channel-actions .btn"));
     expect(channelActionButtons.map((button) => button.textContent?.trim())).toEqual([
       "Reconnect Feishu",
-      "Channel tool configured",
       "Disconnect Feishu",
     ]);
     const disconnectButton = screen.getByRole("button", { name: "Disconnect Feishu" });
-    expect(disconnectButton).toHaveClass("btn-outline-danger");
+    expect(disconnectButton).toHaveClass(buttonStyles["btn-outline-danger"]);
     await user.click(disconnectButton);
     expect(onDisconnectFeishu).toHaveBeenCalledWith(expect.objectContaining({ id: worker.id }));
-  });
-
-  it("shows user-managed lark-cli installation guidance and retries configuration on demand", async () => {
-    const user = userEvent.setup();
-    const onDismissLarkCLIDialog = vi.fn();
-    const onInitLarkCLI = vi.fn();
-    const onShowLarkCLIInstall = vi.fn();
-    const unavailableWorker = {
-      ...worker,
-      lark_cli: {
-        available: false,
-        bound: false,
-        state: "unavailable",
-      },
-      participants: [
-        {
-          agent_id: worker.id,
-          channel: "feishu",
-          channel_user_kind: "app_id",
-          id: "worker-feishu",
-          type: "agent",
-        },
-      ],
-    };
-    const draft = agentToDraft(unavailableWorker);
-    const paneProps = {
-      activeRoom: null,
-      authBusyProvider: "",
-      authStatuses: {},
-      busyKey: "",
-      draft,
-      error: "",
-      item: unavailableWorker,
-      modelBusy: false,
-      models: [],
-      notifierWebhookPublicOrigin: "http://127.0.0.1:18080",
-      onDelete: vi.fn(),
-      onDisconnectFeishu: vi.fn(),
-      onDismissLarkCLIDialog,
-      onDraftChange: vi.fn(),
-      onInitLarkCLI,
-      onInvite: vi.fn(),
-      onOpenDM: vi.fn(),
-      onProviderLogin: vi.fn(),
-      onPublish: vi.fn(),
-      onRecreate: vi.fn(),
-      onSave: vi.fn(),
-      onShowLarkCLIInstall,
-      onStart: vi.fn(),
-      onStartFeishuConnect: vi.fn(),
-      onStop: vi.fn(),
-      onUpgrade: vi.fn(),
-      publishBusy: false,
-      saveError: "",
-      savedDraft: draft,
-      saving: false,
-      t,
-    };
-    const { rerender } = render(<AgentDetailPane {...paneProps} />);
-
-    await user.click(screen.getByRole("button", { name: "Channels" }));
-    await user.click(screen.getByRole("button", { name: "View installation steps" }));
-    expect(onShowLarkCLIInstall).toHaveBeenCalledWith(expect.objectContaining({ id: worker.id }));
-    expect(onInitLarkCLI).not.toHaveBeenCalled();
-
-    rerender(
-      <AgentDetailPane
-        {...paneProps}
-        larkCLIDialog={{
-          kind: "install",
-          title: "Install the Feishu channel tool",
-          message: "CSGClaw does not download or upgrade lark-cli automatically.",
-        }}
-      />,
-    );
-
-    expect(screen.getByRole("dialog", { name: "Install the Feishu channel tool" })).toBeInTheDocument();
-    expect(screen.getByText("npm install -g @larksuite/cli@latest")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Download Node.js LTS" })).toHaveAttribute(
-      "href",
-      "https://nodejs.org/en/download",
-    );
-    expect(screen.getByRole("link", { name: "View native binaries" })).toHaveAttribute(
-      "href",
-      "https://github.com/larksuite/cli/releases/latest",
-    );
-
-    await user.click(screen.getByRole("button", { name: "Detect and configure" }));
-    expect(onDismissLarkCLIDialog).toHaveBeenCalledOnce();
-    expect(onInitLarkCLI).toHaveBeenCalledWith(expect.objectContaining({ id: worker.id }));
   });
 
   it("shows pending Feishu authorization without requiring a manual completion action", async () => {

@@ -5,6 +5,8 @@ import { useConversationController } from "@/hooks/workspace/useConversationCont
 import { WorkspacePaneTypes } from "@/models/routing";
 import { openCSGAuthGuardStub } from "../helpers/openCSGAuthGuard";
 import { MAX_ATTACHMENT_FILE_BYTES } from "@/models/attachments";
+import { renderComposerSegments, type ComposerSegment } from "@/models/composer";
+import { resourceSegment } from "@/models/conversationResources";
 import {
   RoomTypes,
   type IMConversation,
@@ -276,6 +278,55 @@ describe("useConversationController", () => {
       await send();
     });
     expect(apiMocks.sendMessageRequest.mock.calls[2][0].client_message_id).not.toBe(first.client_message_id);
+  });
+
+  it.each(["composer", "thread"])("keeps file and resource identities in %s sends and retries", async (scope) => {
+    const root = { id: "root", content: "Review", sender_id: "u-admin" };
+    const { result } = renderConversationController({
+      data: dataWithMessages([root]),
+      agents: [{ id: "u-demo", name: "demo", role: "worker", runtime_kind: "codex", status: "running" }],
+    });
+    if (scope === "thread") await act(async () => result.current.conversationViewProps.onOpenThread(root));
+    const editor = document.createElement("div");
+    const setDraft = (path: string, id: string) => {
+      const segments: ComposerSegment[] = [
+        resourceSegment({ source: "mcp", id, type: "connector", name: "Search" }, "u-demo"),
+        {
+          type: "file",
+          text: "@notes.md",
+          reference: { source: "workspace", agent_id: "u-demo", path, label: "notes.md" },
+        },
+      ];
+      act(() => {
+        if (scope === "thread") result.current.conversationViewProps.onThreadDraftChange(segments);
+        else {
+          result.current.conversationViewProps.editorRef.current = editor;
+          renderComposerSegments(editor, segments);
+          result.current.conversationViewProps.onSyncComposer();
+        }
+      });
+    };
+    const send = async () => {
+      await act(async () => {
+        if (scope === "thread") await result.current.conversationViewProps.onSendThreadReply();
+        else await result.current.conversationViewProps.onSendMessage();
+      });
+      return apiMocks.sendMessageRequest.mock.lastCall![0];
+    };
+    apiMocks.sendMessageRequest.mockRejectedValue({ message: "Temporary failure" });
+    setDraft("docs/notes.md", "search");
+    const first = await send();
+    expect(first).toMatchObject({
+      resource_refs: [{ source: "mcp", id: "search" }],
+      file_references: [{ source: "workspace", agent_id: "u-demo", path: "docs/notes.md" }],
+    });
+    expect((await send()).client_message_id).toBe(first.client_message_id);
+    setDraft("other/notes.md", "search");
+    const changedFile = await send();
+    expect(changedFile.content).toBe(first.content);
+    expect(changedFile.client_message_id).not.toBe(first.client_message_id);
+    setDraft("other/notes.md", "other-search");
+    expect((await send()).client_message_id).not.toBe(changedFile.client_message_id);
   });
 
   it.each(["composer", "thread"])(

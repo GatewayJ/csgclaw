@@ -1,4 +1,5 @@
 import type { TaskConfiguration } from "@/models/taskConfiguration";
+import type { FileReference } from "@/models/fileReferences";
 import { trackDiagnosticSubmission } from "@/shared/diagnostics/renderTiming";
 import { apiErrorFromText, del, get, post, resolveRequestPath, type ApiError } from "@/api/client";
 import type {
@@ -15,6 +16,7 @@ import type { ResourceReference } from "@/models/conversationResources";
 
 export type SendMessagePayload = {
   resource_refs?: ResourceReference[];
+  file_references?: FileReference[];
   attachments?: File[];
   client_message_id?: string;
   content: string;

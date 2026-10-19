@@ -61,7 +61,7 @@ func (h *Handler) prepareMessageResources(ctx context.Context, req *im.CreateMes
 		return err
 	}
 	selection := resolved.Snapshot()
-	if strings.TrimSpace(input.Content) == "" && len(req.Attachments) == 0 && !selection.SingleSkill() {
+	if strings.TrimSpace(input.Content) == "" && len(req.Attachments) == 0 && req.ResolveAttachments == nil && !selection.SingleSkill() {
 		return &conversationresource.Error{Code: conversationresource.InvalidRequest}
 	}
 	req.Content = input.Content

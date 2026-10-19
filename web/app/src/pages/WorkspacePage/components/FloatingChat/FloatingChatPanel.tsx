@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { errorMessage } from "@/api/client";
 import {
@@ -9,8 +9,8 @@ import {
   useQuestionAnswerMode,
   useConversationDraftEditorSync,
 } from "@/components/business/ConversationPane";
-import { DocumentPreviewPanel, type DocumentPreviewRequest } from "@/components/business/DocumentPreviewPanel";
-import { DialogContent, DialogRoot, DialogTitle } from "@/components/ui";
+import type { DocumentPreviewRequest } from "@/components/business/DocumentPreviewPanel";
+import { ChatSidePanel, useChatTools } from "@/components/business/ChatSidePanel";
 import { normalizeAuthProviderName } from "@/models/agents";
 import {
   getConversationDescription,
@@ -81,6 +81,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
     onInviteAction,
     onMessageAction,
     onOpenThread,
+    onRestoreThread,
     onPreviewUser,
     onProviderLogin,
     onRetrySend,
@@ -128,7 +129,9 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
   const [deleteRoomDialogOpen, setDeleteRoomDialogOpen] = useState(false);
   const [deleteRoomBusy, setDeleteRoomBusy] = useState(false);
   const [deleteRoomError, setDeleteRoomError] = useState("");
-  const [documentPreview, setDocumentPreview] = useState<DocumentPreviewRequest | null>(null);
+  const tools = useChatTools({ conversation, currentUserID, agents, usersById, editorRef, t });
+  const { openPreview, openActivity, openSources } = tools;
+  const { openTab, closeTab, state: sideState } = tools.controller;
   const composerDisabled = Boolean(composerDisabledReason);
   const mainMessages = useMemo(
     () => conversation.messages.filter((message) => !message.relates_to),
@@ -177,16 +180,25 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
     setDeleteRoomDialogOpen(false);
     setDeleteRoomBusy(false);
     setDeleteRoomError("");
-    setDocumentPreview(null);
   }, [conversation.id]);
 
   const handlePreviewAttachment = useCallback(
     (request: DocumentPreviewRequest) => {
-      onCloseThread();
-      setDocumentPreview(request);
+      openPreview(request);
     },
-    [onCloseThread],
+    [openPreview],
   );
+  const previousThreadRoot = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (previousThreadRoot.current === activeThreadRootID) return;
+    previousThreadRoot.current = activeThreadRootID;
+    if (activeThreadRootID && !sideState.tabs.some((tab) => tab.kind === "thread" && tab.rootID === activeThreadRootID))
+      openTab({ id: "thread", kind: "thread", rootID: activeThreadRootID });
+  }, [activeThreadRootID, sideState.tabs, openTab]);
+  const handleCloseThread = () => {
+    closeTab("thread");
+    onCloseThread();
+  };
 
   const handleOpenClearMessagesDialog = useCallback(() => {
     onToggleChannelTools(false);
@@ -219,6 +231,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
       thread={activeThreadView}
       loading={threadLoading}
       error={threadError}
+      fileScope={tools.fileScope}
       draftSegments={threadDraftSegments}
       attachmentDrafts={threadAttachmentDrafts}
       disabled={Boolean(threadComposerDisabledReason)}
@@ -227,7 +240,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
       theme={theme}
       showToolCalls={showToolCalls}
       t={t}
-      onClose={onCloseThread}
+      onClose={handleCloseThread}
       onDraftChange={onThreadDraftChange}
       onSlashQueryChange={onThreadSlashQueryChange}
       onAddAttachments={onAddThreadAttachments}
@@ -243,6 +256,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
       mentionableUsers={conversationMembers}
       onPreviewUser={onPreviewUser}
       onPreviewAttachment={handlePreviewAttachment}
+      onCitationSelect={openSources}
       onQuestionSelect={threadQuestionMode.select}
       questionMode={threadQuestionMode}
       onSend={onSendThreadReply}
@@ -256,7 +270,13 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
         conversation={conversation}
         conversationMembers={conversationMembers}
         description={description}
-        headerAccessory={headerAccessory}
+        headerTrailingAccessory={tools.toggle}
+        headerAccessory={
+          <>
+            {headerAccessory}
+            {tools.toolbar}
+          </>
+        }
         inviteActionLabel={inviteActionLabel}
         agents={agents}
         memberMenuRef={memberMenuRef}
@@ -293,6 +313,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
         onPickPrompt={onPickPrompt}
         onPreviewUser={onPreviewUser}
         onPreviewAttachment={handlePreviewAttachment}
+        onCitationSelect={openSources}
         onQuestionSelect={questionMode.select}
       />
       {questionMode.pending.length > 0 ? (
@@ -301,6 +322,7 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
         <Conversation.Composer
           resourceAgentID={resourceAgentID}
           onPickResources={onPickResources}
+          fileScope={tools.fileScope}
           authBusyProvider={authBusyProvider}
           authStatuses={authStatuses}
           composerDisabled={composerDisabled}
@@ -339,44 +361,37 @@ export function FloatingChatPanel({ agentName, chatProps, headerAccessory, onPic
           onSendMessage={onSendMessage}
           onStopSend={onStopSend}
           onUndoRemoveAttachment={onUndoRemoveAttachment}
+          onWorkingAction={(participant) => openActivity(participant?.activity?.entryID)}
           onStopWorkingTurn={onStopWorkingTurn}
           onRemoveAttachment={onRemoveAttachment}
           onSyncComposer={onSyncComposer}
         />
       )}
-      <DialogRoot
-        open={Boolean(activeThreadRootID)}
-        onOpenChange={(open) => {
-          if (!open) {
-            onCloseThread();
+      <ChatSidePanel
+        key={conversation.id}
+        controller={tools.controller}
+        fileScope={tools.fileScope}
+        conversation={conversation}
+        agents={agents}
+        usersById={usersById}
+        locale={locale}
+        t={t}
+        onReference={tools.onReference}
+        onPreview={(item) => handlePreviewAttachment({ items: [item], index: 0 })}
+        onSources={openSources}
+        onCollapse={tools.collapse}
+        activeThreadRootID={activeThreadRootID}
+        threadPanel={threadPanel}
+        onThreadSelect={(rootID) => {
+          if (onRestoreThread) {
+            void onRestoreThread(rootID);
+            return;
           }
+          const message = conversation.messages.find((item) => item.id === rootID);
+          if (message) void onOpenThread(message);
         }}
-      >
-        {threadPanel ? (
-          <DialogContent className="thread-dialog-content" overlayClassName="thread-dialog-backdrop">
-            {threadPanel}
-          </DialogContent>
-        ) : null}
-      </DialogRoot>
-      <DialogRoot
-        open={Boolean(documentPreview)}
-        onOpenChange={(open) => (!open ? setDocumentPreview(null) : undefined)}
-      >
-        {documentPreview ? (
-          <DialogContent className="document-preview-dialog-content" aria-describedby={undefined}>
-            <DialogTitle className="sr-only">
-              {documentPreview.items[documentPreview.index]?.name || t("attachmentPreview")}
-            </DialogTitle>
-            <DocumentPreviewPanel
-              {...documentPreview}
-              mode="overlay"
-              t={t}
-              onClose={() => setDocumentPreview(null)}
-              onIndexChange={(index) => setDocumentPreview((current) => (current ? { ...current, index } : current))}
-            />
-          </DialogContent>
-        ) : null}
-      </DialogRoot>
+        onThreadClose={onCloseThread}
+      />
       <Conversation.RoomDangerConfirmDialog
         cancelLabel={t("cancel")}
         closeLabel={t("close")}

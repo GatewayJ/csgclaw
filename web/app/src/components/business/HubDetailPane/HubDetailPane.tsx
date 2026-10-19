@@ -1,3 +1,11 @@
+import {
+  hasSameNamedCloudTemplate,
+  templateInGroup,
+  templateSourceLabelKey,
+  type TemplateGroup,
+} from "@/models/templateGroups";
+import { AgentAvatarImage } from "@/components/business/AgentAvatar";
+import { agenticHubCreateAgentURL, agenticHubTemplatesURL } from "@/models/agenticHub";
 import { parseMCPServerDocument } from "@/models/mcpServerDocument";
 import { GlobalAppsPanel } from "@/components/business/Apps";
 import { ResourceListCard } from "@/components/business/ResourceListCard";
@@ -48,10 +56,10 @@ import {
 } from "@/models/mcp";
 import type { MCPProbeResult, MCPServerPayload, MCPServerSourceStatus, RemoteMCPServer } from "@/models/mcp";
 import { WorkspaceFilePreview, WorkspaceFileTree } from "@/components/business/WorkspaceFileTree";
-import { localizeTemplateSourceTag } from "@/shared/i18n";
 import { WorkspaceTemplatesIcon } from "@/components/ui/Icons";
 import {
   Button,
+  LinkButton,
   DropdownMenuRoot,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -92,7 +100,7 @@ const EMPTY_WORKSPACE_ENTRIES: readonly WorkspaceEntry[] = [];
 type TemplateDetailTabID = "profile" | "instructions" | "memory" | "skills" | "mcp";
 type MCPCreateMode = "manual" | "remote";
 type SkillFilterTabID = "all" | "remote" | "local";
-type TemplateFilterTabID = SkillFilterTabID | "builtin";
+type TemplateFilterTabID = TemplateGroup;
 type KnowledgeFilterTabID = "all" | "available" | "added";
 
 type TemplateSkillSummary = {
@@ -282,16 +290,10 @@ function skillFilterLabel(filter: SkillFilterTabID, t: TranslateFn): string {
 }
 
 function templateFilterLabel(filter: TemplateFilterTabID, t: TranslateFn): string {
-  switch (filter) {
-    case "remote":
-      return t("resourcesSkillRemoteFilter");
-    case "local":
-      return t("resourcesSkillLocalFilter");
-    case "builtin":
-      return t("resourcesTemplateBuiltinFilter");
-    default:
-      return t("resourcesSkillAllFilter");
-  }
+  if (filter === "official") return t("taskEntryOverview_official");
+  if (filter === "mine") return t("taskEntryOverview_personal");
+  if (filter === "public") return t("resourcesPublicTemplates");
+  return t("resourcesSkillAllFilter");
 }
 
 function templateMatchesQuery(template: HubTemplate, query: string): boolean {
@@ -302,6 +304,7 @@ function templateMatchesQuery(template: HubTemplate, query: string): boolean {
   return [
     template.id,
     template.name,
+    template.display_name,
     template.namespace,
     template.description,
     template.image,
@@ -314,22 +317,6 @@ function templateMatchesQuery(template: HubTemplate, query: string): boolean {
       .toLocaleLowerCase()
       .includes(normalizedQuery),
   );
-}
-
-function templateMatchesFilter(template: HubTemplate, filter: TemplateFilterTabID): boolean {
-  if (filter === "all") {
-    return true;
-  }
-  const sourceKind = String(template.source?.kind || "")
-    .trim()
-    .toLocaleLowerCase();
-  if (filter === "local") {
-    return sourceKind === "local";
-  }
-  if (filter === "builtin") {
-    return sourceKind === "builtin";
-  }
-  return sourceKind === "remote";
 }
 
 function mcpMatchesQuery(server: MCPServer, query: string): boolean {
@@ -574,14 +561,14 @@ type HubDetailPaneHub = {
     onClearMCPProbe?: () => void;
     onDeleteMCP?: (item: MCPServer | null | undefined) => Promise<boolean> | boolean;
     onDeleteTemplate?: (item: HubTemplate | null | undefined) => unknown;
+    publishedTemplate?: HubTemplate | null;
+    onDismissPublishedTemplate?: () => void;
     onPublishTemplate?: (
       item: HubTemplate | null | undefined,
-      deploy?: boolean,
       includeMemory?: boolean,
     ) =>
-      | Promise<{ status: "success" } | { status: "partial"; message: string } | null>
-      | { status: "success" }
-      | { status: "partial"; message: string }
+      | Promise<{ status: "success"; template?: HubTemplate } | null>
+      | { status: "success"; template?: HubTemplate }
       | null;
     onSelectMCP?: (name: string | null | undefined) => void;
     onProbeMCP?: (payload: MCPServerPayload) => Promise<MCPProbeResult | null> | MCPProbeResult | null;
@@ -665,6 +652,7 @@ type HubDetailPaneHub = {
     publishBusy?: boolean;
     publishDisabled?: boolean;
     publishError?: string;
+    onResetPublishError?: () => void;
     skills: readonly SkillSummary[];
     skillTree: SkillTree | null;
     skillTreeError: string;
@@ -805,66 +793,81 @@ const jsonHighlightStyle = HighlightStyle.define([
   { tag: tags.punctuation, color: "var(--hub-json-editor-punctuation)" },
 ]);
 
-function jsonSyntaxLinter(view: EditorView): Diagnostic[] {
-  const source = view.state.doc.toString();
-  try {
-    JSON.parse(source);
-    return [];
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Invalid JSON";
-    const positionMatch = /position\s+(\d+)/i.exec(message);
-    const parsedPosition = positionMatch ? Number(positionMatch[1]) : source.length;
-    if (source.length === 0) {
+function createJsonSyntaxLinter(t: TranslateFn) {
+  return function jsonSyntaxLinter(view: EditorView): Diagnostic[] {
+    const source = view.state.doc.toString();
+    try {
+      JSON.parse(source);
+      return [];
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "";
+      const positionMatch = /position\s+(\d+)/i.exec(detail);
+      const message = positionMatch
+        ? t("resourcesJSONSyntaxInvalidAtPosition", { position: positionMatch[1] })
+        : t("resourcesJSONSyntaxInvalid");
+      const parsedPosition = positionMatch ? Number(positionMatch[1]) : source.length;
+      if (source.length === 0) {
+        return [
+          {
+            from: 0,
+            message,
+            severity: "error",
+            to: 0,
+          },
+        ];
+      }
+      const position = Number.isFinite(parsedPosition) ? Math.max(0, Math.min(source.length, parsedPosition)) : 0;
+      const from = Math.max(0, Math.min(source.length, position || source.length) - 1);
+      const to = Math.min(source.length, Math.max(from + 1, position + 1));
       return [
         {
-          from: 0,
+          from,
           message,
           severity: "error",
-          to: 0,
+          to,
         },
       ];
     }
-    const position = Number.isFinite(parsedPosition) ? Math.max(0, Math.min(source.length, parsedPosition)) : 0;
-    const from = Math.max(0, Math.min(source.length, position || source.length) - 1);
-    const to = Math.min(source.length, Math.max(from + 1, position + 1));
-    return [
-      {
-        from,
-        message,
-        severity: "error",
-        to,
-      },
-    ];
-  }
+  };
 }
 
-const jsonEditorExtensions: Extension[] = [
-  lineNumbers(),
-  highlightActiveLineGutter(),
-  highlightActiveLine(),
-  history(),
-  json(),
-  syntaxHighlighting(jsonHighlightStyle),
-  linter(jsonSyntaxLinter, { delay: 250 }),
-  keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
-  EditorState.tabSize.of(2),
-  EditorView.lineWrapping,
-  jsonEditorTheme,
-];
+function jsonEditorExtensions(t: TranslateFn, lineWrapping = true): Extension[] {
+  return [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightActiveLine(),
+    history(),
+    json(),
+    syntaxHighlighting(jsonHighlightStyle),
+    linter(createJsonSyntaxLinter(t), { delay: 250 }),
+    keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+    EditorState.tabSize.of(2),
+    ...(lineWrapping ? [EditorView.lineWrapping] : []),
+    jsonEditorTheme,
+  ];
+}
 
 export function JSONConfigEditor({
+  fillAvailableHeight = false,
   hideLabel = false,
   invalid = false,
   label,
+  lineWrapping = true,
   minRows = 12,
   onChange,
+  readOnly = false,
+  t,
   value,
 }: {
+  fillAvailableHeight?: boolean;
   hideLabel?: boolean;
   invalid?: boolean;
   label: string;
+  lineWrapping?: boolean;
   minRows?: number;
   onChange: (value: string) => void;
+  readOnly?: boolean;
+  t: TranslateFn;
   value: string;
 }) {
   const editorId = useId();
@@ -872,6 +875,14 @@ export function JSONConfigEditor({
   const editorViewRef = useRef<EditorView | null>(null);
   const initialValueRef = useRef(value);
   const onChangeRef = useRef(onChange);
+  const editorExtensions = useMemo(
+    () => [
+      ...jsonEditorExtensions(t, lineWrapping),
+      EditorState.readOnly.of(readOnly),
+      EditorView.editable.of(!readOnly),
+    ],
+    [lineWrapping, readOnly, t],
+  );
   const minHeight = `${Math.max(minRows, 6) * 19.2 + 28}px`;
 
   useEffect(() => {
@@ -886,9 +897,10 @@ export function JSONConfigEditor({
       state: EditorState.create({
         doc: initialValueRef.current,
         extensions: [
-          ...jsonEditorExtensions,
+          ...editorExtensions,
           EditorView.contentAttributes.of({
             "aria-label": label,
+            ...(readOnly ? { "aria-readonly": "true" } : {}),
             id: editorId,
           }),
           EditorView.updateListener.of((update) => {
@@ -905,7 +917,7 @@ export function JSONConfigEditor({
       editorViewRef.current = null;
       view.destroy();
     };
-  }, [editorId, label]);
+  }, [editorExtensions, editorId, label, readOnly]);
 
   useEffect(() => {
     const view = editorViewRef.current;
@@ -927,7 +939,9 @@ export function JSONConfigEditor({
 
   return (
     <div
-      className={moduleClassNames(`hub-json-editor${invalid ? " is-invalid" : ""}`)}
+      className={moduleClassNames(
+        `hub-json-editor${invalid ? " is-invalid" : ""}${fillAvailableHeight ? " is-fill-available-height" : ""}`,
+      )}
       style={{ "--hub-json-editor-min-height": minHeight } as CSSProperties}
     >
       <label className={moduleClassNames(`hub-json-editor-label${hideLabel ? " sr-only" : ""}`)} htmlFor={editorId}>
@@ -970,6 +984,9 @@ function HubPreviewEmptyIcon() {
 }
 
 export type HubDetailPaneProps = {
+  agenticHubSiteURL?: string;
+  templateUsername?: string;
+  onTemplateLogin?: () => void;
   hub?: HubDetailPaneHub;
   inlineTemplateDetail?: boolean;
   locale?: LocaleCode;
@@ -978,6 +995,9 @@ export type HubDetailPaneProps = {
 };
 
 export function HubDetailPane({
+  agenticHubSiteURL = "",
+  templateUsername = "",
+  onTemplateLogin,
   t = (key) => key,
   locale = "en",
   hub,
@@ -1061,14 +1081,22 @@ export function HubDetailPane({
     onUpdateMCP,
     onUpdateTemplateInstructions,
     deleteBusy = false,
+    publishedTemplate,
+    onDismissPublishedTemplate,
     publishBusy = false,
     publishDisabled = false,
     publishError = "",
+    onResetPublishError,
     skillDeleteBusy = false,
   } = hub?.detailPaneProps ?? EMPTY_HUB_DETAIL_PROPS;
   const canDeleteTemplate = isDeletableHubTemplate(selectedTemplate);
+  const templatesURL = agenticHubTemplatesURL(agenticHubSiteURL);
+  const hasCloudTemplateWithSameName = Boolean(
+    templateUsername && selectedTemplate && hasSameNamedCloudTemplate(selectedTemplate, templates, templateUsername),
+  );
   const canPublishTemplate = canPublishHubTemplateToCommunity(selectedTemplate);
   const templateReview = hubTemplateReviewState(selectedTemplate);
+
   const activeResourceType = useMemo(() => {
     if (selectedResourceType === "knowledge") {
       return "knowledge";
@@ -1095,7 +1123,12 @@ export function HubDetailPane({
   }, [mcpServers.length, selectedResourceType, skills.length, templates.length]);
   const [deleteSkillDialogOpen, setDeleteSkillDialogOpen] = useState(false);
   const [publishSuccessDialogOpen, setPublishSuccessDialogOpen] = useState(false);
-  const [publishPartialMessage, setPublishPartialMessage] = useState("");
+  const [publishedTemplateID, setPublishedTemplateID] = useState("");
+  const publishSuccessURL = agenticHubCreateAgentURL(agenticHubSiteURL, publishedTemplate?.id || publishedTemplateID);
+  const dismissPublishSuccess = () => {
+    setPublishSuccessDialogOpen(false);
+    onDismissPublishedTemplate?.();
+  };
   const [publishChoiceDialogOpen, setPublishChoiceDialogOpen] = useState(false);
   const [publishTemplateIncludeMemory, setPublishTemplateIncludeMemory] = useState(false);
   const [mcpDeleteDialogOpen, setMCPDeleteDialogOpen] = useState(false);
@@ -1185,7 +1218,7 @@ export function HubDetailPane({
   );
   const templateFilterTabs = useMemo(
     () =>
-      (["all", "remote", "local", "builtin"] as const).map((id) => ({
+      (["all", "official", "mine", "public"] as const).map((id) => ({
         id,
         label: templateFilterLabel(id, t),
       })),
@@ -1202,9 +1235,10 @@ export function HubDetailPane({
   const filteredTemplates = useMemo(
     () =>
       templates.filter(
-        (template) => templateMatchesFilter(template, templateFilter) && templateMatchesQuery(template, templateSearch),
+        (template) =>
+          templateInGroup(template, templateFilter, templateUsername) && templateMatchesQuery(template, templateSearch),
       ),
-    [templateFilter, templateSearch, templates],
+    [templateFilter, templateSearch, templateUsername, templates],
   );
   const filteredMCPServers = useMemo(
     () => mcpServers.filter((server) => mcpMatchesFilter(server, mcpFilter) && mcpMatchesQuery(server, mcpSearch)),
@@ -1425,14 +1459,10 @@ export function HubDetailPane({
     }
   }
 
-  async function handlePublishTemplate(deploy = false) {
-    const result = await onPublishTemplate?.(selectedTemplate, deploy, publishTemplateIncludeMemory);
+  async function handlePublishTemplate() {
+    const result = await onPublishTemplate?.(selectedTemplate, publishTemplateIncludeMemory);
     if (result?.status === "success") {
-      setPublishPartialMessage("");
-      setPublishChoiceDialogOpen(false);
-      setPublishSuccessDialogOpen(true);
-    } else if (result?.status === "partial") {
-      setPublishPartialMessage(result.message);
+      setPublishedTemplateID(String(result.template?.id || ""));
       setPublishChoiceDialogOpen(false);
       setPublishSuccessDialogOpen(true);
     }
@@ -1814,6 +1844,14 @@ export function HubDetailPane({
                   </DismissibleAlert>
                 ) : null}
 
+                {templateFilter === "mine" && !templateUsername ? (
+                  <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                    <span>{t("resourcesMyTemplatesLoginHint")}</span>
+                    <Button variant="secondaryGray" size="sm" disabled={!onTemplateLogin} onClick={onTemplateLogin}>
+                      {t("csghubSignIn")}
+                    </Button>
+                  </div>
+                ) : null}
                 {filteredTemplates.length ? (
                   <div className={moduleClassNames("hub-skill-card-grid")}>
                     {filteredTemplates.map((template) => {
@@ -1830,9 +1868,15 @@ export function HubDetailPane({
                           )}
                           onClick={() => openTemplateDetail(template)}
                         >
-                          <ResourceFeaturedIcon>
-                            <WorkspaceTemplatesIcon />
-                          </ResourceFeaturedIcon>
+                          {template.avatar ? (
+                            <span className={moduleClassNames("hub-template-avatar")} aria-hidden="true">
+                              <AgentAvatarImage avatar={template.avatar} />
+                            </span>
+                          ) : (
+                            <ResourceFeaturedIcon>
+                              <WorkspaceTemplatesIcon />
+                            </ResourceFeaturedIcon>
+                          )}
                           <span className={moduleClassNames("hub-skill-card-copy")}>
                             <span className={moduleClassNames("hub-skill-card-title")}>
                               {hubTemplateFullName(template)}
@@ -1845,10 +1889,12 @@ export function HubDetailPane({
                                 : template.description || template.id}
                             </span>
                           </span>
-                          <span className={moduleClassNames("hub-template-source-badge")} aria-hidden="true">
-                            <span className={moduleClassNames("hub-template-source-badge-dot")}></span>
-                            {localizeTemplateSourceTag(template.source?.name, locale)}
-                          </span>
+                          {!(templateFilter === "mine" && !templateUsername) ? (
+                            <span className={moduleClassNames("hub-template-source-badge")} aria-hidden="true">
+                              <span className={moduleClassNames("hub-template-source-badge-dot")}></span>
+                              {t(templateSourceLabelKey(template, templateUsername))}
+                            </span>
+                          ) : null}
                         </button>
                       );
                     })}
@@ -1872,7 +1918,11 @@ export function HubDetailPane({
                     <div className={moduleClassNames("hub-inspector-copy")}>
                       <div className={moduleClassNames("hub-inspector-title-row")}>
                         <span className={moduleClassNames("hub-inspector-title-icon")} aria-hidden="true">
-                          <WorkspaceTemplatesIcon />
+                          {selectedTemplate.avatar ? (
+                            <AgentAvatarImage avatar={selectedTemplate.avatar} />
+                          ) : (
+                            <WorkspaceTemplatesIcon />
+                          )}
                         </span>
                         <h2>{hubTemplateFullName(selectedTemplate)}</h2>
                         <div className={moduleClassNames("hub-inspector-badge-row")}>
@@ -1886,7 +1936,7 @@ export function HubDetailPane({
                           </span>
                           <span className={moduleClassNames("mini-badge template-source-badge")}>
                             <span className={moduleClassNames("template-source-badge-dot")} aria-hidden="true"></span>
-                            {localizeTemplateSourceTag(selectedTemplate.source?.name, locale)}
+                            {t(templateSourceLabelKey(selectedTemplate, templateUsername))}
                           </span>
                         </div>
                       </div>
@@ -1897,6 +1947,17 @@ export function HubDetailPane({
                     <Button variant="primary" size="md" onClick={() => onCreateFromTemplate?.(selectedTemplate)}>
                       <span>{t("createAgent")}</span>
                     </Button>
+                    {hasCloudTemplateWithSameName && templatesURL ? (
+                      <LinkButton
+                        variant="secondaryGray"
+                        size="md"
+                        href={templatesURL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {t("iaTemplateSameNameOnHub")} <ExternalLink size={14} />
+                      </LinkButton>
+                    ) : null}
                     {canPublishTemplate ? (
                       <Button
                         variant="secondaryGray"
@@ -1905,6 +1966,7 @@ export function HubDetailPane({
                         disabled={publishBusy || publishDisabled}
                         title={publishDisabled ? t("agentPublishLoginRequired") : undefined}
                         onClick={() => {
+                          onResetPublishError?.();
                           setPublishTemplateIncludeMemory(false);
                           setPublishChoiceDialogOpen(true);
                         }}
@@ -1999,7 +2061,7 @@ export function HubDetailPane({
                       <label className={moduleClassNames("field")}>
                         <span>{t("resourcesSourceLabel")}</span>
                         <input
-                          value={localizeTemplateSourceTag(selectedTemplate.source?.name, locale)}
+                          value={t(templateSourceLabelKey(selectedTemplate, templateUsername))}
                           readOnly
                           disabled
                         />
@@ -2704,6 +2766,7 @@ export function HubDetailPane({
                   onChange={handleMCPDetailDocumentChange}
                   invalid={Boolean(mcpDetailError)}
                   minRows={12}
+                  t={t}
                 />
                 {mcpDetailError ? (
                   <div className={moduleClassNames("form-error hub-json-editor-error")}>{mcpDetailError}</div>
@@ -2794,6 +2857,8 @@ export function HubDetailPane({
           !inlineTemplateDetail &&
           activeResourceType === "template" &&
           templateDetailDialogOpen &&
+          !publishedTemplate &&
+          !publishSuccessDialogOpen &&
           Boolean(selectedTemplate)
         }
         onOpenChange={(open) => {
@@ -2871,7 +2936,7 @@ export function HubDetailPane({
                         <label className={moduleClassNames("field")}>
                           <span>{t("resourcesSourceLabel")}</span>
                           <input
-                            value={localizeTemplateSourceTag(selectedTemplate.source?.name, locale)}
+                            value={t(templateSourceLabelKey(selectedTemplate, templateUsername))}
                             readOnly
                             disabled
                           />
@@ -3093,6 +3158,17 @@ export function HubDetailPane({
                     {t("resourcesDeleteTemplate")}
                   </Button>
                 ) : null}
+                {hasCloudTemplateWithSameName && templatesURL ? (
+                  <LinkButton
+                    variant="secondaryGray"
+                    size="md"
+                    href={templatesURL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t("iaTemplateSameNameOnHub")} <ExternalLink size={14} />
+                  </LinkButton>
+                ) : null}
                 {canPublishTemplate ? (
                   <Button
                     variant="secondaryGray"
@@ -3101,6 +3177,7 @@ export function HubDetailPane({
                     disabled={publishBusy || publishDisabled}
                     title={publishDisabled ? t("agentPublishLoginRequired") : undefined}
                     onClick={() => {
+                      onResetPublishError?.();
                       setPublishTemplateIncludeMemory(false);
                       setPublishChoiceDialogOpen(true);
                     }}
@@ -3327,6 +3404,7 @@ export function HubDetailPane({
                     onChange={handleMCPDetailDocumentChange}
                     invalid={Boolean(mcpDetailError)}
                     minRows={12}
+                    t={t}
                   />
                   {mcpDetailError ? (
                     <div className={moduleClassNames("form-error hub-json-editor-error")}>{mcpDetailError}</div>
@@ -3397,23 +3475,31 @@ export function HubDetailPane({
           </DialogFooter>
         </DialogContent>
       </DialogRoot>
-      <DialogRoot open={publishSuccessDialogOpen} onOpenChange={setPublishSuccessDialogOpen}>
+      <DialogRoot
+        open={publishSuccessDialogOpen || Boolean(publishedTemplate)}
+        onOpenChange={(open) => {
+          if (!open) dismissPublishSuccess();
+        }}
+      >
         <DialogContent className={moduleClassNames("hub-skill-delete-dialog")}>
           <DialogHeader className={moduleClassNames("hub-skill-delete-dialog-header")}>
             <div className={moduleClassNames("hub-skill-delete-dialog-copy")}>
-              <DialogTitle>
-                {publishPartialMessage
-                  ? t("resourcesPublishCommunityDeployFailedTitle")
-                  : t("resourcesPublishCommunitySuccessTitle")}
-              </DialogTitle>
-              <DialogDescription className={moduleClassNames(publishPartialMessage && "hub-publish-partial-message")}>
-                {publishPartialMessage ? publishPartialMessage : t("resourcesPublishCommunitySuccessMessage")}
-              </DialogDescription>
+              <DialogTitle>{t("resourcesPublishCommunitySuccessTitle")}</DialogTitle>
+              <DialogDescription>{t("resourcesPublishCommunitySuccessMessage")}</DialogDescription>
             </div>
             <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" />
           </DialogHeader>
           <DialogFooter className={moduleClassNames("hub-skill-delete-dialog-actions")}>
-            <Button variant="primary" size="sm" onClick={() => setPublishSuccessDialogOpen(false)}>
+            {publishSuccessURL ? (
+              <Button
+                variant="secondaryGray"
+                size="sm"
+                onClick={() => window.open(publishSuccessURL, "_blank", "noopener,noreferrer")}
+              >
+                {t("agentTemplateCreateInHub")}
+              </Button>
+            ) : null}
+            <Button variant="primary" size="sm" onClick={dismissPublishSuccess}>
               {t("resourcesPublishCommunitySuccessDismiss")}
             </Button>
           </DialogFooter>
@@ -3451,7 +3537,11 @@ export function HubDetailPane({
               </label>
             </DialogBody>
           ) : null}
-          {publishError ? <div className={moduleClassNames("form-error")}>{publishError}</div> : null}
+          {publishError ? (
+            <div className={moduleClassNames("form-error")} role="alert">
+              <span className="whitespace-pre-wrap break-words">{publishError}</span>
+            </div>
+          ) : null}
           <DialogFooter>
             <Button
               variant="secondaryGray"
@@ -3462,24 +3552,14 @@ export function HubDetailPane({
               {t("cancel")}
             </Button>
             <Button
-              variant="secondaryGray"
-              size="md"
-              loading={publishBusy}
-              loadingLabel={t("agentPublishing")}
-              disabled={publishBusy}
-              onClick={() => void handlePublishTemplate(false)}
-            >
-              {t("agentPublishCommunityTemplateOnly")}
-            </Button>
-            <Button
               variant="primary"
               size="md"
               loading={publishBusy}
               loadingLabel={t("agentPublishing")}
               disabled={publishBusy}
-              onClick={() => void handlePublishTemplate(true)}
+              onClick={() => void handlePublishTemplate()}
             >
-              {t("agentPublishCommunityAndDeploy")}
+              {t("agentPublishCommunityTemplateOnly")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3595,12 +3675,15 @@ export function HubDetailPane({
             {mcpCreateMode === "manual" ? (
               <>
                 <JSONConfigEditor
+                  fillAvailableHeight
                   hideLabel
                   label={t("resourcesMCPServerDocumentJSONLabel")}
                   value={mcpDraftDocument}
                   onChange={handleMCPDraftDocumentChange}
                   invalid={Boolean(mcpFormError)}
+                  lineWrapping={false}
                   minRows={12}
+                  t={t}
                 />
                 {mcpFormError || mcpCreateError ? (
                   <div className={moduleClassNames("form-error hub-json-editor-error")}>
@@ -3628,11 +3711,11 @@ export function HubDetailPane({
             )}
           </DialogBody>
           <DialogFooter className={moduleClassNames("hub-skill-delete-dialog-actions")}>
-            <Button variant="secondaryGray" size="sm" disabled={mcpMutationBusy} onClick={closeMCPFormDialog}>
+            <Button variant="secondaryGray" size="md" disabled={mcpMutationBusy} onClick={closeMCPFormDialog}>
               {t("cancel")}
             </Button>
             {mcpCreateMode === "manual" ? (
-              <Button variant="primary" size="sm" loading={mcpMutationBusy} onClick={handleSaveMCP}>
+              <Button variant="primary" size="md" loading={mcpMutationBusy} onClick={handleSaveMCP}>
                 {mcpMutationBusy ? t("resourcesMCPCreating") : t("resourcesMCPCreateAction")}
               </Button>
             ) : null}
@@ -3911,12 +3994,15 @@ export function MCPServerCreateDialog({
           {activeMode === "manual" ? (
             <>
               <JSONConfigEditor
+                fillAvailableHeight
                 hideLabel
                 label={t("resourcesMCPServerDocumentJSONLabel")}
                 value={document}
                 onChange={changeDocument}
                 invalid={Boolean(parseError)}
+                lineWrapping={false}
                 minRows={12}
+                t={t}
               />
               {parseError || createError ? (
                 <div className={moduleClassNames("form-error hub-json-editor-error")}>{parseError || createError}</div>
@@ -3942,11 +4028,11 @@ export function MCPServerCreateDialog({
           )}
         </DialogBody>
         <DialogFooter className={moduleClassNames("hub-skill-delete-dialog-actions")}>
-          <Button variant="secondaryGray" size="sm" disabled={busy} onClick={close}>
+          <Button variant="secondaryGray" size="md" disabled={busy} onClick={close}>
             {t("cancel")}
           </Button>
           {activeMode === "manual" ? (
-            <Button variant="primary" size="sm" loading={busy} onClick={save}>
+            <Button variant="primary" size="md" loading={busy} onClick={save}>
               {busy ? t("resourcesMCPCreating") : t("resourcesMCPCreateAction")}
             </Button>
           ) : null}

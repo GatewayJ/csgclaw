@@ -460,7 +460,7 @@ export function formatConversationPreview(
   return conversation ? getConversationSubtitle(conversation, currentUserID, usersById, locale, t) : "";
 }
 
-export function formatMessagePreviewText(content: unknown): string {
+export function formatMessagePreviewText(content: unknown, options: { preserveLineBreaks?: boolean } = {}): string {
   const activity = parseAgentActivity(content);
   const preview =
     activity?.content.action?.title ||
@@ -468,7 +468,8 @@ export function formatMessagePreviewText(content: unknown): string {
     activity?.content.question?.questions[0]?.question ||
     activity?.content.body ||
     content;
-  return collapsePreviewWhitespace(stripPreviewCodeFence(flattenMentionText(renderSlashCommandPreviewText(preview))));
+  const text = stripPreviewCodeFence(flattenMentionText(renderSlashCommandPreviewText(preview)));
+  return options.preserveLineBreaks ? text.trim() : collapsePreviewWhitespace(text);
 }
 
 export type MessagePreviewTextToken = {
@@ -585,7 +586,7 @@ export function formatEventMessage(
     const id = typeof message.metadata?.task_id === "string" ? message.metadata.task_id : "";
     const actor = userDisplayName(message.sender_id || message.event.actor_id || "", usersById);
     return isChineseLocale(locale)
-      ? `${actor} 更新了任务${id ? ` ${id}` : ""}，交由 Manager 处理`
+      ? `${actor} 更新了任务${id ? ` ${id}` : ""}，交由管理智能体处理`
       : `${actor} updated ${id || "a task"} for Manager review`;
   }
   return message.content || "";

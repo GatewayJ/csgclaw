@@ -5,11 +5,9 @@ import {
   type ModelOverride,
 } from "@/models/modelMetadata";
 import type { ProviderName } from "@/models/agents";
-import {
-  modelProviderPresetMeta,
-  normalizeModelProviderPreset,
-  type ModelProviderPreset,
-} from "@/models/modelProviderPresets";
+import { normalizeModelProviderPreset, type ModelProviderPreset } from "@/models/modelProviderPresets";
+import type { LocaleCode, TranslateFn } from "@/models/conversations";
+import { messages } from "@/shared/i18n/messages";
 
 export const MODEL_PROVIDER_IDS = {
   OpenCSG: "opencsg",
@@ -17,6 +15,8 @@ export const MODEL_PROVIDER_IDS = {
   Codex: "codex",
   ClaudeCode: "claude_code",
 } as const;
+
+export const OPENCSG_AUTO_MODEL_ID = "auto";
 
 export const BUILTIN_MODEL_PROVIDER_IDS = [
   MODEL_PROVIDER_IDS.OpenCSG,
@@ -47,6 +47,11 @@ export type ModelProvider = {
   kind: string;
   display_name: string;
   preset: ModelProviderPreset;
+  avatar?: string;
+  service_name?: string;
+  region?: string;
+  api_protocol?: string;
+  model_source?: string;
   builtin: boolean;
   base_url?: string;
   api_key_set?: boolean;
@@ -78,6 +83,7 @@ export type ModelProviderOption = {
 };
 
 export type ModelProviderSelectOption = {
+  serviceName?: string;
   avatar: string;
   builtin?: boolean;
   disabled?: boolean;
@@ -118,6 +124,32 @@ export function modelProviderConfigUsesOpenCSG(config: ModelProviderConfigLike |
   return String(config?.model_provider_id ?? "").trim() === MODEL_PROVIDER_IDS.OpenCSG;
 }
 
+export function isOpenCSGAutoModel(providerID: string, modelID: string): boolean {
+  return (
+    normalizeModelProviderID(providerID) === MODEL_PROVIDER_IDS.OpenCSG &&
+    String(modelID ?? "")
+      .trim()
+      .toLowerCase() === OPENCSG_AUTO_MODEL_ID
+  );
+}
+
+export function modelIDsForProviderSelection(providerID: string, modelIDs: readonly string[]): string[] {
+  const models = [...modelIDs];
+  if (normalizeModelProviderID(providerID) !== MODEL_PROVIDER_IDS.OpenCSG) {
+    return models;
+  }
+  const autoIndex = models.findIndex((modelID) => isOpenCSGAutoModel(providerID, modelID));
+  if (autoIndex <= 0) {
+    return models;
+  }
+  const [autoModel] = models.splice(autoIndex, 1);
+  return [autoModel, ...models];
+}
+
+export function defaultModelIDForProvider(providerID: string, modelIDs: readonly string[]): string {
+  return modelIDsForProviderSelection(providerID, modelIDs)[0] || "";
+}
+
 type RawCatalog = {
   providers?: unknown;
 };
@@ -152,7 +184,7 @@ export function modelProviderCatalogForOpenCSGState(
       ...(!state.authenticated
         ? {
             last_checked_at: undefined,
-            message: state.authenticationRequiredMessage || "OpenCSG sign-in is required",
+            message: state.authenticationRequiredMessage,
             models: [],
             status: "failed",
           }
@@ -175,6 +207,11 @@ function normalizeModelProvider(raw: unknown): ModelProvider {
   return {
     id,
     kind,
+    avatar: String(record.avatar || "") || undefined,
+    service_name: String(record.service_name || "") || undefined,
+    region: String(record.region || "") || undefined,
+    api_protocol: String(record.api_protocol || "") || undefined,
+    model_source: String(record.model_source || "") || undefined,
     imageModels: normalizeModelIDs(record.image_models),
     videoModels: normalizeModelIDs(record.video_models),
     model_metadata: normalizeModelMetadataMap(record.model_metadata),
@@ -408,8 +445,9 @@ export function modelProviderSelectOptionsFromCatalog(
         avatar: modelProviderAvatarPath(provider),
         builtin: provider.builtin || undefined,
         displayName: provider.display_name || provider.id,
+        serviceName: provider.service_name,
         id: provider.id,
-        disabled: disabled || undefined,
+        disabled: disabled || provider.status === "failed" || undefined,
         models: disabled ? [] : [...provider.models],
         imageModels: disabled ? [] : (provider.imageModels ?? []),
         videoModels: disabled ? [] : (provider.videoModels ?? []),
@@ -469,12 +507,12 @@ export function parseModelProviderModelsText(value: string): string[] {
   return models;
 }
 
-export function modelProviderAvatarPath(provider: Pick<ModelProvider, "id" | "builtin" | "preset"> | string): string {
-  if (typeof provider !== "string" && !provider.builtin) {
-    const presetAvatar = modelProviderPresetMeta(provider.preset).avatar;
-    if (presetAvatar) {
-      return presetAvatar;
-    }
+export function modelProviderAvatarPath(
+  provider: (Pick<ModelProvider, "id" | "builtin" | "preset"> & { avatar?: string }) | string,
+): string {
+  if (typeof provider !== "string") {
+    if ("avatar" in provider && typeof provider.avatar === "string" && provider.avatar) return provider.avatar;
+    if (!provider.builtin && MODEL_PROVIDER_AVATARS[provider.preset]) return MODEL_PROVIDER_AVATARS[provider.preset];
   }
   const id = normalizeModelProviderID(typeof provider === "string" ? provider : provider.id);
   return MODEL_PROVIDER_AVATARS[id] || MODEL_PROVIDER_AVATARS.openai;
@@ -488,12 +526,72 @@ export function providerStatusTone(
     case "connected":
       return "online";
     case "failed":
+    case "error":
+    case "unconfigured":
       return "warning";
     default:
       if (normalizeModelProviderID(provider?.id) === MODEL_PROVIDER_IDS.OpenCSG) {
         return "warning";
       }
       return provider?.builtin ? "online" : "neutral";
+  }
+}
+
+export function modelProviderStatusLabel(
+  status: ModelProviderStatus | null | undefined,
+  provider: Partial<Pick<ModelProvider, "builtin" | "id">> | null | undefined,
+  t: TranslateFn,
+): string {
+  switch (String(status ?? "").trim()) {
+    case "connected":
+      return t("modelProviderConnected");
+    case "failed":
+    case "error":
+      return t("modelProviderStatusFailed");
+    case "unconfigured":
+      return t("modelProviderStatusUnconfigured");
+    case "unknown":
+    case "":
+      return t("modelProviderNotChecked");
+    default:
+      return providerStatusTone(status, provider) === "online"
+        ? t("modelProviderConnected")
+        : t("modelProviderStatusUnknown");
+  }
+}
+
+export function modelProviderMessageLabel(
+  provider: Pick<ModelProvider, "message" | "status"> | null | undefined,
+  t: TranslateFn,
+  locale?: LocaleCode,
+): string {
+  const message = String(provider?.message ?? "").trim();
+  const normalized = message.toLowerCase().replace(/\s+/g, " ");
+  switch (normalized) {
+    case "":
+      return "";
+    case "connected":
+      return t("modelProviderConnected");
+    case "base url is required":
+      return t("modelProviderBaseURLRequired");
+    case "opencsg sign-in is required":
+      return t("modelProviderOpenCSGAuthenticationRequired");
+    case "the model service is unavailable. check its configuration or try again later.":
+      return t("errors.upstream_unavailable");
+    case "claude code auth is required. run csgclaw model auth login claude-code.":
+    case "claude code auth was not found in macos keychain. run csgclaw model auth login claude-code.":
+      return t("modelProviderClaudeCodeAuthRequired");
+    default: {
+      if (provider?.status === "connected") {
+        return t("modelProviderConnected");
+      }
+      const isChinese =
+        locale === "zh" || (!locale && t("modelProviderCheckFailed") === messages.zh.modelProviderCheckFailed);
+      if (provider?.status === "failed" && isChinese && /[A-Za-z]/.test(message) && !/[\u4e00-\u9fff]/.test(message)) {
+        return t("modelProviderCheckFailed");
+      }
+      return message;
+    }
   }
 }
 

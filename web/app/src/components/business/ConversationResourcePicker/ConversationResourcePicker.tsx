@@ -1,10 +1,9 @@
 import { isComposerKeyboardEventComposing } from "@/models/composer";
 import { useState } from "react";
 import { X, Search } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, LinkButton } from "@/components/ui";
 import { useConversationResources } from "@/hooks/workspace/useConversationResources";
 import { maxResourceReferences, resourceKey, type ResourceSnapshot } from "@/models/conversationResources";
-import { Link } from "react-router-dom";
 import { pathForPane, WorkspacePaneTypes } from "@/models/routing";
 import { localizeAPIError } from "@/shared/i18n";
 import type { TranslateFn } from "@/models/conversations";
@@ -138,9 +137,14 @@ export function ConversationResourcePicker({
             {t("taskRuntimeEditAgent")}
           </Button>
         ) : (
-          <Link to={pathForPane({ type: WorkspacePaneTypes.agent, id: agentID })} onClick={onClose}>
+          <LinkButton
+            variant="tertiaryGray"
+            size="sm"
+            href={`#${pathForPane({ type: WorkspacePaneTypes.agent, id: agentID })}`}
+            onClick={onClose}
+          >
             {t("taskRuntimeEditAgent")}
-          </Link>
+          </LinkButton>
         )}
         <Button size="sm" disabled={!selected.length} onClick={() => onPick(selected)}>
           {t("addAttachmentResource")}

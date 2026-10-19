@@ -12,6 +12,7 @@
 |---|---|---|---|
 | `schema_version` | `agent.toml` 的格式版本。目前发布模板时会写入 `agentfile/v1`，但读取时尚未校验 | 否 | ✅ |
 | `name` | 模板名称，用于模板展示；创建 Agent 时可作为默认名称 | 是 | ✅ |
+| `avatar` | 本地模板保存的智能体头像，支持内置头像路径和上传头像的数据 URL；旧模板未设置时使用默认图标 | 否 | ✅ |
 | `description` | 模板说明；创建 Agent 时可作为 Agent 的默认描述 | 否 | ✅ |
 | `role` | 模板角色，旧格式只支持 `manager` 或 `worker` | 否，已移除 | ❌ |
 | `runtime_kind` | Agent 运行时类型，只支持 `codex`、`picoclaw` 或 `openclaw` | 是 | ✅ |
@@ -50,3 +51,7 @@
 当 `[sandbox].provider = "csghub"` 时，服务启动不请求模型目录；通过 `--from-template` 创建 Codex Worker 时，不在线探测模型可用性。运行时依赖、运行时选项和 MCP 配置仍会校验。模型不可用的错误在实际聊天调用时通过现有失败事件返回，不阻止平台模板 Worker 的创建。本地部署和非模板创建保持原有模型检查行为。
 
 未配置 `[bootstrap].default_worker_template` 或配置为空时，默认使用 `builtin.codex-worker`；显式配置的模板不受影响。未传 `--from-template` 但实际解析了默认模板的创建，同样跳过上述平台模型探测。
+
+### 模板展示名称
+
+保存智能体为模板时，`name` 默认使用智能体 ID，可手动修改，仍须符合原有名称规则：以英文字母开头，最多 24 位，仅允许英文字母、数字、下划线及连字符。新增可选的 `display_name` 支持中文，默认使用智能体名称，留空时回退到 `name`。该字段保存在 `agent.toml` 中，模板列表和详情优先展示它；发布到社区的 `/api/v1/codes` 请求将其映射为 `nickname`，`name` 保持原有标识用途。旧模板没有该字段时继续使用原名称。

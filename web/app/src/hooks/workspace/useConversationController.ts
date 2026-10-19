@@ -13,6 +13,7 @@ import {
   type ResourceSnapshot,
 } from "@/models/conversationResources";
 import { effectiveConversationProfile } from "@/models/taskConfiguration";
+import { composerFileReferences } from "@/models/composer";
 import { useSlashSelection } from "./useSlashSelection";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -1158,7 +1159,11 @@ export function useConversationController({
       resourceAgentID || draftSegments.some((segment) => segment.type === "resource")
         ? resourceMessageInput(draftSegments, serializedDraft)
         : { content: normalizeSlashShorthandForPayload(serializedDraft), resource_refs: [] };
-    const fingerprint = messageFingerprint(content, attachmentDrafts, resource_refs);
+    const fingerprint = messageFingerprint(
+      content + JSON.stringify(composerFileReferences(draftSegments)),
+      attachmentDrafts,
+      resource_refs,
+    );
     if (sendLocksRef.current[roomID]) {
       return;
     }
@@ -1181,6 +1186,7 @@ export function useConversationController({
           sender_id: senderID,
           content,
           resource_refs,
+          file_references: composerFileReferences(draftSegments),
           client_message_id: clientMessage.id,
           locale,
           attachments,
@@ -1305,6 +1311,28 @@ export function useConversationController({
     await openThreadInConversation(activeConversation.id, message);
   }
 
+  async function restoreThread(rootID: string) {
+    if (!activeConversation || !rootID) return;
+    const root = activeConversation.messages.find((message) => message.id === rootID);
+    if (root) {
+      await openThread(root);
+      return;
+    }
+    const selection = { roomID: activeConversation.id, rootID };
+    activeThreadSelectionRef.current = selection;
+    setActiveThreadRootID(rootID);
+    setActiveThreadView(null);
+    setThreadError("");
+    setThreadLoading(true);
+    try {
+      await refreshThreadView(selection);
+    } catch (error) {
+      if (activeThreadSelectionRef.current === selection) setThreadError(errorMessage(error, t("threadLoadFailed")));
+    } finally {
+      if (activeThreadSelectionRef.current === selection) setThreadLoading(false);
+    }
+  }
+
   async function refreshThreadView(selection: ThreadSelection) {
     const view = await fetchThreadRequest(selection.roomID, selection.rootID);
     if (activeThreadSelectionRef.current !== selection) {
@@ -1371,7 +1399,11 @@ export function useConversationController({
       return;
     }
     sendLocksRef.current[threadSendKey] = true;
-    const fingerprint = messageFingerprint(text, activeThreadAttachmentDrafts, input.resource_refs);
+    const fingerprint = messageFingerprint(
+      text + JSON.stringify(composerFileReferences(activeThreadDraftSegments)),
+      activeThreadAttachmentDrafts,
+      input.resource_refs,
+    );
     const pending = pendingClientMessagesRef.current[threadSendKey];
     const clientMessage = pending?.fingerprint === fingerprint ? pending : { fingerprint, id: newClientMessageID() };
     pendingClientMessagesRef.current[threadSendKey] = clientMessage;
@@ -1382,6 +1414,7 @@ export function useConversationController({
         sender_id: data.current_user_id,
         content: text,
         resource_refs: input.resource_refs,
+        file_references: composerFileReferences(activeThreadDraftSegments),
         client_message_id: clientMessage.id,
         locale,
         attachments: activeThreadAttachmentDrafts.map((draft) => draft.file),
@@ -2013,6 +2046,7 @@ export function useConversationController({
       threadDraftSegments: activeThreadDraftSegments,
       threadAttachmentDrafts: activeThreadAttachmentDrafts,
       onOpenThread: openThread,
+      onRestoreThread: restoreThread,
       onCloseThread: closeThread,
       onThreadDraftChange: (segments: ComposerSegment[]) => {
         if (!activeThreadDraftKey) {

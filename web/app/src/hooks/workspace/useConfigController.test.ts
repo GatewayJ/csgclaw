@@ -68,12 +68,18 @@ describe("useConfigController", () => {
       installDownloadedUpdate: vi.fn().mockResolvedValue(undefined),
       restartSidecar,
       showWindow: vi.fn().mockResolvedValue(undefined),
+      showTurnNotification: vi.fn().mockResolvedValue(undefined),
+      onTurnNotificationClick: vi.fn(() => vi.fn()),
       setUpdateChannel: vi.fn().mockResolvedValue({
         state: "idle",
         channel: "release",
         currentVersion: "0.3.19",
       }),
       setThemeSource: vi.fn().mockResolvedValue(undefined),
+      getWindowState: vi.fn(),
+      onWindowState: vi.fn(),
+      browserCommand: vi.fn(),
+      onBrowserState: vi.fn(),
       onUpdateStatus: vi.fn().mockReturnValue(() => undefined),
     };
     window.csgclawDesktop = bridge;

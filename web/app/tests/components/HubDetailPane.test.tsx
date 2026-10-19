@@ -22,6 +22,7 @@ function t(key: string, params: Record<string, string | number> = {}) {
     close: "Close",
     createAgent: "Create",
     agentPublishCommunity: "Publish to community",
+    iaTemplateSameNameOnHub: "Same-name template on AgenticHub",
     agentPublishCommunityAndDeploy: "Publish and deploy",
     agentPublishCommunityTemplateOnly: "Publish template only",
     agentPublishLoginRequired: "Sign in first",
@@ -200,13 +201,17 @@ function renderHubDetailPane(
   selectedResourceType: "mcp" | "skill" | "template" = "template",
   options: {
     selectedTemplate?: HubTemplate;
+    publishedTemplate?: HubTemplate;
+    agenticHubSiteURL?: string;
+    templateUsername?: string;
+    templates?: HubTemplate[];
     onPublishTemplate?: (
       item: HubTemplate | null | undefined,
-      deploy?: boolean,
       includeMemory?: boolean,
-    ) => Promise<{ status: "success" } | { status: "partial"; message: string } | null>;
+    ) => Promise<{ status: "success" } | null>;
     publishDisabled?: boolean;
     publishError?: string;
+    onResetPublishError?: () => void;
     lazyMemory?: boolean;
     loaded?: boolean;
     inlineTemplateDetail?: boolean;
@@ -263,6 +268,8 @@ function renderHubDetailPane(
     const workspaceFile = workspaceFiles[selectedWorkspacePath as keyof typeof workspaceFiles] || null;
     return (
       <HubDetailPane
+        agenticHubSiteURL={options.agenticHubSiteURL}
+        templateUsername={options.templateUsername}
         inlineTemplateDetail={options.inlineTemplateDetail}
         locale="en"
         t={t}
@@ -310,7 +317,7 @@ function renderHubDetailPane(
             skillTree: null,
             skillTreeError: "",
             skillTreeLoading: false,
-            templates: [selectedTemplate],
+            templates: options.templates ?? [selectedTemplate],
             workspaceFile,
             workspaceFiles,
             workspaceFileError: "",
@@ -318,15 +325,24 @@ function renderHubDetailPane(
             workspaceEntries,
             deleteBusy: false,
             onDeleteTemplate: vi.fn(),
+            publishedTemplate: options.publishedTemplate,
             onPublishTemplate: options.onPublishTemplate,
             publishDisabled: options.publishDisabled,
             publishError: options.publishError,
+            onResetPublishError: options.onResetPublishError,
           },
         }}
       />
     );
   }
-  return render(<Harness />);
+  const view = render(<Harness />);
+  return {
+    ...view,
+    rerenderOptions: (patch: Partial<typeof options>) => {
+      Object.assign(options, patch);
+      view.rerender(<Harness />);
+    },
+  };
 }
 
 function renderHubSkillDetailPane(onDeleteSkill = vi.fn().mockResolvedValue(true)) {
@@ -881,6 +897,113 @@ describe("HubDetailPane", () => {
     expect(onDeleteMCP).toHaveBeenCalledWith(mcp);
   });
 
+  it("offers cloud creation only after publishing succeeds, using the complete returned template ID", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    try {
+      renderHubDetailPane("template", {
+        agenticHubSiteURL: "https://opencsg-stg.com/account",
+        selectedTemplate: {
+          ...template,
+          id: "local.repo-id",
+          name: "api-template",
+          display_name: "中文展示名",
+          runtime_kind: "codex",
+          source: { kind: "local", name: "local" },
+        },
+        onPublishTemplate: vi
+          .fn()
+          .mockResolvedValue({ status: "success", template: { id: "alice/repo-id", name: "api-template" } }),
+      });
+      await openTemplateDetail(user);
+      expect(screen.queryByRole("button", { name: "agentTemplateCreateInHub" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Publish to community" }));
+      expect(screen.queryByRole("button", { name: "agentTemplateCreateInHub" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Publish template only" }));
+      const success = await screen.findByRole("dialog", { name: "Published successfully" });
+      await user.click(within(success).getByRole("button", { name: "agentTemplateCreateInHub" }));
+      expect(open).toHaveBeenCalledWith(
+        "https://opencsg-stg.com/agentichub?action=create-agent&template_name=alice%2Frepo-id",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it("shows success for an agent publication and uses its complete returned template ID", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    try {
+      renderHubDetailPane("template", {
+        agenticHubSiteURL: "https://opencsg.com",
+        publishedTemplate: {
+          id: "alice/repo",
+          name: "returned-name",
+          display_name: "展示名",
+          source: { kind: "remote" },
+        },
+      });
+      const success = await screen.findByRole("dialog", { name: "Published successfully" });
+      await user.click(within(success).getByRole("button", { name: "agentTemplateCreateInHub" }));
+      expect(open).toHaveBeenCalledWith(
+        "https://opencsg.com/agentichub?action=create-agent&template_name=alice%2Frepo",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it("shows the saved local avatar and no source badge in signed-out My templates", async () => {
+    const user = userEvent.setup();
+    renderHubDetailPane("template", {
+      selectedTemplate: {
+        ...template,
+        avatar: "data:image/png;base64,aGVsbG8=",
+        source: { kind: "local", name: "local" },
+      },
+    });
+    await screen.findByRole("dialog");
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("tab", { name: "taskEntryOverview_personal" }));
+    const card = screen.getByRole("button", { name: /demo-template/ });
+    expect(screen.queryByRole("button", { name: "agentTemplateCreateInHub" })).not.toBeInTheDocument();
+    expect(card.querySelector("img")).toHaveAttribute("src", "data:image/png;base64,aGVsbG8=");
+    expect(card.querySelector('[class*="hub-template-source-badge"]')).toBeNull();
+    expect(screen.getByText("resourcesMyTemplatesLoginHint")).toBeInTheDocument();
+  });
+
+  it.each([false, true])(
+    "keeps publishing available with a same-name cloud template (inline: %s)",
+    async (inlineTemplateDetail) => {
+      const localTemplate = {
+        ...template,
+        id: "local.demo-template",
+        runtime_kind: "codex",
+        source: { kind: "local" },
+      };
+      renderHubDetailPane("template", {
+        selectedTemplate: localTemplate,
+        templateUsername: "alice",
+        agenticHubSiteURL: "https://custom.example:8443/login",
+        inlineTemplateDetail,
+        templates: [
+          localTemplate,
+          { ...template, id: "alice/demo-template", namespace: "alice", source: { kind: "remote" } },
+        ],
+      });
+      if (!inlineTemplateDetail) await openTemplateDetail(userEvent.setup());
+      expect(screen.getByRole("link", { name: "Same-name template on AgenticHub" })).toHaveAttribute(
+        "href",
+        "https://custom.example:8443/agentichub?view=resources&subview=template",
+      );
+      expect(screen.getByRole("button", { name: "Publish to community" })).toBeEnabled();
+    },
+  );
+
   it("publishes a local template to the community", async () => {
     const user = userEvent.setup();
     const onPublishTemplate = vi.fn().mockResolvedValue({ status: "success" });
@@ -891,21 +1014,40 @@ describe("HubDetailPane", () => {
       source: { name: "local", kind: "local" },
       workspace: { ...template.workspace, kind: "codex" },
     };
-    renderHubDetailPane("template", { selectedTemplate: localTemplate, onPublishTemplate });
+    const view = renderHubDetailPane("template", {
+      selectedTemplate: localTemplate,
+      onPublishTemplate,
+      templateUsername: "alice",
+      agenticHubSiteURL: "https://qa.opencsg.com/account",
+    });
 
     await openTemplateDetail(user);
     await user.click(screen.getByRole("button", { name: "Publish to community" }));
     expect(screen.getByRole("dialog", { name: "Publish agent template" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish template only" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish and deploy" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish and deploy" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Publish template only" }));
 
-    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, false, false);
+    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, false);
     expect(await screen.findByRole("dialog", { name: "Published successfully" })).toBeInTheDocument();
     expect(screen.getByText("The template has been published to the community.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "OK" }));
     expect(screen.queryByRole("dialog", { name: "Published successfully" })).not.toBeInTheDocument();
+    view.rerenderOptions({
+      templates: [
+        localTemplate,
+        { ...localTemplate, id: "alice/demo-template", namespace: "alice", source: { kind: "remote" } },
+      ],
+    });
+    expect(screen.getByRole("link", { name: "Same-name template on AgenticHub" })).toHaveAttribute(
+      "href",
+      "https://qa.opencsg.com/agentichub?view=resources&subview=template",
+    );
+    expect(screen.getByRole("button", { name: "Publish to community" })).toBeEnabled();
+    view.rerenderOptions({ templates: [localTemplate] });
+    expect(screen.queryByRole("link", { name: "Same-name template on AgenticHub" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish to community" })).toBeEnabled();
   });
 
   it("publishes a local DSH template to the community", async () => {
@@ -923,12 +1065,12 @@ describe("HubDetailPane", () => {
     await openTemplateDetail(user);
     await user.click(screen.getByRole("button", { name: "Publish to community" }));
     expect(screen.getByRole("button", { name: "Publish template only" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish and deploy" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish and deploy" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Include agent memory" })).not.toBeChecked();
     await user.click(screen.getByRole("checkbox", { name: "Include agent memory" }));
-    await user.click(screen.getByRole("button", { name: "Publish and deploy" }));
+    await user.click(screen.getByRole("button", { name: "Publish template only" }));
 
-    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, true, true);
+    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, true);
   });
 
   it("does not show publishing success when publishing fails", async () => {
@@ -952,51 +1094,6 @@ describe("HubDetailPane", () => {
     expect(screen.queryByRole("dialog", { name: "Published successfully" })).not.toBeInTheDocument();
   });
 
-  it("publishes and deploys a local template when selected", async () => {
-    const user = userEvent.setup();
-    const onPublishTemplate = vi.fn().mockResolvedValue({ status: "success" });
-    const localTemplate = {
-      ...template,
-      id: "local.demo-template",
-      runtime_kind: "codex",
-      source: { name: "local", kind: "local" },
-      workspace: { ...template.workspace, kind: "codex" },
-    };
-    renderHubDetailPane("template", { selectedTemplate: localTemplate, onPublishTemplate });
-
-    await openTemplateDetail(user);
-    await user.click(screen.getByRole("button", { name: "Publish to community" }));
-    await user.click(screen.getByRole("checkbox", { name: "Include agent memory" }));
-    await user.click(screen.getByRole("button", { name: "Publish and deploy" }));
-
-    expect(onPublishTemplate).toHaveBeenCalledWith(localTemplate, true, true);
-  });
-
-  it("closes the publish form and shows deployment details after partial success", async () => {
-    const user = userEvent.setup();
-    const localTemplate = {
-      ...template,
-      id: "local.demo-template",
-      runtime_kind: "codex",
-      source: { name: "local", kind: "local" },
-      workspace: { ...template.workspace, kind: "codex" },
-    };
-    renderHubDetailPane("template", {
-      selectedTemplate: localTemplate,
-      onPublishTemplate: vi.fn().mockResolvedValue({ status: "partial", message: "Review failed\nUnsafe content" }),
-    });
-
-    await openTemplateDetail(user);
-    await user.click(screen.getByRole("button", { name: "Publish to community" }));
-    await user.click(screen.getByRole("button", { name: "Publish and deploy" }));
-
-    expect(screen.queryByRole("dialog", { name: "Publish agent template" })).not.toBeInTheDocument();
-    expect(
-      await screen.findByRole("dialog", { name: "Template published, but deployment failed" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Unsafe content/)).toBeInTheDocument();
-  });
-
   it("shows publishing failures inside the publish choice dialog", async () => {
     const user = userEvent.setup();
     const localTemplate = {
@@ -1017,6 +1114,25 @@ describe("HubDetailPane", () => {
     expect(screen.getByRole("dialog", { name: "Publish agent template" })).toBeInTheDocument();
     expect(screen.getByText("Template was published, but deployment failed.")).toBeInTheDocument();
   });
+
+  it.each([false, true])(
+    "resets previous publishing errors when opening the publish dialog (inline: %s)",
+    async (inlineTemplateDetail) => {
+      const reset = vi.fn();
+      renderHubDetailPane("template", {
+        selectedTemplate: { ...template, id: "local.new-template", runtime_kind: "codex", source: { kind: "local" } },
+        inlineTemplateDetail,
+        onResetPublishError: reset,
+      });
+      const user = userEvent.setup();
+      if (!inlineTemplateDetail) await openTemplateDetail(user);
+      await user.click(screen.getByRole("button", { name: "Publish to community" }));
+      expect(reset).toHaveBeenCalledOnce();
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      await user.click(screen.getByRole("button", { name: "Publish to community" }));
+      expect(reset).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("requires sign-in before publishing a local template to the community", async () => {
     const localTemplate = {

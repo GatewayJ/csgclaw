@@ -1,0 +1,32 @@
+.dialog {
+  width: min(1000px, calc(100vw - 32px));
+  max-width: none;
+}
+.connectorDialog {
+  width: min(640px, calc(100vw - 32px));
+  height: min(640px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+}
+.connectorBody {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.files {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.3fr) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 320px;
+}
+.files > * {
+  min-width: 0;
+  max-height: 60vh;
+  overflow: auto;
+}
+@media (max-width: 720px) {
+  .files {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
