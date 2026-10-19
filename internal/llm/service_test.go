@@ -33,7 +33,9 @@ func TestChatCompletionsLLMAPIOverridesModelAndProxiesUpstream(t *testing.T) {
 		}
 		gotModel, _ = payload["model"].(string)
 		gotReasoningEffort, _ = payload["reasoning_effort"].(string)
-		gotMaxTokens = payloadInt(payload, "max_tokens")
+		if value, ok := payload["max_tokens"].(float64); ok {
+			gotMaxTokens = int(value)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"remote result"},"finish_reason":"stop"}]}`))
 	}))
@@ -80,8 +82,8 @@ func TestChatCompletionsLLMAPIOverridesModelAndProxiesUpstream(t *testing.T) {
 	if gotReasoningEffort != "medium" {
 		t.Fatalf("upstream reasoning_effort = %q, want %q", gotReasoningEffort, "medium")
 	}
-	if gotMaxTokens != maxForwardedCompletionTokens {
-		t.Fatalf("upstream max_tokens = %d, want %d", gotMaxTokens, maxForwardedCompletionTokens)
+	if gotMaxTokens != 256000 {
+		t.Fatalf("upstream max_tokens = %d, want %d", gotMaxTokens, 256000)
 	}
 	if !strings.Contains(string(body), "remote result") {
 		t.Fatalf("body = %s, want remote result", body)
@@ -1491,66 +1493,6 @@ func mustSeededAgentService(t *testing.T, llmCfg config.LLMConfig, agents []agen
 		t.Fatalf("NewService() error = %v", err)
 	}
 	return svc
-}
-
-func TestNormalizeCompletionTokenLimitsRaisesSymmetric32768Budget(t *testing.T) {
-	payload := map[string]any{
-		"max_tokens": float64(32768),
-	}
-	normalizeCompletionTokenLimits(payload)
-	if got, want := payloadInt(payload, "max_tokens"), 33792; got != want {
-		t.Fatalf("max_tokens = %d, want %d", got, want)
-	}
-	if got, want := payloadInt(payload, "max_completion_tokens"), 33792; got != want {
-		t.Fatalf("max_completion_tokens = %d, want %d", got, want)
-	}
-}
-
-func TestNormalizeCompletionTokenLimitsRaises16384ForReasoningModel(t *testing.T) {
-	payload := map[string]any{
-		"model":      "glm-5.1",
-		"max_tokens": float64(16384),
-	}
-	normalizeCompletionTokenLimits(payload)
-	if got, want := payloadInt(payload, "max_tokens"), 33792; got != want {
-		t.Fatalf("max_tokens = %d, want %d", got, want)
-	}
-}
-
-func TestNormalizeCompletionTokenLimitsEnsuresMaxAboveThinkingBudget(t *testing.T) {
-	payload := map[string]any{
-		"max_completion_tokens": float64(32768),
-		"thinking_budget":       float64(32768),
-	}
-	normalizeCompletionTokenLimits(payload)
-	if got, want := payloadInt(payload, "max_completion_tokens"), 33792; got != want {
-		t.Fatalf("max_completion_tokens = %d, want %d", got, want)
-	}
-}
-
-func TestNormalizeCompletionTokenLimitsLeavesSmallNonReasoningLimits(t *testing.T) {
-	payload := map[string]any{
-		"model":      "gpt-4.1-mini",
-		"max_tokens": float64(4096),
-	}
-	normalizeCompletionTokenLimits(payload)
-	if got, want := payloadInt(payload, "max_tokens"), 4096; got != want {
-		t.Fatalf("max_tokens = %d, want %d", got, want)
-	}
-}
-
-func TestNormalizeCompletionTokenLimitsCapsExcessiveRuntimeDefault(t *testing.T) {
-	payload := map[string]any{
-		"model":      "qwen3.7-plus",
-		"max_tokens": float64(256000),
-	}
-	normalizeCompletionTokenLimits(payload)
-	if got, want := payloadInt(payload, "max_tokens"), maxForwardedCompletionTokens; got != want {
-		t.Fatalf("max_tokens = %d, want %d", got, want)
-	}
-	if got, want := payloadInt(payload, "max_completion_tokens"), maxForwardedCompletionTokens; got != want {
-		t.Fatalf("max_completion_tokens = %d, want %d", got, want)
-	}
 }
 
 func TestCompactUpstreamErrorResponseUsesFriendlyMessages(t *testing.T) {
