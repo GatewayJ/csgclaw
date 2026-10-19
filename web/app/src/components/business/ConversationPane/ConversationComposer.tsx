@@ -1,5 +1,10 @@
 import "@/components/business/ResourceTag";
-import { ComposerResourceMenu, type ComposerResourceProps } from "@/components/business/ConversationResourcePicker";
+import {
+  ConversationResourcePicker,
+  useComposerResourcePicker,
+  type ComposerResourceProps,
+} from "@/components/business/ConversationResourcePicker";
+import { ComposerAddMenu } from "./ComposerAddMenu";
 import { canSendComposer, selectedResources } from "@/models/conversationResources";
 import type { ChatFileScope } from "@/components/business/ChatSidePanel/types";
 import { useFileMentions } from "./FileMentionPicker";
@@ -152,7 +157,15 @@ export const ConversationComposer = memo(function ConversationComposer({
   const composerHelpId = useId();
   const isSending = sendStatus === "sending";
   const interactionDisabled = composerDisabled || isSending;
-  const sendDisabled = interactionDisabled || !canSendComposer(draftSegments, attachmentDrafts.length);
+  const resourcePicker = useComposerResourcePicker({
+    resourceAgentID,
+    onPickResources,
+    editorRef,
+    selected: selectedResources(draftSegments),
+    disabled: interactionDisabled,
+  });
+  const sendDisabled =
+    interactionDisabled || resourcePicker.active || !canSendComposer(draftSegments, attachmentDrafts.length);
   const actionSuggestions = useMemo(() => composerActionSuggestions(draftText), [draftText]);
 
   function handleFiles(files: File[]) {
@@ -164,7 +177,7 @@ export const ConversationComposer = memo(function ConversationComposer({
 
   return (
     <footer className={`composer${workingParticipants.length > 0 ? " has-working-status" : ""}`}>
-      {slashPickerOpen ? (
+      {!resourcePicker.active && slashPickerOpen ? (
         <SlashPicker
           candidates={slashCandidates}
           activeIndex={slashIndex}
@@ -174,7 +187,7 @@ export const ConversationComposer = memo(function ConversationComposer({
           onSelect={(name) => onApplySlashCandidate(name)}
         />
       ) : null}
-      {fileScope ? (
+      {resourcePicker.active ? null : fileScope ? (
         fileMentions.picker
       ) : mentionCandidates.length > 0 ? (
         <MentionPicker users={mentionCandidates} activeIndex={mentionIndex} t={t} onSelect={onApplyMention} />
@@ -225,7 +238,14 @@ export const ConversationComposer = memo(function ConversationComposer({
           onPreviewAttachment={onPreviewAttachment}
           onRemove={onRemoveAttachment}
         />
-        <div className="composer-editor-wrap">
+        {resourcePicker.pickerProps ? (
+          <ConversationResourcePicker
+            key={`${resourceAgentID}:${resourcePicker.pickerProps.kind}`}
+            {...resourcePicker.pickerProps}
+            t={t}
+          />
+        ) : null}
+        <div className="composer-editor-wrap" hidden={resourcePicker.active}>
           {draftSegments.length === 0 ? (
             <div className="composer-placeholder" aria-hidden="true">
               {composerDisabled ? composerDisabledReason || t("profileIncomplete") : t("inputPlaceholder")}
@@ -276,7 +296,7 @@ export const ConversationComposer = memo(function ConversationComposer({
             }}
           />
         </div>
-        {actionSuggestions.length > 0 ? (
+        {!resourcePicker.active && actionSuggestions.length > 0 ? (
           <div className="composer-action-suggestions" aria-label={t("suggestedActions")}>
             <span>{t("suggestedActions")}</span>
             {actionSuggestions.map((suggestion) => (
@@ -294,10 +314,8 @@ export const ConversationComposer = memo(function ConversationComposer({
           </div>
         ) : null}
         <div className="composer-toolbar">
-          <ComposerResourceMenu
-            resourceAgentID={resourceAgentID}
-            onPickResources={onPickResources}
-            selected={selectedResources(draftSegments)}
+          <ComposerAddMenu
+            onOpenResourcePicker={resourcePicker.open}
             disabled={interactionDisabled}
             t={t}
             onAddFiles={() => fileInputRef.current?.click()}

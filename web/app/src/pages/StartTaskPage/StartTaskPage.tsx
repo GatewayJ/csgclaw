@@ -18,7 +18,11 @@ import { taskConversationTitle } from "@/models/taskConversations";
 import type { IMConversation } from "@/models/conversations";
 import styles from "./StartTaskPage.module.css";
 import { TargetPicker, SOLO_TEAM_ID } from "./components/TargetPicker";
-import { ComposerResourceMenu } from "@/components/business/ConversationResourcePicker";
+import {
+  ConversationResourcePicker,
+  useComposerResourcePicker,
+} from "@/components/business/ConversationResourcePicker";
+import { ComposerAddMenu } from "@/components/business/ConversationPane/ComposerAddMenu";
 import {
   resourceMessageInput,
   resourceSegment,
@@ -77,16 +81,25 @@ function StartTaskForm({
   const sendID = useRef({ fingerprint: "", id: "" });
   const inFlight = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   const sidebar = controller.ready ? controller.sidebarProps : null;
   const agents = useMemo(() => sidebar?.workerAgentItems ?? [], [sidebar?.workerAgentItems]);
   const teams = useMemo(() => sidebar?.teams ?? [], [sidebar?.teams]);
   const manager = agents.find((agent) => agent.role === "manager");
   const selected = target || `agent:${manager?.id || agents[0]?.id || ""}`;
+  const selectedAgent = agents.find((agent) => selected === `agent:${agent.id}`);
+  const resourceAgentID = supportsTaskConfiguration(selectedAgent) ? selectedAgent?.id || undefined : undefined;
+  const resourcePicker = useComposerResourcePicker({
+    resourceAgentID,
+    onPickResources: (items) => setResources((current) => uniqueResources([...current, ...items])),
+    editorRef,
+    selected: resources,
+    disabled: busy,
+  });
   if (!controller.ready || !sidebar || !controller.taskEntry) return null;
   const readySidebar = sidebar;
   const { t } = sidebar;
   const entry = controller.taskEntry;
-  const selectedAgent = agents.find((agent) => selected === `agent:${agent.id}`);
   const selectedTeam = teams.find((team) => selected === `team:${team.id}`);
   const recipient = selectedAgent || manager;
   const selectedProfile = recipient
@@ -239,38 +252,45 @@ function StartTaskForm({
           ) : null}
           <div className={styles.composerGroup}>
             <div className={styles.composer}>
-              {resources.length ? (
-                <div className="flex flex-wrap gap-2">
-                  {resources.map((resource) => (
-                    <ResourceTag
-                      key={resourceKey(resource)}
-                      resource={resource}
-                      removal={{
-                        label: t("remove"),
-                        disabled: busy,
-                        onRemove: () =>
-                          setResources((current) =>
-                            current.filter((item) => resourceKey(item) !== resourceKey(resource)),
-                          ),
-                      }}
-                    />
-                  ))}
-                </div>
+              {resourcePicker.pickerProps ? (
+                <ConversationResourcePicker
+                  key={`${resourceAgentID}:${resourcePicker.pickerProps.kind}`}
+                  {...resourcePicker.pickerProps}
+                  t={t}
+                  className={styles.resourceSearch}
+                />
               ) : null}
-              <textarea
-                className={styles.input}
-                aria-label={t("taskEntryPrompt")}
-                placeholder={t("iaStartComposerPlaceholder")}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                disabled={busy}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    void start();
-                  }
-                }}
-              />
+              <div className={styles.draft} hidden={resourcePicker.active}>
+                {resources.map((resource) => (
+                  <ResourceTag
+                    key={resourceKey(resource)}
+                    resource={resource}
+                    removal={{
+                      label: t("remove"),
+                      disabled: busy,
+                      onRemove: () =>
+                        setResources((current) =>
+                          current.filter((item) => resourceKey(item) !== resourceKey(resource)),
+                        ),
+                    }}
+                  />
+                ))}
+                <textarea
+                  ref={editorRef}
+                  className={styles.input}
+                  aria-label={t("taskEntryPrompt")}
+                  placeholder={t("iaStartComposerPlaceholder")}
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  disabled={busy}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      void start();
+                    }
+                  }}
+                />
+              </div>
               {files.length ? (
                 <ul className={styles.files}>
                   {files.map((file, index) => (
@@ -300,13 +320,8 @@ function StartTaskForm({
                     event.target.value = "";
                   }}
                 />
-                <ComposerResourceMenu
-                  resourceAgentID={
-                    supportsTaskConfiguration(selectedAgent) ? selectedAgent?.id || undefined : undefined
-                  }
-                  selected={resources}
-                  onPickResources={(items) => setResources((current) => uniqueResources([...current, ...items]))}
-                  onManage={selectedAgent ? () => void controller.openAgentSettings(selectedAgent) : undefined}
+                <ComposerAddMenu
+                  onOpenResourcePicker={resourcePicker.open}
                   disabled={busy}
                   t={t}
                   onAddFiles={() => fileInput.current?.click()}
@@ -329,6 +344,7 @@ function StartTaskForm({
                   aria-label={t("taskEntryStart")}
                   disabled={
                     busy ||
+                    resourcePicker.active ||
                     !canSendResources(draftInput.content, draftInput.resource_refs, files.length) ||
                     Boolean(modelMissing)
                   }

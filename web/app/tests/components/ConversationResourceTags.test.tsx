@@ -126,7 +126,7 @@ describe.each([false, true])("resource tags in the composer (thread=%s)", (threa
     selection.removeAllRanges();
     selection.addRange(caret);
     setRemoveLabel("移除");
-    expect(within(editor).getByRole("button", { name: "移除 Review" })).toBeInTheDocument();
+    expect(within(editor).getByRole("button", { name: "移除 /Review" })).toBeInTheDocument();
     expect(editor.querySelector('[data-resource-type="skill"]')).toBe(token);
     expect(selection.anchorNode).toBe(text);
     expect(selection.anchorOffset).toBe(1);

@@ -1,2 +1,2 @@
 export { ConversationResourcePicker } from "./ConversationResourcePicker";
-export { ComposerResourceMenu, type ComposerResourceProps } from "./ComposerResourceMenu";
+export { useComposerResourcePicker, type ComposerResourceProps } from "./useComposerResourcePicker";

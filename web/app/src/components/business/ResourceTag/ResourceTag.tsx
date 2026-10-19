@@ -1,4 +1,4 @@
-import { resourceKey, type ResourceSnapshot } from "@/models/agentResources";
+import { resourceKey, resourceLabel, type ResourceSnapshot } from "@/models/agentResources";
 
 type ResourceTagProps = {
   resource: ResourceSnapshot;
@@ -8,12 +8,12 @@ type ResourceTagProps = {
 export function ResourceTag({ resource, removal }: ResourceTagProps) {
   return (
     <span className="resource-tag" data-resource-type={resource.type} title={resourceKey(resource)}>
-      <span className="resource-tag-label">{resource.name}</span>
+      <span className="resource-tag-label">{resourceLabel(resource)}</span>
       {removal ? (
         <button
           type="button"
           className="resource-tag-remove"
-          aria-label={`${removal.label} ${resource.name}`}
+          aria-label={`${removal.label} ${resourceLabel(resource)}`}
           disabled={removal.disabled}
           onClick={removal.onRemove}
         />

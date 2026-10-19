@@ -1,6 +1,11 @@
 import "@/components/business/ResourceTag";
 import { messageResources, resourceMessageText } from "@/models/conversationResources";
-import { ComposerResourceMenu, type ComposerResourceProps } from "@/components/business/ConversationResourcePicker";
+import {
+  ConversationResourcePicker,
+  useComposerResourcePicker,
+  type ComposerResourceProps,
+} from "@/components/business/ConversationResourcePicker";
+import { ComposerAddMenu } from "./ComposerAddMenu";
 import { canSendComposer, selectedResources } from "@/models/conversationResources";
 import type { ChatFileScope } from "@/components/business/ChatSidePanel/types";
 import { useFileMentions } from "./FileMentionPicker";
@@ -159,6 +164,13 @@ export function ConversationThreadPanel({
   const threadBodyRef = useRef<HTMLDivElement | null>(null);
   const threadEditorRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const resourcePicker = useComposerResourcePicker({
+    resourceAgentID,
+    onPickResources,
+    editorRef: threadEditorRef,
+    selected: selectedResources(draftSegments),
+    disabled,
+  });
   const [mentionState, setMentionState] = useState<ThreadMentionState | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const root = thread?.root ?? null;
@@ -415,7 +427,7 @@ export function ConversationThreadPanel({
             handleFiles(files);
           }}
         >
-          {threadSlashPickerOpen ? (
+          {!resourcePicker.active && threadSlashPickerOpen ? (
             <SlashPicker
               candidates={threadSlashCandidates}
               activeIndex={threadSlashIndex}
@@ -426,7 +438,7 @@ export function ConversationThreadPanel({
               onSelect={(name) => onApplyThreadSlashCandidate(name)}
             />
           ) : null}
-          {fileScope ? (
+          {resourcePicker.active ? null : fileScope ? (
             fileMentions.picker
           ) : threadMentionCandidates.length > 0 ? (
             <MentionPicker
@@ -446,6 +458,7 @@ export function ConversationThreadPanel({
           />
           <div
             ref={threadEditorRef}
+            hidden={resourcePicker.active}
             contentEditable={!disabled}
             suppressContentEditableWarning={true}
             role="textbox"
@@ -563,6 +576,13 @@ export function ConversationThreadPanel({
               syncThreadDraft(threadEditorRef.current);
             }}
           />
+          {resourcePicker.pickerProps ? (
+            <ConversationResourcePicker
+              key={`${resourceAgentID}:${resourcePicker.pickerProps.kind}`}
+              {...resourcePicker.pickerProps}
+              t={t}
+            />
+          ) : null}
           <input
             ref={fileInputRef}
             className="sr-only"
@@ -574,10 +594,8 @@ export function ConversationThreadPanel({
               event.currentTarget.value = "";
             }}
           />
-          <ComposerResourceMenu
-            resourceAgentID={resourceAgentID}
-            onPickResources={onPickResources}
-            selected={selectedResources(draftSegments)}
+          <ComposerAddMenu
+            onOpenResourcePicker={resourcePicker.open}
             disabled={disabled}
             t={t}
             onAddFiles={() => fileInputRef.current?.click()}
@@ -585,7 +603,7 @@ export function ConversationThreadPanel({
           <Button
             variant="primary"
             className="thread-send-button"
-            disabled={disabled || !canSendComposer(draftSegments, attachmentDrafts.length)}
+            disabled={disabled || resourcePicker.active || !canSendComposer(draftSegments, attachmentDrafts.length)}
             onClick={onSend}
           >
             <span aria-hidden="true">{IconImage("send")}</span>

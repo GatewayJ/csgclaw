@@ -73,6 +73,11 @@ describe("会话资源选择", () => {
     const segments = addResources([], [skill], "agent-a");
     const root = document.createElement("div");
     renderComposerSegments(root, segments);
+    expect(root.querySelector(".resource-tag-label")).toHaveTextContent("/review");
+    expect(resourceMessageInput(parseComposerSegments(root))).toEqual({
+      content: "",
+      resource_refs: [{ source: "skill", id: "review" }],
+    });
     expect(resourcesMatchAgent(parseComposerSegments(root), "agent-a")).toBe(true);
     expect(resourcesMatchAgent(parseComposerSegments(root), "agent-b")).toBe(false);
     expect(canSendComposer([...segments, { type: "slash", text: "/new" }], 0)).toBe(false);

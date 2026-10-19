@@ -1,13 +1,21 @@
+import { useRef, useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 import { createQueryWrapper } from "../../../../tests/helpers/queryClient";
 import { ConversationResourcePicker } from "./ConversationResourcePicker";
-import { ComposerResourceMenu } from "./ComposerResourceMenu";
+import { useComposerResourcePicker } from "./useComposerResourcePicker";
+import { ComposerAddMenu } from "@/components/business/ConversationPane/ComposerAddMenu";
+import { ResourceTag } from "@/components/business/ResourceTag";
 import { fetchConversationResourceBatch } from "@/api/agentResources";
-import type { AgentResourceSummary } from "@/models/conversationResources";
+import {
+  resourceKey,
+  maxResourceReferences,
+  type AgentResourceSummary,
+  type ResourceSnapshot,
+} from "@/models/conversationResources";
 
 vi.mock("@/api/agentResources", () => ({ fetchConversationResourceBatch: vi.fn() }));
+const t = (key: string) => key;
 const item = (id: string, available = true): AgentResourceSummary => ({
   source: "app",
   id,
@@ -17,7 +25,39 @@ const item = (id: string, available = true): AgentResourceSummary => ({
   available,
 });
 
-it("服务器搜索与分页保留同名实例身份，并禁止选择停用资源", async () => {
+function Composer({ agentID = "agent", disabled = false }: { agentID?: string; disabled?: boolean }) {
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const [draft, setDraft] = useState("Existing draft");
+  const [selected, setSelected] = useState<ResourceSnapshot[]>([]);
+  const picker = useComposerResourcePicker({
+    editorRef,
+    resourceAgentID: agentID,
+    disabled,
+    selected,
+    onPickResources: (items) => setSelected((current) => [...current, ...items]),
+  });
+  return (
+    <>
+      {selected.map((resource) => (
+        <ResourceTag key={resourceKey(resource)} resource={resource} />
+      ))}
+      {picker.pickerProps ? (
+        <ConversationResourcePicker key={`${agentID}:${picker.pickerProps.kind}`} {...picker.pickerProps} t={t} />
+      ) : null}
+      <textarea
+        ref={editorRef}
+        aria-label="Draft"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        hidden={picker.active}
+      />
+      <ComposerAddMenu disabled={disabled} t={t} onOpenResourcePicker={picker.open} onAddFiles={() => {}} />
+      <button>Outside</button>
+    </>
+  );
+}
+
+it("searches and paginates on the server while preserving resource identities and availability", async () => {
   const fetch = vi.mocked(fetchConversationResourceBatch);
   fetch.mockImplementation(async (_agent, _type, cursor, request) => ({
     items:
@@ -33,32 +73,100 @@ it("服务器搜索与分页保留同名实例身份，并禁止选择停用资�
   }));
   const pick = vi.fn();
   const { wrapper } = createQueryWrapper();
-  render(
-    <MemoryRouter>
-      <ConversationResourcePicker agentID="agent" kind="connector" t={(key) => key} onClose={() => {}} onPick={pick} />
-    </MemoryRouter>,
-    { wrapper },
-  );
+  render(<ConversationResourcePicker agentID="agent" kind="connector" t={t} onClose={() => {}} onPick={pick} />, {
+    wrapper,
+  });
   const user = userEvent.setup();
-  await screen.findByText("app:first");
-  const checks = screen.getAllByRole("checkbox");
-  expect(checks[1]).toBeDisabled();
-  await user.click(checks[0]);
+  await screen.findByTitle("app:first");
+  expect(screen.getByTitle("app:disabled")).toBeDisabled();
+  await user.click(screen.getByTitle("app:first"));
+  expect(pick).toHaveBeenLastCalledWith(expect.objectContaining({ source: "app", id: "first" }));
   await user.click(screen.getByRole("button", { name: "taskEntryLoadMore" }));
-  await screen.findByText("app:second");
-  await user.click(screen.getAllByRole("checkbox")[2]);
-  await user.type(screen.getByRole("textbox", { name: "search" }), "special");
-  await screen.findByText("app:searched");
-  await user.click(screen.getByRole("button", { name: "addAttachmentResource" }));
-  expect(pick.mock.calls[0][0].map((ref: AgentResourceSummary) => ref.id)).toEqual(["first", "second"]);
+  await user.click(await screen.findByTitle("app:second"));
+  expect(pick).toHaveBeenLastCalledWith(expect.objectContaining({ source: "app", id: "second" }));
+  await user.type(screen.getByRole("combobox"), "special");
+  await screen.findByTitle("app:searched");
+  expect(screen.getAllByRole("option")).toHaveLength(1);
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith("agent", "connector", "", { search: "special" }, expect.any(AbortSignal)),
   );
+  expect(screen.getByRole("link", { name: "composerResourceManage" })).toHaveAttribute(
+    "href",
+    "#/agents/agent?tab=connectors",
+  );
 });
 
-it("共享资源窗口支持键盘选择、中文输入法、关闭和焦点恢复", async () => {
+it("selects directly from composer search, preserves the draft and ignores IME confirmation", async () => {
+  vi.mocked(fetchConversationResourceBatch).mockResolvedValue({
+    items: [item("first"), item("disabled", false), item("second")],
+    total: 3,
+    list_revision: "r",
+    has_more: false,
+  });
+  const { wrapper } = createQueryWrapper();
+  render(<Composer />, { wrapper });
+  const user = userEvent.setup();
+  const trigger = screen.getByRole("button", { name: "composerAddContent" });
+  async function openPicker() {
+    await user.click(trigger);
+    await user.click(screen.getByRole("button", { name: "composerResourceConnector" }));
+    await screen.findByTitle("app:first");
+    expect(screen.getByRole("combobox")).toHaveFocus();
+    expect(screen.queryByRole("textbox", { name: "Draft" })).not.toBeInTheDocument();
+  }
+  await openPicker();
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter", isComposing: true });
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape", isComposing: true });
+  expect(screen.getByRole("listbox")).toBeInTheDocument();
+  await user.keyboard("{ArrowDown}{Enter}");
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  expect(screen.getByTitle("app:second")).toHaveClass("resource-tag");
+  const draft = screen.getByRole("textbox", { name: "Draft" });
+  await waitFor(() => expect(draft).toHaveFocus());
+  expect(draft).toHaveValue("Existing draft");
+  await user.keyboard(" continued");
+  await openPicker();
+  expect(screen.getByRole("option", { name: "GitLab", selected: true })).toHaveAttribute("title", "app:first");
+  expect(screen.getByRole("listbox").querySelector('[title="app:second"]')).toBeDisabled();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(draft).toHaveFocus());
+  expect(draft).toHaveValue("Existing draft continued");
+  await openPicker();
+  await user.click(screen.getByRole("button", { name: "Outside" }));
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
+});
+
+it("resets search when changing agents or disabling the composer", async () => {
   vi.mocked(fetchConversationResourceBatch).mockResolvedValue({
     items: [item("first")],
+    total: 1,
+    list_revision: "r",
+    has_more: false,
+  });
+  const { wrapper } = createQueryWrapper();
+  const { rerender } = render(<Composer />, { wrapper });
+  const user = userEvent.setup();
+  async function openPicker() {
+    await user.click(screen.getByRole("button", { name: "composerAddContent" }));
+    await user.click(screen.getByRole("button", { name: "composerResourceConnector" }));
+    await screen.findByRole("option");
+  }
+  await openPicker();
+  await user.type(screen.getByRole("combobox"), "old search");
+  rerender(<Composer agentID="other" />);
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  await openPicker();
+  expect(screen.getByRole("combobox")).toHaveValue("");
+  rerender(<Composer agentID="other" disabled />);
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  rerender(<Composer agentID="other" />);
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+});
+
+it("prevents selecting resources beyond the reference limit", async () => {
+  vi.mocked(fetchConversationResourceBatch).mockResolvedValue({
+    items: [item("new")],
     total: 1,
     list_revision: "r",
     has_more: false,
@@ -66,42 +174,17 @@ it("共享资源窗口支持键盘选择、中文输入法、关闭和焦点恢�
   const pick = vi.fn();
   const { wrapper } = createQueryWrapper();
   render(
-    <MemoryRouter>
-      <ComposerResourceMenu
-        resourceAgentID="agent"
-        onPickResources={pick}
-        disabled={false}
-        t={(key) => key}
-        onAddFiles={() => {}}
-      />
-      <button>外部操作</button>
-    </MemoryRouter>,
+    <ConversationResourcePicker
+      agentID="agent"
+      kind="connector"
+      t={t}
+      onClose={() => {}}
+      onPick={pick}
+      existing={Array.from({ length: maxResourceReferences }, (_, index) => item(String(index)))}
+    />,
     { wrapper },
   );
-  const user = userEvent.setup();
-  const trigger = screen.getByRole("button", { name: "composerAddContent" });
-  async function openPicker() {
-    await user.click(trigger);
-    await user.click(screen.getByRole("button", { name: "composerResourceConnector" }));
-    await screen.findByRole("checkbox");
-    expect(screen.getByRole("textbox", { name: "search" })).toHaveFocus();
-  }
-  await openPicker();
-  fireEvent.keyDown(screen.getByRole("textbox", { name: "search" }), { key: "Escape", isComposing: true });
-  expect(screen.getByRole("dialog", { name: "composerResourceConnector" })).toBeInTheDocument();
-  await user.keyboard("{ArrowDown}{Enter}");
-  expect(screen.getByRole("checkbox")).toBeChecked();
-  await user.click(screen.getByRole("button", { name: "addAttachmentResource" }));
-  expect(pick).toHaveBeenCalledWith([expect.objectContaining({ source: "app", id: "first" })]);
-  await waitFor(() => expect(trigger).toHaveFocus());
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  await openPicker();
-  expect(screen.getByRole("checkbox")).not.toBeChecked();
-  await user.keyboard("{Escape}");
-  await waitFor(() => expect(trigger).toHaveFocus());
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  await openPicker();
-  await user.click(screen.getByRole("button", { name: "外部操作" }));
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "外部操作" })).toHaveFocus();
+  expect(await screen.findByRole("option")).toBeDisabled();
+  await userEvent.setup().keyboard("{Enter}");
+  expect(pick).not.toHaveBeenCalled();
 });

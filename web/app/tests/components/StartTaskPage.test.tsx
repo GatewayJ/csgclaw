@@ -83,6 +83,34 @@ function setup(
 
 describe("StartTaskPage task preparation", () => {
   beforeEach(() => vi.mocked(sendMessageRequest).mockReset());
+  it.each([
+    ["/", "u-manager"],
+    ["/new?agent=u-worker", "u-worker"],
+  ])("opens resource management for the selected agent from %s", async (path, agentID) => {
+    vi.mocked(fetchConversationResourceBatch).mockResolvedValue({
+      items: [],
+      total: 0,
+      list_revision: "r",
+      has_more: false,
+    });
+    setup(path);
+    const user = userEvent.setup();
+    for (const [label, tab] of [
+      ["composerResourceSkill", "skills"],
+      ["composerResourceConnector", "connectors"],
+      ["composerResourceKnowledge", "connectors"],
+    ]) {
+      await user.click(screen.getByRole("button", { name: "composerAddContent" }));
+      await user.click(screen.getByRole("button", { name: label }));
+      expect(screen.getByRole("link", { name: "composerResourceManage" })).toHaveAttribute(
+        "href",
+        `#/agents/${agentID}?tab=${tab}`,
+      );
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "taskEntryPrompt" })).toHaveFocus());
+    }
+  });
+
   it.each(["opencsg", "codex"])(
     "checks %s authentication for the selected room model before the first prompt",
     async (provider) => {
@@ -188,8 +216,7 @@ it("StartTask 使用规范化输入检查资源组合，校验失败时不创建
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "composerAddContent" }));
   await user.click(screen.getByRole("button", { name: "composerResourceConnector" }));
-  await user.click(await screen.findByRole("checkbox"));
-  await user.click(screen.getByRole("button", { name: "addAttachmentResource" }));
+  await user.click(await screen.findByRole("option", { name: "Search" }));
   const input = screen.getByRole("textbox", { name: "taskEntryPrompt" });
   await user.type(input, "/review");
   expect(screen.getByRole("button", { name: "taskEntryStart" })).toBeDisabled();
@@ -240,8 +267,7 @@ it("removes a selected resource while preserving the task text", async () => {
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "composerAddContent" }));
   await user.click(screen.getByRole("button", { name: "composerResourceConnector" }));
-  await user.click(await screen.findByRole("checkbox"));
-  await user.click(screen.getByRole("button", { name: "addAttachmentResource" }));
+  await user.click(await screen.findByRole("option", { name: "Search" }));
   await user.type(screen.getByRole("textbox", { name: "taskEntryPrompt" }), "Check project");
   const remove = screen.getByRole("button", { name: "remove Search" });
   expect(remove.closest(".resource-tag")).toHaveAttribute("data-resource-type", "connector");

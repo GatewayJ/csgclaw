@@ -1,4 +1,4 @@
-import { resourceKey, isResourceSnapshot, type ResourceSnapshot } from "./agentResources";
+import { resourceKey, resourceLabel, isResourceSnapshot, type ResourceSnapshot } from "./agentResources";
 import { fileReferenceKey, type ComposerFileReference, type FileReference } from "./fileReferences";
 
 export type ComposerSegment =
@@ -120,14 +120,14 @@ export function createResourceTokenElement(
   token.title = `${resource.source}:${resource.id}`;
   const label = document.createElement("span");
   label.className = "resource-tag-label";
-  label.textContent = resource.name;
+  label.textContent = resourceLabel(resource);
   token.append(label);
   if (removeLabel) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "resource-tag-remove";
     button.dataset.composerResourceRemove = "true";
-    button.setAttribute("aria-label", `${removeLabel} ${resource.name}`);
+    button.setAttribute("aria-label", `${removeLabel} ${resourceLabel(resource)}`);
     token.append(button);
   }
   return token;

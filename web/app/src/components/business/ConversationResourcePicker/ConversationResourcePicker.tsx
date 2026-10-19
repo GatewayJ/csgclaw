@@ -1,44 +1,53 @@
-import { isComposerKeyboardEventComposing } from "@/models/composer";
-import { useState } from "react";
-import { X, Search } from "lucide-react";
-import { Button, LinkButton } from "@/components/ui";
+import { useId, useLayoutEffect, useRef, useState } from "react";
+import { BookOpen, Boxes, Wrench } from "lucide-react";
+import { Button, LinkButton, TextInput } from "@/components/ui";
 import { useConversationResources } from "@/hooks/workspace/useConversationResources";
+import { isComposerKeyboardEventComposing } from "@/models/composer";
 import { maxResourceReferences, resourceKey, type ResourceSnapshot } from "@/models/conversationResources";
-import { pathForPane, WorkspacePaneTypes } from "@/models/routing";
+import { pathForAgentResources } from "@/models/routing";
 import { localizeAPIError } from "@/shared/i18n";
 import type { TranslateFn } from "@/models/conversations";
 import type { TaskResourceKind } from "@/components/business/ConversationPane/ComposerAddMenu";
 import styles from "./ConversationResourcePicker.module.css";
+
+const unavailableLabels: Record<string, string> = {
+  disabled: "errors.resource_disabled",
+  connecting: "resourceConnecting",
+  disconnected: "resourceDisconnected",
+  authorization_required: "resourceAuthorizationRequired",
+  no_tools: "resourceNoTools",
+  connection_error: "resourceConnectionError",
+};
+
 export function ConversationResourcePicker({
   agentID,
   kind,
   t,
   onClose,
   onPick,
-  onManage,
   existing = [],
+  className,
 }: {
   agentID: string;
   kind: TaskResourceKind;
   t: TranslateFn;
-  onClose: () => void;
-  onPick: (resources: ResourceSnapshot[]) => void;
+  onClose: (restoreFocus?: boolean) => void;
+  onPick: (resource: ResourceSnapshot) => void;
   existing?: readonly ResourceSnapshot[];
-  onManage?: () => void;
+  className?: string;
 }) {
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<ResourceSnapshot[]>([]);
-  const resource = useConversationResources(agentID, kind === "knowledge" ? "knowledge_base" : kind, query);
-  const items = resource.items;
-  const unavailableLabels: Record<string, string> = {
-    disabled: "errors.resource_disabled",
-    connecting: "resourceConnecting",
-    disconnected: "resourceDisconnected",
-    authorization_required: "resourceAuthorizationRequired",
-    no_tools: "resourceNoTools",
-    connection_error: "resourceConnectionError",
-  };
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const activeRef = useRef<HTMLButtonElement>(null);
+  const listID = useId();
+  const resourceType = kind === "knowledge" ? "knowledge_base" : kind;
+  const resource = useConversationResources(agentID, resourceType, query);
   const existingKeys = new Set(existing.map(resourceKey));
+  const available = resource.items.filter(
+    (item) => item.available && !existingKeys.has(resourceKey(item)) && existing.length < maxResourceReferences,
+  );
+  const active = available.find((item) => resourceKey(item) === activeKey) ?? available[0];
+  const activeIndex = resource.items.indexOf(active);
   const label = t(
     kind === "skill"
       ? "composerResourceSkill"
@@ -46,110 +55,130 @@ export function ConversationResourcePicker({
         ? "composerResourceConnector"
         : "composerResourceKnowledge",
   );
+  const searchLabel = t("composerResourceSearchPlaceholder", { kind: label });
+  const manageLabel = t("composerResourceManage", { kind: label });
+  const Icon = kind === "skill" ? Wrench : kind === "connector" ? Boxes : BookOpen;
+  useLayoutEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeKey, activeIndex]);
+
   return (
-    <section
-      className={styles.picker}
-      aria-label={label}
+    <div
+      className={`${styles.search} ${className ?? ""}`.trim()}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) onClose(false);
+      }}
       onKeyDown={(event) => {
-        if (isComposerKeyboardEventComposing(event)) return;
-        if (event.key === "Enter" && event.target instanceof HTMLInputElement && event.target.type === "checkbox") {
+        if (event.key === "Escape" && !isComposerKeyboardEventComposing(event)) {
           event.preventDefault();
-          event.target.click();
-        }
-        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-          const inputs = Array.from(
-            event.currentTarget.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:not(:disabled)'),
-          );
-          const current = inputs.indexOf(document.activeElement as HTMLInputElement);
-          const next = event.key === "ArrowDown" ? current + 1 : current - 1;
-          if (inputs.length) {
-            event.preventDefault();
-            inputs[(next + inputs.length) % inputs.length]?.focus();
-          }
+          event.stopPropagation();
+          onClose();
         }
       }}
     >
-      <header>
-        <strong>{label}</strong>
-        <Button variant="tertiaryGray" size="sm" aria-label={t("close")} onClick={onClose}>
-          <X size={16} />
-        </Button>
-      </header>
-      <label className={styles.search}>
-        <Search size={14} />
-        <input
-          autoFocus
-          aria-label={t("search")}
-          placeholder={t("search")}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </label>
-      <div className={styles.list}>
-        {items.map((item) => {
-          const key = resourceKey(item);
-          const checked = selected.some((ref) => resourceKey(ref) === key);
-          const alreadySelected = existingKeys.has(key);
-          return (
-            <label key={key} title={key}>
-              <input
-                type="checkbox"
-                checked={alreadySelected || checked}
-                disabled={
-                  !item.available ||
-                  alreadySelected ||
-                  (!checked && existing.length + selected.length >= maxResourceReferences)
-                }
-                onChange={(event) =>
-                  setSelected((value) =>
-                    event.target.checked ? [...value, item] : value.filter((ref) => resourceKey(ref) !== key),
-                  )
-                }
-              />
-              <span>
-                {item.name}
-                <small>{item.description}</small>
-                <small>{key}</small>
-                {!item.available ? (
-                  <small>{t(unavailableLabels[item.unavailable_reason ?? ""] ?? "errors.resource_unavailable")}</small>
-                ) : null}
-              </span>
-            </label>
-          );
-        })}
-        {resource.loading ? <p>{t("loading")}</p> : null}
+      <section className={styles.picker} aria-label={label}>
+        <div id={listID} role="listbox" aria-label={label} aria-busy={resource.loading} className={styles.list}>
+          {resource.items.map((item, index) => {
+            const key = resourceKey(item);
+            const disabled = !available.includes(item);
+            return (
+              <button
+                key={key}
+                id={`${listID}-${index}`}
+                type="button"
+                role="option"
+                aria-selected={item === active}
+                disabled={disabled}
+                tabIndex={-1}
+                ref={item === active ? activeRef : undefined}
+                className={styles.option}
+                title={key}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseMove={() => {
+                  if (!disabled) setActiveKey(key);
+                }}
+                onClick={() => onPick(item)}
+              >
+                <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
+                <span className={styles.copy}>
+                  <strong>{item.name}</strong>
+                  {item.description ? <span className={styles.description}>{item.description}</span> : null}
+                  {!item.available ? (
+                    <span className={styles.reason}>
+                      {t(unavailableLabels[item.unavailable_reason ?? ""] ?? "errors.resource_unavailable")}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
+          {resource.loading ? <p role="status">{t("loading")}</p> : null}
+          {!resource.loading && !resource.continuation.failed && !resource.items.length ? (
+            <p>{t(query ? "composerResourceSearchEmpty" : "composerResourceEmpty", { kind: label })}</p>
+          ) : null}
+        </div>
         {resource.continuation.failed ? (
-          <div role="alert">
-            <p>{localizeAPIError(resource.query.error, t, t("errors.resource_unavailable"))}</p>
-            <Button onClick={resource.continuation.retry}>{t("retry")}</Button>
+          <div className={styles.status} role="alert">
+            {localizeAPIError(resource.query.error, t, t("errors.resource_unavailable"))}
+            <Button variant="tertiaryGray" size="sm" onClick={resource.continuation.retry}>
+              {t("retry")}
+            </Button>
           </div>
         ) : null}
         {resource.continuation.hasMore ? (
-          <Button variant="tertiaryGray" size="sm" onClick={() => void resource.continuation.loadMore()}>
-            {t("taskEntryLoadMore")}
-          </Button>
-        ) : null}
-        {!resource.loading && !resource.continuation.failed && !items.length ? <p>{t("iaListSearchEmpty")}</p> : null}
-      </div>
-      <footer>
-        {onManage ? (
-          <Button variant="tertiaryGray" size="sm" onClick={onManage}>
-            {t("taskRuntimeEditAgent")}
-          </Button>
-        ) : (
-          <LinkButton
+          <Button
             variant="tertiaryGray"
             size="sm"
-            href={`#${pathForPane({ type: WorkspacePaneTypes.agent, id: agentID })}`}
-            onClick={onClose}
+            disabled={resource.continuation.loading}
+            onClick={() => void resource.continuation.loadMore()}
           >
-            {t("taskRuntimeEditAgent")}
+            {t(resource.continuation.loading ? "loading" : "taskEntryLoadMore")}
+          </Button>
+        ) : null}
+        <footer className={styles.footer}>
+          <LinkButton
+            variant="linkColor"
+            size="sm"
+            href={`#${pathForAgentResources(agentID, resourceType)}`}
+            onClick={() => onClose(false)}
+          >
+            {manageLabel}
           </LinkButton>
-        )}
-        <Button size="sm" disabled={!selected.length} onClick={() => onPick(selected)}>
-          {t("addAttachmentResource")}
-        </Button>
-      </footer>
-    </section>
+        </footer>
+      </section>
+      <TextInput
+        autoFocus
+        variant="plain"
+        role="combobox"
+        aria-label={searchLabel}
+        placeholder={searchLabel}
+        aria-autocomplete="list"
+        aria-expanded="true"
+        aria-controls={listID}
+        aria-activedescendant={activeIndex >= 0 ? `${listID}-${activeIndex}` : undefined}
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setActiveKey(null);
+        }}
+        onKeyDown={(event) => {
+          if (isComposerKeyboardEventComposing(event)) return;
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            event.stopPropagation();
+            const next =
+              available[
+                (available.indexOf(active) + (event.key === "ArrowDown" ? 1 : -1) + available.length) % available.length
+              ];
+            if (next) setActiveKey(resourceKey(next));
+          }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            if (active) onPick(active);
+          }
+        }}
+      />
+    </div>
   );
 }

@@ -3,6 +3,8 @@ import {
   WorkspacePaneTypes,
   WorkspaceTabs,
   paneFromLocation,
+  pathForAgentApps,
+  pathForAgentResources,
   pathForPane,
   workspaceHasContextSidebar,
   workspaceShowsFloatingChat,
@@ -10,6 +12,18 @@ import {
 } from "@/models/routing";
 
 describe("task routing", () => {
+  it.each([
+    ["skill", "skills"],
+    ["connector", "connectors"],
+    ["knowledge_base", "connectors"],
+  ] as const)("opens the agent profile tab that manages %s resources", (type, tab) => {
+    expect(pathForAgentResources("agent/one", type)).toBe(`/agents/agent%2Fone?tab=${tab}`);
+  });
+
+  it("keeps connector navigation consistent with agent resource management", () => {
+    expect(pathForAgentApps("agent-one")).toBe(pathForAgentResources("agent-one", "connector"));
+  });
+
   it("uses the conversation pane as the default workspace pane", () => {
     expect(paneFromLocation("/")).toEqual({ type: WorkspacePaneTypes.conversation, id: "" });
   });
