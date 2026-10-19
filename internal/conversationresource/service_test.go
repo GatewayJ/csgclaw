@@ -17,13 +17,17 @@ import (
 )
 
 type agentFixture struct {
-	item  contract.Agent
-	query *resourcequery.Query
+	item   contract.Agent
+	query  *resourcequery.Query
+	mcpErr error
 }
 
 func (f *agentFixture) Get(_ context.Context, _ string, options contract.AgentGetOptions) (contract.Agent, error) {
 	f.query = options.SkillQuery
 	item := f.item
+	if options.AdoptMCPServers && f.mcpErr != nil {
+		return contract.Agent{}, f.mcpErr
+	}
 	if options.IncludeSkillSummaries {
 		entries := []resourcequery.Entry{}
 		for _, name := range item.Spec.Skills {
@@ -180,4 +184,36 @@ func TestDependencyFailureAndNewCommand(t *testing.T) {
 	if !errors.As(err, &failure) || failure.Code != InvalidRequest {
 		t.Fatalf("会话命令接受了资源：%v", err)
 	}
+}
+
+func TestRuntimeMCPFailureOnlyAffectsMCPReads(t *testing.T) {
+	s, a, _ := resourceFixture()
+	cause := errors.New("runtime MCP read failed")
+	a.mcpErr = cause
+	query := resourcequery.Query{Mode: "cursor", Size: 20}
+	if items, _, err := s.List(t.Context(), "agent", apitypes.ResourceTypeSkill, query); err != nil || len(items) != 3 {
+		t.Fatalf("skill listing: %v, %v", items, err)
+	}
+	for _, refs := range [][]apitypes.ResourceReference{
+		nil,
+		{{Source: apitypes.ResourceSourceSkill, ID: "review"}},
+		{{Source: apitypes.ResourceSourceApp, ID: "installation-a"}},
+	} {
+		if _, err := s.Resolve(t.Context(), "agent", refs); err != nil {
+			t.Fatalf("resolve %v: %v", refs, err)
+		}
+	}
+	assertUnavailable := func(err error) {
+		t.Helper()
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Code != ServiceUnavailable || !errors.Is(err, cause) {
+			t.Fatalf("error = %v, want service unavailable with runtime cause", err)
+		}
+	}
+	for _, kind := range []apitypes.ResourceType{apitypes.ResourceTypeConnector, apitypes.ResourceTypeKnowledgeBase} {
+		_, _, err := s.List(t.Context(), "agent", kind, query)
+		assertUnavailable(err)
+	}
+	_, err := s.Resolve(t.Context(), "agent", []apitypes.ResourceReference{{Source: apitypes.ResourceSourceMCP, ID: "search-key"}})
+	assertUnavailable(err)
 }

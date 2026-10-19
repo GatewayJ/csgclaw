@@ -29,14 +29,22 @@ type Service struct {
 
 func New(agents AgentReader, apps AppReader) *Service { return &Service{agents: agents, apps: apps} }
 
-func supported(agent contract.Agent) bool {
-	return agent.Spec.Runtime.Adapter == "codex" || agent.Spec.Runtime.Adapter == "dsh"
+func (s *Service) getAgent(ctx context.Context, agentID string, options contract.AgentGetOptions) (contract.Agent, error) {
+	agent, err := s.agents.Get(ctx, agentID, options)
+	if err != nil {
+		return contract.Agent{}, readError(err)
+	}
+	if agent.Spec.Runtime.Adapter != "codex" && agent.Spec.Runtime.Adapter != "dsh" {
+		return contract.Agent{}, &Error{Code: InvalidRequest}
+	}
+	return agent, nil
 }
 
 func (s *Service) List(ctx context.Context, agentID string, kind apitypes.ResourceType, query resourcequery.Query) ([]apitypes.AgentResourceSummary, resourcequery.Metadata, error) {
 	if kind != apitypes.ResourceTypeSkill && kind != apitypes.ResourceTypeConnector && kind != apitypes.ResourceTypeKnowledgeBase {
 		return nil, resourcequery.Metadata{}, resourcequery.ErrInvalid
 	}
+	options := contract.AgentGetOptions{AdoptMCPServers: kind != apitypes.ResourceTypeSkill}
 	if kind == apitypes.ResourceTypeSkill {
 		q := query
 		q.Exclude = nil
@@ -45,28 +53,21 @@ func (s *Service) List(ctx context.Context, agentID string, kind apitypes.Resour
 				q.Exclude = append(q.Exclude, strings.TrimPrefix(key, "skill:"))
 			}
 		}
-		item, err := s.agents.Get(ctx, agentID, contract.AgentGetOptions{IncludeSkillSummaries: true, SkillQuery: &q})
-		if err != nil {
-			return nil, resourcequery.Metadata{}, readError(err)
-		}
-		if !supported(item) {
-			return nil, resourcequery.Metadata{}, &Error{Code: InvalidRequest}
-		}
+		options.IncludeSkillSummaries, options.SkillQuery = true, &q
+	}
+	agent, err := s.getAgent(ctx, agentID, options)
+	if err != nil {
+		return nil, resourcequery.Metadata{}, err
+	}
+	if kind == apitypes.ResourceTypeSkill {
 		items := []apitypes.AgentResourceSummary{}
-		for _, summary := range item.Status.SkillSummaries {
+		for _, summary := range agent.Status.SkillSummaries {
 			items = append(items, resourceSummary(apitypes.ResourceSourceSkill, summary.Name, kind, summary.Name, summary.Description, summary.Enabled))
 		}
-		if item.Status.SkillPage == nil {
+		if agent.Status.SkillPage == nil {
 			return nil, resourcequery.Metadata{}, &Error{Code: ResourceUnavailable}
 		}
-		return items, *item.Status.SkillPage, nil
-	}
-	agent, err := s.agents.Get(ctx, agentID, contract.AgentGetOptions{})
-	if err != nil {
-		return nil, resourcequery.Metadata{}, readError(err)
-	}
-	if !supported(agent) {
-		return nil, resourcequery.Metadata{}, &Error{Code: InvalidRequest}
+		return items, *agent.Status.SkillPage, nil
 	}
 	items := mcpSummaries(agent)
 	appItems, _, err := s.appSummaries(ctx, agentID)
@@ -115,12 +116,11 @@ func (s *Service) Resolve(ctx context.Context, agentID string, refs []apitypes.R
 	if len(input.Refs) == 0 {
 		return result, nil
 	}
-	agent, err := s.agents.Get(ctx, agentID, contract.AgentGetOptions{})
+	agent, err := s.getAgent(ctx, agentID, contract.AgentGetOptions{
+		AdoptMCPServers: slices.ContainsFunc(input.Refs, func(ref apitypes.ResourceReference) bool { return ref.Source == apitypes.ResourceSourceMCP }),
+	})
 	if err != nil {
-		return result, readError(err)
-	}
-	if !supported(agent) {
-		return result, &Error{Code: InvalidRequest}
+		return result, err
 	}
 	candidates := map[apitypes.ResourceReference]apitypes.AgentResourceSummary{}
 	for _, slug := range agent.Spec.Skills {
