@@ -10,7 +10,7 @@ import { conversationActivityAgents } from "@/components/business/ConversationAc
 import type { DocumentPreviewRequest } from "@/components/business/DocumentPreviewPanel";
 import type { CitationSelection } from "@/components/business/MessageContent";
 import { parseCitationDocument } from "@/models/citations";
-import { ChatSideToggle, ChatToolsToolbar } from "./ChatToolsToolbar";
+import { ChatToolsToolbar } from "./ChatToolsToolbar";
 import { useChatSidePanel } from "./useChatSidePanel";
 
 type ChatToolsOptions = {
@@ -101,7 +101,7 @@ export function useChatTools({ conversation, currentUserID, agents, editorRef, t
   );
 
   const openPreview = useCallback(
-    (request: DocumentPreviewRequest) => {
+    (request: DocumentPreviewRequest, originTabID?: "files") => {
       const item = request.items[request.index] ?? request.items[0];
       if (!item) return;
       triggerRef.current = request.anchor ?? null;
@@ -114,6 +114,7 @@ export function useChatTools({ conversation, currentUserID, agents, editorRef, t
         mediaType: item.mediaType,
         reference,
         draft: item.file ? item : undefined,
+        originTabID,
       });
     },
     [openTab],
@@ -145,7 +146,5 @@ export function useChatTools({ conversation, currentUserID, agents, editorRef, t
     t,
   });
 
-  const toggle = createElement(ChatSideToggle, { controller, onCollapse: collapse, triggerRef, t });
-
-  return { toggle, controller, fileScope, onReference, openPreview, openActivity, openSources, collapse, toolbar };
+  return { controller, fileScope, onReference, openPreview, openActivity, openSources, collapse, toolbar };
 }

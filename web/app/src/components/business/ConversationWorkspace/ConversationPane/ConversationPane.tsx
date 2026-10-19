@@ -395,11 +395,11 @@ function ConversationPaneContent({
   );
 
   const handlePreviewAttachment = useCallback(
-    (request: DocumentPreviewRequest) => {
+    (request: DocumentPreviewRequest, originTabID?: "files") => {
       if (agentDetailPanelProps?.onClose(false) === false) return;
       onPreserveMessageAnchor(request.anchor);
       onToggleChannelTools(false);
-      openPreview(request);
+      openPreview(request, originTabID);
     },
     [agentDetailPanelProps, onPreserveMessageAnchor, onToggleChannelTools, openPreview],
   );
@@ -500,7 +500,6 @@ function ConversationPaneContent({
         conversation={conversation}
         conversationMembers={conversationMembers}
         description={description}
-        headerTrailingAccessory={tools.toggle}
         headerAccessory={
           <>
             {taskHeader}
@@ -618,7 +617,7 @@ function ConversationPaneContent({
         locale={locale}
         t={t}
         onReference={tools.onReference}
-        onPreview={(item) => handlePreviewAttachment({ items: [item], index: 0 })}
+        onPreview={(item) => handlePreviewAttachment({ items: [item], index: 0 }, "files")}
         onSources={handleOpenCitation}
         onCollapse={tools.collapse}
         activeThreadRootID={activeThreadRootID}

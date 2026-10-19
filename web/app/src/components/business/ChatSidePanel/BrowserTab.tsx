@@ -1,8 +1,7 @@
 import { useNativeBrowser } from "./useNativeBrowser";
-import { writeTextToClipboard } from "@/shared/lib/clipboard";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Copy, ExternalLink, Globe, RefreshCw } from "lucide-react";
-import { Button, Tooltip } from "@/components/ui";
+import { ArrowLeft, ArrowRight, ExternalLink, RefreshCw } from "lucide-react";
+import { Button, EmptyState, LinkButton, TextInput, Tooltip } from "@/components/ui";
 import { normalizeBrowserURL } from "@/models/fileReferences";
 import type { TranslateFn } from "@/models/conversations";
 
@@ -22,8 +21,7 @@ export function BrowserTab({
   const [address, setAddress] = useState(url);
   const [reload, setReload] = useState(0);
   const [invalid, setInvalid] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState(false);
+  const [history, setHistory] = useState(() => ({ urls: url ? [url] : [], index: url ? 0 : -1 }));
   const previousURL = useRef(url);
   useEffect(() => {
     const previous = previousURL.current;
@@ -31,6 +29,15 @@ export function BrowserTab({
     setAddress((current) => (current === previous ? url : current));
   }, [url]);
   const native = useNativeBrowser({ url, active, onNavigate, onPopup });
+  useEffect(() => {
+    if (!native.available && url) {
+      setHistory((current) =>
+        current.urls[current.index] === url
+          ? current
+          : { urls: [...current.urls.slice(0, current.index + 1), url], index: current.index + 1 },
+      );
+    }
+  }, [native.available, url]);
   const externalURL = normalizeBrowserURL(address) || url;
   return (
     <section className="chat-browser-tab" aria-label={t("chatBrowser")}>
@@ -41,8 +48,12 @@ export function BrowserTab({
           const next = normalizeBrowserURL(address);
           setInvalid(!next);
           if (next) {
-            setCopied(false);
-            setCopyError(false);
+            if (!native.available && next !== url) {
+              setHistory((current) => ({
+                urls: [...current.urls.slice(0, current.index + 1), next],
+                index: current.index + 1,
+              }));
+            }
             onNavigate(next);
             setAddress(next);
             if (native.available && next === url) void native.command("reload");
@@ -50,37 +61,68 @@ export function BrowserTab({
           }
         }}
       >
-        {native.available ? (
-          <>
-            <Tooltip content={t("chatBrowserBack")}>
-              <Button
-                type="button"
-                iconOnly
-                size="sm"
-                variant="tertiaryGray"
-                aria-label={t("chatBrowserBack")}
-                disabled={!native.state?.canGoBack}
-                onClick={() => void native.command("back")}
-              >
-                <ArrowLeft size={16} />
-              </Button>
-            </Tooltip>
-            <Tooltip content={t("chatBrowserForward")}>
-              <Button
-                type="button"
-                iconOnly
-                size="sm"
-                variant="tertiaryGray"
-                aria-label={t("chatBrowserForward")}
-                disabled={!native.state?.canGoForward}
-                onClick={() => void native.command("forward")}
-              >
-                <ArrowRight size={16} />
-              </Button>
-            </Tooltip>
-          </>
-        ) : null}
-        <input
+        <Tooltip content={t("chatBrowserBack")} contentProps={{ side: "bottom" }}>
+          <span className="inline-flex">
+            <Button
+              type="button"
+              iconOnly
+              size="sm"
+              variant="tertiaryGray"
+              aria-label={t("chatBrowserBack")}
+              disabled={native.available ? !native.state?.canGoBack : history.index <= 0}
+              onClick={() => {
+                if (native.available) void native.command("back");
+                else {
+                  const next = history.index - 1;
+                  setHistory((current) => ({ ...current, index: next }));
+                  onNavigate(history.urls[next]);
+                }
+              }}
+            >
+              <ArrowLeft size={16} />
+            </Button>
+          </span>
+        </Tooltip>
+        <Tooltip content={t("chatBrowserForward")} contentProps={{ side: "bottom" }}>
+          <span className="inline-flex">
+            <Button
+              type="button"
+              iconOnly
+              size="sm"
+              variant="tertiaryGray"
+              aria-label={t("chatBrowserForward")}
+              disabled={native.available ? !native.state?.canGoForward : history.index >= history.urls.length - 1}
+              onClick={() => {
+                if (native.available) void native.command("forward");
+                else {
+                  const next = history.index + 1;
+                  setHistory((current) => ({ ...current, index: next }));
+                  onNavigate(history.urls[next]);
+                }
+              }}
+            >
+              <ArrowRight size={16} />
+            </Button>
+          </span>
+        </Tooltip>
+        <Tooltip content={t("chatRefresh")} contentProps={{ side: "bottom" }}>
+          <span className="inline-flex">
+            <Button
+              type="button"
+              iconOnly
+              size="sm"
+              variant="tertiaryGray"
+              aria-label={t("chatRefresh")}
+              disabled={!url}
+              onClick={() => (native.available ? void native.command("reload") : setReload((value) => value + 1))}
+            >
+              <RefreshCw size={16} />
+            </Button>
+          </span>
+        </Tooltip>
+        <TextInput
+          className="chat-browser-address"
+          size="sm"
           aria-label={t("chatBrowserAddress")}
           placeholder={t("chatBrowserAddressPlaceholder")}
           autoFocus={!url}
@@ -94,58 +136,20 @@ export function BrowserTab({
           }}
           aria-invalid={invalid}
         />
-        <Button type="submit" size="sm" variant="secondaryGray">
-          {t("chatBrowserGo")}
-        </Button>
-        <Tooltip content={t("chatRefresh")}>
-          <Button
-            type="button"
-            iconOnly
-            size="sm"
-            variant="tertiaryGray"
-            aria-label={t("chatRefresh")}
-            disabled={!url}
-            onClick={() => (native.available ? void native.command("reload") : setReload((value) => value + 1))}
-          >
-            <RefreshCw size={16} />
-          </Button>
-        </Tooltip>
-        <Tooltip content={t(copied ? "chatCopied" : "chatCopyURL")}>
-          <Button
-            type="button"
-            iconOnly
-            size="sm"
-            variant="tertiaryGray"
-            aria-label={t("chatCopyURL")}
-            disabled={!url}
-            onClick={() => {
-              void writeTextToClipboard(url).then((ok) => {
-                setCopied(ok);
-                setCopyError(!ok);
-              });
-            }}
-          >
-            <Copy size={16} />
-          </Button>
-        </Tooltip>
         {externalURL ? (
-          <a
-            className="chat-browser-external"
-            href={externalURL}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={t("chatBrowserExternal")}
-            title={t("chatBrowserExternal")}
-          >
-            <ExternalLink size={16} />
-          </a>
+          <Tooltip content={t("chatBrowserSystem")} contentProps={{ side: "bottom" }}>
+            <a
+              className="chat-browser-external"
+              href={externalURL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={t("chatBrowserSystem")}
+            >
+              <ExternalLink size={16} />
+            </a>
+          </Tooltip>
         ) : null}
       </form>
-      {copyError ? (
-        <div className="chat-browser-hint" role="alert">
-          {t("copyTextFailed")}
-        </div>
-      ) : null}
       {invalid ? (
         <div className="chat-browser-hint" role="alert">
           {t("chatBrowserInvalid")}
@@ -166,10 +170,10 @@ export function BrowserTab({
         <>
           <div className="chat-browser-hint chat-browser-embed-hint">
             <span>{t("chatBrowserEmbedHint")}</span>
-            <a href={externalURL} target="_blank" rel="noopener noreferrer">
+            <LinkButton href={externalURL} target="_blank" rel="noopener noreferrer" size="sm" variant="linkColor">
               <ExternalLink size={14} />
-              {t("chatBrowserExternal")}
-            </a>
+              {t("chatBrowserSystem")}
+            </LinkButton>
           </div>
           <iframe
             key={`${url}:${reload}`}
@@ -180,11 +184,11 @@ export function BrowserTab({
           />
         </>
       ) : (
-        <div className="chat-side-status">
-          <Globe size={36} />
-          <strong>{t("chatBrowser")}</strong>
-          <span>{t("chatBrowserEmpty")}</span>
-        </div>
+        <EmptyState
+          className="chat-browser-empty"
+          title={t("chatBrowserEmptyTitle")}
+          description={t("chatBrowserEmptyDescription")}
+        />
       )}
     </section>
   );

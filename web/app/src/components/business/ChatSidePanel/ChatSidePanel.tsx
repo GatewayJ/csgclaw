@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { Button, Tooltip } from "@/components/ui";
+import { FolderIcon } from "@/components/business/FileTypeIcon";
 import { DocumentPreviewPanel, documentPreviewKind } from "@/components/business/DocumentPreviewPanel";
 import { ConversationActivityPanel } from "@/components/business/ConversationActivityPanel";
 import { CitationSources } from "@/components/business/MessageContent";
@@ -166,6 +167,11 @@ export function ChatSidePanel({
         ?.focus({ preventScroll: true }),
     );
   }
+  function closeAll() {
+    const hasThread = state.tabs.some((tab) => tab.kind === "thread");
+    patch({ tabs: [], activeID: "" });
+    if (hasThread) onThreadClose();
+  }
   function persistWidth(next: number) {
     setWidth(next);
     try {
@@ -263,14 +269,44 @@ export function ChatSidePanel({
         />
       ) : null}
       <header className="chat-side-header">
+        <div className="chat-side-leading-actions">
+          <Tooltip content={t("chatSideNew")} contentProps={{ side: "bottom" }}>
+            <Button
+              className="chat-side-new"
+              iconOnly
+              size="sm"
+              variant="tertiaryGray"
+              aria-label={t("chatSideNew")}
+              onClick={() => openTab({ id: crypto.randomUUID(), kind: "new" })}
+            >
+              <Plus size={18} />
+            </Button>
+          </Tooltip>
+          <Tooltip content={t("chatSideCloseAll")} contentProps={{ side: "bottom" }}>
+            <Button
+              iconOnly
+              size="sm"
+              variant="tertiaryGray"
+              aria-label={t("chatSideCloseAll")}
+              disabled={!state.tabs.length}
+              onClick={closeAll}
+            >
+              <X size={17} />
+            </Button>
+          </Tooltip>
+        </div>
         <div
           className="chat-side-tabs"
           role="tablist"
           aria-label={t("chatSideTabs")}
           onKeyDown={(event) => {
             if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            if (!state.tabs.length) return;
             event.preventDefault();
-            const index = state.tabs.findIndex((tab) => tab.id === state.activeID);
+            const index = Math.max(
+              0,
+              state.tabs.findIndex((tab) => tab.id === state.activeID),
+            );
             const next =
               event.key === "Home"
                 ? 0
@@ -288,45 +324,44 @@ export function ChatSidePanel({
             const Icon = iconFor(tab);
             return (
               <div className={`chat-side-tab${tab.id === state.activeID ? " is-active" : ""}`} key={tab.id}>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab.id === state.activeID}
-                  tabIndex={tab.id === state.activeID ? 0 : -1}
-                  id={`chat-tab-label-${encodeURIComponent(tab.id)}`}
-                  aria-controls={`chat-tab-${encodeURIComponent(tab.id)}`}
-                  title={labelFor(tab)}
-                  onClick={() => patch({ activeID: tab.id })}
-                >
-                  <Icon size={15} />
-                  <span>{labelFor(tab)}</span>
-                </button>
-                <button
-                  type="button"
-                  className="chat-side-tab-close"
-                  aria-label={t("chatCloseTab", { name: labelFor(tab) })}
-                  onClick={() => close(tab)}
-                >
-                  <X size={13} />
-                </button>
+                <Tooltip content={labelFor(tab)} contentProps={{ side: "bottom" }}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab.id === state.activeID}
+                    tabIndex={tab.id === state.activeID ? 0 : -1}
+                    id={`chat-tab-label-${encodeURIComponent(tab.id)}`}
+                    aria-controls={`chat-tab-${encodeURIComponent(tab.id)}`}
+                    onClick={() => patch({ activeID: tab.id })}
+                  >
+                    {tab.kind === "files" ? (
+                      <span className="chat-side-folder-icon" aria-hidden="true" />
+                    ) : tab.kind === "file" ? (
+                      <span className="chat-side-file-icon" aria-hidden="true" />
+                    ) : (
+                      <Icon size={15} aria-hidden="true" />
+                    )}
+                    <span>{labelFor(tab)}</span>
+                  </button>
+                </Tooltip>
+                <Tooltip content={t("chatCloseTab", { name: labelFor(tab) })} contentProps={{ side: "bottom" }}>
+                  <Button
+                    iconOnly
+                    size="sm"
+                    variant="tertiaryGray"
+                    className="chat-side-tab-close"
+                    aria-label={t("chatCloseTab", { name: labelFor(tab) })}
+                    onClick={() => close(tab)}
+                  >
+                    <X size={13} />
+                  </Button>
+                </Tooltip>
               </div>
             );
           })}
         </div>
         <div className="chat-side-layout-actions">
-          <Tooltip content={t("chatSideNew")}>
-            <Button
-              className="chat-side-new"
-              iconOnly
-              size="sm"
-              variant="tertiaryGray"
-              aria-label={t("chatSideNew")}
-              onClick={() => openTab({ id: crypto.randomUUID(), kind: "new" })}
-            >
-              <Plus size={18} />
-            </Button>
-          </Tooltip>
-          <Tooltip content={t(maximized ? "chatSideRestore" : "chatSideMaximize")}>
+          <Tooltip content={t(maximized ? "chatSideRestore" : "chatSideMaximize")} contentProps={{ side: "bottom" }}>
             <Button
               iconOnly
               size="sm"
@@ -337,7 +372,7 @@ export function ChatSidePanel({
               {maximized ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
             </Button>
           </Tooltip>
-          <Tooltip content={t("chatSideCollapse")}>
+          <Tooltip content={t("chatSideCollapse")} contentProps={{ side: "bottom" }}>
             <Button
               iconOnly
               size="sm"
@@ -426,11 +461,13 @@ function WelcomeTab({ t, onSelect }: { t: TranslateFn; onSelect: (kind: "files" 
   return (
     <div className="chat-side-welcome">
       {(["files", "browser", "activity"] as const).map((kind) => {
-        const Icon = kind === "files" ? Folder : kind === "browser" ? Globe : Activity;
+        const Icon = kind === "files" ? FolderIcon : kind === "browser" ? Globe : Activity;
         return (
-          <button key={kind} type="button" onClick={() => onSelect(kind)}>
-            <Icon size={24} />
-            <span>
+          <button key={kind} className={`chat-side-welcome-${kind}`} type="button" onClick={() => onSelect(kind)}>
+            <span className="chat-side-welcome-icon">
+              <Icon size={18} />
+            </span>
+            <span className="chat-side-welcome-content">
               <strong>
                 {t(
                   kind === "files"
