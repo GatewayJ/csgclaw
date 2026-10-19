@@ -1,20 +1,28 @@
-# PR 686 UI screenshots
+# Chat resource selection screenshots
 
-Captured on October 19, 2026 from `72a7869a1673c2c8a2f94d99c84e75cbf7ac516a`, after merging main (`f5c1aa53`).
+Pull request: https://github.com/OpenCSGs/csgclaw/pull/686
 
-Production Vite build with API fixture data; desktop 1440 × 1000 and mobile 390 × 844. Browser checks cover resource menus, search, unavailable entries, ordered Skill/MCP/App/knowledge-base references, message history, slash suggestions, and task entry.
+Source commit: `75256510ef1d08a071377e148e54eba28134e504`
 
-Real Codex and DSH provider/tool execution is separate draft validation.
+Captured on October 19, 2026 from the production UI using API fixture data.
+Desktop: 1440 × 1000. Mobile: 390 × 844.
 
-Source PR: https://github.com/OpenCSGs/csgclaw/pull/686
+Coverage includes composer search, direct selection, inline resource tags, connectors,
+knowledge bases, message history, thread replies, new tasks, light and dark themes,
+and management links to the selected agent's Skills and Connectors tabs.
 
-- [01-add-menu.png](01-add-menu.png)
-- [02-skills-picker.png](02-skills-picker.png)
-- [02b-skills-search.png](02b-skills-search.png)
-- [03-connectors-picker.png](03-connectors-picker.png)
-- [04-knowledge-picker.png](04-knowledge-picker.png)
-- [05-selected-resources.png](05-selected-resources.png)
-- [06-message-history.png](06-message-history.png)
-- [07-slash-selection.png](07-slash-selection.png)
-- [08-new-task.png](08-new-task.png)
-- [09-mobile-picker.png](09-mobile-picker.png)
+- [01-skills-search](2026-10-19-75256510/01-skills-search.png)
+- [02-filtered-skill](2026-10-19-75256510/02-filtered-skill.png)
+- [03-selected-skill](2026-10-19-75256510/03-selected-skill.png)
+- [04-connectors](2026-10-19-75256510/04-connectors.png)
+- [05-knowledge](2026-10-19-75256510/05-knowledge.png)
+- [06-selected-resources](2026-10-19-75256510/06-selected-resources.png)
+- [07-message-resources](2026-10-19-75256510/07-message-resources.png)
+- [08-thread-search](2026-10-19-75256510/08-thread-search.png)
+- [09-thread-selected](2026-10-19-75256510/09-thread-selected.png)
+- [10-new-task-search](2026-10-19-75256510/10-new-task-search.png)
+- [11-new-task-selected](2026-10-19-75256510/11-new-task-selected.png)
+- [12-mobile-search](2026-10-19-75256510/12-mobile-search.png)
+- [13-dark-search](2026-10-19-75256510/13-dark-search.png)
+- [14-manager-skills](2026-10-19-75256510/14-manager-skills.png)
+- [15-agent-connectors](2026-10-19-75256510/15-agent-connectors.png)
