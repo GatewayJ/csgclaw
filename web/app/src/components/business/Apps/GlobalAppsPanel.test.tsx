@@ -7,6 +7,7 @@ import { createTranslator } from "@/shared/i18n";
 import { GlobalAppsPanel } from "./GlobalAppsPanel";
 import { AppSettingsDialog } from "./AppSettingsDialog";
 import type { AppDefinition } from "@/api/apps";
+import buttonStyles from "@/components/ui/Button/Button.module.css";
 const t = createTranslator("en");
 const definition: AppDefinition = {
   app_id: "feishu",
@@ -21,6 +22,56 @@ const definition: AppDefinition = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Global Apps", () => {
+  it("reenables a disabled global connector from its details header", async () => {
+    const user = userEvent.setup();
+    let resource = {
+      installation_id: "global-disabled",
+      app_id: "gitlab",
+      name: "Disabled GitLab",
+      kind: "mcp",
+      enabled: false,
+      status: "disabled",
+      config: {},
+      credentials_set: {},
+      tools: [],
+    };
+    let finishUpdate!: () => void;
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        await new Promise<void>((resolve) => {
+          finishUpdate = resolve;
+        });
+        resource = { ...resource, ...JSON.parse(String(init.body)), status: "configured" };
+        return Response.json(resource);
+      }
+      return Response.json({
+        items: String(url).endsWith("catalog")
+          ? [{ ...definition, app_id: "gitlab", name: "GitLab", kind: "mcp" }]
+          : [resource],
+      });
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(
+      <MemoryRouter initialEntries={["/connectors/global-disabled"]}>
+        <Routes>
+          <Route path="/connectors/:resourceId" element={<GlobalAppsPanel t={t} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    const toggle = dialog.getByRole("switch", { name: "Enable" });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    expect(toggle).toBeDisabled();
+    expect(fetch).toHaveBeenCalledWith(
+      "api/v1/connectors/resources/global-disabled",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: true }) }),
+    );
+    await act(async () => finishUpdate());
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeEnabled();
+  });
+
   it("loads the selected CLI resource when navigating between authorization dialogs", async () => {
     const definitions = ["first", "second"].map((id) => ({
       ...definition,
@@ -158,9 +209,12 @@ describe("Global Apps", () => {
     await user.click(screen.getByRole("button", { name: "Test connection" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Connected · 1 tools");
     expect(screen.queryByText("Current settings tested successfully. Not saved yet.")).not.toBeInTheDocument();
-    expect(screen.getByText("Long tool details should not appear")).not.toBeVisible();
+    expect(screen.getByText("Long tool details should not appear")).toBeVisible();
     const tools = screen.getByText("Available tools (1)").closest("details");
+    expect(tools).toHaveAttribute("open");
+    await user.click(screen.getByText("Available tools (1)"));
     expect(tools).not.toHaveAttribute("open");
+    expect(screen.getByText("Long tool details should not appear")).not.toBeVisible();
     await user.click(screen.getByText("Available tools (1)"));
     expect(screen.getByText("Long tool details should not appear")).toBeVisible();
     expect(probe.mock.calls[0][0].credentials.app_secret).toBe("test-secret");
@@ -186,8 +240,9 @@ describe("Global Apps", () => {
       installation_id: "global-1",
       resource_id: "global-1",
       agent_id: "",
-      app_id: "feishu",
-      name: "Team Feishu",
+      app_id: "gitlab",
+      name: "Team GitLab",
+      kind: "mcp",
       enabled: true,
       resource_enabled: true,
       status: "configured",
@@ -205,7 +260,8 @@ describe("Global Apps", () => {
       ],
     };
     const fetch = vi.fn(async (url: string) => {
-      if (String(url) === "api/v1/connectors/catalog") return Response.json({ items: [definition] });
+      if (String(url) === "api/v1/connectors/catalog")
+        return Response.json({ items: [{ ...definition, app_id: "gitlab", name: "GitLab", kind: "mcp" }] });
       return Response.json({ items: [resource] });
     });
     vi.stubGlobal("fetch", fetch);
@@ -218,14 +274,24 @@ describe("Global Apps", () => {
         </Routes>
       </MemoryRouter>,
     );
-    await screen.findByText("Team Feishu");
-    await user.click(screen.getByRole("button", { name: "Actions for Team Feishu" }));
-    expect(screen.getByRole("menuitem", { name: "Settings" })).toBeVisible();
-    expect(screen.getByRole("menuitem", { name: "Disable" })).toBeVisible();
-    expect(screen.getByRole("menuitem", { name: "Remove" })).toBeVisible();
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: /^Team Feishu/ }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("Team Feishu");
+    await screen.findByText("Team GitLab");
+    expect(screen.queryByRole("button", { name: "Actions for Team GitLab" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Team GitLab/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Team GitLab");
+    expect(within(dialog).getByRole("button", { name: "Remove" })).toHaveClass(
+      buttonStyles["btn-danger"],
+      buttonStyles["btn-md"],
+    );
+    expect(within(dialog).getByRole("button", { name: "Test connection" })).toHaveClass(
+      buttonStyles["btn-secondary-gray"],
+      buttonStyles["btn-md"],
+    );
+    expect(within(dialog).getByRole("button", { name: "Save configuration" })).toHaveClass(
+      buttonStyles["btn-primary"],
+      buttonStyles["btn-md"],
+    );
+    expect(within(dialog).queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
 });
 

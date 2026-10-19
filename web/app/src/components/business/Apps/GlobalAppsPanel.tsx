@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { CircleAlert, Plus, MoreHorizontal } from "lucide-react";
+import { CircleAlert, Plus } from "lucide-react";
 import {
   createAppResource,
   deleteAppResource,
@@ -13,10 +13,6 @@ import {
 } from "@/api/apps";
 import {
   Button,
-  DropdownMenuRoot,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
   DialogFooter,
   DialogRoot,
   DialogContent,
@@ -26,6 +22,7 @@ import {
   DialogBody,
   DialogCloseButton,
   DismissibleAlert,
+  Switch,
 } from "@/components/ui";
 import { localizeAPIError } from "@/shared/i18n";
 import { errorMessage } from "@/api/client";
@@ -235,44 +232,6 @@ export function GlobalAppsPanel({
               <span className={styles.status} data-status={app.enabled ? app.status : "disabled"}>
                 {appStatus(app, t)}
               </span>
-              <DropdownMenuRoot>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    iconOnly
-                    size="sm"
-                    variant="tertiaryGray"
-                    aria-label={t("connectorsActions", { name: app.name })}
-                  >
-                    <MoreHorizontal size={16} />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem
-                    onSelect={() =>
-                      embedded
-                        ? setLocalEditingID(app.installation_id)
-                        : void navigate(pathForPane({ type: "apps", id: app.installation_id }))
-                    }
-                  >
-                    {t("appSettings")}
-                  </DropdownMenuItem>
-                  {app.kind !== "cli" ? (
-                    <>
-                      <DropdownMenuItem
-                        disabled={busy}
-                        onSelect={() =>
-                          void mutate(() => updateAppResource(app.installation_id, { enabled: !app.enabled }))
-                        }
-                      >
-                        {t(app.enabled ? "appDisable" : "appEnable")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem danger disabled={busy} onSelect={() => setRemoving(app)}>
-                        {t("appRemove")}
-                      </DropdownMenuItem>
-                    </>
-                  ) : null}
-                </DropdownMenuContent>
-              </DropdownMenuRoot>
             </article>
           );
         })}
@@ -331,8 +290,21 @@ export function GlobalAppsPanel({
         <AppSettingsDialog
           key={editing?.installation_id || definition.app_id}
           globalResource
+          showCancel={editing?.kind === "cli" || !editing}
           definition={definition}
           existing={adding ? null : editing}
+          headerActions={
+            editing && !adding ? (
+              <Switch
+                aria-label={t("appEnable")}
+                checked={editing.enabled}
+                disabled={busy}
+                onCheckedChange={(enabled) =>
+                  void mutate(() => updateAppResource(editing.installation_id, { enabled }))
+                }
+              />
+            ) : undefined
+          }
           savedConnectionStatus={
             editing && !adding ? (
               <div className={styles.resourceDetails}>
@@ -365,6 +337,7 @@ export function GlobalAppsPanel({
             ) : undefined
           }
           t={t}
+          onRemove={editing && editing.kind !== "cli" ? () => setRemoving(editing) : undefined}
           onClose={close}
           onProbe={(payload) =>
             probeAppResource({

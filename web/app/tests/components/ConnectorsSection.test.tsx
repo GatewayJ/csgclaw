@@ -16,7 +16,8 @@ vi.mock("@/api/mcp", async () => ({
 }));
 vi.mock("@/components/business/Apps", async () => ({
   ...(await vi.importActual<typeof import("@/components/business/Apps")>("@/components/business/Apps")),
-  GlobalAppsPanel: () => null,
+  GlobalAppsPanel: ({ catalogOpen }: { catalogOpen?: boolean }) =>
+    catalogOpen ? <div role="dialog" aria-label="Add application connector" /> : null,
 }));
 
 const t = createTranslator("zh");
@@ -74,6 +75,28 @@ function setup() {
 afterEach(() => vi.clearAllMocks());
 
 describe("MCP market installation", () => {
+  it("opens the connector catalog from the market Add menu", async () => {
+    const client = setup();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "MCP 市场" }));
+    await user.click(screen.getByRole("button", { name: "添加" }));
+    await user.click(screen.getByRole("menuitem", { name: "添加连接器" }));
+    expect(screen.getByRole("tab", { name: "已安装" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("dialog", { name: "Add application connector" })).toBeVisible();
+    client.clear();
+  });
+
+  it("combines MCP and connector creation under one Add menu", async () => {
+    setup();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "添加" }));
+
+    expect(screen.getByRole("menuitem", { name: "添加 MCP 服务" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "添加连接器" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "添加连接器" })).not.toBeInTheDocument();
+  });
+
   it("shows a direct plus-button failure beside that card and in a named notice", async () => {
     vi.mocked(installRemoteMCPServerRequest).mockRejectedValueOnce({
       status: 502,
