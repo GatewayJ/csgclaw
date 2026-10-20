@@ -1,12 +1,10 @@
-import { DiagnosticHeaderAction } from "@/components/business/TurnDiagnostics";
 import { memo } from "react";
 import type { ReactNode, RefObject } from "react";
 import { AgentAvatarContent } from "@/components/business/AgentAvatar";
 import { Button, Tooltip, PanelHeader } from "@/components/ui";
 import { AddUserIcon, TrashIcon, UsersIcon, WrenchIcon } from "@/components/ui/Icons";
-import type { AgentLike } from "@/models/agents";
 import type { IMConversation, IMUser, TranslateFn } from "@/models/conversations";
-import { isDirectConversation, resolveAgentForUser } from "@/models/conversations";
+import { isDirectConversation } from "@/models/conversations";
 import { avatarFallbackText } from "@/shared/avatar";
 import { localizeRole } from "@/shared/i18n";
 import type { BooleanStateSetter } from "./types";
@@ -18,7 +16,6 @@ export type ConversationHeaderProps = {
   description?: string;
   headerAccessory?: ReactNode;
   inviteActionLabel: string;
-  agents?: AgentLike[];
   memberMenuRef?: RefObject<HTMLDivElement | null>;
   onClearMessages: () => void;
   onDeleteRoom: () => void;
@@ -30,6 +27,7 @@ export type ConversationHeaderProps = {
   selectedMessageCount: number;
   selectedVisibleMessageCount?: number;
   showChannelTools: boolean;
+  showChannelToolsAction?: boolean;
   showInviteAction: boolean;
   showMemberList?: boolean;
   showMemberListAction?: boolean;
@@ -44,11 +42,11 @@ export const ConversationHeader = memo(function ConversationHeader({
   description,
   headerAccessory,
   inviteActionLabel,
-  agents = [],
   memberMenuRef,
   selectedMessageCount,
   selectedVisibleMessageCount,
   showChannelTools,
+  showChannelToolsAction = true,
   showInviteAction,
   showMemberList = false,
   showMemberListAction = true,
@@ -139,57 +137,52 @@ export const ConversationHeader = memo(function ConversationHeader({
           </div>
           <div className="chat-title-actions">
             {headerAccessory}
-            <DiagnosticHeaderAction
-              room={conversation.id}
-              agents={conversationMembers
-                .map((user) => resolveAgentForUser(agents, user))
-                .filter((agent): agent is AgentLike => Boolean(agent))}
-              t={t}
-            />
-            <div ref={channelToolsRef} className="header-menu tools-menu">
-              <Tooltip content={t("channelTools")} contentProps={{ side: "bottom" }}>
-                <Button
-                  className="icon-button"
-                  active={showChannelTools}
-                  iconOnly
-                  size="lg"
-                  variant="secondaryGray"
-                  aria-label={t("channelTools")}
-                  aria-expanded={showChannelTools}
-                  onClick={() => {
-                    onToggleChannelTools((value) => !value);
-                    onToggleMemberList?.(false);
-                  }}
-                >
-                  <span className="icon-button-mark">
-                    <WrenchIcon />
-                  </span>
-                </Button>
-              </Tooltip>
-              {showChannelTools ? (
-                <div className="header-popover tools-popover">
-                  <div className="header-popover-title">{t("channelTools")}</div>
-                  <Button className="tool-menu-row" onClick={() => onToggleToolCalls((value) => !value)}>
-                    <span>{showToolCalls ? t("toggleToolCallsHide") : t("toggleToolCallsShow")}</span>
-                    <strong>{showToolCalls ? t("enabled") : t("disabled")}</strong>
-                  </Button>
-                  <Button variant="outlineDanger" className="tool-menu-row danger" onClick={onClearMessages}>
-                    <span>{t("clearRoomMessages")}</span>
-                    <span className="tool-menu-icon" aria-hidden="true">
-                      <TrashIcon />
+            {showChannelToolsAction ? (
+              <div ref={channelToolsRef} className="header-menu tools-menu">
+                <Tooltip content={t("channelTools")} contentProps={{ side: "bottom" }}>
+                  <Button
+                    className="icon-button"
+                    active={showChannelTools}
+                    iconOnly
+                    size="lg"
+                    variant="secondaryGray"
+                    aria-label={t("channelTools")}
+                    aria-expanded={showChannelTools}
+                    onClick={() => {
+                      onToggleChannelTools((value) => !value);
+                      onToggleMemberList?.(false);
+                    }}
+                  >
+                    <span className="icon-button-mark">
+                      <WrenchIcon />
                     </span>
                   </Button>
-                  {!isDirectConversation(conversation) ? (
-                    <Button variant="outlineDanger" className="tool-menu-row danger" onClick={onDeleteRoom}>
-                      <span>{t("deleteRoom")}</span>
+                </Tooltip>
+                {showChannelTools ? (
+                  <div className="header-popover tools-popover">
+                    <div className="header-popover-title">{t("channelTools")}</div>
+                    <Button className="tool-menu-row" onClick={() => onToggleToolCalls((value) => !value)}>
+                      <span>{showToolCalls ? t("toggleToolCallsHide") : t("toggleToolCallsShow")}</span>
+                      <strong>{showToolCalls ? t("enabled") : t("disabled")}</strong>
+                    </Button>
+                    <Button variant="outlineDanger" className="tool-menu-row danger" onClick={onClearMessages}>
+                      <span>{t("clearRoomMessages")}</span>
                       <span className="tool-menu-icon" aria-hidden="true">
                         <TrashIcon />
                       </span>
                     </Button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
+                    {!isDirectConversation(conversation) ? (
+                      <Button variant="outlineDanger" className="tool-menu-row danger" onClick={onDeleteRoom}>
+                        <span>{t("deleteRoom")}</span>
+                        <span className="tool-menu-icon" aria-hidden="true">
+                          <TrashIcon />
+                        </span>
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {showInviteAction ? (
               <Tooltip content={inviteActionLabel} contentProps={{ side: "bottom" }}>
                 <Button

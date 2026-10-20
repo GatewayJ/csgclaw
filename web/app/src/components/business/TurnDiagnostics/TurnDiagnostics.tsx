@@ -48,6 +48,8 @@ type Props = {
   room: string;
   source?: string;
   turn?: string;
+  initialSource?: string;
+  initialTurn?: string;
   agents?: AgentLike[];
   t: TranslateFn;
   onClose: () => void;
@@ -101,10 +103,10 @@ export function DiagnosticMessageAction({
       ) : null}
       {open ? (
         <TurnDiagnostics
-          key={ref.room + ref.source}
+          key={ref.room + ref.source + (ref.turn || "")}
           room={ref.room}
-          source={ref.source}
-          turn={ref.turn}
+          initialSource={ref.source}
+          initialTurn={ref.turn}
           t={t}
           onClose={() => setOpen(false)}
         />
@@ -181,28 +183,16 @@ function InlineDiagnosticErrorContent({
   );
 }
 
-export function DiagnosticHeaderAction({ room, agents = [], t }: Omit<Props, "onClose" | "source" | "turn">) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Tooltip content={t("diagConversation")} contentProps={{ side: "bottom", sideOffset: 6 }}>
-        <Button
-          className="icon-button"
-          variant="secondaryGray"
-          iconOnly
-          size="lg"
-          aria-label={t("diagConversation")}
-          onClick={() => setOpen(true)}
-        >
-          <Activity size={18} />
-        </Button>
-      </Tooltip>
-      {open ? <TurnDiagnostics key={room} room={room} agents={agents} t={t} onClose={() => setOpen(false)} /> : null}
-    </>
-  );
-}
-
-export function TurnDiagnostics({ room, source = "", turn, agents = [], t, onClose }: Props) {
+export function TurnDiagnostics({
+  room,
+  source = "",
+  turn,
+  initialSource,
+  initialTurn,
+  agents = [],
+  t,
+  onClose,
+}: Props) {
   const [error, setError] = useState("");
   const [agent, setAgent] = useState("");
   const [status, setStatus] = useState("");
@@ -224,6 +214,8 @@ export function TurnDiagnostics({ room, source = "", turn, agents = [], t, onClo
     room,
     source,
     turn,
+    initialSource,
+    initialTurn,
     agent,
     status,
     cursor,
@@ -240,7 +232,9 @@ export function TurnDiagnostics({ room, source = "", turn, agents = [], t, onClo
   }));
   const showAgentFilter = agentOptions.length > 1;
   const showList = !source || page.total > 1 || Boolean(cursor || nextCursor);
-  const emptyLabel = t(diagnosticEmptyKey(page.source, Boolean(agent || status), turn));
+  const emptyLabel = t(
+    diagnosticEmptyKey(page.source, Boolean(agent || status), turn || (!selected ? initialTurn : undefined)),
+  );
   const activeAgent = logAgent || detail?.agent_id || agentOptions[0]?.value || "";
   const activeAgentName = agentOptions.find((item) => item.value === activeAgent)?.label || activeAgent;
   const [logsLoading, setLogsLoading] = useState(false);
@@ -479,11 +473,7 @@ export function TurnDiagnostics({ room, source = "", turn, agents = [], t, onClo
                   </>
                 ) : (
                   <p className={styles.empty}>
-                    {loadError
-                      ? t("diagDetailUnavailable")
-                      : loading || items.length
-                        ? t("agentLogsLoading")
-                        : emptyLabel}
+                    {loadError ? t("diagDetailUnavailable") : loading || selected ? t("agentLogsLoading") : emptyLabel}
                   </p>
                 )}
               </main>

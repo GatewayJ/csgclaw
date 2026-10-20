@@ -516,11 +516,11 @@ function ConversationPaneContent({
           </>
         }
         inviteActionLabel={inviteActionLabel}
-        agents={agents}
         selectedMessageCount={selectedMessageCount}
         selectedVisibleMessageCount={visibleMessages.length}
         showChannelTools={showChannelTools}
-        showInviteAction={true}
+        showChannelToolsAction={true}
+        showInviteAction={!conversation.is_direct}
         showMemberListAction={false}
         showToolCalls={showToolCalls}
         t={t}
