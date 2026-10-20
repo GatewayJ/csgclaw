@@ -58,3 +58,13 @@ Regression coverage includes shared card rendering, room filtering and child pro
 Browser checks use the production React application with local API fixtures. They cover 1280px and 1440px desktop layouts, a 390px viewport, light and dark themes, task details and focus return, panel maximization, membership changes and failed-request retry, external settings, and conversation switching. These checks validate frontend behavior with controlled responses; deployment-specific server integration requires an available CSGClaw backend.
 
 Run the repository frontend checks with `pnpm --dir web/app check`. Validate production bundling with `pnpm --dir web/app exec vite build --outDir /tmp/csgclaw-room-collaboration-build --emptyOutDir`.
+
+## Screenshots
+
+These captures use demo API responses in the local application. Desktop captures use a 1440px viewport; mobile captures use a 390px viewport.
+
+| View                                   | Preview                                                                                                                                                                                         |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New task and target selection          | [Light theme](screenshots/room-collaboration/new-task-light.png)                                                                                                                                |
+| Room task board with unresolved issues | [Light theme](screenshots/room-collaboration/tasks-light.png), [maximized dark theme](screenshots/room-collaboration/tasks-dark.png), [mobile](screenshots/room-collaboration/tasks-mobile.png) |
+| Member management and external sources | [Light theme](screenshots/room-collaboration/members-light.png), [mobile](screenshots/room-collaboration/members-mobile.png)                                                                    |
