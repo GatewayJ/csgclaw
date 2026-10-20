@@ -235,6 +235,8 @@ export const messages = {
     iaTemplateCloudCollapse: "收起 AgenticHub 上的模板",
     iaTemplateManageOnHub: "在 AgenticHub 上管理我的模板",
     iaTemplateSameNameOnHub: "云端存在同名模板",
+    resourcesTemplatePublished: "已发布",
+    resourcesTemplatePublishedOnHub: "已发布到 AgenticHub",
     iaTemplateCloudTag: "云端",
     iaTemplateCloudSignIn: "登录后查看云端模板",
     iaTemplateCloudSignInHint: "你在 AgenticHub 上的模板，登录后才能列出来。",
@@ -1594,6 +1596,8 @@ export const messages = {
     resourcesLoadFailed: "资源模板加载失败，请稍后重试。",
     resourcesDeleteTemplate: "删除模板",
     resourcesDeleteConfirm: "删除模板",
+    resourcesDeleteLocalOnlyNotice:
+      "只删除本地模板，AgenticHub 上的模板不会删除。如需彻底删除，请前往 AgenticHub 下架。",
     resourcesDeleteFailed: "模板删除失败，请稍后重试。",
     resourcesDeleteSkill: "删除",
     resourcesDeleteSkillConfirmAction: "删除",
@@ -2449,7 +2453,7 @@ export const messages = {
     agentRuntimeServiceUnavailable: "智能体服务暂时不可用",
     createAgent: "创建",
     createAgentTitle: "创建智能体",
-    createAgentSubtitle: "创建执行智能体，并沿用上次创建时的模型选择。",
+    createAgentSubtitle: "从模板创建执行智能体，或自定义配置。",
     createAgentSubtitleNotifier: "创建一个通知智能体（推送 Webhook 或拉取收件箱），可与执行智能体一样绑定飞书并进群。",
     createAgentKindTabAriaLabel: "创建智能体类型",
     createAgentKindWorker: "执行智能体",
@@ -2566,7 +2570,7 @@ export const messages = {
     agentPublishTemplateCommunitySubtitle: "填写模板信息，保存到本地模板库并发布到 agentic hub。",
     agentPublishTemplateName: "模板名称",
     agentPublishTemplateDisplayName: "展示名称",
-    agentPublishTemplateDisplayNameHint: "支持中文，留空时使用模板名称。",
+    agentPublishTemplateDisplayNameHint: "最多 32 个字符，支持中文，留空时使用模板名称。",
     agentPublishTemplateNameHint: "必须以英文字母开头，最多 32 个字符，仅支持英文字母、数字、下划线和短横线。",
     agentPublishTemplateNameInvalid:
       "模板名称必须以英文字母开头，最多 32 个字符，且只能包含英文字母、数字、下划线和短横线。",
@@ -3144,6 +3148,8 @@ export const messages = {
     iaTemplateCloudCollapse: "Hide AgenticHub templates",
     iaTemplateManageOnHub: "Manage my templates on AgenticHub",
     iaTemplateSameNameOnHub: "Same-name template on AgenticHub",
+    resourcesTemplatePublished: "Published",
+    resourcesTemplatePublishedOnHub: "Published on AgenticHub",
     iaTemplateCloudTag: "Cloud",
     iaTemplateCloudSignIn: "Sign in to see cloud templates",
     iaTemplateCloudSignInHint: "Templates in your AgenticHub can only be listed after signing in.",
@@ -4548,6 +4554,8 @@ export const messages = {
     resourcesLoadFailed: "Failed to load resource templates. Please try again later.",
     resourcesDeleteTemplate: "Delete template",
     resourcesDeleteConfirm: "Delete template",
+    resourcesDeleteLocalOnlyNotice:
+      "Only the local template will be deleted. The template on AgenticHub will remain available. To remove it entirely, unpublish it on AgenticHub.",
     resourcesDeleteFailed: "Failed to delete the template. Please try again later.",
     resourcesDeleteSkill: "Delete",
     resourcesDeleteSkillConfirmAction: "Delete",
@@ -5429,7 +5437,7 @@ export const messages = {
     agentRuntimeServiceUnavailable: "Agent service is temporarily unavailable",
     createAgent: "Create",
     createAgentTitle: "Create Agent",
-    createAgentSubtitle: "Create an agent with the model choices from your last creation.",
+    createAgentSubtitle: "Create an agent from a template or configure it yourself.",
     createAgentSubtitleNotifier:
       "Create a notification agent (push webhook or pull inbox). Can bind Feishu and join groups like workers.",
     createAgentKindTabAriaLabel: "Create agent kind",
@@ -5556,7 +5564,7 @@ export const messages = {
     agentPublishTemplateCommunitySubtitle: "Enter template details, save a local copy, and publish it to agentic hub.",
     agentPublishTemplateName: "Template name",
     agentPublishTemplateDisplayName: "Display name",
-    agentPublishTemplateDisplayNameHint: "Supports Chinese. Uses the template name when empty.",
+    agentPublishTemplateDisplayNameHint: "Up to 32 characters. Supports Chinese. Uses the template name when empty.",
     agentPublishTemplateNameHint:
       "Start with an English letter; use up to 32 English letters, numbers, underscores, or hyphens.",
     agentPublishTemplateNameInvalid:

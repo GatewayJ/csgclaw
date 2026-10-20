@@ -1573,4 +1573,21 @@ describe("ConversationPane", () => {
     await user.click(screen.getByRole("button", { name: "clearRoomMessagesConfirm" }));
     expect(onClearRoomMessages).toHaveBeenCalledWith("room-1");
   });
+
+  it("preserves direct conversation tools and room member management alongside side-panel actions", () => {
+    const direct = renderThreadPane({ isDirect: true });
+    expect(screen.getByRole("button", { name: "Activity records" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chatFiles" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chatBrowser" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Invite" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "channelTools" })).toBeInTheDocument();
+    direct.unmount();
+
+    renderThreadPane({ isDirect: false });
+    expect(screen.getByRole("button", { name: "Invite" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Activity records" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chatFiles" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chatBrowser" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "channelTools" })).not.toBeInTheDocument();
+  });
 });

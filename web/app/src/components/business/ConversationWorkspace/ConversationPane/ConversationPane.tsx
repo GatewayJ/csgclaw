@@ -534,12 +534,11 @@ function ConversationPaneContent({
         description={description}
         headerAccessory={tools.toolbar}
         inviteActionLabel={inviteActionLabel}
-        agents={agents}
         selectedMessageCount={selectedMessageCount}
         selectedVisibleMessageCount={visibleMessages.length}
         showChannelTools={showChannelTools}
         showInviteAction={!isDirectConversation(conversation)}
-        showManagementActions={isDirectConversation(conversation)}
+        showChannelToolsAction={isDirectConversation(conversation)}
         memberManagementOpen={Boolean(memberPanelProps)}
         showMemberListAction={false}
         showToolCalls={showToolCalls}
