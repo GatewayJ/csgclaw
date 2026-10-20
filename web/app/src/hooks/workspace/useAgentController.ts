@@ -20,7 +20,6 @@ import {
   fetchAgentProfile,
   fetchAgentProfileDefaults,
   fetchAgentMCPServers,
-  fetchAgentSkillSummaries,
   finalizeFeishuRegistrationRequest,
   patchNotificationBotRequest,
   runAgentActionRequest,
@@ -43,7 +42,6 @@ import {
 } from "@/api/hub";
 import type { HubTemplate } from "@/models/hubWorkspace";
 import { createUserRequest, joinAgentToRoomRequest } from "@/api/im";
-import { fetchSkills } from "@/api/skills";
 import { createTeamRequest, deleteTeamRequest, fetchTeams, updateTeamRequest } from "@/api/tasks";
 import type { CreateTeamPayload } from "@/api/tasks";
 import {
@@ -117,7 +115,6 @@ import type {
   RuntimeBootstrapConfig,
 } from "@/models/agents";
 import { isDirectConversation, localIdentitiesMatch, upsertUserInData } from "@/models/conversations";
-import { mcpManagedKnowledgeBaseSource, mcpServersFromMap } from "@/models/mcp";
 import type { MCPServer, MCPServerSourceStatus } from "@/models/mcp";
 import { displayTeam, teamMemberIDs } from "@/models/tasks";
 import type { WorkspaceTeam } from "@/models/tasks";
@@ -407,9 +404,6 @@ export function useAgentController({
   agentsQuery,
   bootstrapConfig,
   data,
-  catalogMCPServers = [],
-  catalogMCPServersError = "",
-  catalogMCPServersLoading = false,
   hubTemplates,
   locale,
   managerProfile,
@@ -420,7 +414,6 @@ export function useAgentController({
   onTemplatePublished,
   profileDetailAgentID = "",
   redirectToIncompleteManagerProfile = true,
-  refreshMCPServers = async () => null,
   refreshHubTemplates,
   refreshWorkspaceAgents,
   refreshWorkspaceBootstrap,
@@ -709,55 +702,18 @@ export function useAgentController({
       current ? { ...current, mcpServers: cloneMCPServersForDraft(view.servers) } : current,
     );
   });
-  const [skillCandidatesAgentID, setSkillCandidatesAgentID] = useState("");
-  const globalSkillsQuery = useQuery({
-    enabled: Boolean(agentDetailAgentID) && skillCandidatesAgentID === agentDetailAgentID,
-    queryKey: workspaceQueryKeys.skills(),
-    queryFn: async () => {
-      const payload = await fetchSkills();
-      return Array.isArray(payload) ? payload : [];
-    },
-  });
   const resourceLists = useAgentResourceLists(agentDetailAgentID);
-  const agentSkillsQuery = useQuery({
-    queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID),
-    queryFn: ({ signal }) => fetchAgentSkillSummaries(agentDetailAgentID, signal),
-    enabled: Boolean(agentDetailAgentID) && skillCandidatesAgentID === agentDetailAgentID,
-  });
-  const agentMCPServersQuery = useQuery({
-    queryKey: workspaceQueryKeys.agentMCPServers(agentDetailAgentID),
-    queryFn: () => fetchAgentMCPServers(agentDetailAgentID),
-    enabled: Boolean(agentDetailAgentID),
-  });
   const agentSkillsError = resourceLists.skills.query.error
     ? errorMessage(resourceLists.skills.query.error, t("agentSkillsLoadFailed"))
     : resourceLists.skills.items.some((skill) => skill.error)
       ? t("agentSkillMetadataUnavailable")
       : "";
-  const agentSkillCandidates = useMemo(() => {
-    if (!agentSkillsQuery.data) return [];
-    const currentSkillNames = new Set((agentSkillsQuery.data ?? []).map((skill) => String(skill?.name || "").trim()));
-    return (globalSkillsQuery.data ?? []).filter((skill) => {
-      const name = String(skill?.name || "").trim();
-      return Boolean(name) && !currentSkillNames.has(name);
-    });
-  }, [agentSkillsQuery.data, globalSkillsQuery.data]);
-  const agentSkillCandidatesError =
-    globalSkillsQuery.error || agentSkillsQuery.error
-      ? errorMessage(globalSkillsQuery.error || agentSkillsQuery.error, t("agentSkillsLoadFailed"))
-      : "";
-  const agentMCPServers = useMemo(() => {
-    return mcpServersFromMap(agentMCPServersQuery.data?.servers);
-  }, [agentMCPServersQuery.data]);
   const [agentMCPSourceStatuses, setAgentMCPSourceStatuses] = useState<Record<string, MCPServerSourceStatus>>({});
   const [agentMCPSourceBusyNames, setAgentMCPSourceBusyNames] = useState<ReadonlySet<string>>(new Set());
   const [agentMCPSourceSyncBusyName, setAgentMCPSourceSyncBusyName] = useState("");
   const managedAgentMCPServerNames = useMemo(
-    () =>
-      resourceLists.mcp.items
-        .filter((server) => Boolean(mcpManagedKnowledgeBaseSource(server.config)))
-        .map((server) => server.name),
-    [resourceLists.mcp.items],
+    () => resourceLists.knowledge.items.map((server) => server.name),
+    [resourceLists.knowledge.items],
   );
 
   useEffect(() => {
@@ -824,10 +780,7 @@ export function useAgentController({
     },
     [agentDetailAgentID, errorMessage, handleOpenCSGAuthenticationError, queryClient, requireOpenCSGAuthentication, t],
   );
-  const agentMCPCandidates = useMemo(() => {
-    const currentNames = new Set(agentMCPServers.map((server) => server.name));
-    return catalogMCPServers.filter((server) => server.name && !currentNames.has(server.name));
-  }, [agentMCPServers, catalogMCPServers]);
+
   const activeConversation = useMemo(
     () => data?.rooms.find((item) => item.id === activeConversationId) ?? null,
     [data, activeConversationId],
@@ -2635,10 +2588,12 @@ export function useAgentController({
       setAgentMCPAddError("");
       setAgentMCPDeleteError("");
       try {
-        const view = await batchAddAgentMCPServersRequest(agentDetailAgentID, names);
+        const view = await batchAddAgentMCPServersRequest(agentDetailAgentID, names, true);
         const mcpServers = cloneMCPServersForDraft(view.servers);
-        setAgentPageDraft((current) => (current ? { ...current, mcpServers } : current));
-        setAgentPageSavedDraft((current) => (current ? { ...current, mcpServers } : current));
+        if (selectedAgentForPageRef.current?.id === agentDetailAgentID) {
+          setAgentPageDraft((current) => (current ? { ...current, mcpServers } : current));
+          setAgentPageSavedDraft((current) => (current ? { ...current, mcpServers } : current));
+        }
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentMCPServers(agentDetailAgentID) }),
           queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agents() }),
@@ -2812,33 +2767,23 @@ export function useAgentController({
       authStatuses: cliproxyAuthStatuses,
       authBusyProvider: cliproxyAuthBusy,
       notifierWebhookPublicOrigin,
-      skillCandidates: agentSkillCandidates,
-      skillCandidatesLoading:
-        globalSkillsQuery.isFetching ||
-        agentSkillsQuery.isFetching ||
-        (!agentSkillsQuery.data && !agentSkillsQuery.isError),
-      onLoadSkillCandidates: () => {
-        setSkillCandidatesAgentID(agentDetailAgentID);
-        if (skillCandidatesAgentID === agentDetailAgentID) {
-          void globalSkillsQuery.refetch();
-          void agentSkillsQuery.refetch();
-        }
-      },
       onRefreshSkills: resourceLists.skills.query.refetch,
       skillContinuation: resourceLists.skills.continuation,
       mcpContinuation: resourceLists.mcp.continuation,
+      knowledgeContinuation: resourceLists.knowledge.continuation,
+      knowledgeListError: resourceLists.knowledge.query.error
+        ? errorMessage(resourceLists.knowledge.query.error, t("resourcesMCPLoadFailed"))
+        : "",
       mcpListError: resourceLists.mcp.query.error
         ? errorMessage(resourceLists.mcp.query.error, t("resourcesMCPLoadFailed"))
         : "",
-      skillCandidatesError: agentSkillCandidatesError,
       skillAddBusy: agentSkillAddBusy,
       skillAddError: agentSkillAddError,
       skillDeleteBusy: agentSkillDeleteBusy,
       skillDeleteError: agentSkillDeleteError,
-      mcpCandidates: agentMCPCandidates,
-      mcpCandidatesLoading: catalogMCPServersLoading,
-      mcpCandidatesError: catalogMCPServersError,
       mcpServers: resourceLists.mcp.items,
+      knowledgeServers: resourceLists.knowledge.items,
+      resourceAuthenticated: openCSGAuthenticated,
       mcpSourceBusyNames: agentMCPSourceBusyNames,
       mcpSourceUnavailableNames: new Set(
         Object.entries(agentMCPSourceStatuses)
@@ -2894,7 +2839,6 @@ export function useAgentController({
       onInstallMCPServers: installAgentMCPServers,
       onDeleteMCPServer: deleteAgentMCPServer,
       onUpdateMCPServer: updateAgentMCPServerSource,
-      onRetryMCPServers: refreshMCPServers,
       teamActionBusy,
       teamActionError,
       onCreateTeam: createAgentTeam,

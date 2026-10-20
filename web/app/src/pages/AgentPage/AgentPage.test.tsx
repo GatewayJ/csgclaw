@@ -73,7 +73,7 @@ describe("Agent App deep links", () => {
         <Location />
       </MemoryRouter>,
     );
-    expect(await screen.findByRole("dialog", { name: "Add from resources" })).toBeVisible();
+    expect(await screen.findByRole("dialog", { name: "Enable app connector" })).toBeVisible();
     expect(screen.queryByLabelText("Instance name")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Manage global Connectors" })).toHaveAttribute(
       "href",

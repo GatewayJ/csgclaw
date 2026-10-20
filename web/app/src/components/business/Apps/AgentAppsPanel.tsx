@@ -1,13 +1,9 @@
 import { ResourceList, ResourceListCard } from "@/components/business/ResourceListCard";
 import { useState, type ReactNode } from "react";
-import { ArrowRight, ArrowUpRight, BookOpen, Plus, RefreshCw, ChevronDown, Server } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BookOpen, Plus, RefreshCw } from "lucide-react";
 import {
   Button,
   LinkButton,
-  DropdownMenuRoot,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
   Switch,
   DialogRoot,
   DialogContent,
@@ -33,7 +29,6 @@ type Props = {
   agentID: string;
   cliSupported?: boolean;
   children?: ReactNode;
-  onAddTools?: () => void;
   controller: AgentAppsController;
   t: TranslateFn;
   portalContainer?: HTMLElement | null;
@@ -51,7 +46,6 @@ export function AgentAppsPanel({
   addAppID,
   onSelect,
   children,
-  onAddTools,
 }: Props) {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<AppInstallation | null>(null);
@@ -104,30 +98,21 @@ export function AgentAppsPanel({
     <section id="agent-profile-apps" className={`profile-section ${styles.panel}`}>
       <div className={styles.heading}>
         <div>
-          <div className="profile-section-title">{t("agentAppsTab")}</div>
+          <div className="profile-section-title">{t("profileAppConnectors")}</div>
           <p className={styles.hint}>{t("appBindingDescription")}</p>
         </div>
-        <DropdownMenuRoot>
-          <DropdownMenuTrigger asChild>
-            <Button variant="primary" size="sm">
-              <Plus size={16} />
-              {t("connectorsAdd")}
-              <ChevronDown size={14} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent portalContainer={portalContainer}>
-            <DropdownMenuItem onSelect={() => setAdding(true)}>
-              <ConnectorBoxesIcon size={16} />
-              {t("appAddFromResources")}
-            </DropdownMenuItem>
-            {onAddTools ? (
-              <DropdownMenuItem onSelect={onAddTools}>
-                <Server size={16} />
-                {t("agentMCPAdd")}
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenuRoot>
+        <div className="flex items-center gap-3">
+          <span className={styles.hint}>{t("profileAppConnectorCount", { count: controller.items.length })}</span>
+          <Button
+            variant="secondaryGray"
+            size="sm"
+            iconOnly
+            aria-label={t("profileAppConnectorAdd")}
+            onClick={() => setAdding(true)}
+          >
+            <Plus size={16} />
+          </Button>
+        </div>
       </div>
       {error || controller.error ? (
         <div role="alert" className="form-error">
@@ -169,6 +154,11 @@ export function AgentAppsPanel({
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
           >
+            {feishu ? (
+              <span className={styles.status} data-status={feishu.enabled ? feishu.status : "disabled"}>
+                {appStatus(feishu, t)}
+              </span>
+            ) : null}
             <Switch
               aria-label={t("feishuCLIWorkerSwitch")}
               checked={Boolean(feishu?.enabled)}
@@ -207,6 +197,12 @@ export function AgentAppsPanel({
                 onClick={(event) => event.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
               >
+                <span
+                  className={styles.status}
+                  data-status={app.enabled && app.resource_enabled !== false ? app.status : "disabled"}
+                >
+                  {appStatus(app, t)}
+                </span>
                 <Switch
                   aria-label={app.name}
                   checked={app.enabled}
@@ -327,12 +323,17 @@ export function AgentAppsPanel({
         <DialogContent portalContainer={portalContainer} className={styles.catalogDialog}>
           <DialogHeader>
             <div>
-              <DialogTitle>{t("appAddFromResources")}</DialogTitle>
+              <DialogTitle>{t("profileAppConnectorAdd")}</DialogTitle>
               <DialogDescription>{t("appBindingDescription")}</DialogDescription>
             </div>
             <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" iconOnly />
           </DialogHeader>
           <DialogBody className={styles.catalog}>
+            {error || controller.error ? (
+              <div className="form-error" role="alert">
+                {localizeAPIError(error || controller.error, t) || errorMessage(error || controller.error)}
+              </div>
+            ) : null}
             {available.map((resource) => (
               <Button
                 key={resource.installation_id}

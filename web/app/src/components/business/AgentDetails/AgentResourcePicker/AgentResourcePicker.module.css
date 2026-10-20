@@ -1,0 +1,55 @@
+.dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(760px, calc(100dvh - 32px));
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+.list {
+  overflow: auto;
+  min-height: 120px;
+  max-height: 48dvh;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.copy > span,
+.status {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+.links,
+.login {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 600px) {
+  .row {
+    flex-wrap: wrap;
+  }
+  .copy {
+    flex-basis: 60%;
+  }
+}

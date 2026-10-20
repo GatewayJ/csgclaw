@@ -221,8 +221,15 @@ export function fetchAgentMCPServers(agentID: string): Promise<AgentMCPServersVi
   return get(`api/v1/agents/${encodeURIComponent(agentID)}/mcp-servers`);
 }
 
-export function batchAddAgentMCPServersRequest(agentID: string, serverNames: string[]): Promise<AgentMCPServersView> {
-  return post(`api/v1/agents/${encodeURIComponent(agentID)}/mcp-servers:batchAdd`, { names: serverNames });
+export function batchAddAgentMCPServersRequest(
+  agentID: string,
+  serverNames: string[],
+  enabled?: boolean,
+): Promise<AgentMCPServersView> {
+  return post(`api/v1/agents/${encodeURIComponent(agentID)}/mcp-servers:batchAdd`, {
+    names: serverNames,
+    ...(enabled === undefined ? {} : { enabled }),
+  });
 }
 
 export function batchDeleteAgentMCPServersRequest(

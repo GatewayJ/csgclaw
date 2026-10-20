@@ -517,6 +517,8 @@ Runtime 尚未生成文档时，`ready` 为 `false`。
 
 接收 `{ "names": ["..."] }`，将 MCP catalog 中同名 server 的定义合并到该 Agent 托管的 MCP server。响应与 `GET` 一样。
 
+可选 boolean 字段 `enabled` 在同一次更新中设置这些定义在 Agent 内的启用状态。省略时保留 catalog 中各定义的状态。Profile 添加资源时传入 `enabled: true`，全局 catalog 保持原状态。
+
 #### `POST /api/v1/agents/{id}/mcp-servers:batchDelete`
 
 接收 `{ "names": ["..."] }`，从该 Agent 托管的 MCP server 中移除同名 server。响应与 `GET` 一样。

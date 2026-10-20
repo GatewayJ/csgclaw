@@ -152,8 +152,7 @@ describe("Agent Apps", () => {
     const user = userEvent.setup();
     render(<Harness />);
     await screen.findByText("Connect the services your agent needs");
-    await user.click(screen.getByRole("button", { name: "Add" }));
-    await user.click(screen.getByRole("menuitem", { name: "Add from resources" }));
+    await user.click(screen.getByRole("button", { name: "Enable app connector" }));
     const resource = within(screen.getByRole("dialog")).getByRole("button", { name: /^Work GitLab/ });
     expect(resource).toHaveTextContent("GitLab · http://localhost:8888/mcp");
     await user.click(resource);
@@ -192,8 +191,7 @@ describe("Agent Apps", () => {
       const user = userEvent.setup();
       render(<Harness />);
       if (allBound) await screen.findByRole("button", { name: /Work GitLab/ });
-      await user.click(screen.getByRole("button", { name: "Add" }));
-      await user.click(screen.getByRole("menuitem", { name: "Add from resources" }));
+      await user.click(screen.getByRole("button", { name: "Enable app connector" }));
       const dialog = within(screen.getByRole("dialog"));
       if (!allBound) await dialog.findByRole("button", { name: /^Work GitLab/ });
       const link = dialog.getByRole("link", { name: t("appManageResources") });
