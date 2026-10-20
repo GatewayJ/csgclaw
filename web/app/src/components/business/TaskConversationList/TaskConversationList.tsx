@@ -187,9 +187,14 @@ export function TaskConversationList({
               key={room.id}
               className={`${styles.row} ${managerDM ? styles.noAvatar : ""} ${activeID === room.id ? styles.active : ""}`}
             >
-              <button type="button" className={styles.open} onClick={() => onSelect(room.id)}>
+              <button
+                type="button"
+                className={styles.open}
+                aria-current={activeID === room.id ? "page" : undefined}
+                onClick={() => onSelect(room.id)}
+              >
                 {!managerDM ? (
-                  <span className={styles.avatar}>
+                  <span className={styles.avatar} aria-hidden="true">
                     {room.is_direct ? (
                       <AgentAvatarContent avatar={other?.avatar} fallback={other?.name?.slice(0, 1) || "A"} />
                     ) : (
