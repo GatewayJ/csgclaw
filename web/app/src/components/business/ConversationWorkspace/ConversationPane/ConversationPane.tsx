@@ -241,6 +241,9 @@ function ConversationPaneContent({
   authStatuses,
   authBusyProvider,
   onProviderLogin,
+  resourceAgentID,
+  onPickResources,
+  onPickThreadResources,
   draftSegments,
   draftText,
   attachmentDrafts,
@@ -381,7 +384,7 @@ function ConversationPaneContent({
     [messageControls.byMessage, onStopWorkingTurn, t],
   );
 
-  useConversationDraftEditorSync(editorRef, draftSegments);
+  useConversationDraftEditorSync(editorRef, draftSegments, t("remove"));
 
   useEffect(() => {
     setClearMessagesDialogOpen(false);
@@ -457,6 +460,8 @@ function ConversationPaneContent({
 
   const threadPanel = activeThreadRootID ? (
     <Conversation.ThreadPanel
+      resourceAgentID={resourceAgentID}
+      onPickResources={onPickThreadResources}
       renderTurnControls={renderTurnControls}
       agents={agents}
       thread={activeThreadView}
@@ -565,6 +570,8 @@ function ConversationPaneContent({
         <AgentQuestionComposer mode={questionMode} t={t} usersById={usersById} />
       ) : (
         <Conversation.Composer
+          resourceAgentID={resourceAgentID}
+          onPickResources={onPickResources}
           fileScope={tools.fileScope}
           authBusyProvider={authBusyProvider}
           authStatuses={authStatuses}

@@ -133,6 +133,7 @@ func Run(opts Options) error {
 			return fmt.Errorf("prepare connector migration: %w", err)
 		}
 	}
+	handler.EnableConversationResources()
 	handler.SetEventStreamShutdown(streamCtx.Done())
 	if err := handler.RecoverRoomTasks(); err != nil {
 		return fmt.Errorf("recover room tasks: %w", err)

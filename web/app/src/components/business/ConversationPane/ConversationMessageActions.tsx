@@ -1,3 +1,4 @@
+import { resourceMessageText } from "@/models/conversationResources";
 import { writeTextToClipboard } from "@/shared/lib/clipboard";
 import { DiagnosticMessageAction } from "@/components/business/TurnDiagnostics";
 import { diagnosticReference } from "@/models/diagnostics";
@@ -34,7 +35,7 @@ export function ConversationMessageActions({
   const [copying, setCopying] = useState(false);
   const [copyError, setCopyError] = useState("");
   const copiedTimerRef = useRef<number | null>(null);
-  const copyText = flattenMentionText(renderSlashCommandPreviewText(content));
+  const copyText = flattenMentionText(resourceMessageText(renderSlashCommandPreviewText(content), metadata));
   const imageURL = image?.download_url || image?.preview_url || "";
   const canCopy = Boolean(imageURL || copyText.replace(/\u200b/g, ""));
   const usage = messageTokenUsage(metadata);

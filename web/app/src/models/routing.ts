@@ -1,5 +1,6 @@
 import { isDirectConversation } from "@/models/conversations";
 import type { IMConversation } from "@/models/conversations";
+import type { ResourceType } from "@/models/agentResources";
 
 type ValueOf<T> = T[keyof T];
 
@@ -274,5 +275,10 @@ export function workspaceShowsFloatingChat(pane: WorkspacePane | null | undefine
 }
 
 export function pathForAgentApps(agentID: string): string {
-  return `${pathForPane({ type: WorkspacePaneTypes.agent, id: agentID })}?tab=connectors`;
+  return pathForAgentResources(agentID, "connector");
+}
+
+export function pathForAgentResources(agentID: string, resourceType: ResourceType): string {
+  const tab = resourceType === "skill" ? "skills" : "connectors";
+  return `${pathForPane({ type: WorkspacePaneTypes.agent, id: agentID })}?tab=${tab}`;
 }

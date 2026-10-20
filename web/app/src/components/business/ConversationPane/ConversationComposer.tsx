@@ -1,4 +1,11 @@
+import "@/components/business/ResourceTag";
+import {
+  ConversationResourcePicker,
+  useComposerResourcePicker,
+  type ComposerResourceProps,
+} from "@/components/business/ConversationResourcePicker";
 import { ComposerAddMenu } from "./ComposerAddMenu";
+import { canSendComposer, selectedResources } from "@/models/conversationResources";
 import type { ChatFileScope } from "@/components/business/ChatSidePanel/types";
 import { useFileMentions } from "./FileMentionPicker";
 import type { SkillContinuation } from "@/models/slashCommands";
@@ -17,6 +24,7 @@ import {
   insertComposerSegmentsAtSelection,
   insertPlainTextAtSelection,
   normalizeTextMentions,
+  removeComposerResourceToken,
   type ComposerMentionUser,
   type ComposerSegment,
 } from "@/models/composer";
@@ -33,7 +41,7 @@ import {
   type VoidOrPromise,
 } from "./types";
 
-export type ConversationComposerProps = {
+export type ConversationComposerProps = ComposerResourceProps & {
   fileScope?: ChatFileScope;
   authBusyProvider: string;
   authStatuses: CLIProxyAuthStatusMap;
@@ -82,6 +90,8 @@ export type ConversationComposerProps = {
 };
 
 export const ConversationComposer = memo(function ConversationComposer({
+  resourceAgentID,
+  onPickResources,
   fileScope,
   authBusyProvider,
   authStatuses,
@@ -145,7 +155,15 @@ export const ConversationComposer = memo(function ConversationComposer({
   const composerHelpId = useId();
   const isSending = sendStatus === "sending";
   const interactionDisabled = composerDisabled || isSending;
-  const sendDisabled = interactionDisabled || (!draftText.trim() && attachmentDrafts.length === 0);
+  const resourcePicker = useComposerResourcePicker({
+    resourceAgentID,
+    onPickResources,
+    editorRef,
+    selected: selectedResources(draftSegments),
+    disabled: interactionDisabled,
+  });
+  const sendDisabled =
+    interactionDisabled || resourcePicker.active || !canSendComposer(draftSegments, attachmentDrafts.length);
   const actionSuggestions = useMemo(() => composerActionSuggestions(draftText), [draftText]);
 
   function handleFiles(files: File[]) {
@@ -157,7 +175,7 @@ export const ConversationComposer = memo(function ConversationComposer({
 
   return (
     <footer className={`composer${workingParticipants.length > 0 ? " has-working-status" : ""}`}>
-      {slashPickerOpen ? (
+      {!resourcePicker.active && slashPickerOpen ? (
         <SlashPicker
           candidates={slashCandidates}
           activeIndex={slashIndex}
@@ -167,7 +185,7 @@ export const ConversationComposer = memo(function ConversationComposer({
           onSelect={(name) => onApplySlashCandidate(name)}
         />
       ) : null}
-      {fileScope ? (
+      {resourcePicker.active ? null : fileScope ? (
         fileMentions.picker
       ) : mentionCandidates.length > 0 ? (
         <MentionPicker users={mentionCandidates} activeIndex={mentionIndex} t={t} onSelect={onApplyMention} />
@@ -218,7 +236,14 @@ export const ConversationComposer = memo(function ConversationComposer({
           onPreviewAttachment={onPreviewAttachment}
           onRemove={onRemoveAttachment}
         />
-        <div className="composer-editor-wrap">
+        {resourcePicker.pickerProps ? (
+          <ConversationResourcePicker
+            key={`${resourceAgentID}:${resourcePicker.pickerProps.kind}`}
+            {...resourcePicker.pickerProps}
+            t={t}
+          />
+        ) : null}
+        <div className="composer-editor-wrap" hidden={resourcePicker.active}>
           {draftSegments.length === 0 ? (
             <div className="composer-placeholder" aria-hidden="true">
               {composerDisabled ? composerDisabledReason || t("profileIncomplete") : t("inputPlaceholder")}
@@ -236,8 +261,12 @@ export const ConversationComposer = memo(function ConversationComposer({
             aria-describedby={composerHelpId}
             aria-disabled={interactionDisabled}
             onInput={sync}
-            onClick={sync}
+            onClick={(event) => {
+              if (!interactionDisabled) removeComposerResourceToken(event.currentTarget, event.target);
+              sync();
+            }}
             onKeyDown={(event) => {
+              if (event.target instanceof Element && event.target.closest("[data-composer-resource-remove]")) return;
               if (!fileMentions.handleKeyDown(event)) onComposerKeyDown(event);
             }}
             onCompositionStart={onComposerCompositionStart}
@@ -265,7 +294,7 @@ export const ConversationComposer = memo(function ConversationComposer({
             }}
           />
         </div>
-        {actionSuggestions.length > 0 ? (
+        {!resourcePicker.active && actionSuggestions.length > 0 ? (
           <div className="composer-action-suggestions" aria-label={t("suggestedActions")}>
             <span>{t("suggestedActions")}</span>
             {actionSuggestions.map((suggestion) => (
@@ -283,7 +312,12 @@ export const ConversationComposer = memo(function ConversationComposer({
           </div>
         ) : null}
         <div className="composer-toolbar">
-          <ComposerAddMenu disabled={interactionDisabled} t={t} onAddFiles={() => fileInputRef.current?.click()} />
+          <ComposerAddMenu
+            onOpenResourcePicker={resourcePicker.open}
+            disabled={interactionDisabled}
+            t={t}
+            onAddFiles={() => fileInputRef.current?.click()}
+          />
           <input
             ref={fileInputRef}
             className="sr-only"
