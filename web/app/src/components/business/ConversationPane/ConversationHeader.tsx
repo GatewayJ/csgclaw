@@ -32,6 +32,7 @@ export type ConversationHeaderProps = {
   showMemberList?: boolean;
   showMemberListAction?: boolean;
   showToolCalls: boolean;
+  memberManagementOpen?: boolean;
   t: TranslateFn;
 };
 
@@ -51,6 +52,7 @@ export const ConversationHeader = memo(function ConversationHeader({
   showMemberList = false,
   showMemberListAction = true,
   showToolCalls,
+  memberManagementOpen = false,
   t,
   onClearMessages,
   onDeleteRoom,
@@ -71,7 +73,7 @@ export const ConversationHeader = memo(function ConversationHeader({
           <div className="chat-title-row">
             <div className="chat-title-group">
               <div className="chat-kicker">
-                <span>{isDirectConversation(conversation) ? t("directMessagesSection") : t("conversationLabel")}</span>
+                <span>{isDirectConversation(conversation) ? t("directMessagesSection") : t("iaRoomsTab")}</span>
                 <Tooltip content={messageCountLabel}>
                   <strong>{messageCountLabel}</strong>
                 </Tooltip>
@@ -136,6 +138,28 @@ export const ConversationHeader = memo(function ConversationHeader({
             </div>
           </div>
           <div className="chat-title-actions">
+            {showInviteAction ? (
+              <Tooltip content={inviteActionLabel} contentProps={{ side: "bottom" }}>
+                <Button
+                  className="icon-button member-management-button"
+                  iconOnly
+                  size="lg"
+                  variant="secondaryGray"
+                  aria-label={inviteActionLabel}
+                  active={memberManagementOpen}
+                  aria-pressed={memberManagementOpen}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onInviteAction();
+                  }}
+                >
+                  <span className="icon-button-mark">
+                    <AddUserIcon />
+                  </span>
+                </Button>
+              </Tooltip>
+            ) : null}
             {headerAccessory}
             {showChannelToolsAction ? (
               <div ref={channelToolsRef} className="header-menu tools-menu">
@@ -182,26 +206,6 @@ export const ConversationHeader = memo(function ConversationHeader({
                   </div>
                 ) : null}
               </div>
-            ) : null}
-            {showInviteAction ? (
-              <Tooltip content={inviteActionLabel} contentProps={{ side: "bottom" }}>
-                <Button
-                  className="icon-button member-management-button"
-                  iconOnly
-                  size="lg"
-                  variant="secondaryGray"
-                  aria-label={inviteActionLabel}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onInviteAction();
-                  }}
-                >
-                  <span className="icon-button-mark">
-                    <AddUserIcon />
-                  </span>
-                </Button>
-              </Tooltip>
             ) : null}
           </div>
         </div>
