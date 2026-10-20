@@ -28,8 +28,12 @@ import {
   X,
 } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { ResourceList, ResourceListCard } from "@/components/business/ResourceListCard";
+import {
+  ResourceList,
+  ResourceListCard,
+  ResourceFeaturedIcon,
+  ResourceStatus,
+} from "@/components/business/ResourceListCard";
 import { AgentResourcePicker } from "../AgentResourcePicker";
 import { AgentResourceDetails } from "../AgentResourceDetails";
 import type { AgentResourceKind } from "@/api/agents";
@@ -1632,7 +1636,7 @@ function AgentMCPPanel({
             {t(kind === "knowledge" ? "profileKnowledgeTitle" : "connectorsTools")}
           </div>
           <p className="profile-section-description">
-            {t(kind === "knowledge" ? "profileKnowledgeHint" : "profileMCPPickerHint")}
+            {t(kind === "knowledge" ? "profileKnowledgeHint" : "profileMCPHint")}
           </p>
         </div>
         <div className="agent-skills-summary-actions">
@@ -1641,20 +1645,22 @@ function AgentMCPPanel({
               count: continuation?.total ?? servers.length,
             })}
           </span>
-          <Tooltip content={t(kind === "knowledge" ? "agentKnowledgeAdd" : "agentMCPAdd")}>
-            <span>
-              <Button
-                className="agent-skill-add-button"
-                variant="secondaryGray"
-                size="sm"
-                aria-label={t(kind === "knowledge" ? "agentKnowledgeAdd" : "agentMCPAdd")}
-                disabled={mutationBusy || addBusy}
-                onClick={onOpenAddMCP}
-              >
-                <Plus aria-hidden="true" size={16} strokeWidth={2.2} />
-              </Button>
-            </span>
-          </Tooltip>
+          {servers.length > 0 ? (
+            <Tooltip content={t(kind === "knowledge" ? "agentKnowledgeAdd" : "agentMCPAdd")}>
+              <span>
+                <Button
+                  className="agent-skill-add-button"
+                  variant="secondaryGray"
+                  size="sm"
+                  aria-label={t(kind === "knowledge" ? "agentKnowledgeAdd" : "agentMCPAdd")}
+                  disabled={mutationBusy || addBusy}
+                  onClick={onOpenAddMCP}
+                >
+                  <Plus aria-hidden="true" size={16} strokeWidth={2.2} />
+                </Button>
+              </span>
+            </Tooltip>
+          ) : null}
         </div>
       </div>
       {addError ? <div className="form-error">{addError}</div> : null}
@@ -1672,7 +1678,7 @@ function AgentMCPPanel({
       {!continuation?.loading && !listError && !servers.length ? (
         <div className="agent-skills-summary-empty">
           <span className="agent-skills-summary-icon" aria-hidden="true">
-            <Server size={18} strokeWidth={1.8} />
+            {kind === "knowledge" ? <BookOpen size={18} /> : <Server size={18} strokeWidth={1.8} />}
           </span>
           <div className="agent-skills-summary-empty-copy">
             <strong>
@@ -1700,9 +1706,9 @@ function AgentMCPPanel({
                 title={mcpServerDisplayName(server)}
                 description={server.description}
                 icon={
-                  <AgentProfileFeaturedIcon>
+                  <ResourceFeaturedIcon>
                     {kind === "knowledge" ? <BookOpen size={16} /> : <SidebarMcpIcon size={16} />}
-                  </AgentProfileFeaturedIcon>
+                  </ResourceFeaturedIcon>
                 }
                 onOpen={() => onOpenDetail(server)}
                 badge={
@@ -1716,9 +1722,9 @@ function AgentMCPPanel({
                 }
                 actions={
                   <>
-                    <span className="agent-connector-source-badge">
+                    <ResourceStatus status={server.config.enabled === false ? "disabled" : "enabled"}>
                       {t(server.config.enabled === false ? "appStatusDisabled" : "profileResourceEnabled")}
-                    </span>
+                    </ResourceStatus>
                     {updateAvailable && !sourceUnavailable && onUpdateMCP ? (
                       <Button
                         size="sm"
@@ -1746,7 +1752,7 @@ function AgentMCPPanel({
           })}
         </ResourceList>
       ) : null}
-      <ResourceLoadMore continuation={continuation} t={t} />
+      <ResourceLoadMore continuation={continuation} showSummary={false} t={t} />
     </section>
   );
 }
@@ -2120,12 +2126,9 @@ function AgentSkillsPanel({
               onOpen={() => onOpenDetail(skill)}
               actions={
                 <>
-                  <span
-                    className="hub-template-source-badge agent-skill-status-badge"
-                    data-enabled={skill.enabled !== false}
-                  >
+                  <ResourceStatus status={skill.enabled === false ? "disabled" : "enabled"}>
                     {skill.enabled === false ? t("appStatusDisabled") : t("resourcesSkillEnabled")}
-                  </span>
+                  </ResourceStatus>
                   <Switch
                     aria-busy={toggleBusyName === skill.name}
                     className="agent-skill-card-switch-sm"
@@ -2140,25 +2143,16 @@ function AgentSkillsPanel({
           ))}
         </div>
       ) : null}
-      <ResourceLoadMore continuation={continuation} t={t} />
+      <ResourceLoadMore continuation={continuation} showSummary={false} t={t} />
     </section>
   );
 }
 
 function AgentSkillFeaturedIcon() {
   return (
-    <AgentProfileFeaturedIcon>
+    <ResourceFeaturedIcon>
       <SidebarPuzzlePiece02Icon size={16} aria-hidden="true" />
-    </AgentProfileFeaturedIcon>
-  );
-}
-
-function AgentProfileFeaturedIcon({ children }: { children: ReactNode }) {
-  return (
-    <span className="hub-skill-featured-icon" aria-hidden="true">
-      <span className="hub-skill-featured-icon-shadow"></span>
-      <span className="hub-skill-featured-icon-glass">{children}</span>
-    </span>
+    </ResourceFeaturedIcon>
   );
 }
 

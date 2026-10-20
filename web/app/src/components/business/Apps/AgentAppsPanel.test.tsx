@@ -153,8 +153,9 @@ describe("Agent Apps", () => {
     render(<Harness />);
     await screen.findByText("Connect the services your agent needs");
     await user.click(screen.getByRole("button", { name: "Enable app connector" }));
-    const resource = within(screen.getByRole("dialog")).getByRole("button", { name: /^Work GitLab/ });
-    expect(resource).toHaveTextContent("GitLab · http://localhost:8888/mcp");
+    const dialog = within(screen.getByRole("dialog"));
+    expect(await dialog.findByText("Work GitLab")).toBeVisible();
+    const resource = dialog.getByRole("button", { name: "Enable" });
     await user.click(resource);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(await screen.findByText("Work GitLab")).toBeVisible();
@@ -185,7 +186,7 @@ describe("Agent Apps", () => {
   });
 
   it.each([false, true])(
-    "resource catalog management links retain button styles when all resources are bound: %s",
+    "resource catalog shows binding state and a management link when all resources are bound: %s",
     async (allBound) => {
       mockServer(allBound ? [installation] : []);
       const user = userEvent.setup();
@@ -193,10 +194,13 @@ describe("Agent Apps", () => {
       if (allBound) await screen.findByRole("button", { name: /Work GitLab/ });
       await user.click(screen.getByRole("button", { name: "Enable app connector" }));
       const dialog = within(screen.getByRole("dialog"));
-      if (!allBound) await dialog.findByRole("button", { name: /^Work GitLab/ });
+      await dialog.findByText("Work GitLab");
+      const action = dialog.getByRole("button", { name: allBound ? "Enabled" : "Enable" });
+      if (allBound) expect(action).toBeDisabled();
+      else expect(action).toBeEnabled();
       const link = dialog.getByRole("link", { name: t("appManageResources") });
       expect(link).toHaveAttribute("href", "#/connectors");
-      expect(link).toHaveClass(buttonStyles.btn, buttonStyles["btn-secondary-gray"], buttonStyles["btn-sm"]);
+      expect(link).toHaveClass(buttonStyles.btn, buttonStyles["btn-link-color"], buttonStyles["btn-sm"]);
     },
   );
 
