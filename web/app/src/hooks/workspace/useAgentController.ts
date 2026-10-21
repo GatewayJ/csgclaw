@@ -2035,6 +2035,7 @@ export function useAgentController({
         from_template: agentDraft.from_template || "",
         agent_profile: profile,
         profile: profileSelectorFromDraft(draft),
+        ...(isCreate && resources ? { skills: resources.skills } : {}),
       };
       const editingDraftBaseline = editingAgent ? agentToDraft(editingAgent) : null;
       const runtimeOptionsChanged = !isCreate
