@@ -26,7 +26,7 @@ export function ComposerAddMenu({
   const openingResourcePicker = useRef(false);
   return (
     <PopoverRoot open={open} onOpenChange={setOpen}>
-      <Tooltip content={t("composerAddContent")}>
+      <Tooltip content={t("composerAddContent")} contentProps={{ side: "top" }}>
         <PopoverTrigger asChild>
           <Button
             aria-label={t("composerAddContent")}

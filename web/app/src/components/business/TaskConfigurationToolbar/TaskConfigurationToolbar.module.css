@@ -38,6 +38,17 @@
   gap: 6px;
   margin-left: auto;
 }
+.modelFooter {
+  display: grid;
+  gap: var(--space-2);
+}
+.modelFooter .error {
+  margin: 0;
+  font: var(--text-xs-normal);
+}
+.modelFooter > button {
+  justify-self: start;
+}
 .popover {
   width: min(330px, calc(100vw - 24px));
   padding: 4px;
@@ -154,15 +165,210 @@
   background: transparent;
   opacity: 0.55;
 }
-.directoryInput {
+.directoryPopover {
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  max-height: min(520px, var(--radix-popover-content-available-height));
+  overflow-y: auto;
+}
+.directorySearch {
+  position: relative;
   color: var(--muted);
-  font-size: 12px;
+}
+.directorySearch > svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.directorySearch input[data-csg-control] {
+  padding-left: 34px;
+}
+.directoryOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.directoryOption:hover {
+  background: var(--panel-soft);
+}
+.directoryOption.active {
+  background: var(--primary-soft);
+}
+.directoryOption > svg {
+  flex: none;
+  color: var(--muted);
+}
+.directoryOption > svg:last-child {
+  color: var(--primary);
+}
+.directoryOption > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.directoryOption strong {
+  font: var(--text-sm-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.directoryOption small {
+  font: var(--text-xs-normal);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.directoryOption .directoryPath {
+  display: flex;
+  min-width: 0;
+}
+.directoryPrefix,
+.directoryCurrent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.directoryPrefix {
+  flex: 0 1000 auto;
+}
+.directoryCurrent {
+  flex: 0 1 auto;
+}
+.directoryList {
+  border-top: 1px solid var(--line);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.directoryList .directoryOption + .directoryOption {
+  margin-top: var(--space-1);
+}
+.directoryGroupTitle {
+  padding: 10px 8px 4px;
+  color: var(--muted);
+  font: var(--text-xs-normal);
+}
+.directoryFooter {
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+.directoryFooter button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--primary);
+  padding: 10px 8px;
+  cursor: pointer;
+  font: var(--text-sm-normal);
+  text-align: left;
+}
+.directoryFooter button:hover {
+  background: var(--primary-soft);
+}
+.directoryPopover .hint {
+  padding: 0;
+}
+.directoryDefault {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
 }
 .error {
   margin: 8px;
   color: var(--danger);
   font-size: 12px;
+}
+.directoryLabel,
+.lockedDirectory {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.directoryLabel > svg,
+.lockedDirectory > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.directoryLabel > span,
+.lockedDirectory > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.directoryLabel small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.directoryTrigger,
+.modelTrigger {
+  width: auto;
+  max-width: 240px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+.directoryTrigger:hover,
+.modelTrigger:hover {
+  background: var(--panel-soft);
+  color: var(--text);
+}
+.lockedDirectory {
+  padding: 5px 8px;
+  max-width: 240px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.directoryMenu,
+.modelMenu {
+  width: min(330px, calc(100vw - 24px));
+}
+.directoryMenu [role="option"],
+.modelMenu [role="option"] {
+  padding-left: var(--space-2);
+  padding-right: var(--space-8);
+}
+.directoryMenu [role="option"] > svg,
+.modelMenu [role="option"] > svg {
+  left: auto;
+  right: var(--space-2);
+}
+.menuFooter {
+  margin-top: var(--space-1);
+  padding: var(--space-1);
+  border-top: 1px solid var(--line);
+}
+.menuFooter .configureButton {
+  width: 100%;
+  justify-content: flex-start;
+  color: var(--primary);
+}
+@media (max-width: 600px) {
+  .modelTrigger,
+  .directoryTrigger,
+  .lockedDirectory {
+    max-width: 160px;
+  }
 }

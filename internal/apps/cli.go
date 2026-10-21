@@ -477,6 +477,32 @@ func (s *Service) cliSnapshot(id string) (record, error) {
 	}
 	return copyJSON(e.record), nil
 }
+
+func setCLIOperationError(r *record) {
+	r.LastErrorCode = r.CLI.Operation.ErrorCode
+	r.LastErrorHTTPStatus = 0
+	r.LastError = ""
+	if r.LastErrorCode != "" {
+		r.LastError = "CLI connector operation could not be completed; retry the operation."
+	}
+}
+
+func repairCancelledCLIError(r *record) bool {
+	if r.Kind != KindCLI || r.AgentID != "" || r.CLI == nil || r.CLI.Operation == nil {
+		return false
+	}
+	op := r.CLI.Operation
+	if op.Status != "cancelled" || !op.Settled || op.ErrorCode != "" || r.LastErrorCode != "" {
+		return false
+	}
+	if r.LastError == "" && r.LastErrorHTTPStatus == 0 {
+		return false
+	}
+	// Older versions saved a failure message even after cancellation recovered successfully.
+	setCLIOperationError(r)
+	return true
+}
+
 func (s *Service) executeCLI(id string) {
 	defer s.promoteQueuedCLI(id)
 	r, err := s.cliSnapshot(id)
@@ -528,6 +554,7 @@ func (s *Service) executeCLI(id string) {
 			op := r.CLI.Operation
 			op.Settled = settled
 			op.Status = "failed"
+			op.FailureStage = op.Stage
 			op.ErrorCode = "cli_operation_failed"
 			var commandErr *connectorcli.OperationError
 			if errors.As(err, &commandErr) {
@@ -548,8 +575,7 @@ func (s *Service) executeCLI(id string) {
 			}
 			op.URL = ""
 			op.Device = nil
-			r.LastErrorCode = op.ErrorCode
-			r.LastError = "CLI connector operation could not be completed; retry the operation."
+			setCLIOperationError(r)
 			if r.CLI.Completed == nil {
 				r.CLI.Completed = map[string]CLIOperation{}
 			}
@@ -567,8 +593,7 @@ func (s *Service) executeCLI(id string) {
 		op.URL = ""
 		op.Device = nil
 		op.ErrorCode = ""
-		r.LastErrorCode = ""
-		r.LastError = ""
+		setCLIOperationError(r)
 		if r.CLI.Completed == nil {
 			r.CLI.Completed = map[string]CLIOperation{}
 		}
@@ -599,6 +624,9 @@ func (s *Service) performCLI(ctx context.Context, id string) error {
 		return err
 	}
 	if op.Action == "disconnect" {
+		if err = s.editCLI(id, func(r *record) error { r.CLI.Operation.Stage = "stopping_workers"; return nil }); err != nil {
+			return err
+		}
 		if err = s.prepareMigrationDisconnect(ctx, id); err != nil {
 			return err
 		}

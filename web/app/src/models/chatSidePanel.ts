@@ -7,6 +7,7 @@ export type ChatSideTab =
   | { id: string; kind: "new" }
   | { id: string; kind: "files" }
   | { id: string; kind: "activity"; entryID?: string }
+  | { id: string; kind: "tasks" }
   | { id: string; kind: "browser"; url: string }
   | {
       id: string;
@@ -30,6 +31,7 @@ export type ChatSideTab =
 export type ChatSideState = {
   tabs: ChatSideTab[];
   activeID: string;
+  activePanel: "tools" | "members";
   open: boolean;
   agentID: string;
   directory: string;
@@ -37,7 +39,15 @@ export type ChatSideState = {
 };
 
 export function initialChatSideState(): ChatSideState {
-  return { tabs: [], activeID: "", open: false, agentID: "", directory: "", fileSource: "workspace" };
+  return {
+    tabs: [],
+    activeID: "",
+    activePanel: "tools",
+    open: false,
+    agentID: "",
+    directory: "",
+    fileSource: "workspace",
+  };
 }
 
 export function openChatSideTab(state: ChatSideState, tab: ChatSideTab): ChatSideState {
@@ -103,7 +113,7 @@ export function restoreChatSideState(value: string | null): ChatSideState {
       )
         continue;
       const tab = entry as ChatSideTab;
-      if (tab.kind === "new" || tab.kind === "files" || tab.kind === "activity") tabs.push(tab);
+      if (tab.kind === "new" || tab.kind === "files" || tab.kind === "activity" || tab.kind === "tasks") tabs.push(tab);
       else if (tab.kind === "browser" && typeof tab.url === "string") {
         const url = tab.url ? normalizeBrowserURL(tab.url) : "";
         if (url !== null) tabs.push({ ...tab, url });
@@ -139,6 +149,7 @@ export function restoreChatSideState(value: string | null): ChatSideState {
     return {
       tabs,
       activeID: tabs.some((tab) => tab.id === data.activeID) ? String(data.activeID) : (tabs[0]?.id ?? ""),
+      activePanel: data.activePanel === "members" ? "members" : "tools",
       open: data.open === true,
       agentID: typeof data.agentID === "string" ? data.agentID : "",
       directory: typeof data.directory === "string" ? data.directory : "",

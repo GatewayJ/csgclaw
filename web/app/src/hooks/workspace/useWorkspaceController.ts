@@ -1,3 +1,4 @@
+import { pathForNewAgentTask, pathForNewTeamTask } from "@/models/routing";
 import { bindAgentViews } from "./bindings/agent";
 import {
   initialsForIdentity,
@@ -270,6 +271,7 @@ export function useWorkspaceController(): WorkspaceController {
     modelProvidersLoaded,
     openCSGAuthGuard,
     onAgentDeleted: handleAgentDeleted,
+    onBrowseTemplates: () => navigate("/agents?tab=templates"),
     onTemplatePublished: hub.showPublishedTemplate,
     profileDetailAgentID: conversationProfileDetailAgentID,
     refreshHubTemplates,
@@ -277,7 +279,6 @@ export function useWorkspaceController(): WorkspaceController {
     refreshWorkspaceModelProviders,
     refreshWorkspaceBootstrap,
     refreshWorkspaceBootstrapConfig,
-    refreshWorkspaceHubTemplates,
     refreshWorkspaceManagerProfile,
     rooms,
     navigatePane,
@@ -832,6 +833,9 @@ export function useWorkspaceController(): WorkspaceController {
     activeRoom: conversation.activeChannel,
     detailAgentID: conversationProfileDetailAgentID,
     onClose: closeConversationAgentDetail,
+    onNewTask: (item) => {
+      if (item?.id) navigate(pathForNewAgentTask(item.id));
+    },
   });
   const mainPanelHasThread = Boolean(conversation.activeThreadRootID && conversation.selectedConversation);
 
@@ -908,8 +912,9 @@ export function useWorkspaceController(): WorkspaceController {
       collapsedWorkspaceGroups,
       showUpgradeControls: bootstrapConfig?.show_upgrade !== false,
       onToggleWorkspaceGroup: shell.toggleWorkspaceGroup,
-      onCreateRoom: () => conversation.openCreateRoomModal(),
+      onCreateRoom: () => navigate("/new"),
       onCreateAgent: agent.openCreateAgentModal,
+      onCreateCustomAgent: agent.openCreateCustomAgentModal,
       onCreateModelProvider: modelProviderCreation.open,
       onCreateNotificationParticipant: agent.openCreateNotificationParticipantModal,
       onCreateTeam: async (payload: CreateTeamPayload) => {
@@ -928,12 +933,17 @@ export function useWorkspaceController(): WorkspaceController {
       onSelectTeamSection: selectTeamSection,
       onSelectTask: selectTasks,
       onSelectTaskBoardView: task.setTaskBoardView,
-      onOpenCreateTask: () => conversation.openCreateRoomModal(),
+      onOpenCreateTask: () => navigate("/new"),
       onOpenCreateScheduledTask: task.openCreateScheduledTaskModal,
       onViewTaskDetails: task.openParentTaskDetail,
       onSelectTeam: selectTeam,
       agentsError: agent.agentsDisplayError,
       onSelectConversation: selectConversationAndCloseSidePanels,
+      onSelectSearchMatch: (id, message) => {
+        if (!closeConversationAgentDetail()) return;
+        selectConversationAndCloseThreadPanel(id);
+        conversation.navigateToSearchMatch(id, message);
+      },
       onSelectThread: openThreadInConversation,
       onPreviewUser: profilePreview.openParticipantPreview,
       onSelectAgent: selectAgent,
@@ -1020,6 +1030,14 @@ export function useWorkspaceController(): WorkspaceController {
     },
     conversationViewProps: {
       ...conversation.conversationViewProps,
+      memberPanelProps: conversation.conversationViewProps.memberPanelProps
+        ? {
+            ...conversation.conversationViewProps.memberPanelProps,
+            onPreviewUser: profilePreview.openParticipantPreview,
+            onManageExternalMessages: () =>
+              navigate({ search: settingsDialogSearch(location.search, "external") }, { replace: true }),
+          }
+        : null,
       onNewTask: (agentID?: string, configuration?: TaskConfiguration) =>
         navigate(agentID ? `/new?agent=${encodeURIComponent(agentID)}` : "/new", { state: { configuration } }),
       agents: agent.agentItems,
@@ -1030,7 +1048,7 @@ export function useWorkspaceController(): WorkspaceController {
     },
     taskViewProps: {
       ...task.taskViewProps,
-      onOpenCreateTaskModal: () => conversation.openCreateRoomModal(),
+      onOpenCreateTaskModal: () => navigate("/new"),
     },
     teamViewProps: {
       t,
@@ -1041,15 +1059,14 @@ export function useWorkspaceController(): WorkspaceController {
       tasks: selectedTeamTasks,
       teamActionBusy: agent.agentViewProps.teamActionBusy,
       teamActionError: agent.agentViewProps.teamActionError,
+      onStartCollaboration: (team) => navigate(pathForNewTeamTask(team.id)),
       onManageMembers: agent.openManageTeamMembers,
       onDeleteTeam: agent.deleteTeam,
       onSelectAgent: selectAgent,
       onSelectTask: selectTasks,
     },
     profilePreviewProps: profilePreview.profilePreviewProps,
-    createRoomModalProps: conversation.createRoomModalProps,
     createTeamModalProps: agent.createTeamModalProps,
-    inviteMembersModalProps: conversation.inviteMembersModalProps,
     upgradeModalProps: upgrade.upgradeModalProps,
     configModalProps: configSettings.configModalProps,
     createModelProviderModalProps: modelProviderCreation.modalProps,

@@ -1,12 +1,10 @@
-import { DiagnosticHeaderAction } from "@/components/business/TurnDiagnostics";
 import { memo } from "react";
 import type { ReactNode, RefObject } from "react";
 import { AgentAvatarContent } from "@/components/business/AgentAvatar";
 import { Button, Tooltip, PanelHeader } from "@/components/ui";
 import { AddUserIcon, TrashIcon, UsersIcon, WrenchIcon } from "@/components/ui/Icons";
-import type { AgentLike } from "@/models/agents";
 import type { IMConversation, IMUser, TranslateFn } from "@/models/conversations";
-import { isDirectConversation, resolveAgentForUser } from "@/models/conversations";
+import { isDirectConversation, normalizeComparable } from "@/models/conversations";
 import { avatarFallbackText } from "@/shared/avatar";
 import { localizeRole } from "@/shared/i18n";
 import type { BooleanStateSetter } from "./types";
@@ -18,7 +16,6 @@ export type ConversationHeaderProps = {
   description?: string;
   headerAccessory?: ReactNode;
   inviteActionLabel: string;
-  agents?: AgentLike[];
   memberMenuRef?: RefObject<HTMLDivElement | null>;
   onClearMessages: () => void;
   onDeleteRoom: () => void;
@@ -30,10 +27,12 @@ export type ConversationHeaderProps = {
   selectedMessageCount: number;
   selectedVisibleMessageCount?: number;
   showChannelTools: boolean;
+  showChannelToolsAction?: boolean;
   showInviteAction: boolean;
   showMemberList?: boolean;
   showMemberListAction?: boolean;
   showToolCalls: boolean;
+  memberManagementOpen?: boolean;
   t: TranslateFn;
 };
 
@@ -44,15 +43,16 @@ export const ConversationHeader = memo(function ConversationHeader({
   description,
   headerAccessory,
   inviteActionLabel,
-  agents = [],
   memberMenuRef,
   selectedMessageCount,
   selectedVisibleMessageCount,
   showChannelTools,
+  showChannelToolsAction = true,
   showInviteAction,
   showMemberList = false,
   showMemberListAction = true,
   showToolCalls,
+  memberManagementOpen = false,
   t,
   onClearMessages,
   onDeleteRoom,
@@ -65,6 +65,12 @@ export const ConversationHeader = memo(function ConversationHeader({
   const visibleCount = selectedVisibleMessageCount ?? selectedMessageCount;
   const messageCountLabel =
     visibleCount === selectedMessageCount ? String(selectedMessageCount) : `${visibleCount}/${selectedMessageCount}`;
+  const directAgentName = isDirectConversation(conversation)
+    ? conversationMembers
+        .find((user) => ["worker", "agent", "manager"].includes(normalizeComparable(user.role)))
+        ?.name?.trim()
+    : "";
+  const headerName = isDirectConversation(conversation) ? directAgentName : conversation.title;
 
   return (
     <PanelHeader className="chat-header">
@@ -73,10 +79,18 @@ export const ConversationHeader = memo(function ConversationHeader({
           <div className="chat-title-row">
             <div className="chat-title-group">
               <div className="chat-kicker">
-                <span>{isDirectConversation(conversation) ? t("directMessagesSection") : t("conversationLabel")}</span>
-                <Tooltip content={messageCountLabel}>
-                  <strong>{messageCountLabel}</strong>
-                </Tooltip>
+                {headerName ? (
+                  <span className="truncate" title={headerName}>
+                    {headerName}
+                  </span>
+                ) : (
+                  <>
+                    <span>{isDirectConversation(conversation) ? t("directMessagesSection") : t("iaRoomsTab")}</span>
+                    <Tooltip content={messageCountLabel}>
+                      <strong>{messageCountLabel}</strong>
+                    </Tooltip>
+                  </>
+                )}
               </div>
               <Tooltip
                 content={conversation.title}
@@ -138,58 +152,6 @@ export const ConversationHeader = memo(function ConversationHeader({
             </div>
           </div>
           <div className="chat-title-actions">
-            {headerAccessory}
-            <DiagnosticHeaderAction
-              room={conversation.id}
-              agents={conversationMembers
-                .map((user) => resolveAgentForUser(agents, user))
-                .filter((agent): agent is AgentLike => Boolean(agent))}
-              t={t}
-            />
-            <div ref={channelToolsRef} className="header-menu tools-menu">
-              <Tooltip content={t("channelTools")} contentProps={{ side: "bottom" }}>
-                <Button
-                  className="icon-button"
-                  active={showChannelTools}
-                  iconOnly
-                  size="lg"
-                  variant="secondaryGray"
-                  aria-label={t("channelTools")}
-                  aria-expanded={showChannelTools}
-                  onClick={() => {
-                    onToggleChannelTools((value) => !value);
-                    onToggleMemberList?.(false);
-                  }}
-                >
-                  <span className="icon-button-mark">
-                    <WrenchIcon />
-                  </span>
-                </Button>
-              </Tooltip>
-              {showChannelTools ? (
-                <div className="header-popover tools-popover">
-                  <div className="header-popover-title">{t("channelTools")}</div>
-                  <Button className="tool-menu-row" onClick={() => onToggleToolCalls((value) => !value)}>
-                    <span>{showToolCalls ? t("toggleToolCallsHide") : t("toggleToolCallsShow")}</span>
-                    <strong>{showToolCalls ? t("enabled") : t("disabled")}</strong>
-                  </Button>
-                  <Button variant="outlineDanger" className="tool-menu-row danger" onClick={onClearMessages}>
-                    <span>{t("clearRoomMessages")}</span>
-                    <span className="tool-menu-icon" aria-hidden="true">
-                      <TrashIcon />
-                    </span>
-                  </Button>
-                  {!isDirectConversation(conversation) ? (
-                    <Button variant="outlineDanger" className="tool-menu-row danger" onClick={onDeleteRoom}>
-                      <span>{t("deleteRoom")}</span>
-                      <span className="tool-menu-icon" aria-hidden="true">
-                        <TrashIcon />
-                      </span>
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
             {showInviteAction ? (
               <Tooltip content={inviteActionLabel} contentProps={{ side: "bottom" }}>
                 <Button
@@ -198,6 +160,8 @@ export const ConversationHeader = memo(function ConversationHeader({
                   size="lg"
                   variant="secondaryGray"
                   aria-label={inviteActionLabel}
+                  active={memberManagementOpen}
+                  aria-pressed={memberManagementOpen}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -209,6 +173,53 @@ export const ConversationHeader = memo(function ConversationHeader({
                   </span>
                 </Button>
               </Tooltip>
+            ) : null}
+            {headerAccessory}
+            {showChannelToolsAction ? (
+              <div ref={channelToolsRef} className="header-menu tools-menu">
+                <Tooltip content={t("channelTools")} contentProps={{ side: "bottom" }}>
+                  <Button
+                    className="icon-button"
+                    active={showChannelTools}
+                    iconOnly
+                    size="lg"
+                    variant="secondaryGray"
+                    aria-label={t("channelTools")}
+                    aria-expanded={showChannelTools}
+                    onClick={() => {
+                      onToggleChannelTools((value) => !value);
+                      onToggleMemberList?.(false);
+                    }}
+                  >
+                    <span className="icon-button-mark">
+                      <WrenchIcon />
+                    </span>
+                  </Button>
+                </Tooltip>
+                {showChannelTools ? (
+                  <div className="header-popover tools-popover">
+                    <div className="header-popover-title">{t("channelTools")}</div>
+                    <Button className="tool-menu-row" onClick={() => onToggleToolCalls((value) => !value)}>
+                      <span>{showToolCalls ? t("toggleToolCallsHide") : t("toggleToolCallsShow")}</span>
+                      <strong>{showToolCalls ? t("enabled") : t("disabled")}</strong>
+                    </Button>
+                    <Button variant="outlineDanger" className="tool-menu-row danger" onClick={onClearMessages}>
+                      <span>{t("clearRoomMessages")}</span>
+                      <span className="tool-menu-icon" aria-hidden="true">
+                        <TrashIcon />
+                      </span>
+                    </Button>
+                    {!isDirectConversation(conversation) ? (
+                      <Button variant="outlineDanger" className="tool-menu-row danger" onClick={onDeleteRoom}>
+                        <span>{t("deleteRoom")}</span>
+                        <span className="tool-menu-icon" aria-hidden="true">
+                          <TrashIcon />
+                        </span>
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </div>

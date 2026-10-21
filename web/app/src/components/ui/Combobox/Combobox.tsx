@@ -17,6 +17,8 @@ export type ComboboxOption = {
   description?: ReactNode;
   disabled?: boolean;
   separatorAfter?: boolean;
+  group?: string;
+  alwaysVisible?: boolean;
 };
 
 export type ComboboxProps = {
@@ -99,9 +101,22 @@ export function Combobox({
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return normalized
-      ? options.filter((option) => option.value !== "" && searchText(option).toLocaleLowerCase().includes(normalized))
+      ? options.filter(
+          (option) =>
+            option.alwaysVisible ||
+            (option.value !== "" && searchText(option).toLocaleLowerCase().includes(normalized)),
+        )
       : options;
   }, [options, query]);
+  const groups = useMemo(() => {
+    const result: { name?: string; items: { option: ComboboxOption; index: number }[] }[] = [];
+    filtered.forEach((option, index) => {
+      const name = option.group?.trim() || undefined;
+      if (!result.length || result.at(-1)?.name !== name) result.push({ name, items: [] });
+      result.at(-1)?.items.push({ option, index });
+    });
+    return result;
+  }, [filtered]);
   const enabled = loading ? [] : filtered.filter((option) => !option.disabled);
   const activeValue = enabled.some((option) => option.value === highlightedValue)
     ? highlightedValue
@@ -330,43 +345,57 @@ export function Combobox({
               {loadingLabel}
             </div>
           ) : filtered.length ? (
-            filtered.map((option, index) => (
-              <Fragment key={option.value}>
-                <div
-                  id={`${listId}-${index}`}
-                  role="option"
-                  aria-selected={option.value === selectedValue}
-                  aria-disabled={option.disabled || undefined}
-                  data-highlighted={option.value === activeValue ? "" : undefined}
-                  data-disabled={option.disabled ? "" : undefined}
-                  className={classNames(
-                    selectionStyles["csg-select-item"],
-                    "relative flex w-full items-center rounded-md py-2 pr-3 pl-8",
-                  )}
-                  onPointerMove={() => {
-                    if (!option.disabled) setHighlightedValue(option.value);
-                  }}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => commit(option)}
-                >
-                  {option.value === selectedValue ? (
-                    <Check
-                      className={classNames(selectionStyles["csg-select-item-indicator"], "absolute left-2")}
-                      size={16}
-                      aria-hidden="true"
-                    />
-                  ) : null}
-                  <span className={selectionStyles["csg-select-item-copy"]}>
-                    <span className={styles["csg-combobox-label"]}>{option.label}</span>
-                    {option.description ? (
-                      <span className={selectionStyles["csg-select-item-description"]}>{option.description}</span>
-                    ) : null}
-                  </span>
-                </div>
-                {option.separatorAfter && index < filtered.length - 1 ? (
-                  <div role="separator" className={classNames(selectionStyles["csg-select-separator"], "my-1")} />
+            groups.map((group, groupIndex) => (
+              <div
+                key={`${group.name ?? "ungrouped"}-${groupIndex}`}
+                role={group.name ? "group" : "presentation"}
+                aria-label={group.name}
+                className={styles["csg-combobox-group"]}
+              >
+                {group.name ? (
+                  <div className={styles["csg-combobox-group-title"]} aria-hidden="true">
+                    {group.name}
+                  </div>
                 ) : null}
-              </Fragment>
+                {group.items.map(({ option, index }) => (
+                  <Fragment key={option.value}>
+                    <div
+                      id={`${listId}-${index}`}
+                      role="option"
+                      aria-selected={option.value === selectedValue}
+                      aria-disabled={option.disabled || undefined}
+                      data-highlighted={option.value === activeValue ? "" : undefined}
+                      data-disabled={option.disabled ? "" : undefined}
+                      className={classNames(
+                        selectionStyles["csg-select-item"],
+                        "relative flex w-full items-center rounded-md py-2 pr-3 pl-8",
+                      )}
+                      onPointerMove={() => {
+                        if (!option.disabled) setHighlightedValue(option.value);
+                      }}
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => commit(option)}
+                    >
+                      {option.value === selectedValue ? (
+                        <Check
+                          className={classNames(selectionStyles["csg-select-item-indicator"], "absolute left-2")}
+                          size={16}
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      <span className={selectionStyles["csg-select-item-copy"]}>
+                        <span className={styles["csg-combobox-label"]}>{option.label}</span>
+                        {option.description ? (
+                          <span className={selectionStyles["csg-select-item-description"]}>{option.description}</span>
+                        ) : null}
+                      </span>
+                    </div>
+                    {option.separatorAfter && index < filtered.length - 1 ? (
+                      <div role="separator" className={classNames(selectionStyles["csg-select-separator"], "my-1")} />
+                    ) : null}
+                  </Fragment>
+                ))}
+              </div>
             ))
           ) : (
             <div className={selectionStyles["csg-select-empty"]} role="status">

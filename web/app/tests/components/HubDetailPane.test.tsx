@@ -20,7 +20,7 @@ function t(key: string, params: Record<string, string | number> = {}) {
   const messages: Record<string, string> = {
     cancel: "Cancel",
     close: "Close",
-    createAgent: "Create",
+    iaTemplateCreateAgent: "Create agent",
     agentPublishCommunity: "Publish to community",
     resourcesTemplatePublished: "Published",
     resourcesTemplatePublishedOnHub: "Published on AgenticHub",
@@ -720,6 +720,27 @@ async function openMCPDetail(user: ReturnType<typeof userEvent.setup>, name = /g
 }
 
 describe("HubDetailPane", () => {
+  it("shows the template display name in the list and omits the ID subtitle", async () => {
+    const user = userEvent.setup();
+    const selected: HubTemplate = {
+      ...template,
+      id: "local.internal-template-id",
+      name: "internal-template-id",
+      display_name: "展示名称",
+      namespace: "alice",
+      description: "",
+      source: { kind: "local" },
+    };
+    renderHubDetailPane("template", { selectedTemplate: selected, templates: [selected] });
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    const card = screen.getByRole("button", { name: /展示名称/ });
+    expect(card).not.toHaveTextContent("alice/展示名称");
+    await user.click(card);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "alice/展示名称" })).toBeInTheDocument();
+    expect(within(dialog).queryByText("local.internal-template-id")).not.toBeInTheDocument();
+  });
+
   it.each(["local", "remote"] as const)("reveals a selected %s template in My templates", (kind) => {
     const selected = {
       ...template,
@@ -791,7 +812,7 @@ describe("HubDetailPane", () => {
     }
     render(<Harness />);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Create" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
     const name = await screen.findByRole("textbox", { name: "Agent name" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(onCreate).toHaveBeenCalledWith(selectedTemplate);
@@ -1194,7 +1215,7 @@ describe("HubDetailPane", () => {
       },
     });
     await openTemplateDetail(user, /generic-assistant-openclaw/i);
-    expect(screen.queryByRole("button", { name: "Create" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create agent" })).not.toBeInTheDocument();
   });
 
   it("allows agent creation for remote OpenClaw templates", async () => {
@@ -1209,7 +1230,7 @@ describe("HubDetailPane", () => {
     });
 
     await openTemplateDetail(user, /feishu-assistant/i);
-    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create agent" })).toBeInTheDocument();
   });
 
   it.each([false, true])("groups template details into working tabs (inline: %s)", async (inlineTemplateDetail) => {

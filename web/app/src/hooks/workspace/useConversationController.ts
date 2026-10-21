@@ -15,12 +15,12 @@ import {
 import { effectiveConversationProfile } from "@/models/taskConfiguration";
 import { composerFileReferences } from "@/models/composer";
 import { useSlashSelection } from "./useSlashSelection";
+import { useSearchMessageNavigation } from "./useSearchMessageNavigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { apiErrorCode, errorMessage } from "@/api/client";
 import {
   clearRoomMessagesRequest,
-  createRoomRequest,
   deleteRoomRequest,
   fetchThreadRequest,
   inviteRoomUsersRequest,
@@ -38,7 +38,6 @@ import {
   conversationThreadViews,
   isDirectConversation,
   RoomTypes,
-  type RoomType,
   isThreadReply,
   isToolCallMessage,
   localIdentitiesMatch,
@@ -76,6 +75,10 @@ import {
 import { WorkspacePaneTypes } from "@/models/routing";
 import {
   agentOfflineReasonLabel,
+  isAgentRestartNeeded,
+  agentSandboxEnabled,
+  isAgentProfileDraftComplete,
+  agentToDraft,
   agentProfileConfig,
   agentRuntimeState,
   isAgentLifecycleRunning,
@@ -109,6 +112,7 @@ import { useAttachmentWarning } from "./useAttachmentWarning";
 import type { UseConversationControllerArgs } from "./types";
 import { messageListScrollKey, useMessageListAutoScroll } from "./useMessageListAutoScroll";
 import { handleSlashPickerNavigation } from "@/components/business/ConversationPane";
+import { useChatSidePanel } from "@/components/business/ChatSidePanel";
 import { modelProviderConfigUsesOpenCSG } from "@/models/modelProviders";
 import { isOpenCSGRuntimeAuthenticationError } from "./useOpenCSGAuthGuard";
 
@@ -168,13 +172,6 @@ function messageFingerprint(
     attachments.map(({ file }) => [file.name, file.size, file.lastModified, file.type]),
   ]);
 }
-
-type OpenCreateRoomOptions = {
-  description?: string;
-  lockedMemberIDs?: string[];
-  preselectedMemberIDs?: string[];
-  title?: string;
-};
 
 function clearThreadDraftsForConversation(current: DraftsByThreadKey, conversationID: string): DraftsByThreadKey {
   const prefix = `${conversationID}:`;
@@ -494,17 +491,17 @@ export function useConversationController({
   const [threadSlashPickerDismissed, setThreadSlashPickerDismissed] = useState(false);
   const [threadSlashIndex, setThreadSlashIndex] = useState(0);
   const [threadSlashQuery, setThreadSlashQuery] = useState<string | null>(null);
-  const [showCreateRoom, setShowCreateRoom] = useState(false);
-  const [newRoomType, setNewRoomType] = useState<RoomType>(RoomTypes.onDemand);
-  const roomManagerID = data?.users.find((user) => user.role?.toLowerCase() === "manager")?.id ?? "";
-  const [showInvite, setShowInvite] = useState(false);
+  const { state: sidePanelState, patch: patchSidePanel } = useChatSidePanel(
+    data?.current_user_id ?? "",
+    activeConversationId,
+  );
   const [showMemberList, setShowMemberList] = useState(false);
   const [showChannelTools, setShowChannelTools] = useState(false);
-  const [roomTitle, setRoomTitle] = useState("");
-  const [roomDescription, setRoomDescription] = useState("");
-  const [roomMemberIDs, setRoomMemberIDs] = useState<string[]>([]);
-  const [lockedRoomMemberIDs, setLockedRoomMemberIDs] = useState<string[]>([]);
   const [inviteUserIDs, setInviteUserIDs] = useState<string[]>([]);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const memberMutationRef = useRef(false);
+  const activeRoomIDRef = useRef(activeConversationId);
+  activeRoomIDRef.current = activeConversationId;
   const [submitError, setSubmitError] = useState("");
   const [memberActionBusyID, setMemberActionBusyID] = useState("");
   const [memberActionError, setMemberActionError] = useState("");
@@ -608,6 +605,9 @@ export function useConversationController({
   );
   const roomCount = rooms.length;
   const selectedConversation = activePane.type === WorkspacePaneTypes.conversation ? activeConversation : null;
+  const showInvite = Boolean(
+    selectedConversation && !isDirectConversation(selectedConversation) && sidePanelState.activePanel === "members",
+  );
   const activeChannel =
     selectedConversation && !isDirectConversation(selectedConversation) ? selectedConversation : null;
   const selectedConversationID = selectedConversation?.id ?? "";
@@ -728,7 +728,17 @@ export function useConversationController({
   }
   function activeConversationAgentOfflineMessage(segments: readonly ComposerSegment[]): string {
     const recipients = recipientAgentsForSegments(segments);
-    if (recipients.length === 0 || recipients.some(isAgentLifecycleRunning)) return "";
+    // Let the backend reconcile pending Codex configuration under its lifecycle
+    // gate. It still owns explicit-stop intent and connector readiness checks.
+    const canRecover = recipients.some(
+      (agent) =>
+        agentRuntimeKind(agent) === "codex" &&
+        !agentSandboxEnabled(agent) &&
+        isAgentRestartNeeded(agent) &&
+        isAgentProfileDraftComplete(agentToDraft(agent)) &&
+        ["failed", "stopped", "exited", "unknown", "profile_incomplete"].includes(agentRuntimeState(agent)),
+    );
+    if (recipients.length === 0 || recipients.some(isAgentLifecycleRunning) || canRecover) return "";
     const agent = recipients[0];
     const name = String(agent.name || agent.id || "").trim();
     const reason = agentOfflineReasonLabel(agentRuntimeState(agent), t);
@@ -977,16 +987,6 @@ export function useConversationController({
   }, [managerProfileIncomplete, setComposerError]);
 
   useEffect(() => {
-    if (!showCreateRoom) {
-      setRoomTitle("");
-      setRoomDescription("");
-      setRoomMemberIDs([]);
-      setLockedRoomMemberIDs([]);
-      setSubmitError("");
-    }
-  }, [showCreateRoom]);
-
-  useEffect(() => {
     if (!showInvite) {
       setInviteUserIDs([]);
       setSubmitError("");
@@ -996,12 +996,10 @@ export function useConversationController({
   useEffect(() => {
     setShowMemberList(false);
     setShowChannelTools(false);
-  }, [activeConversationId, activePane.type]);
-
-  useEffect(() => {
-    setMemberActionBusyID("");
+    setInviteUserIDs([]);
+    setSubmitError("");
     setMemberActionError("");
-  }, [activeConversationId]);
+  }, [activeConversationId, activePane.type, data?.current_user_id]);
 
   useEffect(() => {
     if (!showMemberList) {
@@ -1109,7 +1107,7 @@ export function useConversationController({
   }, [activeConversationId, draftSegments, t]);
 
   useEffect(() => {
-    if (!activeConversationId || showCreateRoom || showInvite) {
+    if (!activeConversationId || showInvite) {
       return;
     }
     const editor = editorRef.current;
@@ -1123,7 +1121,7 @@ export function useConversationController({
       editor.focus();
       placeCaretAtEnd(editor);
     });
-  }, [activeConversationId, showCreateRoom, showInvite]);
+  }, [activeConversationId, showInvite]);
 
   async function sendMessage(): Promise<void> {
     const eligibilityError = recipientConfigurationError(draftSegments) || recipientAuthenticationError(draftSegments);
@@ -1333,6 +1331,13 @@ export function useConversationController({
     }
   }
 
+  const navigateToSearchMatch = useSearchMessageNavigation({
+    active: messageListActive && activePane.type === WorkspacePaneTypes.conversation && Boolean(activeConversation),
+    roomID: activeConversationId,
+    messageListRef,
+    openThread: restoreThread,
+  });
+
   async function refreshThreadView(selection: ThreadSelection) {
     const view = await fetchThreadRequest(selection.roomID, selection.rootID);
     if (activeThreadSelectionRef.current !== selection) {
@@ -1458,94 +1463,64 @@ export function useConversationController({
     selectConversation(id);
   }
 
-  async function createRoom(): Promise<void> {
-    if (!data?.current_user_id || !roomTitle.trim()) {
-      return;
-    }
-
-    setSubmitError("");
-    const memberIDs = roomMemberIDs.filter((id): id is string => Boolean(id && id !== data.current_user_id));
-    try {
-      const created = await createRoomRequest({
-        title: roomTitle,
-        type: newRoomType,
-        manager_id: newRoomType === RoomTypes.onDemand ? roomManagerID : undefined,
-        description: roomDescription,
-        creator_id: data.current_user_id,
-        member_ids: memberIDs,
-        locale,
-      });
-      setBootstrapData((current) => upsertConversationInData(current, created));
-      selectConversation(created.id);
-      setComposerError("");
-      setShowCreateRoom(false);
-    } catch (err) {
-      setSubmitError(localizeAPIError(err, t, errorMessage(err, "")));
-    }
-  }
-
-  function openCreateRoomModal(options: OpenCreateRoomOptions = {}) {
-    if (!data) {
-      return;
-    }
-    setNewRoomType(RoomTypes.onDemand);
-    const lockedIDs = Array.from(
-      new Set((options.lockedMemberIDs ?? [data.current_user_id]).filter((id): id is string => Boolean(id))),
-    );
-    const selectedIDs = Array.from(
-      new Set((options.preselectedMemberIDs ?? lockedIDs).filter((id): id is string => Boolean(id))),
-    );
-    setRoomTitle(options.title ?? "");
-    setRoomDescription(options.description ?? "");
-    setRoomMemberIDs(Array.from(new Set([...selectedIDs, ...(roomManagerID ? [roomManagerID] : [])])));
-    setLockedRoomMemberIDs(lockedIDs);
-    setSubmitError("");
-    setShowInvite(false);
-    setShowCreateRoom(true);
+  function setShowInvite(open: boolean) {
+    patchSidePanel({ activePanel: open ? "members" : "tools" });
   }
 
   function handleInviteAction() {
-    if (!activeConversation) {
-      return;
-    }
-    if (isDirectConversation(activeConversation)) {
-      openCreateRoomModal({
-        preselectedMemberIDs: activeConversation.members,
-        lockedMemberIDs: activeConversation.members,
-      });
-      return;
-    }
+    if (!activeConversation || isDirectConversation(activeConversation)) return;
     setSubmitError("");
+    setMemberActionError("");
     setInviteUserIDs([]);
-    setShowInvite(true);
+    setShowInvite(!showInvite);
   }
 
   async function inviteUsers(): Promise<void> {
-    if (!data?.current_user_id || !activeConversation || inviteUserIDs.length === 0) {
-      return;
-    }
+    await addRoomMembers(inviteUserIDs, { closePanel: true });
+  }
 
+  async function addRoomMembers(
+    userIDs: string[],
+    options: { closePanel: boolean; busyMemberID?: string },
+  ): Promise<void> {
+    if (!data?.current_user_id || !activeConversation || userIDs.length === 0 || memberMutationRef.current) return;
+    const roomID = activeConversation.id;
+    memberMutationRef.current = true;
+    setInviteBusy(options.closePanel);
+    setMemberActionBusyID(options.busyMemberID ?? "");
     setSubmitError("");
+    setMemberActionError("");
     try {
       const updated = await inviteRoomUsersRequest({
-        room_id: activeConversation.id,
+        room_id: roomID,
         inviter_id: data.current_user_id,
-        user_ids: inviteUserIDs,
+        user_ids: userIDs,
         locale,
       });
       setBootstrapData((current) => upsertConversationInData(current, updated));
-      setComposerError("");
-      setShowInvite(false);
+      if (activeRoomIDRef.current === roomID) {
+        setComposerError("");
+        if (options.closePanel) setShowInvite(false);
+      }
     } catch (err) {
-      setSubmitError(localizeAPIError(err, t, errorMessage(err, "")));
+      if (activeRoomIDRef.current === roomID) {
+        const localized = localizeAPIError(err, t, errorMessage(err, ""));
+        if (options.busyMemberID) setMemberActionError(localized);
+        else setSubmitError(localized);
+      }
+    } finally {
+      memberMutationRef.current = false;
+      setInviteBusy(false);
+      setMemberActionBusyID("");
     }
   }
 
   async function removeRoomMember(memberID: string): Promise<void> {
-    if (!data?.current_user_id || !activeConversation || !memberID) {
+    if (!data?.current_user_id || !activeConversation || !memberID || memberMutationRef.current) {
       return;
     }
-
+    const roomID = activeConversation.id;
+    memberMutationRef.current = true;
     setMemberActionBusyID(memberID);
     setMemberActionError("");
     try {
@@ -1556,14 +1531,19 @@ export function useConversationController({
         locale,
       });
       setBootstrapData((current) => upsertConversationInData(current, updated));
-      setComposerError("");
+      if (activeRoomIDRef.current === roomID) setComposerError("");
     } catch (err) {
       const localized = localizeAPIError(err, t, errorMessage(err, ""));
-      setMemberActionError(localized);
-      throw err;
+      if (activeRoomIDRef.current === roomID) setMemberActionError(localized);
     } finally {
+      memberMutationRef.current = false;
       setMemberActionBusyID("");
     }
+  }
+
+  async function changeExternalMembership(memberID: string, connected: boolean): Promise<void> {
+    if (connected) await addRoomMembers([memberID], { closePanel: false, busyMemberID: memberID });
+    else await removeRoomMember(memberID);
   }
 
   async function deleteRoom(roomID: string): Promise<void> {
@@ -1936,6 +1916,10 @@ export function useConversationController({
     directMessages,
     handleRealtimeEvent,
     openThreadInConversation,
+    navigateToSearchMatch: (roomID: string, message: IMMessage) => {
+      if (isToolCallMessage(message)) setShowToolCalls(true);
+      navigateToSearchMatch(roomID, message);
+    },
     roomCount,
     selectedConversation,
     selectedMessageCount,
@@ -1945,8 +1929,27 @@ export function useConversationController({
     usersById,
     visibleMessages,
     clearComposerError,
-    openCreateRoomModal,
     conversationViewProps: {
+      memberPanelProps:
+        showInvite && data && !isDirectConversation(activeConversation)
+          ? {
+              t,
+              agents,
+              candidates: inviteCandidates,
+              members: activeConversationMembers,
+              currentUserID: data.current_user_id || "",
+              inviteUserIDs,
+              inviteBusy,
+              memberActionBusyID,
+              memberActionError,
+              onRemoveMember: removeRoomMember,
+              onExternalMembershipChange: changeExternalMembership,
+              onInviteUserIDsChange: setInviteUserIDs,
+              submitError,
+              onClose: () => setShowInvite(false),
+              onInvite: inviteUsers,
+            }
+          : null,
       conversation: selectedConversation,
       visibleMessages,
       currentUserID: data?.current_user_id,
@@ -2078,52 +2081,6 @@ export function useConversationController({
       },
       onSetThreadSlashIndex: setThreadSlashIndex,
     },
-    createRoomModalProps:
-      showCreateRoom && data
-        ? {
-            t,
-            roomTitle,
-            onRoomTitleChange: setRoomTitle,
-            roomDescription,
-            onRoomDescriptionChange: setRoomDescription,
-            candidates: data.users,
-            roomMemberIDs,
-            lockedRoomMemberIDs:
-              newRoomType === RoomTypes.onDemand && roomManagerID
-                ? [...lockedRoomMemberIDs, roomManagerID]
-                : lockedRoomMemberIDs,
-            onRoomMemberIDsChange: setRoomMemberIDs,
-            roomType: newRoomType,
-            managerAvailable: Boolean(roomManagerID),
-            onRoomTypeChange: (type: RoomType) => {
-              setNewRoomType(type);
-              if (type === RoomTypes.onDemand && roomManagerID)
-                setRoomMemberIDs((current) => Array.from(new Set([...current, roomManagerID])));
-            },
-            submitError,
-            onClose: () => setShowCreateRoom(false),
-            onCreate: createRoom,
-          }
-        : null,
-    inviteMembersModalProps:
-      showInvite && data
-        ? {
-            t,
-            candidates: inviteCandidates,
-            members: activeConversationMembers,
-            currentUserID: data.current_user_id || "",
-            allowMemberRemoval: !isDirectConversation(activeConversation),
-            inviteUserIDs,
-            memberActionBusyID,
-            memberActionError,
-            onRemoveMember: removeRoomMember,
-            onClearMemberActionError: clearMemberActionError,
-            onInviteUserIDsChange: setInviteUserIDs,
-            submitError,
-            onClose: () => setShowInvite(false),
-            onInvite: inviteUsers,
-          }
-        : null,
   };
 }
 
@@ -2157,7 +2114,8 @@ export function buildSlashPickerState(input: SlashPickerStateInput): SlashPicker
     active: true,
     candidates: [
       ...builtinSlashCommandNames
-        .filter((name) => fuzzySkillMatch(name, query ?? ""))
+        // Keep /new parsing and execution available without suggesting the legacy entry point.
+        .filter((name) => name !== "new" && fuzzySkillMatch(name, query ?? ""))
         .map((name) => ({ description: slashCommandDescription(name), name, type: "command" as const })),
       ...input.skillOptions
         .filter(

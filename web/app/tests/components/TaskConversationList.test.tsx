@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { TaskConversationList } from "@/components/business/TaskConversationList";
 import { fetchTaskConversations } from "@/api/taskConversations";
 import { useArchiveConfirmation } from "@/hooks/workspace/useArchiveConfirmation";
@@ -12,7 +13,7 @@ function Preference() {
   const [skip] = useArchiveConfirmation();
   return <output data-testid="preference">{String(skip)}</output>;
 }
-function setup(working = false, archived = false, compact = false) {
+function setup(working = false, archived = false, compact = false, activeID?: string, onArchiveCurrent?: () => void) {
   vi.mocked(fetchTaskConversations).mockResolvedValue({ rooms: [room], total: 1, has_more: false });
   const patch = vi.fn().mockResolvedValue(undefined);
   const remove = vi.fn().mockResolvedValue(undefined);
@@ -23,11 +24,13 @@ function setup(working = false, archived = false, compact = false) {
       <TaskConversationList
         archived={archived}
         compact={compact}
+        activeID={activeID}
         entry={entry}
         currentUserID="user-admin"
         usersById={usersById}
         t={(key) => key}
         onSelect={vi.fn()}
+        onArchiveCurrent={onArchiveCurrent}
       />
       <Preference />
     </>,
@@ -37,6 +40,171 @@ function setup(working = false, archived = false, compact = false) {
 }
 describe("TaskConversationList archive management", () => {
   beforeEach(() => window.localStorage.clear());
+  it.each([false, true])(
+    "does not navigate away from a newly selected task after archive completes (skip=%s)",
+    async (skip) => {
+      if (skip) localStorage.setItem("csgclaw.task-entry.skip-archive-confirmation", "true");
+      vi.mocked(fetchTaskConversations).mockResolvedValue({ rooms: [room], total: 1, has_more: false });
+      let finish!: () => void;
+      const patch = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const onArchiveCurrent = vi.fn();
+      function Harness() {
+        const [activeID, setActiveID] = useState("r1");
+        return (
+          <>
+            <button onClick={() => setActiveID("r2")}>Switch task</button>
+            <TaskConversationList
+              compact
+              activeID={activeID}
+              entry={{ patch, remove: vi.fn(), isWorking: () => false, busyID: "" } as unknown as TaskEntryController}
+              currentUserID="user-admin"
+              usersById={new Map()}
+              t={(key) => key}
+              onSelect={vi.fn()}
+              onArchiveCurrent={onArchiveCurrent}
+            />
+          </>
+        );
+      }
+      render(<Harness />, { wrapper: createQueryWrapper().wrapper });
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "taskEntryArchive · Review" }));
+      if (!skip) await user.click(screen.getByRole("button", { name: "confirm" }));
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      // Change the active task while the archive request is still pending.
+      if (!skip) {
+        fireEvent.click(screen.getByRole("button", { name: "Switch task", hidden: true }));
+      } else await user.click(screen.getByRole("button", { name: "Switch task" }));
+      await act(async () => finish());
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(onArchiveCurrent).not.toHaveBeenCalled();
+    },
+  );
+  it("exposes the full task title on hover", async () => {
+    setup(false, false, true);
+    const title = await screen.findByText("Review");
+    await userEvent.setup().hover(title);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Review");
+    expect(title).not.toHaveAttribute("title");
+  });
+  it("clears the search and restores the unfiltered list", async () => {
+    const user = userEvent.setup();
+    setup(false, false, true);
+    const input = screen.getByRole("textbox", { name: "taskEntrySearchHistory" });
+    expect(screen.queryByRole("button", { name: "taskEntryClearSearch" })).not.toBeInTheDocument();
+    await user.type(input, "needle");
+    await waitFor(() => expect(fetchTaskConversations).toHaveBeenLastCalledWith("needle", false, 0));
+    await user.click(screen.getByRole("button", { name: "taskEntryClearSearch" }));
+    expect(input).toHaveValue("");
+    expect(input).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "taskEntryClearSearch" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Review")).toBeInTheDocument());
+  });
+  it.each([
+    {
+      historicalMessage:
+        "This beginning is intentionally long enough to overflow the available sidebar preview before the ending Needle",
+      query: "needle",
+      matchedText: "Needle",
+    },
+    {
+      historicalMessage: "请搜索网页了解 OpenAI 最新公开文档里关于 Codex 的说明，并总结一句。",
+      query: "总结一句",
+      matchedText: "总结一句",
+    },
+  ])(
+    "shows the matching historical message below the task title",
+    async ({ historicalMessage, query, matchedText }) => {
+      const user = userEvent.setup();
+      const onSelect = vi.fn();
+      vi.mocked(fetchTaskConversations).mockImplementation(async (query) => ({
+        rooms: [
+          {
+            ...room,
+            messages: [{ content: "Most recent message" }],
+            search_match: query
+              ? { id: "matched-message", content: historicalMessage, created_at: "2026-10-10T10:00:00Z" }
+              : undefined,
+          },
+        ],
+        total: 1,
+        has_more: false,
+      }));
+      render(
+        <TaskConversationList
+          compact
+          entry={
+            {
+              patch: vi.fn(),
+              remove: vi.fn(),
+              isWorking: () => false,
+              busyID: "",
+            } as unknown as TaskEntryController
+          }
+          currentUserID="user-admin"
+          usersById={new Map()}
+          t={(key) => key}
+          onSelect={onSelect}
+        />,
+        { wrapper: createQueryWrapper().wrapper },
+      );
+
+      await user.type(screen.getByRole("textbox", { name: "taskEntrySearchHistory" }), query);
+      const match = await screen.findByText(matchedText, { exact: true });
+      expect(match.tagName).toBe("MARK");
+      expect(match.closest("small")).toHaveTextContent(/^…/);
+      expect(match.closest("small")).toHaveTextContent(matchedText);
+      expect(match.closest("small")).not.toHaveTextContent("This beginning");
+      expect(match.closest("small")).toHaveAttribute("title", historicalMessage);
+      expect(match.closest("small")?.querySelector("time")).toBeNull();
+      expect(fetchTaskConversations).toHaveBeenLastCalledWith(query, false, 0);
+      await user.click(match);
+      expect(onSelect).toHaveBeenCalledWith("r1", expect.objectContaining({ id: "matched-message" }));
+    },
+  );
+  it("opens direct and collaboration conversations from the same list", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    vi.mocked(fetchTaskConversations).mockResolvedValue({
+      rooms: [room, { ...room, id: "collaboration", title: "Release review", is_direct: false }],
+      total: 2,
+      has_more: false,
+    });
+    render(
+      <TaskConversationList
+        compact
+        activeID="collaboration"
+        entry={{
+          create: vi.fn(),
+          patch: vi.fn(),
+          remove: vi.fn(),
+          open: vi.fn(),
+          isWorking: () => false,
+          busyID: "",
+        }}
+        currentUserID="user-admin"
+        usersById={new Map()}
+        t={(key) => key}
+        onSelect={onSelect}
+      />,
+      { wrapper: createQueryWrapper().wrapper },
+    );
+
+    const collaboration = await screen.findByRole("button", { name: "Release review" });
+    expect(collaboration).toHaveAttribute("aria-current", "page");
+    await user.click(collaboration);
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    expect(onSelect.mock.calls).toEqual([
+      ["collaboration", undefined],
+      ["r1", undefined],
+    ]);
+  });
+
   it("filters by the session directory instead of another task using the same Agent", async () => {
     const user = userEvent.setup();
     vi.mocked(fetchTaskConversations).mockResolvedValue({
@@ -83,6 +251,7 @@ describe("TaskConversationList archive management", () => {
     await waitFor(() => expect(patch).toHaveBeenCalledWith("r1", { pinned: true }));
     await user.click(screen.getByRole("button", { name: "taskEntryArchive · Review" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "confirm" })).toHaveClass("btn-primary");
     await user.click(screen.getByRole("button", { name: "cancel" }));
     expect(patch).toHaveBeenCalledTimes(1);
   });
@@ -105,6 +274,28 @@ describe("TaskConversationList archive management", () => {
     await user.click(screen.getByRole("button", { name: "confirm" }));
     await waitFor(() => expect(patch).toHaveBeenCalledWith("r1", { archived: true }));
     await waitFor(() => expect(screen.getByTestId("preference")).toHaveTextContent("true"));
+  });
+
+  it("opens the start panel after archiving the current conversation", async () => {
+    const user = userEvent.setup();
+    const onArchiveCurrent = vi.fn();
+    const { patch } = setup(false, false, true, "r1", onArchiveCurrent);
+    await user.click(await screen.findByRole("button", { name: "taskEntryMore · Review" }));
+    await user.click(screen.getByRole("menuitem", { name: "taskEntryArchive" }));
+    await user.click(screen.getByRole("button", { name: "confirm" }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("r1", { archived: true }));
+    expect(onArchiveCurrent).toHaveBeenCalledOnce();
+  });
+
+  it("opens the start panel when the current conversation skips archive confirmation", async () => {
+    window.localStorage.setItem("csgclaw.task-entry.skip-archive-confirmation", "true");
+    const user = userEvent.setup();
+    const onArchiveCurrent = vi.fn();
+    const { patch } = setup(false, false, true, "r1", onArchiveCurrent);
+    await user.click(await screen.findByRole("button", { name: "taskEntryMore · Review" }));
+    await user.click(screen.getByRole("menuitem", { name: "taskEntryArchive" }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("r1", { archived: true }));
+    expect(onArchiveCurrent).toHaveBeenCalledOnce();
   });
   it("keeps archive errors visible in the dialog and does not save the preference on failure", async () => {
     const user = userEvent.setup();
