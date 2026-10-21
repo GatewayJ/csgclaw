@@ -253,6 +253,7 @@ export type UseConversationControllerArgs = {
 };
 
 export type UseAgentControllerArgs = {
+  workingParticipantsForRoom?: ParticipantWorkStatus["workingParticipantsForRoom"];
   activeConversationId: string;
   activePane: WorkspacePane;
   agents: AgentLike[];

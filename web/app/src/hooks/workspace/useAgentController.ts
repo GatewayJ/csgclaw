@@ -114,7 +114,12 @@ import type {
   AgentTemplateLike,
   RuntimeBootstrapConfig,
 } from "@/models/agents";
-import { isDirectConversation, localIdentitiesMatch, upsertUserInData } from "@/models/conversations";
+import {
+  agentIdentityMatchesUser,
+  isDirectConversation,
+  localIdentitiesMatch,
+  upsertUserInData,
+} from "@/models/conversations";
 import type { MCPServer, MCPServerSourceStatus } from "@/models/mcp";
 import { displayTeam, teamMemberIDs } from "@/models/tasks";
 import type { WorkspaceTeam } from "@/models/tasks";
@@ -432,6 +437,7 @@ export function useAgentController({
   setManagerProfileData,
   setSelectedHubTemplateId,
   t,
+  workingParticipantsForRoom,
 }: UseAgentControllerArgs) {
   const { showNotice } = useGlobalNotice();
   const {
@@ -2135,6 +2141,38 @@ export function useAgentController({
     }
   }
 
+  async function checkAgentDelete(item: AgentLike): Promise<{ message: string; onResolve?: () => void } | null> {
+    if (isNotificationBotAgent(item)) return null;
+    try {
+      const result = await teamsQuery.refetch();
+      if (result.error) throw result.error;
+      const referencedTeams = (result.data ?? []).filter((candidate) =>
+        teamMemberIDs(candidate).some((id) => agentIdentityMatchesUser(item, { id })),
+      );
+      const team = referencedTeams[0];
+      if (team) {
+        return {
+          message: t("agentDeleteTeamBlocked", { count: referencedTeams.length }),
+          onResolve: () => {
+            navigatePane({ type: WorkspacePaneTypes.team, id: team.id });
+          },
+        };
+      }
+      if (
+        rooms.some((room) =>
+          workingParticipantsForRoom?.(room.id).some((participant) =>
+            agentIdentityMatchesUser(item, { id: participant.participantID, user_id: participant.id }),
+          ),
+        )
+      ) {
+        return { message: t("agentDeleteWorkingBlocked") };
+      }
+      return null;
+    } catch {
+      return { message: t("agentDeleteCheckFailed") };
+    }
+  }
+
   async function runAgentAction(item: AgentLike | null | undefined, action: AgentAction): Promise<void> {
     if (!item?.id || isAgentActionBusy(item.id)) {
       return;
@@ -2189,6 +2227,11 @@ export function useAgentController({
       let updatedAgent: AgentLike | null = null;
       const deletingNotificationBot = action === "delete" && isNotificationBotAgent(item);
       if (action === "delete") {
+        const blocked = await checkAgentDelete(item);
+        if (blocked) {
+          setAgentOperationError(item, blocked.message);
+          return;
+        }
         await deleteAgentLikeRequest(item);
         onAgentDeleted?.(item);
         if (activePane.type === WorkspacePaneTypes.agent && activePane.id === item.id) {
@@ -2865,6 +2908,7 @@ export function useAgentController({
       onRecreate: (item: AgentLike | null | undefined) => runAgentAction(item, "recreate"),
       onUpgrade: (item: AgentLike | null | undefined) => runAgentAction(item, "upgrade"),
       onDelete: (item: AgentLike | null | undefined) => runAgentAction(item, "delete"),
+      onCheckDelete: checkAgentDelete,
       onInvite: inviteAgentToRoom,
       onOpenDM: openAgentDirectMessage,
       onStartFeishuConnect: startFeishuConnect,

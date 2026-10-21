@@ -51,6 +51,7 @@ import { useOpenCSGAuthGuard, type OpenCSGAuthGuard } from "@/hooks/workspace/us
 import { emptyAuthStatus } from "@/models/auth";
 import { createTeamRequest, deleteTeamRequest, fetchTeams, updateTeamRequest } from "@/api/tasks";
 import { useAgentController } from "@/hooks/workspace/useAgentController";
+import type { UseAgentControllerArgs } from "@/hooks/workspace/types";
 import { WorkspacePaneTypes } from "@/models/routing";
 import type { WorkspacePane } from "@/models/routing";
 import type { AgentLike, AgentProfileLike, AgentTemplateLike, RuntimeBootstrapConfig } from "@/models/agents";
@@ -61,6 +62,7 @@ import type { WorkspaceTeam } from "@/models/tasks";
 import type { ApiError } from "@/api/client";
 import { AGENT_AVATAR_OPTIONS } from "@/shared/avatarOptions";
 import { ACTION_REBUILD_MANAGER } from "@/shared/constants/messages";
+import { createTranslator } from "@/shared/i18n";
 
 const navigationBlockerMock = vi.hoisted(() => ({
   current: {
@@ -245,6 +247,7 @@ function useAgentControllerHarness(
     refreshWorkspaceBootstrapConfig?: () => Promise<RuntimeBootstrapConfig | null>;
     refreshWorkspaceModelProviders?: () => Promise<ModelProviderCatalog | null>;
     t?: TranslateFn;
+    workingParticipantsForRoom?: UseAgentControllerArgs["workingParticipantsForRoom"];
   } = {},
 ) {
   const [agents, setAgents] = useState<AgentLike[]>(options.agents ?? [oldAgent]);
@@ -332,6 +335,7 @@ function useAgentControllerHarness(
     },
     setSelectedHubTemplateId: setSelectedHubTemplateIdRef.current,
     t: options.t ?? t,
+    workingParticipantsForRoom: options.workingParticipantsForRoom,
   });
 
   return {
@@ -1169,6 +1173,103 @@ describe("useAgentController", () => {
     expect(deleteAgentLikeRequest).toHaveBeenCalledWith(oldAgent);
     expect(deleteBotRequest).not.toHaveBeenCalled();
     expect(onAgentDeleted).toHaveBeenCalledWith(oldAgent);
+  });
+
+  it.each([
+    { role: "lead", count: 1 },
+    { role: "member", count: 2 },
+  ])("shows $count team references for a $role", async ({ role, count }) => {
+    const worker: AgentLike = {
+      ...oldAgent,
+      id: "agent-worker",
+      name: "Worker",
+      role: "worker",
+      user_id: "user-worker",
+    };
+    const team: WorkspaceTeam = {
+      id: "team-1",
+      title: "Team",
+      lead_agent_id: role === "lead" ? "u-worker" : "u-manager",
+      member_agent_ids: role === "member" ? ["user-worker"] : [],
+      status: "active",
+      created_at: "",
+      updated_at: "",
+    };
+    const translate = createTranslator("zh");
+    const { result } = renderHook(() => useAgentControllerHarness({ agents: [oldAgent, worker], t: translate }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.controller.teamsLoading).toBe(false));
+    // The team was created after this view loaded; cached teams must not allow deletion.
+    const otherTeam = {
+      ...team,
+      id: "team-2",
+      lead_agent_id: "u-manager",
+      member_agent_ids: ["u-worker", "user-worker"],
+    };
+    const unrelatedTeam = { ...team, id: "unrelated", lead_agent_id: "u-manager", member_agent_ids: [] };
+    vi.mocked(fetchTeams).mockResolvedValue(count === 2 ? [team, otherTeam, unrelatedTeam] : [team, unrelatedTeam]);
+    await act(async () => {
+      const block = await result.current.controller.agentViewProps.onCheckDelete(worker);
+      expect(block?.message).toBe(`该智能体仍被 ${count} 个团队使用，请先在团队中移除它，然后再删除。`);
+      block?.onResolve?.();
+    });
+    expect(result.current.navigatePane).toHaveBeenCalledWith({ type: WorkspacePaneTypes.team, id: team.id });
+    expect(result.current.controller.createTeamModalProps).toBeNull();
+    await act(async () => {
+      await result.current.controller.agentViewProps.onDelete(worker);
+    });
+    expect(deleteAgentLikeRequest).not.toHaveBeenCalled();
+    expect(deleteTeamRequest).not.toHaveBeenCalled();
+    expect(updateTeamRequest).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("checks active work without blocking idle room members (working: %s)", async (working) => {
+    const worker: AgentLike = { ...oldAgent, id: "agent-worker", role: "worker", user_id: "user-worker" };
+    const { result } = renderHook(
+      () =>
+        useAgentControllerHarness({
+          agents: [oldAgent, worker],
+          activePane: { type: WorkspacePaneTypes.agent, id: String(worker.id) },
+          data: { users: [], rooms: [{ id: "room-1", members: ["user-worker"], messages: [] }] },
+          workingParticipantsForRoom: () =>
+            working ? [{ id: "user-worker", name: "Worker", participantID: "pt-worker" }] : [],
+        }).controller,
+      { wrapper: createWrapper() },
+    );
+    await act(async () => {
+      await result.current.agentViewProps.onDelete(worker);
+    });
+    if (working) {
+      expect(deleteAgentLikeRequest).not.toHaveBeenCalled();
+      expect(result.current.agentViewProps.saveError).toBe("agentDeleteWorkingBlocked");
+    } else {
+      expect(deleteAgentLikeRequest).toHaveBeenCalledWith(worker);
+    }
+  });
+
+  it("does not delete when team dependency checks fail", async () => {
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.teamsLoading).toBe(false));
+    vi.mocked(fetchTeams).mockRejectedValue(new Error("Team service unavailable"));
+    await act(async () => {
+      await result.current.agentViewProps.onDelete(oldAgent);
+    });
+    expect(deleteAgentLikeRequest).not.toHaveBeenCalled();
+    expect(result.current.agentViewProps.saveError).toBe("agentDeleteCheckFailed");
+  });
+
+  it("preserves deletion of notification participants when the team service is unavailable", async () => {
+    const notifier: AgentLike = { id: "pt-notifier", bot_type: "notification", type: "notification", name: "Alerts" };
+    const { result } = renderHook(() => useAgentControllerHarness({ agents: [notifier] }).controller, {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.teamsLoading).toBe(false));
+    vi.mocked(fetchTeams).mockRejectedValue(new Error("Team service unavailable"));
+    await act(async () => {
+      await result.current.agentViewProps.onDelete(notifier);
+    });
+    expect(deleteAgentLikeRequest).toHaveBeenCalledWith(notifier);
   });
 
   it("keeps the profile detail open when deleting the agent fails", async () => {
