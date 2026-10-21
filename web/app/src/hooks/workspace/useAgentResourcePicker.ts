@@ -35,6 +35,8 @@ function marketSkillKey(skill: SkillSummary): string {
   return JSON.stringify(["skill", skill.remotePath?.trim() || "", skill.remoteRef?.trim() || ""]);
 }
 
+type MarketSkillState = { action: "install" | "enable" | "enabled"; name: string };
+
 export function useAgentResourcePicker({
   agentID,
   kind,
@@ -94,11 +96,19 @@ export function useAgentResourcePicker({
   );
   const enabledNames = new Set(
     kind === "skill"
-      ? installedNames
+      ? (agentSkills.data ?? []).filter((skill) => skill.enabled !== false).map((skill) => skill.name)
       : mcpServersFromMap(agentServers.data?.servers)
           .filter((server) => server.config.enabled !== false)
           .map((server) => server.name),
   );
+
+  function marketSkillState(skill: SkillSummary): MarketSkillState {
+    const preparedName = prepared.current.get(marketSkillKey(skill));
+    const name = preparedName || remoteSkillInstallName(skill);
+    if (enabledNames.has(name)) return { name, action: "enabled" };
+    const installed = preparedName || installedNames.has(name) || skills.data?.some((item) => item.name === name);
+    return { name, action: installed ? "enable" : "install" };
+  }
 
   async function run(key: string, acquire: () => Promise<string[]>) {
     if (pending.current) return false;
@@ -160,10 +170,8 @@ export function useAgentResourcePicker({
     error,
     installedNames,
     enabledNames,
-    isSkillEnabled: (skill: SkillSummary) => {
-      const name = prepared.current.get(marketSkillKey(skill));
-      return Boolean(name && installedNames.has(name));
-    },
+    skillAction: (skill: SkillSummary) => marketSkillState(skill).action,
+    isSkillEnabled: (skill: SkillSummary) => marketSkillState(skill).action === "enabled",
     skills: skills.data ?? [],
     globalServers,
     libraryLoading:
@@ -178,16 +186,16 @@ export function useAgentResourcePicker({
     knowledge,
     knowledgeItems: mergeRemoteKnowledgeBasePages(knowledge.data?.pages ?? []),
     add: (names: string[]) => run("library", async () => names),
-    installSkill: (skill: SkillSummary) =>
-      run(skill.remotePath || skill.name, () =>
-        acquireSkill(marketSkillKey(skill), async () => {
-          const name = remoteSkillInstallName(skill);
-          if (skills.data?.some((item) => item.name === name)) {
-            throw new Error(t("profileSkillNameConflict", { name }));
-          }
-          return installRemoteSkillRequest(skill.remotePath || "", skill.remoteRef);
-        }),
-      ),
+    installSkill: (skill: SkillSummary) => {
+      const state = marketSkillState(skill);
+      if (state.action === "enabled") return Promise.resolve(true);
+      return run(skill.remotePath || skill.name, () => {
+        if (state.action === "enable") return Promise.resolve([state.name]);
+        return acquireSkill(marketSkillKey(skill), () =>
+          installRemoteSkillRequest(skill.remotePath || "", skill.remoteRef),
+        );
+      });
+    },
     upload: (file: File) =>
       run("upload", () =>
         acquireSkill(`upload:${file.name}:${file.size}:${file.lastModified}`, () => uploadSkillArchive(file)),

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAgentResourcePicker, type AgentResourcePickerKind } from "@/hooks/workspace/useAgentResourcePicker";
 import { createTranslator } from "@/shared/i18n";
 import type { SkillSummary } from "@/models/skillhub";
+import type { AgentSkillSummary } from "@/api/agents";
 import { createQueryWrapper } from "../helpers/queryClient";
 
 const t = createTranslator("en");
@@ -23,10 +24,11 @@ const kbConfig = {
 function mockAPI({
   skills = [] as SkillSummary[],
   servers = {} as Record<string, unknown>,
-  installedSkills = [] as { name: string }[],
+  installedSkills = [] as AgentSkillSummary[],
   installedServers = {} as Record<string, unknown>,
   createdMCPName = "",
   knowledgeName = "knowledge-engineering",
+  installedName = "review",
 } = {}) {
   const fetch = vi.fn(async (input: string, init?: RequestInit) => {
     const path = String(input);
@@ -35,8 +37,8 @@ function mockAPI({
     if (path === "api/v1/mcp-servers" && init?.method !== "POST") return Response.json({ mcpServers: servers });
     if (path.includes("/agents/") && path.endsWith("/mcp-servers")) return Response.json({ servers: installedServers });
     if (path === "api/v1/skills:install" || path === "api/v1/skills:upload") {
-      skills = [...skills, { name: "review" }];
-      return Response.json({ name: "review" });
+      skills = [...skills, { name: installedName }];
+      return Response.json({ name: installedName });
     }
     if (path.endsWith("/mcp-config")) return Response.json({ name: knowledgeName, config: kbConfig });
     if (path === "api/v1/mcp-servers" && init?.method === "POST") {
@@ -91,41 +93,61 @@ describe("Agent resource acquisition", () => {
     expect([...result.current.enabledNames]).toEqual(["enabled", "legacy"]);
   });
 
-  it("installs a market skill and binds the returned name to the Agent", async () => {
-    const fetch = mockAPI();
+  it("installs a market skill globally before enabling its returned name for the Agent", async () => {
+    const fetch = mockAPI({ installedName: "custom-review" });
     const { result, onAdd } = renderPicker();
     await waitFor(() => expect(result.current.libraryLoading).toBe(false));
-    await act(async () => {
-      expect(await result.current.installSkill(remoteSkill)).toBe(true);
+    let completeInstall!: (response: Response) => void;
+    fetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          completeInstall = resolve;
+        }),
+    );
+    let operation!: Promise<boolean>;
+    act(() => {
+      operation = result.current.installSkill(remoteSkill);
     });
-    expect(onAdd).toHaveBeenCalledWith(["review"]);
+    expect(onAdd).not.toHaveBeenCalled();
+    await act(async () => {
+      completeInstall(Response.json({ name: "custom-review" }));
+      expect(await operation).toBe(true);
+    });
+    expect(onAdd).toHaveBeenCalledExactlyOnceWith(["custom-review"]);
     expect(fetch.mock.calls.find(([path]) => path === "api/v1/skills:install")?.[1]?.body).toBe(
       JSON.stringify({ remote_path: "team/review" }),
     );
   });
 
-  it.each(["local", "market", "unknown"])(
-    "requires explicit library selection when a same-named %s skill has no verified source identity",
-    async (source) => {
-      const fetch = mockAPI({ skills: [{ name: "review", source }], installedSkills: [{ name: "review" }] });
-      const { result, onAdd } = renderPicker();
-      await waitFor(() => expect(result.current.libraryLoading).toBe(false));
-      expect(result.current.isSkillEnabled(remoteSkill)).toBe(false);
-      await act(async () => {
-        expect(await result.current.installSkill(remoteSkill)).toBe(false);
-      });
-      expect(onAdd).not.toHaveBeenCalled();
-      expect(result.current.error).toBe(t("profileSkillNameConflict", { name: "review" }));
-      expect(fetch.mock.calls.some(([path]) => path === "api/v1/skills:install")).toBe(false);
-      await act(async () => {
-        expect(await result.current.add(["review"])).toBe(true);
-      });
-      expect(onAdd).toHaveBeenCalledExactlyOnceWith(["review"]);
-    },
-  );
+  it.each(["local", "market", "unknown"])("enables the existing global %s skill by name", async (source) => {
+    const fetch = mockAPI({ skills: [{ name: "review", source }] });
+    const { result, onAdd } = renderPicker();
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+    expect(result.current.skillAction(remoteSkill)).toBe("enable");
+    expect(result.current.isSkillEnabled(remoteSkill)).toBe(false);
+    await act(async () => {
+      expect(await result.current.installSkill(remoteSkill)).toBe(true);
+    });
+    expect(fetch.mock.calls.some(([path]) => path === "api/v1/skills:install")).toBe(false);
+    expect(onAdd).toHaveBeenCalledExactlyOnceWith(["review"]);
+  });
+
+  it.each([undefined, true, false])("uses the worker's enabled=%s state for an existing skill", async (enabled) => {
+    const fetch = mockAPI({ installedSkills: [{ name: "review", enabled }] });
+    const { result, onAdd } = renderPicker();
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+    expect(result.current.skillAction(remoteSkill)).toBe(enabled === false ? "enable" : "enabled");
+    expect(result.current.isSkillEnabled(remoteSkill)).toBe(enabled !== false);
+    expect(result.current.enabledNames.has("review")).toBe(enabled !== false);
+    await act(async () => {
+      expect(await result.current.installSkill(remoteSkill)).toBe(true);
+    });
+    expect(onAdd).toHaveBeenCalledTimes(enabled === false ? 1 : 0);
+    expect(fetch.mock.calls.some(([path]) => path === "api/v1/skills:install")).toBe(false);
+  });
 
   it("retries binding the acquired market skill without reinstalling it", async () => {
-    const fetch = mockAPI();
+    const fetch = mockAPI({ installedName: "custom-review" });
     const onAdd = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
     const { result } = renderPicker("skill", onAdd);
     await waitFor(() => expect(result.current.libraryLoading).toBe(false));
@@ -133,29 +155,66 @@ describe("Agent resource acquisition", () => {
     await act(async () => {
       expect(await result.current.installSkill(skill)).toBe(false);
     });
+    expect(result.current.skillAction(skill)).toBe("enable");
     await act(async () => {
       expect(await result.current.installSkill(skill)).toBe(true);
     });
     expect(fetch.mock.calls.filter(([path]) => path === "api/v1/skills:install")).toHaveLength(1);
-    expect(onAdd.mock.calls).toEqual([[["review"]], [["review"]]]);
+    expect(onAdd.mock.calls).toEqual([[["custom-review"]], [["custom-review"]]]);
   });
 
   it.each([
     { ...remoteSkill, remotePath: "different-publisher/review", remoteRef: "main" },
     { ...remoteSkill, remoteRef: "release" },
-  ])("does not reuse an acquired skill for $remotePath at $remoteRef", async (skill) => {
+  ])("uses the existing global name for $remotePath at $remoteRef", async (skill) => {
     const fetch = mockAPI();
-    const onAdd = vi.fn().mockResolvedValue(false);
+    const onAdd = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
     const { result } = renderPicker("skill", onAdd);
     await waitFor(() => expect(result.current.libraryLoading).toBe(false));
     await act(async () => {
       expect(await result.current.installSkill({ ...remoteSkill, remoteRef: "main" })).toBe(false);
     });
     await act(async () => {
-      expect(await result.current.installSkill(skill)).toBe(false);
+      expect(await result.current.installSkill(skill)).toBe(true);
     });
-    expect(result.current.error).toBe(t("profileSkillNameConflict", { name: "review" }));
+    expect(onAdd.mock.calls).toEqual([[["review"]], [["review"]]]);
+    expect(fetch.mock.calls.filter(([path]) => path === "api/v1/skills:install")).toHaveLength(1);
+  });
+
+  it("keeps the install action available after installation fails", async () => {
+    const fetch = mockAPI();
+    const { result, onAdd } = renderPicker();
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+    fetch.mockResolvedValueOnce(
+      Response.json({ error: { code: "skill_install_failed", message: "Install failed" } }, { status: 503 }),
+    );
+    await act(async () => {
+      expect(await result.current.installSkill(remoteSkill)).toBe(false);
+    });
+    expect(result.current.error).toBe("Install failed");
+    expect(result.current.skillAction(remoteSkill)).toBe("install");
+    expect(onAdd).not.toHaveBeenCalled();
+    await act(async () => {
+      expect(await result.current.installSkill(remoteSkill)).toBe(true);
+    });
     expect(onAdd).toHaveBeenCalledExactlyOnceWith(["review"]);
+  });
+
+  it("enables the installed global skill after the picker is reopened", async () => {
+    const fetch = mockAPI();
+    const first = renderPicker("skill", vi.fn().mockResolvedValue(false));
+    await waitFor(() => expect(first.result.current.libraryLoading).toBe(false));
+    await act(async () => {
+      expect(await first.result.current.installSkill(remoteSkill)).toBe(false);
+    });
+    first.unmount();
+    const second = renderPicker();
+    await waitFor(() => expect(second.result.current.libraryLoading).toBe(false));
+    expect(second.result.current.skillAction(remoteSkill)).toBe("enable");
+    await act(async () => {
+      expect(await second.result.current.installSkill(remoteSkill)).toBe(true);
+    });
+    expect(second.onAdd).toHaveBeenCalledExactlyOnceWith(["review"]);
     expect(fetch.mock.calls.filter(([path]) => path === "api/v1/skills:install")).toHaveLength(1);
   });
 

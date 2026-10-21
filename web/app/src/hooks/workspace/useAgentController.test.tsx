@@ -38,6 +38,7 @@ import {
   deleteFeishuParticipantRequest,
   finalizeFeishuRegistrationRequest,
   runAgentActionRequest,
+  setAgentResourceEnabled,
   startFeishuRegistrationRequest,
   updateAgentRequest,
 } from "@/api/agents";
@@ -116,6 +117,7 @@ vi.mock("@/api/agents", async () => {
     deleteFeishuParticipantRequest: vi.fn(),
     finalizeFeishuRegistrationRequest: vi.fn(),
     runAgentActionRequest: vi.fn(),
+    setAgentResourceEnabled: vi.fn(),
     startFeishuRegistrationRequest: vi.fn(),
     updateAgentRequest: vi.fn(),
   };
@@ -400,6 +402,7 @@ describe("useAgentController", () => {
     vi.mocked(fetchTeams).mockReset();
     vi.mocked(updateTeamRequest).mockReset();
     vi.mocked(runAgentActionRequest).mockReset();
+    vi.mocked(setAgentResourceEnabled).mockReset();
     vi.mocked(startFeishuRegistrationRequest).mockReset();
     vi.mocked(updateAgentRequest).mockReset();
     vi.mocked(patchCsgclawUserRequest).mockReset();
@@ -2170,9 +2173,10 @@ describe("useAgentController", () => {
   });
 
   it("adds selected global skills into the current agent runtime and refreshes skills", async () => {
-    vi.mocked(fetchAgentSkillSummaries)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ name: "alpha", description: "Alpha skill" }]);
+    vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([]);
+    vi.mocked(batchAddAgentSkillsRequest).mockImplementationOnce(async () => {
+      vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", description: "Alpha skill" }]);
+    });
     vi.mocked(fetchAgentSkillsFile).mockResolvedValue({
       content: "---\ndescription: Alpha skill\n---\n# Alpha\n",
       path: "alpha/SKILL.md",
@@ -2188,9 +2192,62 @@ describe("useAgentController", () => {
     });
 
     expect(batchAddAgentSkillsRequest).toHaveBeenCalledWith("u-manager", ["alpha"]);
-    await waitFor(() => expect(fetchAgentSkillSummaries).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchAgentSkillSummaries).toHaveBeenCalledTimes(3));
     expect(result.current.agentViewProps.skillAddError).toBe("");
     expect(result.current.agentViewProps.skills.map((item) => item.name)).toEqual(["alpha"]);
+  });
+
+  it("enables an existing disabled skill without copying it again", async () => {
+    vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", enabled: false }]);
+    vi.mocked(setAgentResourceEnabled).mockImplementationOnce(async () => {
+      vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", enabled: true }]);
+      return {
+        agent_id: "u-manager",
+        name: "alpha",
+        enabled: true,
+        resource_version: "2",
+        runtime_kind: "codex",
+        runtime_state: "running",
+        restart_required: false,
+      };
+    });
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.agentViewProps.skills).toHaveLength(1));
+
+    await act(async () => {
+      expect(await result.current.agentViewProps.onAddSkills?.(["alpha", "alpha"])).toBe(true);
+    });
+
+    expect(batchAddAgentSkillsRequest).not.toHaveBeenCalled();
+    expect(setAgentResourceEnabled).toHaveBeenCalledExactlyOnceWith("u-manager", "skill", "alpha", true);
+    expect(result.current.agentViewProps.skills[0].enabled).toBe(true);
+  });
+
+  it("refreshes partial additions and retries enablement without copying successful skills again", async () => {
+    vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", enabled: false }]);
+    vi.mocked(batchAddAgentSkillsRequest).mockImplementationOnce(async () => {
+      vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([
+        { name: "alpha", enabled: false },
+        { name: "beta", enabled: true },
+      ]);
+    });
+    vi.mocked(setAgentResourceEnabled).mockRejectedValueOnce(new Error("Enablement failed"));
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.agentViewProps.skills).toHaveLength(1));
+
+    await act(async () => {
+      expect(await result.current.agentViewProps.onAddSkills?.(["alpha", "beta"])).toBe(false);
+    });
+
+    expect(batchAddAgentSkillsRequest).toHaveBeenCalledExactlyOnceWith("u-manager", ["beta"]);
+    expect(result.current.agentViewProps.skillAddError).toContain("Enablement failed");
+    expect(result.current.agentViewProps.skills).toHaveLength(2);
+    await act(async () => {
+      expect(await result.current.agentViewProps.onAddSkills?.(["alpha", "beta"])).toBe(true);
+    });
+    expect(batchAddAgentSkillsRequest).toHaveBeenCalledTimes(1);
+    expect(setAgentResourceEnabled).toHaveBeenCalledTimes(2);
+    expect(result.current.agentViewProps.skillAddError).toBe("");
   });
 
   it("deletes an agent-scoped skill and refreshes the agent skill list", async () => {
