@@ -229,6 +229,7 @@ function renderConversationController(
 
 describe("useConversationController", () => {
   beforeEach(() => {
+    localStorage.clear();
     subscribeIMEventsMock.mockReset();
     subscribeIMEventsMock.mockReturnValue(() => {});
     apiMocks.deleteRoomRequest.mockReset();
@@ -1385,7 +1386,7 @@ describe("useConversationController", () => {
     });
   });
 
-  it("closes member management when changing rooms and ignores the previous room's request error", async () => {
+  it("keeps member panels independent between rooms and ignores the previous room's request error", async () => {
     const conversation = { ...directConversation, is_direct: false, members: ["u-admin", "u-dev"] };
     const nextConversation = { ...conversation, id: "room-next" };
     const data = { ...groupConversationData(conversation), rooms: [conversation, nextConversation] };
@@ -1406,6 +1407,86 @@ describe("useConversationController", () => {
       await pending;
     });
     expect(result.current.conversationViewProps.memberPanelProps?.memberActionError).toBe("");
+  });
+
+  it("restores each room's member panel without carrying invitation selections or errors", async () => {
+    const conversation = { ...directConversation, is_direct: false, members: ["u-admin", "u-dev"] };
+    const nextConversation = { ...conversation, id: "room-next" };
+    const data = { ...groupConversationData(conversation), rooms: [conversation, nextConversation] };
+    apiMocks.inviteRoomUsersRequest.mockRejectedValue(new Error("Invitation failed"));
+    const { result, rerender } = renderConversationController({ data });
+    act(() => result.current.conversationViewProps.onInviteAction());
+    act(() => result.current.conversationViewProps.memberPanelProps?.onInviteUserIDsChange(["u-qa"]));
+    await act(async () => result.current.conversationViewProps.memberPanelProps?.onInvite());
+    expect(result.current.conversationViewProps.memberPanelProps?.submitError).toBe("Invitation failed");
+    rerender({ activeConversationId: "room-next", data, messageListActive: true });
+    expect(result.current.conversationViewProps.memberPanelProps).toBeNull();
+    act(() => result.current.conversationViewProps.onInviteAction());
+    act(() => result.current.conversationViewProps.memberPanelProps?.onInviteUserIDsChange(["u-manager"]));
+    rerender({ activeConversationId: conversation.id, data, messageListActive: true });
+    expect(result.current.conversationViewProps.memberPanelProps).toMatchObject({
+      inviteUserIDs: [],
+      submitError: "",
+      memberActionError: "",
+    });
+    rerender({ activeConversationId: "room-next", data, messageListActive: true });
+    expect(result.current.conversationViewProps.memberPanelProps?.inviteUserIDs).toEqual([]);
+    act(() => result.current.conversationViewProps.memberPanelProps?.onClose());
+    rerender({ activeConversationId: conversation.id, data, messageListActive: true });
+    expect(result.current.conversationViewProps.memberPanelProps).not.toBeNull();
+  });
+
+  it.each([false, true])("completes an invitation with another room selected: %s", async (changeRoom) => {
+    const conversation = { ...directConversation, is_direct: false, members: ["u-admin", "u-dev"] };
+    const nextConversation = { ...conversation, id: "room-next" };
+    const data = { ...groupConversationData(conversation), rooms: [conversation, nextConversation] };
+    const request = deferred<IMConversation>();
+    apiMocks.inviteRoomUsersRequest.mockReturnValue(request.promise);
+    const { result, rerender, unmount } = renderConversationController({ data });
+    act(() => result.current.conversationViewProps.onInviteAction());
+    act(() => result.current.conversationViewProps.memberPanelProps?.onInviteUserIDsChange(["u-qa"]));
+    let pending: Promise<void> | undefined;
+    act(() => {
+      pending = result.current.conversationViewProps.memberPanelProps?.onInvite();
+    });
+    if (changeRoom) {
+      rerender({ activeConversationId: nextConversation.id, data, messageListActive: true });
+      act(() => result.current.conversationViewProps.onInviteAction());
+    }
+    await act(async () => {
+      request.resolve({ ...conversation, members: [...conversation.members, "u-qa"] });
+      await pending;
+    });
+    if (changeRoom) expect(result.current.conversationViewProps.memberPanelProps).not.toBeNull();
+    else expect(result.current.conversationViewProps.memberPanelProps).toBeNull();
+    unmount();
+    const restored = renderConversationController({
+      data,
+      activeConversationId: changeRoom ? nextConversation.id : conversation.id,
+    });
+    if (changeRoom) expect(restored.result.current.conversationViewProps.memberPanelProps).not.toBeNull();
+    else expect(restored.result.current.conversationViewProps.memberPanelProps).toBeNull();
+  });
+
+  it("scopes the saved member panel to the current user and hides it in direct conversations", () => {
+    const conversation = { ...directConversation, is_direct: false, members: ["u-admin", "u-dev"] };
+    const data = groupConversationData(conversation);
+    const { result, rerender } = renderConversationController({ data });
+    act(() => result.current.conversationViewProps.onInviteAction());
+    rerender({
+      activeConversationId: conversation.id,
+      data: { ...data, current_user_id: "u-dev" },
+      messageListActive: true,
+    });
+    expect(result.current.conversationViewProps.memberPanelProps).toBeNull();
+    rerender({ activeConversationId: conversation.id, data, messageListActive: true });
+    expect(result.current.conversationViewProps.memberPanelProps).not.toBeNull();
+    rerender({
+      activeConversationId: conversation.id,
+      data: { ...data, rooms: [{ ...conversation, is_direct: true }] },
+      messageListActive: true,
+    });
+    expect(result.current.conversationViewProps.memberPanelProps).toBeNull();
   });
 
   it("does not mark a participant working from message send or activity", async () => {

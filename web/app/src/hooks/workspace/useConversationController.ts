@@ -112,6 +112,7 @@ import { useAttachmentWarning } from "./useAttachmentWarning";
 import type { UseConversationControllerArgs } from "./types";
 import { messageListScrollKey, useMessageListAutoScroll } from "./useMessageListAutoScroll";
 import { handleSlashPickerNavigation } from "@/components/business/ConversationPane";
+import { useChatSidePanel } from "@/components/business/ChatSidePanel";
 import { modelProviderConfigUsesOpenCSG } from "@/models/modelProviders";
 import { isOpenCSGRuntimeAuthenticationError } from "./useOpenCSGAuthGuard";
 
@@ -490,7 +491,10 @@ export function useConversationController({
   const [threadSlashPickerDismissed, setThreadSlashPickerDismissed] = useState(false);
   const [threadSlashIndex, setThreadSlashIndex] = useState(0);
   const [threadSlashQuery, setThreadSlashQuery] = useState<string | null>(null);
-  const [showInvite, setShowInvite] = useState(false);
+  const { state: sidePanelState, patch: patchSidePanel } = useChatSidePanel(
+    data?.current_user_id ?? "",
+    activeConversationId,
+  );
   const [showMemberList, setShowMemberList] = useState(false);
   const [showChannelTools, setShowChannelTools] = useState(false);
   const [inviteUserIDs, setInviteUserIDs] = useState<string[]>([]);
@@ -601,6 +605,9 @@ export function useConversationController({
   );
   const roomCount = rooms.length;
   const selectedConversation = activePane.type === WorkspacePaneTypes.conversation ? activeConversation : null;
+  const showInvite = Boolean(
+    selectedConversation && !isDirectConversation(selectedConversation) && sidePanelState.activePanel === "members",
+  );
   const activeChannel =
     selectedConversation && !isDirectConversation(selectedConversation) ? selectedConversation : null;
   const selectedConversationID = selectedConversation?.id ?? "";
@@ -989,9 +996,10 @@ export function useConversationController({
   useEffect(() => {
     setShowMemberList(false);
     setShowChannelTools(false);
-    setShowInvite(false);
+    setInviteUserIDs([]);
+    setSubmitError("");
     setMemberActionError("");
-  }, [activeConversationId, activePane.type]);
+  }, [activeConversationId, activePane.type, data?.current_user_id]);
 
   useEffect(() => {
     if (!showMemberList) {
@@ -1455,12 +1463,16 @@ export function useConversationController({
     selectConversation(id);
   }
 
+  function setShowInvite(open: boolean) {
+    patchSidePanel({ activePanel: open ? "members" : "tools" });
+  }
+
   function handleInviteAction() {
     if (!activeConversation || isDirectConversation(activeConversation)) return;
     setSubmitError("");
     setMemberActionError("");
     setInviteUserIDs([]);
-    setShowInvite((current) => !current);
+    setShowInvite(!showInvite);
   }
 
   async function inviteUsers(): Promise<void> {
