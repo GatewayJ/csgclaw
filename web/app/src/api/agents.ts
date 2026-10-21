@@ -246,8 +246,17 @@ export function batchDeleteAgentMCPServersRequest(
   return post(`api/v1/agents/${encodeURIComponent(agentID)}/mcp-servers:batchDelete`, { names: serverNames });
 }
 
-export function batchAddAgentSkillsRequest(agentID: string, skillNames: string[]): Promise<void> {
-  return post(`api/v1/agents/${encodeURIComponent(agentID)}/skills:batchAdd`, { names: skillNames });
+export type AgentSkillInstallOptions = { replace?: boolean };
+
+export function batchAddAgentSkillsRequest(
+  agentID: string,
+  skillNames: string[],
+  options: AgentSkillInstallOptions = {},
+): Promise<void> {
+  return post(`api/v1/agents/${encodeURIComponent(agentID)}/skills:batchAdd`, {
+    names: skillNames,
+    ...(options.replace ? { replace: true } : {}),
+  });
 }
 
 export function deleteAgentSkillRequest(agentID: string, skillName: string): Promise<void> {

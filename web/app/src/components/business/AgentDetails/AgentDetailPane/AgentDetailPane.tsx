@@ -36,7 +36,7 @@ import {
 } from "@/components/business/ResourceListCard";
 import { AgentResourcePicker } from "../AgentResourcePicker";
 import { AgentResourceDetails } from "../AgentResourceDetails";
-import type { AgentResourceKind } from "@/api/agents";
+import type { AgentResourceKind, AgentSkillInstallOptions } from "@/api/agents";
 import { errorMessage } from "@/api/client";
 import {
   fetchAgentInstructionsDocument,
@@ -243,7 +243,7 @@ export type AgentDetailPaneProps = {
   t: TranslateFn;
   workspaceSupported?: boolean;
   directoryPickerAvailable?: boolean;
-  onAddSkills?: (skillNames: string[]) => Promise<boolean> | boolean;
+  onAddSkills?: (skillNames: string[], options?: AgentSkillInstallOptions) => Promise<boolean> | boolean;
   onDeleteSkill?: (skill: SlashSkillOption | string) => Promise<boolean> | boolean;
   onInstallMCPServers?: (serverNames: string[]) => Promise<boolean> | boolean;
   onUpdateMCPServer?: (server: MCPServer | string) => Promise<boolean> | boolean;

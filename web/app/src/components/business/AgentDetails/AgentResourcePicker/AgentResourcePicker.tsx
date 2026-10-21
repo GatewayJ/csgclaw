@@ -14,6 +14,7 @@ import { SkillMarketPreview } from "./SkillMarketPreview";
 import type { TranslateFn } from "@/models/conversations";
 import { localizeAPIError } from "@/shared/i18n";
 import { errorMessage } from "@/api/client";
+import type { AgentSkillInstallOptions } from "@/api/agents";
 import {
   ResourcePicker,
   ResourcePickerList,
@@ -37,7 +38,7 @@ export function AgentResourcePicker({
   kind: AgentResourcePickerKind;
   authenticated: boolean;
   error?: string;
-  onAdd: (names: string[]) => Promise<boolean> | boolean;
+  onAdd: (names: string[], options?: AgentSkillInstallOptions) => Promise<boolean> | boolean;
   onClose: () => void;
   onLogin?: () => boolean;
   portalContainer?: HTMLElement | null;
@@ -79,13 +80,10 @@ export function AgentResourcePicker({
     setSelected((current) => (checked ? [...current, name] : current.filter((item) => item !== name)));
   }
   function skillActionLabel(skill: SkillSummary) {
-    const action = picker.skillAction(skill);
     return t(
-      action === "enabled"
-        ? "profileResourceEnabled"
-        : action === "enable"
-          ? "profileSkillEnable"
-          : "profileSkillInstallEnable",
+      picker.skillAction(skill) === "replace"
+        ? "resourcesSkillRemoteReplaceAction"
+        : "resourcesSkillRemoteInstallAction",
     );
   }
   const remoteRows =
@@ -98,7 +96,7 @@ export function AgentResourcePicker({
           },
           name: skill.name,
           description: skill.description,
-          installed: picker.isSkillEnabled(skill),
+          installed: false,
           actionLabel: skillActionLabel(skill),
           unavailable: false,
           add: () => picker.installSkill(skill),
@@ -356,7 +354,6 @@ export function AgentResourcePicker({
           skill={preview}
           t={t}
           busy={busy}
-          installed={picker.isSkillEnabled(preview)}
           actionLabel={skillActionLabel(preview)}
           installDisabled={picker.libraryLoading || Boolean(picker.libraryError)}
           error={failure}

@@ -2197,6 +2197,70 @@ describe("useAgentController", () => {
     expect(result.current.agentViewProps.skills.map((item) => item.name)).toEqual(["alpha"]);
   });
 
+  it.each([true, false])("replaces an installed skill with enabled=%s and refreshes its content", async (enabled) => {
+    vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", description: "Old", enabled }]);
+    vi.mocked(batchAddAgentSkillsRequest).mockImplementationOnce(async () => {
+      vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", description: "New", enabled: true }]);
+    });
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.agentViewProps.skills).toHaveLength(1));
+
+    await act(async () => {
+      expect(await result.current.agentViewProps.onAddSkills?.([" alpha ", "alpha"], { replace: true })).toBe(true);
+    });
+
+    expect(batchAddAgentSkillsRequest).toHaveBeenCalledExactlyOnceWith("u-manager", ["alpha"], { replace: true });
+    expect(setAgentResourceEnabled).not.toHaveBeenCalled();
+    expect(result.current.agentViewProps.skills[0]).toMatchObject({ description: "New", enabled: true });
+  });
+
+  it("refreshes cached skill files and directories after replacement", async () => {
+    vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", enabled: true }]);
+    const { result } = renderHook(
+      () => ({ controller: useAgentControllerHarness().controller, queryClient: useQueryClient() }),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.controller.agentViewProps.skills).toHaveLength(1));
+    const file = {
+      queryKey: ["agent-skill-file", "u-manager", "alpha/SKILL.md"],
+      queryFn: vi.fn().mockResolvedValueOnce("old file").mockResolvedValue("new file"),
+      staleTime: Infinity,
+    };
+    const tree = {
+      queryKey: ["agent-skill-tree", "u-manager", "alpha"],
+      queryFn: vi.fn().mockResolvedValueOnce(["old.txt"]).mockResolvedValue(["new.txt"]),
+      staleTime: Infinity,
+    };
+    await result.current.queryClient.fetchQuery(file);
+    await result.current.queryClient.fetchQuery(tree);
+
+    await act(async () => {
+      expect(await result.current.controller.agentViewProps.onAddSkills?.(["alpha"], { replace: true })).toBe(true);
+    });
+
+    expect(await result.current.queryClient.fetchQuery(file)).toBe("new file");
+    expect(await result.current.queryClient.fetchQuery(tree)).toEqual(["new.txt"]);
+  });
+
+  it("retains the replacement action after a worker update fails", async () => {
+    vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", description: "Old", enabled: true }]);
+    vi.mocked(batchAddAgentSkillsRequest).mockRejectedValueOnce(new Error("Replacement failed"));
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.agentViewProps.skills).toHaveLength(1));
+
+    await act(async () => {
+      expect(await result.current.agentViewProps.onAddSkills?.(["alpha"], { replace: true })).toBe(false);
+    });
+    expect(result.current.agentViewProps.skillAddError).toContain("Replacement failed");
+    expect(result.current.agentViewProps.skills[0].description).toBe("Old");
+
+    await act(async () => {
+      expect(await result.current.agentViewProps.onAddSkills?.(["alpha"], { replace: true })).toBe(true);
+    });
+    expect(batchAddAgentSkillsRequest).toHaveBeenNthCalledWith(2, "u-manager", ["alpha"], { replace: true });
+    expect(result.current.agentViewProps.skillAddError).toBe("");
+  });
+
   it("enables an existing disabled skill without copying it again", async () => {
     vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", enabled: false }]);
     vi.mocked(setAgentResourceEnabled).mockImplementationOnce(async () => {

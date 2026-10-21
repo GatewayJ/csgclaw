@@ -31,6 +31,7 @@ import {
 import { fetchAgentMCPServerSourceStatus, syncAgentMCPServerSource } from "@/api/mcp";
 import { installAgentRuntime, type AgentRuntimeInstallation } from "@/api/agentRuntimes";
 import type {
+  AgentSkillInstallOptions,
   AgentUpdatePayload,
   FeishuRegistration,
   FeishuRegistrationFinalizeResult,
@@ -2631,7 +2632,7 @@ export function useAgentController({
   }
 
   const batchAddAgentSkills = useCallback(
-    async (skillNames: string[]) => {
+    async (skillNames: string[], options: AgentSkillInstallOptions = {}) => {
       if (!agentDetailAgentID || agentSkillAddBusy) {
         return false;
       }
@@ -2642,6 +2643,10 @@ export function useAgentController({
       setAgentSkillAddBusy(true);
       setAgentSkillAddError("");
       try {
+        if (options.replace) {
+          await batchAddAgentSkillsRequest(agentDetailAgentID, names, options);
+          return true;
+        }
         const current = new Map(
           (await fetchAgentSkillSummaries(agentDetailAgentID)).map((skill) => [skill.name, skill]),
         );
@@ -2657,7 +2662,15 @@ export function useAgentController({
         setAgentSkillAddError(errorMessage(err, t("agentSkillAddFailed")));
         return false;
       } finally {
-        await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID) });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID) }),
+          ...(options.replace
+            ? [
+                queryClient.invalidateQueries({ queryKey: ["agent-skill-tree", agentDetailAgentID] }),
+                queryClient.invalidateQueries({ queryKey: ["agent-skill-file", agentDetailAgentID] }),
+              ]
+            : []),
+        ]);
         setAgentSkillAddBusy(false);
       }
     },

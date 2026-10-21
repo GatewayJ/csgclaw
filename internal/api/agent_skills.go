@@ -14,7 +14,8 @@ import (
 )
 
 type batchAddAgentSkillsRequest struct {
-	Names []string `json:"names"`
+	Names   []string `json:"names"`
+	Replace bool     `json:"replace,omitempty"`
 }
 
 func (h *Handler) handleAgentSkillSummaries(w http.ResponseWriter, r *http.Request) {
@@ -72,15 +73,22 @@ func (h *Handler) handleAgentSkillsBatchAdd(w http.ResponseWriter, r *http.Reque
 		writeAgentSkillsMutationError(w, err)
 		return
 	}
+	var replacements []string
 	for _, rawName := range req.Names {
 		name := strings.TrimSpace(rawName)
 		if slices.Contains(current.Spec.Skills, name) {
-			writeAgentSkillsMutationError(w, fmt.Errorf("%w: %s", agent.ErrAgentSkillAlreadyExists, name))
-			return
+			if !req.Replace {
+				writeAgentSkillsMutationError(w, fmt.Errorf("%w: %s", agent.ErrAgentSkillAlreadyExists, name))
+				return
+			}
+		} else {
+			current.Spec.Skills = append(current.Spec.Skills, name)
 		}
-		current.Spec.Skills = append(current.Spec.Skills, name)
+		if req.Replace {
+			replacements = append(replacements, name)
+		}
 	}
-	if _, err := agents.Update(r.Context(), id, agentengine.AgentUpdateRequest{Spec: current.Spec, FieldMask: []string{"skills"}, ResourceVersion: current.ResourceVersion}); err != nil {
+	if _, err := agents.Update(r.Context(), id, agentengine.AgentUpdateRequest{Spec: current.Spec, FieldMask: []string{"skills"}, ResourceVersion: current.ResourceVersion, ReplaceSkills: replacements}); err != nil {
 		writeAgentSkillsMutationError(w, err)
 		return
 	}

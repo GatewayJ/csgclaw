@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchSkills, installRemoteSkillRequest, uploadSkillArchive } from "@/api/skills";
 import { createMCPServerRequest, installRemoteMCPServerRequest } from "@/api/mcp";
 import { fetchRemoteKnowledgeBaseMCPConfig } from "@/api/knowledgeBases";
-import { fetchAgentSkillSummaries, fetchAgentMCPServers } from "@/api/agents";
+import { fetchAgentSkillSummaries, fetchAgentMCPServers, type AgentSkillInstallOptions } from "@/api/agents";
 import { errorMessage } from "@/api/client";
 import type { TranslateFn } from "@/models/conversations";
 import { remoteSkillInstallName, type SkillSummary } from "@/models/skillhub";
@@ -35,8 +35,6 @@ function marketSkillKey(skill: SkillSummary): string {
   return JSON.stringify(["skill", skill.remotePath?.trim() || "", skill.remoteRef?.trim() || ""]);
 }
 
-type MarketSkillState = { action: "install" | "enable" | "enabled"; name: string };
-
 export function useAgentResourcePicker({
   agentID,
   kind,
@@ -47,7 +45,7 @@ export function useAgentResourcePicker({
   agentID: string;
   kind: AgentResourcePickerKind;
   authenticated: boolean;
-  onAdd: (names: string[]) => Promise<boolean> | boolean;
+  onAdd: (names: string[], options?: AgentSkillInstallOptions) => Promise<boolean> | boolean;
   t: TranslateFn;
 }) {
   const client = useQueryClient();
@@ -59,6 +57,7 @@ export function useAgentResourcePicker({
   const active = useRef(true);
   const pending = useRef(false);
   const prepared = useRef(new Map<string, string>());
+  const marketSkillNames = useRef(new Map<string, string>());
   useEffect(() => {
     active.current = true;
     return () => {
@@ -102,15 +101,15 @@ export function useAgentResourcePicker({
           .map((server) => server.name),
   );
 
-  function marketSkillState(skill: SkillSummary): MarketSkillState {
-    const preparedName = prepared.current.get(marketSkillKey(skill));
-    const name = preparedName || remoteSkillInstallName(skill);
-    if (enabledNames.has(name)) return { name, action: "enabled" };
+  function skillAction(skill: SkillSummary): "install" | "replace" {
+    const key = marketSkillKey(skill);
+    const preparedName = prepared.current.get(key);
+    const name = preparedName || marketSkillNames.current.get(key) || remoteSkillInstallName(skill);
     const installed = preparedName || installedNames.has(name) || skills.data?.some((item) => item.name === name);
-    return { name, action: installed ? "enable" : "install" };
+    return installed ? "replace" : "install";
   }
 
-  async function run(key: string, acquire: () => Promise<string[]>) {
+  async function run(key: string, acquire: () => Promise<string[]>, options?: AgentSkillInstallOptions) {
     if (pending.current) return false;
     pending.current = true;
     setBusy(key);
@@ -118,7 +117,7 @@ export function useAgentResourcePicker({
     try {
       const names = await acquire();
       if (!active.current) return false;
-      return await onAdd(names);
+      return await (options ? onAdd(names, options) : onAdd(names));
     } catch (failure) {
       if (active.current) setError(localizeAPIError(failure, t, errorMessage(failure)));
       return false;
@@ -132,12 +131,19 @@ export function useAgentResourcePicker({
     const existing = prepared.current.get(key);
     if (existing) return [existing];
     const skill = await acquire();
+    for (const [preparedKey, name] of prepared.current) {
+      if (name === skill.name) prepared.current.delete(preparedKey);
+    }
     prepared.current.set(key, skill.name);
     client.setQueryData<SkillSummary[]>(workspaceQueryKeys.skills(), (current) => [
       ...(current ?? []).filter((item) => item.name !== skill.name),
       skill,
     ]);
-    await client.invalidateQueries({ queryKey: workspaceQueryKeys.skills() });
+    await Promise.all([
+      client.invalidateQueries({ queryKey: workspaceQueryKeys.skills() }),
+      client.invalidateQueries({ queryKey: workspaceQueryKeys.skillTreeScope() }),
+      client.invalidateQueries({ queryKey: workspaceQueryKeys.skillFileScope() }),
+    ]);
     return [skill.name];
   }
 
@@ -170,8 +176,7 @@ export function useAgentResourcePicker({
     error,
     installedNames,
     enabledNames,
-    skillAction: (skill: SkillSummary) => marketSkillState(skill).action,
-    isSkillEnabled: (skill: SkillSummary) => marketSkillState(skill).action === "enabled",
+    skillAction,
     skills: skills.data ?? [],
     globalServers,
     libraryLoading:
@@ -186,15 +191,21 @@ export function useAgentResourcePicker({
     knowledge,
     knowledgeItems: mergeRemoteKnowledgeBasePages(knowledge.data?.pages ?? []),
     add: (names: string[]) => run("library", async () => names),
-    installSkill: (skill: SkillSummary) => {
-      const state = marketSkillState(skill);
-      if (state.action === "enabled") return Promise.resolve(true);
-      return run(skill.remotePath || skill.name, () => {
-        if (state.action === "enable") return Promise.resolve([state.name]);
-        return acquireSkill(marketSkillKey(skill), () =>
-          installRemoteSkillRequest(skill.remotePath || "", skill.remoteRef),
-        );
-      });
+    installSkill: async (skill: SkillSummary) => {
+      const key = marketSkillKey(skill);
+      const replace = skillAction(skill) === "replace";
+      const added = await run(
+        skill.remotePath || skill.name,
+        () =>
+          acquireSkill(key, async () => {
+            const installed = await installRemoteSkillRequest(skill.remotePath || "", skill.remoteRef, replace);
+            marketSkillNames.current.set(key, installed.name);
+            return installed;
+          }),
+        { replace: true },
+      );
+      if (added) prepared.current.delete(key);
+      return added;
     },
     upload: (file: File) =>
       run("upload", () =>

@@ -137,8 +137,10 @@ export const workspaceQueryKeys = {
   officialSkills: (search: string | null | undefined = "") =>
     [WORKSPACE_QUERY_SCOPE, "official-skills", String(search || "").trim()] as const,
   skills: () => [WORKSPACE_QUERY_SCOPE, "skills"] as const,
-  skillTree: (path: string | null | undefined) => [WORKSPACE_QUERY_SCOPE, "skill-tree", path || ""] as const,
-  skillFile: (path: string | null | undefined) => [WORKSPACE_QUERY_SCOPE, "skill-file", path || ""] as const,
+  skillTreeScope: () => [WORKSPACE_QUERY_SCOPE, "skill-tree"] as const,
+  skillTree: (path: string | null | undefined) => [...workspaceQueryKeys.skillTreeScope(), path || ""] as const,
+  skillFileScope: () => [WORKSPACE_QUERY_SCOPE, "skill-file"] as const,
+  skillFile: (path: string | null | undefined) => [...workspaceQueryKeys.skillFileScope(), path || ""] as const,
   agentWorkspaceScope: (agentID: string | null | undefined) =>
     [WORKSPACE_QUERY_SCOPE, "agent-workspace", agentID || ""] as const,
   agentWorkspace: (agentID: string | null | undefined, workspacePath: string | null | undefined) =>

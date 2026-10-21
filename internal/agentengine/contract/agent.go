@@ -54,6 +54,8 @@ type AgentUpdateRequest struct {
 	Spec            AgentSpec `json:"spec"`
 	FieldMask       []string  `json:"field_mask,omitempty"`
 	ResourceVersion string    `json:"resource_version,omitempty"`
+	// ReplaceSkills refreshes and enables the named skills from the global catalog.
+	ReplaceSkills []string `json:"replace_skills,omitempty"`
 }
 
 type AgentRecreateOptions struct {
