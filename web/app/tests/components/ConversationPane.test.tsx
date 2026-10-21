@@ -729,7 +729,7 @@ describe("ConversationPane", () => {
     expect(screen.queryByText("Direct Messages")).not.toBeInTheDocument();
   });
 
-  it("shows visible and total room message counts when some messages are filtered", () => {
+  it("shows the space name without message counts when some messages are filtered", () => {
     const messages = [
       {
         content: "visible answer",
@@ -745,9 +745,15 @@ describe("ConversationPane", () => {
       },
     ];
 
-    renderThreadPane({ isDirect: false, messages, visibleMessages: [messages[0]] });
+    const { container } = renderThreadPane({
+      isDirect: false,
+      conversationTitle: "测试空间",
+      messages,
+      visibleMessages: [messages[0]],
+    });
 
-    expect(screen.getByText("1/2")).toBeInTheDocument();
+    expect(screen.queryByText("1/2")).not.toBeInTheDocument();
+    expect(container.querySelector(".chat-kicker")).toHaveTextContent("测试空间");
   });
 
   it("shows the complete room title on hover and keyboard focus", async () => {

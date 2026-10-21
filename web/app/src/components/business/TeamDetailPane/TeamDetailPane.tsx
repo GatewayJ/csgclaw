@@ -115,11 +115,11 @@ export function TeamDetailPane({
           </div>
           <p className={styles.teamDetailSubtitle}>{t("teamDetailSubtitle")}</p>
         </div>
-        <div className={classNames("entity-toolbar", styles.teamDetailToolbar)} aria-label={t("teamPanelManage")}>
+        <div className={styles.teamDetailToolbar} aria-label={t("teamPanelManage")}>
           {onStartCollaboration ? (
             <Button
               className={styles.teamDetailToolbarButton}
-              variant="secondaryGray"
+              variant="primary"
               size="md"
               disabled={teamActionBusy}
               onClick={() => onStartCollaboration(team)}

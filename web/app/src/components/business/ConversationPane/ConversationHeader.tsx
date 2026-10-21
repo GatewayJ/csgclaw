@@ -70,6 +70,7 @@ export const ConversationHeader = memo(function ConversationHeader({
         .find((user) => ["worker", "agent", "manager"].includes(normalizeComparable(user.role)))
         ?.name?.trim()
     : "";
+  const headerName = isDirectConversation(conversation) ? directAgentName : conversation.title;
 
   return (
     <PanelHeader className="chat-header">
@@ -78,9 +79,9 @@ export const ConversationHeader = memo(function ConversationHeader({
           <div className="chat-title-row">
             <div className="chat-title-group">
               <div className="chat-kicker">
-                {directAgentName ? (
-                  <span className="truncate" title={directAgentName}>
-                    {directAgentName}
+                {headerName ? (
+                  <span className="truncate" title={headerName}>
+                    {headerName}
                   </span>
                 ) : (
                   <>

@@ -2799,6 +2799,7 @@ export function useAgentController({
     openAgentDirectMessage,
     notificationAgentItems,
     openCreateAgentModal,
+    openCreateCustomAgentModal: () => openCreateAgentModal(null),
     openCreateTeamModal,
     openManageTeamMembers,
     openCreateNotificationParticipantModal,

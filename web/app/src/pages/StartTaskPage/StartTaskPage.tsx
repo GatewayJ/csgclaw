@@ -232,7 +232,7 @@ function StartTaskForm({
             }}
             locked={busy || Boolean(created.current)}
             t={t}
-            onCreateAgent={() => void sidebar.onCreateAgent()}
+            onCreateAgent={() => void sidebar.onCreateCustomAgent()}
             onCreateTeam={() => void sidebar.onOpenCreateTeam()}
           />
           {modelMissing || !agents.length ? (

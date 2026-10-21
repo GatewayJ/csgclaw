@@ -81,6 +81,25 @@ const worker = {
 };
 
 describe("AgentProfileModal", () => {
+  it("defaults to the custom form without creation mode tabs", () => {
+    render(
+      <AgentProfileModal
+        t={t}
+        locale="en"
+        agentModalMode="create"
+        agentCreateBotKind="worker"
+        agentDraft={agentToDraft(worker)}
+        onAgentCreateBotKindChange={vi.fn()}
+        onAgentDraftChange={vi.fn()}
+        onAgentModelsReset={vi.fn()}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("tab", { name: /From template/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Custom/ })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("For example: dev")).toBeInTheDocument();
+  });
   it("hides failed CLI providers and keeps an existing selection read-only", async () => {
     const user = userEvent.setup();
     const draft = { ...agentToDraft(worker), provider: "codex", model_provider_id: "codex", model_id: "saved-model" };

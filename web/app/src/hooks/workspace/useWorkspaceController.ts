@@ -918,6 +918,7 @@ export function useWorkspaceController(): WorkspaceController {
       onToggleWorkspaceGroup: shell.toggleWorkspaceGroup,
       onCreateRoom: () => navigate("/new"),
       onCreateAgent: agent.openCreateAgentModal,
+      onCreateCustomAgent: agent.openCreateCustomAgentModal,
       onCreateModelProvider: modelProviderCreation.open,
       onCreateNotificationParticipant: agent.openCreateNotificationParticipantModal,
       onCreateTeam: async (payload: CreateTeamPayload) => {
@@ -942,6 +943,11 @@ export function useWorkspaceController(): WorkspaceController {
       onSelectTeam: selectTeam,
       agentsError: agent.agentsDisplayError,
       onSelectConversation: selectConversationAndCloseSidePanels,
+      onSelectSearchMatch: (id, message) => {
+        if (!closeConversationAgentDetail()) return;
+        selectConversationAndCloseThreadPanel(id);
+        conversation.navigateToSearchMatch(id, message);
+      },
       onSelectThread: openThreadInConversation,
       onPreviewUser: profilePreview.openParticipantPreview,
       onSelectAgent: selectAgent,
