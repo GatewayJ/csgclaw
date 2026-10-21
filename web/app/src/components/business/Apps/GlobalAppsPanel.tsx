@@ -73,6 +73,7 @@ export function GlobalAppsPanel({
   }, [items.length, onCountChange]);
   const { resourceId } = useParams();
   const [searchParams] = useSearchParams();
+  const requestedResourceID = embedded ? searchParams.get("app_resource") : null;
   const reload = useCallback(
     async (signal?: AbortSignal) => {
       const request = ++seq.current;
@@ -108,7 +109,14 @@ export function GlobalAppsPanel({
       clearInterval(interval);
     };
   }, [reload]);
-  const editing = items.find((item) => item.installation_id === (resourceId ?? localEditingID)) || null;
+  useEffect(() => {
+    if (!loaded || !requestedResourceID || items.some((item) => item.installation_id === requestedResourceID)) return;
+    const next = new URLSearchParams(location.search);
+    next.delete("app_resource");
+    void navigate({ search: next.toString() }, { replace: true });
+  }, [items, loaded, location.search, navigate, requestedResourceID]);
+  const editing =
+    items.find((item) => item.installation_id === (requestedResourceID ?? resourceId ?? localEditingID)) || null;
   const editingError = editing ? appConnectionError(editing, t) : "";
   const availableDefinitions = definitions.filter(
     (definition) =>
@@ -124,7 +132,11 @@ export function GlobalAppsPanel({
     setAdding(null);
     setLocalEditingID("");
     void reload();
-    if (resourceId || !embedded) void navigate(pathForPane({ type: "apps", id: "" }));
+    if (requestedResourceID) {
+      const next = new URLSearchParams(location.search);
+      next.delete("app_resource");
+      void navigate({ search: next.toString() }, { replace: true });
+    } else if (resourceId || !embedded) void navigate(pathForPane({ type: "apps", id: "" }));
   };
   async function mutate(operation: () => Promise<unknown>) {
     setBusy(true);

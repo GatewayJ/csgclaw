@@ -1320,7 +1320,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
               {t("cancel")}
             </Button>
             <Button variant="danger" size="sm" loading={skillDeleteBusy} onClick={handleDeleteSkillConfirm}>
-              {t("agentDeleteSkill")}
+              {t("confirm")}
             </Button>
           </div>
         </DialogContent>
@@ -1380,11 +1380,11 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
               variant="danger"
               size="sm"
               loading={mcpDeleteBusy}
-              loadingLabel={t("agentDeleteMCP")}
+              loadingLabel={t("confirm")}
               disabled={mcpDeleteBusy}
               onClick={handleDeleteMCPConfirm}
             >
-              {t("agentDeleteMCP")}
+              {t("confirm")}
             </Button>
           </div>
         </DialogContent>
@@ -1728,7 +1728,7 @@ function AgentMCPPanel({
                 kind === "knowledge" ? "profileKnowledgeEmpty" : hasManagedApps ? "appManualMCPEmpty" : "agentMCPEmpty",
               )}
             </strong>
-            <p>{t(kind === "knowledge" ? "profileKnowledgeHint" : "agentMCPEmptyHint")}</p>
+            <p>{t(kind === "knowledge" ? "profileKnowledgeEmptyHint" : "agentMCPEmptyHint")}</p>
           </div>
           <Button variant="secondaryGray" size="sm" disabled={mutationBusy || addBusy} onClick={onOpenAddMCP}>
             <Plus aria-hidden="true" size={15} strokeWidth={2.2} />

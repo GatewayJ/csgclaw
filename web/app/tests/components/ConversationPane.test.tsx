@@ -1111,7 +1111,7 @@ describe("ConversationPane", () => {
     const drawer = screen.getByRole("dialog", { name: "agentDetailPanel" });
     await user.click(within(drawer).getByRole("button", { name: /agentProfileSkillsTab/ }));
     await user.click(within(drawer).getByRole("button", { name: /alpha.*Alpha skill/ }));
-    await user.click(within(drawer).getByRole("button", { name: "agentDeleteSkill" }));
+    await user.click(within(drawer).getByRole("button", { name: "profileRemoveResource" }));
 
     const confirmation = screen.getByRole("dialog", { name: "agentDeleteSkill" });
     expect(drawer).toContainElement(confirmation);

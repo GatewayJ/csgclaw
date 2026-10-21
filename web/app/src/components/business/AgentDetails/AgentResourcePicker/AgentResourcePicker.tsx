@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { Plus } from "lucide-react";
-import { Button, Checkbox, DialogRoot, LinkButton, SegmentedControl, TextInput } from "@/components/ui";
+import { Button, Checkbox, DialogRoot, SegmentedControl, TextInput } from "@/components/ui";
 import { SkillUploadDialog } from "@/components/business/SkillUploadDialog";
 import { MCPServerCreateDialog } from "@/components/business/HubDetailPane";
 import { useAgentResourcePicker, type AgentResourcePickerKind } from "@/hooks/workspace/useAgentResourcePicker";
+import { useWorkspaceDialogs } from "@/hooks/workspace/useWorkspaceDialogs";
 import { knowledgeBaseMCPServer } from "@/models/knowledgeBases";
 import { isRemoteMCPInstalled, mcpManagedKnowledgeBaseSource, mcpServerDisplayName } from "@/models/mcp";
 import type { SkillSummary } from "@/models/skillhub";
@@ -43,6 +44,7 @@ export function AgentResourcePicker({
   t: TranslateFn;
 }) {
   const picker = useAgentResourcePicker({ agentID, kind, authenticated, onAdd, t });
+  const { openSettings } = useWorkspaceDialogs();
   const [selected, setSelected] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -97,7 +99,7 @@ export function AgentResourcePicker({
             name: server.name,
             description: server.description,
             installed: picker.globalServers.some(
-              (item) => picker.installedNames.has(item.name) && isRemoteMCPInstalled([item], server),
+              (item) => picker.enabledNames.has(item.name) && isRemoteMCPInstalled([item], server),
             ),
             unavailable: false,
             add: () => picker.installMCP(server),
@@ -119,9 +121,7 @@ export function AgentResourcePicker({
       ? picker.market
         ? "iaSkillsMarketSearchPlaceholder"
         : "resourcesSkillSearchPlaceholder"
-      : picker.market
-        ? "iaMCPMarketSearchPlaceholder"
-        : "iaMCPInstalledSearchPlaceholder",
+      : "profileMCPSearchPlaceholder",
   );
   return (
     <>
@@ -156,10 +156,14 @@ export function AgentResourcePicker({
                   {t("resourcesMCPCreateTitle")}
                 </Button>
               ) : null}
-              <LinkButton
+              <Button
                 size="sm"
                 variant="linkColor"
-                href={kind === "skill" ? "#/skills" : kind === "mcp" ? "#/connectors" : "#/knowledge-bases"}
+                disabled={busy}
+                onClick={() => {
+                  onClose();
+                  openSettings(kind === "skill" ? "skills" : kind === "mcp" ? "connectors" : "knowledge");
+                }}
               >
                 {t(
                   kind === "skill"
@@ -168,7 +172,7 @@ export function AgentResourcePicker({
                       ? "profileManageMCP"
                       : "profileManageKnowledge",
                 )}
-              </LinkButton>
+              </Button>
             </>
           }
           footer={
@@ -235,17 +239,17 @@ export function AgentResourcePicker({
               <>
                 {picker.libraryLoading ? <p role="status">{t("loading")}</p> : null}
                 {visibleLibrary.map((item) => {
-                  const installed = picker.installedNames.has(item.name);
+                  const enabled = picker.enabledNames.has(item.name);
                   return (
                     <ResourcePickerRow selectable key={item.name}>
                       <Checkbox
-                        checked={installed || selected.includes(item.name)}
-                        disabled={busy || installed || Boolean(picker.libraryError)}
+                        checked={enabled || selected.includes(item.name)}
+                        disabled={busy || enabled || Boolean(picker.libraryError)}
                         onCheckedChange={(checked) => select(item.name, checked === true)}
                         aria-label={item.label}
                       />
                       <ResourcePickerCopy
-                        name={item.label + (installed ? ` · ${t("profileResourceEnabled")}` : "")}
+                        name={item.label + (enabled ? ` · ${t("profileResourceEnabled")}` : "")}
                         description={item.description}
                       />
                     </ResourcePickerRow>

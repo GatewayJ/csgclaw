@@ -4,11 +4,11 @@ import {
   ResourceFeaturedIcon,
   ResourceStatus,
 } from "@/components/business/ResourceListCard";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowUpRight, BookOpen, GitBranch, Plus, RefreshCw } from "lucide-react";
 import {
   Button,
-  LinkButton,
   Switch,
   DialogRoot,
   DialogContent,
@@ -24,6 +24,7 @@ import { errorMessage } from "@/api/client";
 import { localizeAPIError } from "@/shared/i18n";
 import type { AppInstallation } from "@/api/apps";
 import type { TranslateFn } from "@/models/conversations";
+import { settingsDialogSearch } from "@/models/workspaceDialogs";
 import { ConnectorBoxesIcon, ConnectorGitLabIcon } from "@/components/ui/Icons";
 import { appName, appDescription } from "./appForm";
 import { appStatus, appConnectionError } from "./appStatus";
@@ -50,6 +51,7 @@ type Props = {
 };
 
 export function AgentAppsPanel({
+  agentID,
   cliSupported = true,
   controller,
   t,
@@ -62,7 +64,16 @@ export function AgentAppsPanel({
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<AppInstallation | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const pickerSession = useRef(0);
+  const location = useLocation();
+  const navigate = useNavigate();
   const { showNotice } = useGlobalNotice();
+  useEffect(
+    () => () => {
+      pickerSession.current += 1;
+    },
+    [agentID],
+  );
   const feishu = controller.items.find((app) => app.kind === "cli" && app.app_id === "feishu");
   const selected = controller.items.find((app) => app.installation_id === selectedID);
   const selectedError = selected ? appConnectionError(selected, t) : "";
@@ -72,7 +83,6 @@ export function AgentAppsPanel({
   const selectedCLISkills = selected?.skills?.length ? selected.skills : (selectedResource?.skills ?? []);
   const selectedCLIRuntimeStatus = selected?.runtime_status || selectedResource?.runtime_status;
   const available = controller.resources.filter((resource) => !addAppID || resource.app_id === addAppID);
-  const manageResourcesHref = addAppID ? `#/connectors?add_connector=${encodeURIComponent(addAppID)}` : "#/connectors";
   const connectorDescription = (app: AppInstallation) => {
     const definition = controller.definitions.find((item) => item.app_id === app.app_id);
     if (app.kind === "cli") return definition ? appDescription(definition, t) : "";
@@ -103,9 +113,29 @@ export function AgentAppsPanel({
     }
   }
   const closePicker = () => {
+    pickerSession.current += 1;
     setAdding(false);
     onSelect(undefined);
   };
+  const manageResources = (resourceID?: string) => {
+    const search = new URLSearchParams(location.search);
+    search.delete("connector");
+    search.delete("add_connector");
+    search.delete("app_resource");
+    if (resourceID) search.set("app_resource", resourceID);
+    closePicker();
+    void navigate({ search: settingsDialogSearch(search.toString(), "connectors") }, { replace: true });
+  };
+  async function bindResource(resourceID: string) {
+    const session = pickerSession.current;
+    setError(null);
+    try {
+      await controller.bind(resourceID);
+      if (session === pickerSession.current) closePicker();
+    } catch (failure) {
+      if (session === pickerSession.current) setError(failure);
+    }
+  }
   return (
     <section id="agent-profile-apps" className={`profile-section ${styles.panel}`}>
       <div className={styles.heading}>
@@ -192,7 +222,7 @@ export function AgentAppsPanel({
           <DialogHeader>
             <div>
               <DialogTitle>{selected?.name}</DialogTitle>
-              <DialogDescription>{selected ? appStatus(selected, t) : ""}</DialogDescription>
+              <DialogDescription>{selected ? appName(selected.app_id, t) : ""}</DialogDescription>
             </div>
             <div className="flex shrink-0 items-center gap-4">
               <Switch
@@ -206,7 +236,7 @@ export function AgentAppsPanel({
               <DialogCloseButton label={t("close")} size="sm" variant="tertiaryGray" iconOnly />
             </div>
           </DialogHeader>
-          <DialogBody className={styles.settingsBody}>
+          <DialogBody className={`${styles.settingsBody} ${styles.scrollableSettingsBody}`}>
             {error ? (
               <p role="alert" className="form-error">
                 {localizeAPIError(error, t) || errorMessage(error)}
@@ -214,6 +244,9 @@ export function AgentAppsPanel({
             ) : null}
             {selected ? (
               <>
+                <div>
+                  <ResourceStatus status={resourceStatus(selected)}>{appStatus(selected, t)}</ResourceStatus>
+                </div>
                 {selected.resource_enabled === false ? (
                   <p className={styles.hint}>{t("appGlobalDisabledHint")}</p>
                 ) : null}
@@ -236,7 +269,7 @@ export function AgentAppsPanel({
                     </ul>
                   </div>
                 ) : (
-                  <AppToolList tools={selected.tools} t={t} fillAvailableHeight />
+                  <AppToolList tools={selected.tools} t={t} defaultOpen={false} />
                 )}
               </>
             ) : null}
@@ -244,24 +277,33 @@ export function AgentAppsPanel({
           {selected ? (
             <DialogFooter className={styles.settingsFooter}>
               <div className={styles.settingsActionGroup}>
-                <LinkButton
+                <Button
                   size="md"
                   variant="primary"
-                  className={`${styles.manageResourceLink} ${styles.settingsPrimaryAction}`}
-                  href={`#/connectors/${encodeURIComponent(selected.resource_id || "")}`}
+                  className={styles.manageResourceLink}
+                  onClick={() => manageResources(selected.resource_id)}
                 >
                   {t("appManageResource")}
                   <ArrowUpRight size={14} />
-                </LinkButton>
-                {selected.kind !== "cli" && (selected.disconnected || selected.status !== "connected") ? (
-                  <Button
-                    size="md"
-                    disabled={!!controller.busyID || !selected.enabled || selected.resource_enabled === false}
-                    onClick={() => void run(() => controller.connect(selected.installation_id))}
-                  >
-                    <RefreshCw size={14} />
-                    {t("appReconnect")}
-                  </Button>
+                </Button>
+                {selected.kind !== "cli" ? (
+                  <>
+                    <Button
+                      size="md"
+                      disabled={!!controller.busyID || !selected.enabled || selected.resource_enabled === false}
+                      onClick={() => void run(() => controller.connect(selected.installation_id))}
+                    >
+                      <RefreshCw size={14} />
+                      {t("appConnect")}
+                    </Button>
+                    <Button
+                      size="md"
+                      disabled={!!controller.busyID || selected.disconnected}
+                      onClick={() => void run(() => controller.disconnect(selected.installation_id))}
+                    >
+                      {t("appDisconnect")}
+                    </Button>
+                  </>
                 ) : null}
               </div>
               {selected.kind !== "cli" ? (
@@ -272,7 +314,7 @@ export function AgentAppsPanel({
                   disabled={!!controller.busyID}
                   onClick={() => setRemoving(selected)}
                 >
-                  {t("appRemove")}
+                  {t("profileRemoveResource")}
                 </Button>
               ) : null}
             </DialogFooter>
@@ -290,17 +332,16 @@ export function AgentAppsPanel({
           title={t("profileAppConnectorAdd")}
           description={t("profileAppConnectorHint")}
           closeLabel={t("close")}
-          busy={Boolean(controller.busyID)}
           portalContainer={portalContainer}
           actions={
             <>
-              <LinkButton size="sm" variant="linkColor" href={manageResourcesHref}>
+              <Button size="sm" variant="linkColor" onClick={() => manageResources()}>
                 {t("appManageResources")}
-              </LinkButton>
+              </Button>
             </>
           }
           footer={
-            <Button size="sm" disabled={Boolean(controller.busyID)} onClick={closePicker}>
+            <Button size="sm" onClick={closePicker}>
               {t("close")}
             </Button>
           }
@@ -326,11 +367,7 @@ export function AgentAppsPanel({
                     disabled={
                       bound || !resource.enabled || !!controller.busyID || (resource.kind === "cli" && !cliSupported)
                     }
-                    onClick={() =>
-                      void run(() => controller.bind(resource.installation_id)).then((ok) => {
-                        if (ok) closePicker();
-                      })
-                    }
+                    onClick={() => void bindResource(resource.installation_id)}
                   >
                     {t(bound ? "profileResourceEnabled" : "appEnable")}
                   </Button>

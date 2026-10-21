@@ -77,6 +77,20 @@ describe("Agent resource acquisition", () => {
     expect([...result.current.installedNames]).toEqual(["review"]);
   });
 
+  it.each(["mcp", "knowledge"] as const)("distinguishes %s membership from enablement", async (kind) => {
+    mockAPI({
+      installedServers: {
+        disabled: { command: "node", enabled: false },
+        enabled: { command: "node", enabled: true },
+        legacy: { command: "node" },
+      },
+    });
+    const { result } = renderPicker(kind);
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+    expect([...result.current.installedNames]).toEqual(["disabled", "enabled", "legacy"]);
+    expect([...result.current.enabledNames]).toEqual(["enabled", "legacy"]);
+  });
+
   it("installs a market skill and binds the returned name to the Agent", async () => {
     const fetch = mockAPI();
     const { result, onAdd } = renderPicker();

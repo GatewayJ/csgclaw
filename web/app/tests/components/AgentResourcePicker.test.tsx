@@ -1,8 +1,29 @@
+import type { PropsWithChildren } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { AgentResourcePicker } from "@/components/business/AgentDetails/AgentResourcePicker";
 import { createTranslator } from "@/shared/i18n";
 import { createQueryWrapper } from "../helpers/queryClient";
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{location.pathname + location.search}</output>;
+}
+
+function createPickerWrapper() {
+  const { wrapper: QueryWrapper } = createQueryWrapper();
+  return function Wrapper({ children }: PropsWithChildren) {
+    return (
+      <MemoryRouter initialEntries={["/agents/agent-1?tab=skills&view=scheduled"]}>
+        <QueryWrapper>
+          {children}
+          <LocationProbe />
+        </QueryWrapper>
+      </MemoryRouter>
+    );
+  };
+}
 
 function setup(locale: "en" | "zh" = "en", fileFailure = false, existingSkill = false) {
   const t = createTranslator(locale);
@@ -49,12 +70,94 @@ function setup(locale: "en" | "zh" = "en", fileFailure = false, existingSkill = 
   const onAdd = vi.fn().mockResolvedValue(true);
   const onClose = vi.fn();
   render(<AgentResourcePicker agentID="agent-1" kind="skill" authenticated onAdd={onAdd} onClose={onClose} t={t} />, {
-    wrapper: createQueryWrapper().wrapper,
+    wrapper: createPickerWrapper(),
   });
   return { fetch, onAdd, onClose, t, user: userEvent.setup() };
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Agent global resource picker", () => {
+  it.each([
+    ["skill", "profileManageSkills", "skills"],
+    ["mcp", "profileManageMCP", "connectors"],
+    ["knowledge", "profileManageKnowledge", "knowledge"],
+  ] as const)("opens %s management in Settings while preserving the Agent location", async (kind, label, section) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(kind === "skill" ? [] : {})),
+    );
+    const t = createTranslator("en");
+    const onClose = vi.fn();
+    render(
+      <AgentResourcePicker
+        agentID="agent-1"
+        kind={kind}
+        authenticated={false}
+        onAdd={vi.fn()}
+        onClose={onClose}
+        t={t}
+      />,
+      { wrapper: createPickerWrapper() },
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: t(label) }));
+    expect(onClose).toHaveBeenCalledOnce();
+    const destination = new URL(screen.getByTestId("location").textContent || "", "http://localhost");
+    expect(destination.pathname).toBe("/agents/agent-1");
+    expect(Object.fromEntries(destination.searchParams)).toEqual({
+      tab: "skills",
+      view: "scheduled",
+      dialog: "settings",
+      section,
+    });
+  });
+
+  it.each(["mcp", "knowledge"] as const)("allows a disabled %s resource to be enabled again", async (kind) => {
+    const config =
+      kind === "knowledge"
+        ? {
+            url: "https://example.com/wiki/mcp",
+            _meta: {
+              "com.opencsg/mcp": {
+                type: "llm_wiki",
+                resource_id: "42",
+                content_id: "wiki-42",
+                auth_type: "csghub_access_token",
+              },
+            },
+          }
+        : { command: "node" };
+    const servers = {
+      disabled: { ...config, display_name: "Disabled resource", enabled: false },
+      enabled: { ...config, display_name: "Enabled resource" },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        if (String(input).includes("/agents/")) return Response.json({ servers });
+        return Response.json({ mcpServers: servers });
+      }),
+    );
+    const t = createTranslator("en");
+    const onAdd = vi.fn().mockResolvedValue(true);
+    const onClose = vi.fn();
+    render(
+      <AgentResourcePicker agentID="agent-1" kind={kind} authenticated={false} onAdd={onAdd} onClose={onClose} t={t} />,
+      { wrapper: createPickerWrapper() },
+    );
+    const disabled = await screen.findByRole("checkbox", { name: "Disabled resource" });
+    expect(disabled).not.toBeChecked();
+    expect(disabled).toBeEnabled();
+    const enabled = screen.getByRole("checkbox", { name: "Enabled resource" });
+    expect(enabled).toBeChecked();
+    expect(enabled).toBeDisabled();
+    const user = userEvent.setup();
+    await user.click(disabled);
+    await user.click(screen.getByRole("button", { name: t(kind === "mcp" ? "agentMCPAdd" : "agentKnowledgeAdd") }));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledExactlyOnceWith(["disabled"]));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});
 
 describe("Agent skill market preview", () => {
   it.each(["en", "zh"] as const)(

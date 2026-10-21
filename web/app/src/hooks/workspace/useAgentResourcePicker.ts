@@ -16,6 +16,7 @@ import {
   createdMCPServerName,
   isRemoteMCPInstalled,
   mcpServersFromCatalogResponse,
+  mcpServersFromMap,
   type MCPServerPayload,
   type RemoteMCPServer,
 } from "@/models/mcp";
@@ -91,6 +92,13 @@ export function useAgentResourcePicker({
       ? (agentSkills.data ?? []).map((skill) => skill.name)
       : Object.keys(agentServers.data?.servers ?? {}),
   );
+  const enabledNames = new Set(
+    kind === "skill"
+      ? installedNames
+      : mcpServersFromMap(agentServers.data?.servers)
+          .filter((server) => server.config.enabled !== false)
+          .map((server) => server.name),
+  );
 
   async function run(key: string, acquire: () => Promise<string[]>) {
     if (pending.current) return false;
@@ -151,6 +159,7 @@ export function useAgentResourcePicker({
     busy,
     error,
     installedNames,
+    enabledNames,
     isSkillEnabled: (skill: SkillSummary) => {
       const name = prepared.current.get(marketSkillKey(skill));
       return Boolean(name && installedNames.has(name));

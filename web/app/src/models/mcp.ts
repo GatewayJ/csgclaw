@@ -351,8 +351,27 @@ function numberFromUnknown(value: unknown): number | null {
 
 export function mcpServerDetailConfig(config: JSONRecord): JSONRecord {
   const output: JSONRecord = {};
-  for (const key of ["command", "transport", "startup_timeout_sec", "tool_timeout_sec", "enabled"]) {
+  for (const key of [
+    "name",
+    "display_name",
+    "description",
+    "source",
+    "type",
+    "command",
+    "transport",
+    "startup_timeout_sec",
+    "tool_timeout_sec",
+    "enabled",
+  ]) {
     if (config[key] !== undefined) output[key] = config[key];
+  }
+  const managed = isJSONRecord(config._meta) ? config._meta["com.opencsg/mcp"] : undefined;
+  if (isJSONRecord(managed)) {
+    const source: JSONRecord = {};
+    for (const key of ["type", "resource_id", "content_id", "auth_type"]) {
+      if (typeof managed[key] === "string") source[key] = managed[key];
+    }
+    output._meta = { "com.opencsg/mcp": source };
   }
   if (typeof config.url === "string") {
     try {

@@ -13,12 +13,20 @@ import (
 	"csgclaw/internal/agentengine/contract"
 	"csgclaw/internal/config"
 	agentruntime "csgclaw/internal/runtime"
+	skillinstall "csgclaw/internal/skill/installstate"
 	skillsystem "csgclaw/internal/skill/system"
 )
 
 func assertDefaultSystemSkills(t *testing.T, root string) {
 	t.Helper()
+	records, err := skillinstall.Read(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"skill-creator", "skill-installer", "csgclaw-self-diagnosis"} {
+		if records[name].SourceKind() != skillinstall.SourceBuiltin {
+			t.Fatalf("built-in skill %s origin = %+v", name, records[name])
+		}
 		source, err := skillsystem.ResolveSource(name)
 		if err != nil {
 			t.Fatal(err)

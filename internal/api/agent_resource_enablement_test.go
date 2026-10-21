@@ -4,6 +4,8 @@ import (
 	"context"
 	"csgclaw/internal/agentengine"
 	agent "csgclaw/internal/agentengine/agents"
+	"csgclaw/internal/config"
+	"csgclaw/internal/knowledgebase"
 	agentruntime "csgclaw/internal/runtime"
 	skill "csgclaw/internal/skill/state"
 	"encoding/json"
@@ -86,6 +88,75 @@ func TestResourceEnablementHTTP(t *testing.T) {
 			summaries := send(http.MethodGet, "/skill-summaries", "")
 			if !strings.Contains(summaries.Body.String(), `"enabled":false`) {
 				t.Fatalf("列表遗漏状态：%s", summaries.Body.String())
+			}
+		})
+	}
+}
+
+func TestKnowledgeBaseEnablementPreservesListingAndMetadata(t *testing.T) {
+	for _, kind := range []string{agent.RuntimeKindCodex, agent.RuntimeKindDSH} {
+		t.Run(kind, func(t *testing.T) {
+			item := completeWorkerAgent("agent-knowledge", "Knowledge")
+			item.RuntimeKind, item.RuntimeName = kind, kind
+			item.Status, item.DesiredState = "stopped", "stopped"
+			item.MCPServers = map[string]any{"wiki": map[string]any{
+				"url": "https://example.test/wiki/mcp", "enabled": true,
+				"_meta": map[string]any{"com.opencsg/mcp": map[string]any{
+					"type": "llm_wiki", "resource_id": "42", "content_id": "wiki-42", "auth_type": "csghub_access_token",
+				}},
+			}}
+			rt := &resourceEnablementRuntime{snapshotMCPServersRuntime: snapshotMCPServersRuntime{fakeCompatRuntime: fakeCompatRuntime{kind: kind}}}
+			_, statePath := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{item}, agent.WithRuntime(rt))
+			controller, err := agent.NewController(config.ModelConfig{}, config.ServerConfig{
+				ListenAddr: "127.0.0.1:18080", AccessToken: "internal-token",
+			}, "manager-image:test", statePath, agent.WithRuntime(rt))
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := &Handler{svc: controller, agentEngine: agentengine.New(controller), workspace: controller.Workspace(), agentRuntime: controller}
+			routes := h.Routes()
+			send := func(method, suffix, body string) *httptest.ResponseRecorder {
+				t.Helper()
+				w := httptest.NewRecorder()
+				routes.ServeHTTP(w, httptest.NewRequest(method, "/api/v1/agents/"+item.ID+suffix, strings.NewReader(body)))
+				if w.Code != http.StatusOK {
+					t.Fatalf("%s %s: %d %s", method, suffix, w.Code, w.Body)
+				}
+				return w
+			}
+			listPath := "/mcp-servers?pagination=cursor&limit=20&kind=knowledge"
+			for _, enabled := range []bool{false, true} {
+				before := send(http.MethodGet, listPath, "")
+				version, err := strconv.Unquote(before.Header().Get("ETag"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				updated := send(http.MethodPut, "/mcp-servers/wiki/enabled", fmt.Sprintf(`{"enabled":%t,"resource_version":%q}`, enabled, version))
+				if updated.Header().Get("ETag") == before.Header().Get("ETag") {
+					t.Fatal("resource version did not change after update")
+				}
+				after := send(http.MethodGet, listPath, "")
+				var page struct {
+					Total int `json:"total"`
+					Items []struct {
+						Name   string         `json:"name"`
+						Config map[string]any `json:"config"`
+					} `json:"items"`
+				}
+				if err := json.Unmarshal(after.Body.Bytes(), &page); err != nil {
+					t.Fatal(err)
+				}
+				if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Name != "wiki" {
+					t.Fatalf("knowledge base missing from listing: %s", after.Body)
+				}
+				entry := page.Items[0].Config
+				metadata, managed := knowledgebase.ManagedMetadataFromServer(entry)
+				if entry["enabled"] != enabled || !managed || metadata.KnowledgeBaseID != 42 || metadata.ContentID != "wiki-42" {
+					t.Fatalf("knowledge base enablement or metadata = %#v", entry)
+				}
+				if strings.Contains(after.Body.String(), "internal-token") {
+					t.Fatal("knowledge base configuration contains runtime credentials")
+				}
 			}
 		})
 	}

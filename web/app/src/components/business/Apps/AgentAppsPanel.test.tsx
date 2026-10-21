@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppDefinition, AppInstallation } from "@/api/apps";
@@ -48,18 +49,37 @@ const feishuInstallation: AppInstallation = {
 
 afterEach(() => vi.unstubAllGlobals());
 
-function Harness({ agentID = "agent-1", mode = "apps" }: { agentID?: string; mode?: "apps" | "mcp" }) {
+function Harness(props: { agentID?: string; mode?: "apps" | "mcp"; initialPath?: string }) {
+  return (
+    <MemoryRouter initialEntries={[props.initialPath || "/agents/agent-1?tab=connectors"]}>
+      <AgentHarness {...props} />
+    </MemoryRouter>
+  );
+}
+
+function AgentHarness({ agentID = "agent-1", mode = "apps" }: { agentID?: string; mode?: "apps" | "mcp" }) {
   const controller = useAgentApps(agentID, true);
   const [selectedID, setSelectedID] = useState<string | undefined>();
+  const location = useLocation();
   if (mode === "mcp") return <AppManagedMCPRows controller={controller} t={t} onSelect={setSelectedID} />;
   return (
-    <AgentAppsPanel agentID={agentID} controller={controller} t={t} selectedID={selectedID} onSelect={setSelectedID} />
+    <>
+      <output data-testid="location">{location.pathname + location.search}</output>
+      <AgentAppsPanel
+        agentID={agentID}
+        controller={controller}
+        t={t}
+        selectedID={selectedID}
+        onSelect={setSelectedID}
+      />
+    </>
   );
 }
 
 function mockServer(
   initial: AppInstallation[] = [],
   resources: AppInstallation[] = [{ ...installation, installation_id: "resource-1", agent_id: "", bindings: [] }],
+  beforeBind?: () => Promise<void>,
 ) {
   let items = initial;
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -78,6 +98,10 @@ function mockServer(
       }));
       return Response.json(items[0]);
     }
+    if (init?.method === "POST" && path.endsWith("/connect")) {
+      items = items.map((app) => ({ ...app, disconnected: false, status: "connected" }));
+      return Response.json(items[0]);
+    }
     if (init?.method === "PATCH" && path.includes("/connectors/")) {
       const body = JSON.parse(String(init.body));
       const id = path.split("/").at(-1);
@@ -88,6 +112,7 @@ function mockServer(
       return Response.json(next);
     }
     if (init?.method === "POST" && path.endsWith("/connectors")) {
+      await beforeBind?.();
       const body = JSON.parse(String(init.body));
       const saved = { ...installation, resource_id: body.resource_id };
       items = [...items, saved];
@@ -166,23 +191,122 @@ describe("Agent Apps", () => {
     expect(screen.queryByLabelText("Token / API key")).not.toBeInTheDocument();
   });
 
-  it("only shows reconnection when the app is disconnected", async () => {
-    mockServer([installation]);
+  it("shows connection controls and opens global configuration from the agent page", async () => {
+    const fetch = mockServer([installation]);
     const user = userEvent.setup();
-    const view = render(<Harness />);
+    render(<Harness initialPath="/agents/agent-1?tab=connectors&connector=install-1" />);
     await screen.findByText("Work GitLab");
     await user.click(screen.getByRole("button", { name: /Work GitLab/ }));
-    const manageLink = screen.getByRole("link", { name: t("appManageResource") });
-    expect(manageLink).toHaveAttribute("href", "#/connectors/resource-1");
-    expect(manageLink).toHaveClass(buttonStyles.btn, buttonStyles["btn-primary"], buttonStyles["btn-md"]);
-    expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reconnect" })).not.toBeInTheDocument();
-    view.unmount();
-    mockServer([{ ...installation, disconnected: true, status: "disconnected" }]);
+    const manageButton = screen.getByRole("button", { name: t("appManageResource") });
+    expect(manageButton).toHaveClass(buttonStyles.btn, buttonStyles["btn-primary"], buttonStyles["btn-md"]);
+    const tools = screen.getByText(t("appAvailableTools", { count: 1 })).closest("details");
+    expect(tools).not.toHaveAttribute("open");
+    await user.click(screen.getByText(t("appAvailableTools", { count: 1 })));
+    expect(tools).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: t("profileRemoveResource") })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    await screen.findByText("Manually disconnected. Reconnect explicitly to restore access.");
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Disconnect" })).toBeEnabled());
+    expect(fetch).toHaveBeenCalledWith(
+      "api/v1/agents/agent-1/connectors/install-1/connect",
+      expect.objectContaining({ method: "POST" }),
+    );
+    await user.click(manageButton);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const destination = new URL(screen.getByTestId("location").textContent!, "https://example.test");
+    expect(destination.pathname).toBe("/agents/agent-1");
+    expect(Object.fromEntries(destination.searchParams)).toEqual({
+      tab: "connectors",
+      app_resource: "resource-1",
+      dialog: "settings",
+      section: "connectors",
+    });
+  });
+
+  it("allows disconnection when the global connector is disabled", async () => {
+    mockServer([{ ...installation, resource_enabled: false }]);
+    const user = userEvent.setup();
     render(<Harness />);
     await user.click(await screen.findByRole("button", { name: /Work GitLab/ }));
-    await screen.findByText("Manually disconnected. Reconnect explicitly to restore access.");
-    expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled();
+    expect(screen.getByText(t("appGlobalDisabledHint"))).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeEnabled();
+  });
+
+  it.each([0, 1])("allows close control %s during binding and preserves a reopened picker", async (closeIndex) => {
+    let finish!: () => void;
+    mockServer(
+      [],
+      undefined,
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<Harness />);
+    await screen.findByText("Connect the services your agent needs");
+    await user.click(screen.getByRole("button", { name: "Enable app connector" }));
+    await user.click(screen.getByRole("button", { name: "Enable" }));
+    const closeButtons = screen.getAllByRole("button", { name: "Close" });
+    expect(closeButtons).toHaveLength(2);
+    expect(closeButtons[closeIndex]).toBeEnabled();
+    await user.click(closeButtons[closeIndex]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Enable app connector" }));
+    expect(screen.getByRole("button", { name: "Enable" })).toBeDisabled();
+    await act(async () => finish());
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(await within(screen.getByRole("dialog")).findByRole("button", { name: "Enabled" })).toBeDisabled();
+  });
+
+  it("ignores a binding failure after closing and reopening the picker", async () => {
+    let fail!: (error: Error) => void;
+    mockServer(
+      [],
+      undefined,
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<Harness />);
+    await screen.findByText("Connect the services your agent needs");
+    await user.click(screen.getByRole("button", { name: "Enable app connector" }));
+    await user.click(screen.getByRole("button", { name: "Enable" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Enable app connector" }));
+    await act(async () => fail(new Error("Previous binding failed")));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Enable" })).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps settings open when an earlier binding request completes", async () => {
+    let finish!: () => void;
+    mockServer(
+      [],
+      undefined,
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<Harness />);
+    await screen.findByText("Connect the services your agent needs");
+    await user.click(screen.getByRole("button", { name: "Enable app connector" }));
+    await user.click(screen.getByRole("button", { name: "Enable" }));
+    await user.click(screen.getByRole("button", { name: t("appManageResources") }));
+    await act(async () => finish());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/agents/agent-1?tab=connectors&dialog=settings&section=connectors",
+    );
   });
 
   it.each([false, true])(
@@ -198,9 +322,13 @@ describe("Agent Apps", () => {
       const action = dialog.getByRole("button", { name: allBound ? "Enabled" : "Enable" });
       if (allBound) expect(action).toBeDisabled();
       else expect(action).toBeEnabled();
-      const link = dialog.getByRole("link", { name: t("appManageResources") });
-      expect(link).toHaveAttribute("href", "#/connectors");
-      expect(link).toHaveClass(buttonStyles.btn, buttonStyles["btn-link-color"], buttonStyles["btn-sm"]);
+      const manage = dialog.getByRole("button", { name: t("appManageResources") });
+      expect(manage).toHaveClass(buttonStyles.btn, buttonStyles["btn-link-color"], buttonStyles["btn-sm"]);
+      await user.click(manage);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/agents/agent-1?tab=connectors&dialog=settings&section=connectors",
+      );
     },
   );
 

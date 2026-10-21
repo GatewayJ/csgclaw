@@ -12,6 +12,7 @@ import (
 
 	"csgclaw/internal/config"
 	"csgclaw/internal/knowledgebase"
+	"csgclaw/internal/mcpschema"
 	"csgclaw/internal/opencsgmcp"
 	agentruntime "csgclaw/internal/runtime"
 	hub "csgclaw/internal/template"
@@ -261,16 +262,57 @@ func TestDeleteManagedKnowledgeBaseMCPUsesPersistedSnapshotWithoutSourceAccess(t
 }
 
 func TestDisabledManagedMCPDoesNotResolveSourceOrMutateSpec(t *testing.T) {
-	svc := &Controller{}
-	entry := map[string]any{
-		"url": "https://example.com/mcp", "enabled": false, "description": "说明",
-		opencsgmcp.ManagedMetaKey: map[string]any{opencsgmcp.ManagedMetaNamespace: map[string]any{"type": opencsgmcp.GatewayMCPType, "auth_type": opencsgmcp.CSGHubAuthType}},
-	}
-	got, err := svc.materializeRuntimeMCPServers(context.Background(), RuntimeKindCodex, map[string]any{"search": entry})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got["search"].(map[string]any)["enabled"] != false || entry["description"] != "说明" {
-		t.Fatalf("禁用配置或原始配置被改变：%v", got)
+	for _, managedType := range []string{opencsgmcp.GatewayMCPType, knowledgebase.ManagedMCPType} {
+		t.Run(managedType, func(t *testing.T) {
+			svc := &Controller{}
+			entry := map[string]any{
+				"url": "https://example.com/mcp", "enabled": false, "description": "说明",
+				mcpschema.DisplayNameKey: "Knowledge",
+				"headers": map[string]any{
+					"Authorization": "Bearer saved-token",
+					"X-Project":     "project",
+				},
+				opencsgmcp.ManagedMetaKey: map[string]any{
+					opencsgmcp.ManagedMetaNamespace: map[string]any{
+						"type": managedType, "auth_type": opencsgmcp.CSGHubAuthType,
+						"resource_id": "42", "content_id": "content-42",
+					},
+					mcpschema.MarketplaceMetaKey: map[string]any{"path": "team/knowledge"},
+					"example.com/custom":         map[string]any{"label": "custom"},
+				},
+			}
+			before, err := json.Marshal(entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := svc.materializeRuntimeMCPServers(context.Background(), RuntimeKindCodex, map[string]any{"search": entry})
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := json.Marshal(entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatalf("original configuration changed: before=%s after=%s", before, after)
+			}
+			runtimeEntry := got["search"].(map[string]any)
+			if runtimeEntry["enabled"] != false || runtimeEntry["url"] != entry["url"] {
+				t.Fatalf("disabled configuration changed: %v", runtimeEntry)
+			}
+			if _, exists := runtimeEntry[mcpschema.DisplayNameKey]; exists {
+				t.Fatalf("runtime configuration retained the display name: %v", runtimeEntry)
+			}
+			meta := runtimeEntry[opencsgmcp.ManagedMetaKey].(map[string]any)
+			if len(meta) != 1 || meta["example.com/custom"] == nil {
+				t.Fatalf("runtime metadata = %v", meta)
+			}
+			if managedType == knowledgebase.ManagedMCPType {
+				headers := runtimeEntry["headers"].(map[string]any)
+				if len(headers) != 1 || headers["X-Project"] != "project" {
+					t.Fatalf("disabled knowledge base retained credentials: %v", headers)
+				}
+			}
+		})
 	}
 }

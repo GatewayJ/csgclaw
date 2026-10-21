@@ -75,10 +75,7 @@ describe("Agent App deep links", () => {
     );
     expect(await screen.findByRole("dialog", { name: "Enable app connector" })).toBeVisible();
     expect(screen.queryByLabelText("Instance name")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Manage global Connectors" })).toHaveAttribute(
-      "href",
-      "#/connectors?add_connector=gitlab",
-    );
+    expect(screen.getByRole("button", { name: "Manage global Connectors" })).toBeEnabled();
     await user.click(screen.getAllByRole("button", { name: "Close" })[0]);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.getByTestId("location")).toHaveTextContent("/agents/agent-1?tab=connectors");

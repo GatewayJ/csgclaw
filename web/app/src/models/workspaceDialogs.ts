@@ -8,7 +8,7 @@ export const WorkspaceDialogNames = {
 export type WorkspaceDialogName = (typeof WorkspaceDialogNames)[keyof typeof WorkspaceDialogNames];
 
 const DIALOG_OWNED_PARAMS: Record<WorkspaceDialogName, readonly string[]> = {
-  settings: ["section"],
+  settings: ["section", "app_resource"],
   profile: ["human"],
 };
 

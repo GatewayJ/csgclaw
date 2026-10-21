@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { createTranslator } from "@/shared/i18n";
 import { GlobalAppsPanel } from "./GlobalAppsPanel";
 import { AppSettingsDialog } from "./AppSettingsDialog";
@@ -22,6 +22,59 @@ const definition: AppDefinition = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Global Apps", () => {
+  it.each(["global-1", "missing"])("opens settings resource %s while preserving the agent page", async (resourceID) => {
+    const resource = {
+      installation_id: "global-1",
+      app_id: "gitlab",
+      name: "Team GitLab",
+      enabled: true,
+      status: "connected",
+      config: { transport: "http", url: "https://service.example/mcp", auth_mode: "bearer" },
+      credentials_set: { token: true },
+      tools: [],
+      bindings: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        Response.json({
+          items: String(url).endsWith("catalog") ? [{ ...definition, app_id: "gitlab", name: "GitLab" }] : [resource],
+        }),
+      ),
+    );
+    function SettingsHarness() {
+      const location = useLocation();
+      return (
+        <>
+          <output data-testid="location">{location.pathname + location.search}</output>
+          <GlobalAppsPanel embedded t={t} />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/agents/agent-1?tab=connectors&dialog=settings&section=connectors&app_resource=${resourceID}`,
+        ]}
+      >
+        <SettingsHarness />
+      </MemoryRouter>,
+    );
+    if (resourceID === "missing") {
+      await screen.findByRole("button", { name: /Team GitLab/ });
+      await user.click(screen.getByRole("button", { name: /Team GitLab/ }));
+    }
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByRole("heading", { name: "Settings for Team GitLab" })).toBeVisible();
+    await user.click(dialog.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/agents/agent-1?tab=connectors&dialog=settings&section=connectors",
+    );
+    expect(screen.getByTestId("location")).not.toHaveTextContent("app_resource");
+  });
+
   it("shows connector loading until the resource response arrives", async () => {
     let finish!: (response: Response) => void;
     vi.stubGlobal(

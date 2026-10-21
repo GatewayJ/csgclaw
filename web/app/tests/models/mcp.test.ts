@@ -4,6 +4,7 @@ import {
   formatMCPServerDocument,
   hasMCPServerName,
   mcpServerDisplayName,
+  mcpServerDetailConfig,
   mcpServerDescription,
   mcpServerOrigin,
   isRemoteMCPInstalled,
@@ -18,6 +19,53 @@ import {
 } from "@/models/mcp";
 
 describe("MCP catalog helpers", () => {
+  it("preserves presentation and managed identity while redacting detail credentials", () => {
+    const config = {
+      name: "Handbook",
+      description: "Team knowledge",
+      source: "agentichub",
+      type: "remote",
+      enabled: false,
+      url: "https://user:password@example.test/mcp?token=secret#private",
+      headers: { Authorization: "Bearer secret" },
+      env: { TOKEN: "secret" },
+      args: ["--token", "secret"],
+      _meta: {
+        "com.opencsg/mcp": {
+          type: "llm_wiki",
+          resource_id: "42",
+          content_id: "content-42",
+          auth_type: "csghub_access_token",
+          access_token: "secret",
+        },
+        private: { token: "secret" },
+      },
+    };
+    const detail = mcpServerDetailConfig(config);
+    expect(detail).toEqual({
+      name: "Handbook",
+      description: "Team knowledge",
+      source: "agentichub",
+      type: "remote",
+      enabled: false,
+      url: "https://example.test/mcp",
+      headers: { Authorization: "••••••" },
+      env: { TOKEN: "••••••" },
+      argument_count: 2,
+      _meta: {
+        "com.opencsg/mcp": {
+          type: "llm_wiki",
+          resource_id: "42",
+          content_id: "content-42",
+          auth_type: "csghub_access_token",
+        },
+      },
+    });
+    expect(JSON.stringify(detail)).not.toContain("secret");
+    expect(config.headers.Authorization).toBe("Bearer secret");
+    expect(config._meta["com.opencsg/mcp"].access_token).toBe("secret");
+  });
+
   it.each(["local-tools", "Team tools", "团队工具"])("resolves the created key for display name %s", (name) => {
     expect(
       createdMCPServerName(

@@ -13,6 +13,8 @@ import (
 
 const lockFileName = ".skillhub-lock.json"
 
+func IsRecordsFile(name string) bool { return name == lockFileName }
+
 // Serialize callers in this process; the OS file lock also covers other processes.
 var installRecordsMu sync.Mutex
 
@@ -29,6 +31,7 @@ type Record struct {
 }
 
 const (
+	SourceBuiltin = "builtin"
 	SourceLocal   = "local"
 	SourceMarket  = "market"
 	SourceUnknown = "unknown"
@@ -36,7 +39,7 @@ const (
 
 func (r Record) SourceKind() string {
 	switch r.Source {
-	case SourceLocal, SourceMarket:
+	case SourceBuiltin, SourceLocal, SourceMarket:
 		return r.Source
 	case "":
 		// Recognize full source URLs and older CLI records without an explicit source.
@@ -83,6 +86,24 @@ func Read(skillsRoot string) (map[string]Record, error) {
 	defer lock.Close()
 	payload, err := readLockFile(skillsRoot)
 	return payload.Skills, err
+}
+
+// RestoreRecords merges preserved origins with regenerated origins without modifying the recovery inputs.
+func RestoreRecords(preservedRoot, generatedRoot, targetRoot string) error {
+	installRecordsMu.Lock()
+	defer installRecordsMu.Unlock()
+	// Unreadable origins do not prevent skill recovery; original files remain available for rollback.
+	preserved, _ := readLockFile(preservedRoot)
+	generated, _ := readLockFile(generatedRoot)
+	if preserved.Skills == nil {
+		preserved.Skills = make(map[string]Record)
+	}
+	for name, record := range generated.Skills {
+		if _, exists := preserved.Skills[name]; !exists || record.SourceKind() == SourceBuiltin {
+			preserved.Skills[name] = record
+		}
+	}
+	return writeLockFile(targetRoot, preserved)
 }
 
 // Update also coordinates a local install or removal. Persist first

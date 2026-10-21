@@ -10,9 +10,32 @@
 }
 .connectorBody {
   display: flex;
+  flex-direction: column;
   min-height: 0;
   flex: 1;
   overflow: hidden;
+}
+.titleRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sourceBadge {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.removeButton {
+  margin-right: auto;
+}
+.configTitle {
+  margin: 0 0 8px;
+  flex: none;
+  color: var(--text);
+  font-size: 13px;
 }
 .files {
   display: grid;

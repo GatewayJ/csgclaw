@@ -49,6 +49,8 @@ func (s *Controller) materializeRuntimeMCPServers(ctx context.Context, runtimeKi
 				}
 			}
 			if meta, ok := entry[opencsgmcp.ManagedMetaKey].(map[string]any); ok {
+				meta = utils.CloneAnyMap(meta)
+				entry[opencsgmcp.ManagedMetaKey] = meta
 				delete(meta, opencsgmcp.ManagedMetaNamespace)
 				if len(meta) == 0 {
 					delete(entry, opencsgmcp.ManagedMetaKey)

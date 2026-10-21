@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"csgclaw/internal/config"
+	skillinstall "csgclaw/internal/skill/installstate"
 )
 
 const (
@@ -42,6 +43,7 @@ type workspaceSkillsPreservedEntry struct {
 	Name      string                  `json:"name"`
 	Restored  bool                    `json:"restored,omitempty"`
 	Displaced bool                    `json:"displaced,omitempty"`
+	Copied    bool                    `json:"copied,omitempty"`
 	Merged    []workspaceSkillsRename `json:"merged,omitempty"`
 }
 
@@ -348,6 +350,9 @@ func (p *workspaceSkillsPreservation) validateRecordedPaths(agentHome string) er
 		if err := validateWorkspaceSkillEntryName(entry.Name); err != nil {
 			return err
 		}
+		if entry.Copied && !skillinstall.IsRecordsFile(entry.Name) {
+			return fmt.Errorf("copied workspace entry %q is not an installation record", entry.Name)
+		}
 		for _, move := range entry.Merged {
 			if !pathWithinRoot(p.displacedRoot, move.From) {
 				return fmt.Errorf("%w: %s", ErrWorkspacePathUnsafe, move.From)
@@ -484,8 +489,15 @@ func (p *workspaceSkillsPreservation) apply(root string) error {
 			return p.revertApply(fmt.Errorf("inspect target skill %q: %w", entry.Name, err))
 		}
 		entry.Restored = true
+		entry.Copied = skillinstall.IsRecordsFile(entry.Name)
 		if err := p.persistState(); err != nil {
 			return p.revertApply(err)
+		}
+		if entry.Copied {
+			if err := skillinstall.RestoreRecords(p.preservedRoot, p.displacedRoot, root); err != nil {
+				return p.revertApply(fmt.Errorf("restore skill installation records: %w", err))
+			}
+			continue
 		}
 		if err := os.Rename(preserved, target); err != nil {
 			return p.revertApply(fmt.Errorf("restore workspace skill %q with rename: %w", entry.Name, err))
@@ -676,6 +688,11 @@ func (p *workspaceSkillsPreservation) RevertRestore() error {
 		target := filepath.Join(root, entry.Name)
 		preserved := filepath.Join(p.preservedRoot, entry.Name)
 		if entry.Restored {
+			if entry.Copied {
+				if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return err
+				}
+			}
 			targetExists, err := workspacePathExists(target)
 			if err != nil {
 				return err
