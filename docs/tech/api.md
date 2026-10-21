@@ -531,6 +531,10 @@ Accepts `{ "names": ["..."] }` and merges the named server definitions from
 the MCP catalog into the agent's managed MCP servers. The response has the same
 shape as the `GET` endpoint.
 
+An optional `enabled` boolean sets the copied definitions' Agent enablement in
+the same update. Omitting it preserves each catalog definition's state. Profile
+passes `enabled: true` when adding resources; the global catalog is unchanged.
+
 #### `POST /api/v1/agents/{id}/mcp-servers:batchDelete`
 
 Accepts `{ "names": ["..."] }` and removes the named servers from the

@@ -1,15 +1,15 @@
 import { fetchAgentSkillBatch, fetchAgentMCPBatch } from "@/api/agentResources";
 import type { AgentMCPServersView } from "@/api/agents";
-import { mcpServersFromMap } from "@/models/mcp";
+import { mcpServersFromMap, mcpManagedKnowledgeBaseSource } from "@/models/mcp";
 vi.mock("@/api/agentResources", () => ({ fetchAgentSkillBatch: vi.fn(), fetchAgentMCPBatch: vi.fn() }));
 function setMCPView(view: AgentMCPServersView) {
   vi.mocked(fetchAgentMCPServers).mockResolvedValue(view);
   const items = mcpServersFromMap(view.servers);
-  vi.mocked(fetchAgentMCPBatch).mockResolvedValue({
-    items,
-    total: items.length,
-    has_more: false,
-    list_revision: "test",
+  vi.mocked(fetchAgentMCPBatch).mockImplementation(async (_id, _cursor, _signal, kind) => {
+    const filtered = items.filter(
+      (item) => !kind || Boolean(mcpManagedKnowledgeBaseSource(item.config)) === (kind === "knowledge"),
+    );
+    return { items: filtered, total: filtered.length, has_more: false, list_revision: "test" };
   });
 }
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -56,7 +56,6 @@ import { WorkspacePaneTypes } from "@/models/routing";
 import type { WorkspacePane } from "@/models/routing";
 import type { AgentLike, AgentProfileLike, AgentTemplateLike, RuntimeBootstrapConfig } from "@/models/agents";
 import type { IMConversation, IMData, TranslateFn } from "@/models/conversations";
-import type { MCPServer } from "@/models/mcp";
 import { normalizeModelProviderCatalog } from "@/models/modelProviders";
 import type { ModelProviderCatalog } from "@/models/modelProviders";
 import type { WorkspaceTeam } from "@/models/tasks";
@@ -235,9 +234,6 @@ function useAgentControllerHarness(
     activePane?: WorkspacePane;
     agents?: AgentLike[];
     data?: IMData | null;
-    catalogMCPServers?: MCPServer[];
-    catalogMCPServersError?: string;
-    catalogMCPServersLoading?: boolean;
     hubTemplates?: AgentTemplateLike[];
     managerProfile?: AgentProfileLike | null;
     modelProviders?: ModelProviderCatalog | null;
@@ -249,7 +245,6 @@ function useAgentControllerHarness(
     bootstrapConfig?: RuntimeBootstrapConfig | null;
     refreshedBootstrapConfig?: RuntimeBootstrapConfig | null;
     refreshWorkspaceBootstrapConfig?: () => Promise<RuntimeBootstrapConfig | null>;
-    refreshMCPServers?: () => Promise<unknown>;
     refreshWorkspaceModelProviders?: () => Promise<ModelProviderCatalog | null>;
     t?: TranslateFn;
     workingParticipantsForRoom?: UseAgentControllerArgs["workingParticipantsForRoom"];
@@ -311,9 +306,6 @@ function useAgentControllerHarness(
     } as UseQueryResult<AgentLike[]>,
     bootstrapConfig: options.bootstrapConfig ?? null,
     data,
-    catalogMCPServers: options.catalogMCPServers ?? [],
-    catalogMCPServersError: options.catalogMCPServersError ?? "",
-    catalogMCPServersLoading: options.catalogMCPServersLoading ?? false,
     hubTemplates: options.hubTemplates ?? [],
     locale: "en",
     managerProfile,
@@ -322,7 +314,6 @@ function useAgentControllerHarness(
     onAgentDeleted: options.onAgentDeleted,
     onBrowseTemplates: options.onBrowseTemplates,
     openCSGAuthGuard: options.openCSGAuthGuard ?? openCSGAuthGuard,
-    refreshMCPServers: options.refreshMCPServers ?? vi.fn(async () => null),
     refreshHubTemplates: refreshHubTemplatesRef.current,
     refreshWorkspaceAgents,
     refreshWorkspaceBootstrap,
@@ -2170,24 +2161,6 @@ describe("useAgentController", () => {
     await waitFor(() => expect(result.current.controller.agentViewProps.skills?.[0].enabled).toBe(false));
   });
 
-  it("loads global skill candidates and filters already-installed agent skills", async () => {
-    vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", description: "Alpha skill" }]);
-    vi.mocked(fetchAgentSkillsFile).mockResolvedValue({
-      content: "---\ndescription: Alpha skill\n---\n# Alpha\n",
-      path: "alpha/SKILL.md",
-      size: 32,
-    });
-
-    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
-
-    act(() => result.current.agentViewProps.onLoadSkillCandidates());
-    await waitFor(() => expect(fetchSkills).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(fetchAgentSkillSummaries).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(result.current.agentViewProps.skills).toHaveLength(1));
-
-    expect(result.current.agentViewProps.skillCandidates).toEqual([{ name: "beta", description: "Beta skill" }]);
-  });
-
   it("keeps skills visible when individual descriptions cannot be read", async () => {
     vi.mocked(fetchAgentSkillSummaries).mockResolvedValue([{ name: "alpha", error: "invalid_metadata" }]);
     const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
@@ -2275,7 +2248,7 @@ describe("useAgentController", () => {
     expect(result.current.agentViewProps.mcpDeleteError).toBe("");
   });
 
-  it("treats a managed knowledge base as a regular agent MCP without loading its source detail", async () => {
+  it("lists managed knowledge through the knowledge resource query", async () => {
     setMCPView({
       agent_id: "u-manager",
       runtime_kind: "codex",
@@ -2298,8 +2271,8 @@ describe("useAgentController", () => {
 
     const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
 
-    await waitFor(() => expect(result.current.agentViewProps.mcpServers).toHaveLength(1));
-    expect(result.current.agentViewProps.mcpServers[0]).toMatchObject({
+    await waitFor(() => expect(result.current.agentViewProps.knowledgeServers).toHaveLength(1));
+    expect(result.current.agentViewProps.knowledgeServers[0]).toMatchObject({
       name: "kb_tourism",
       config: {
         _meta: {
@@ -2332,17 +2305,7 @@ describe("useAgentController", () => {
       },
     });
 
-    const { result } = renderHook(
-      () =>
-        useAgentControllerHarness({
-          catalogMCPServers: [
-            { name: "catalog", description: "Catalog", config: { command: "npx" } },
-            { name: "manual", description: "Manual", config: { command: "uvx" } },
-            { name: "native", description: "Native", config: { command: "npx" } },
-          ],
-        }).controller,
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
 
     await waitFor(() =>
       expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual([
@@ -2351,7 +2314,6 @@ describe("useAgentController", () => {
         "native",
       ]),
     );
-    expect(result.current.agentViewProps.mcpCandidates).toEqual([]);
 
     await act(async () => {
       await result.current.agentViewProps.onDeleteMCPServer?.({ name: "manual" });
@@ -2359,32 +2321,6 @@ describe("useAgentController", () => {
 
     expect(batchDeleteAgentMCPServersRequest).toHaveBeenCalledWith("u-manager", ["manual"]);
     expect(result.current.agentViewProps.mcpDeleteError).toBe("");
-  });
-
-  it("filters catalog MCP candidates by the backend MCP server map", async () => {
-    setMCPView({
-      agent_id: "u-manager",
-      runtime_kind: "codex",
-      servers: {
-        manual: { command: "uvx", env: { MCP_TOKEN: "secret" } },
-      },
-    });
-
-    const { result } = renderHook(
-      () =>
-        useAgentControllerHarness({
-          catalogMCPServers: [
-            { name: "context7", description: "Context7", config: { command: "npx" } },
-            { name: "manual", description: "Manual", config: { command: "uvx" } },
-          ],
-        }).controller,
-      { wrapper: createWrapper() },
-    );
-
-    await waitFor(() =>
-      expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual(["manual"]),
-    );
-    expect(result.current.agentViewProps.mcpCandidates.map((server) => server.name)).toEqual(["context7"]);
   });
 
   it("renders the backend MCP server map when the runtime state is unavailable", async () => {
@@ -2396,18 +2332,11 @@ describe("useAgentController", () => {
       },
     });
 
-    const { result } = renderHook(
-      () =>
-        useAgentControllerHarness({
-          catalogMCPServers: [{ name: "manual", description: "Manual", config: { command: "uvx" } }],
-        }).controller,
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
 
     await waitFor(() =>
       expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual(["manual"]),
     );
-    expect(result.current.agentViewProps.mcpCandidates).toEqual([]);
   });
 
   it("installs MCP catalog servers through the agent MCP server endpoint", async () => {
@@ -2430,23 +2359,15 @@ describe("useAgentController", () => {
       return installedView;
     });
 
-    const { result } = renderHook(
-      () =>
-        useAgentControllerHarness({
-          catalogMCPServers: [{ name: "context7", description: "Context7", config: { command: "uvx" } }],
-        }).controller,
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useAgentControllerHarness().controller, { wrapper: createWrapper() });
 
-    await waitFor(() =>
-      expect(result.current.agentViewProps.mcpCandidates.map((server) => server.name)).toEqual(["context7"]),
-    );
+    await waitFor(() => expect(fetchAgentMCPServers).toHaveBeenCalled());
 
     await act(async () => {
       await result.current.agentViewProps.onInstallMCPServers?.(["context7"]);
     });
 
-    expect(batchAddAgentMCPServersRequest).toHaveBeenCalledWith("u-manager", ["context7"]);
+    expect(batchAddAgentMCPServersRequest).toHaveBeenCalledWith("u-manager", ["context7"], true);
     expect(batchDeleteAgentMCPServersRequest).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(result.current.agentViewProps.mcpServers.map((server) => server.name)).toEqual(["context7"]),
