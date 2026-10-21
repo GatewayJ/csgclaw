@@ -2,19 +2,15 @@
   width: min(640px, calc(100vw - 40px));
   max-height: calc(100dvh - 40px);
 }
-.headerCopy {
+.header {
   display: grid;
-  flex: 1;
-  gap: 4px;
-  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  padding: 18px 22px 14px;
 }
 .description {
+  grid-column: 1 / -1;
   text-wrap: pretty;
-}
-.close {
-  display: flex;
-  justify-content: center;
-  flex: 0 0 64px;
 }
 .body {
   display: grid;
