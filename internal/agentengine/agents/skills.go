@@ -185,9 +185,12 @@ func (s *Controller) ReplaceSkills(ctx context.Context, agentID string, skillNam
 	if err != nil {
 		return err
 	}
-	origins, err := skillinstall.Read(globalRoot)
-	if err != nil {
-		return err
+	var origins map[string]skillinstall.Record
+	if len(skillNames) > 0 {
+		origins, err = skillinstall.Read(globalRoot)
+		if err != nil {
+			return err
+		}
 	}
 	seen := make(map[string]struct{}, len(skillNames))
 	for _, rawName := range skillNames {

@@ -106,13 +106,17 @@ func TestKnowledgeBaseEnablementPreservesListingAndMetadata(t *testing.T) {
 				}},
 			}}
 			rt := &resourceEnablementRuntime{snapshotMCPServersRuntime: snapshotMCPServersRuntime{fakeCompatRuntime: fakeCompatRuntime{kind: kind}}}
-			_, statePath := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{item}, agent.WithRuntime(rt))
+			seeded, statePath := mustNewSeededServiceWithPathAndOptions(t, []agent.Agent{item}, agent.WithRuntime(rt))
+			if err := seeded.Close(); err != nil {
+				t.Fatal(err)
+			}
 			controller, err := agent.NewController(config.ModelConfig{}, config.ServerConfig{
 				ListenAddr: "127.0.0.1:18080", AccessToken: "internal-token",
 			}, "manager-image:test", statePath, agent.WithRuntime(rt))
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { _ = controller.Close() })
 			h := &Handler{svc: controller, agentEngine: agentengine.New(controller), workspace: controller.Workspace(), agentRuntime: controller}
 			routes := h.Routes()
 			send := func(method, suffix, body string) *httptest.ResponseRecorder {
@@ -135,6 +139,17 @@ func TestKnowledgeBaseEnablementPreservesListingAndMetadata(t *testing.T) {
 				if updated.Header().Get("ETag") == before.Header().Get("ETag") {
 					t.Fatal("resource version did not change after update")
 				}
+				if err := controller.Close(); err != nil {
+					t.Fatal(err)
+				}
+				controller, err = agent.NewController(config.ModelConfig{}, config.ServerConfig{
+					ListenAddr: "127.0.0.1:18080", AccessToken: "internal-token",
+				}, "manager-image:test", statePath, agent.WithRuntime(rt))
+				if err != nil {
+					t.Fatal(err)
+				}
+				h = &Handler{svc: controller, agentEngine: agentengine.New(controller), workspace: controller.Workspace(), agentRuntime: controller}
+				routes = h.Routes()
 				after := send(http.MethodGet, listPath, "")
 				var page struct {
 					Total int `json:"total"`
