@@ -4,8 +4,12 @@
 }
 .headerCopy {
   display: grid;
+  flex: 1;
   gap: 4px;
-  max-width: 440px;
+  min-width: 0;
+}
+.description {
+  text-wrap: pretty;
 }
 .close {
   display: flex;

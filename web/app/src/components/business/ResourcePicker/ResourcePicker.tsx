@@ -34,7 +34,9 @@ export function ResourcePicker({
       <DialogHeader>
         <div className={styles.headerCopy}>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription size="md">{description}</DialogDescription>
+          <DialogDescription className={styles.description} size="md">
+            {description}
+          </DialogDescription>
         </div>
         <div className={styles.close}>
           <DialogCloseButton label={closeLabel} disabled={busy} size="sm" variant="tertiaryGray" />
