@@ -3,8 +3,8 @@ package team
 import "strings"
 
 type CreateTeamWithMembersInput struct {
-	Description    string
 	Title          string
+	Description    string
 	LeadAgentID    string
 	MemberAgentIDs []string
 }

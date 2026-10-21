@@ -56,9 +56,9 @@ export type WorkspaceTeamEvent = {
 };
 
 export type WorkspaceTeam = {
-  description?: string;
   id: string;
   title: string;
+  description?: string;
   lead_agent_id: string;
   member_agent_ids: string[];
   status: string;

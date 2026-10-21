@@ -1064,6 +1064,7 @@ export function useWorkspaceController(): WorkspaceController {
       teamActionError: agent.agentViewProps.teamActionError,
       onStartCollaboration: (team) => navigate(pathForNewTeamTask(team.id)),
       onManageMembers: agent.openManageTeamMembers,
+      onUpdateDescription: agent.updateTeamDescription,
       onDeleteTeam: agent.deleteTeam,
       onSelectAgent: selectAgent,
       onSelectTask: selectTasks,

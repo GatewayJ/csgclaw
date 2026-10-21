@@ -46,18 +46,18 @@ type Service struct {
 }
 
 type CreateTeamInput struct {
-	Description    string
 	ID             string
 	Title          string
+	Description    string
 	LeadAgentID    string
 	MemberAgentIDs []string
 	Status         string
 }
 
 type UpdateTeamInput struct {
-	Description       *string
 	TeamID            string
 	Title             string
+	Description       *string
 	LeadAgentID       string
 	MemberAgentIDs    []string
 	SetMemberAgentIDs bool

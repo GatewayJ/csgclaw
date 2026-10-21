@@ -135,8 +135,8 @@ export function AgentProfileModal({
   const isTemplateCreate = isWorkerCreate && agentCreateMode === "template";
   const missingRequiredEnv = isTemplateCreate && agentDraftMissingRequiredEnv(agentDraft);
   const isCustomCreate = isWorkerCreate && agentCreateMode === "custom";
-  const templateLocked = agentCreateTemplateLocked(agentDraft, agentModalMode);
   const useWizard = creationWizard && isCustomCreate;
+  const templateLocked = agentCreateTemplateLocked(agentDraft, agentModalMode);
   const showMCPServers = !useWizard && !isNotificationContext && supportsMCPServers(agentDraft.runtime_kind);
   const runtimeOptionSchemas = isNotificationContext
     ? []

@@ -99,8 +99,8 @@ type TeamEvent struct {
 }
 
 type CreateTeamRequest struct {
-	Description          string   `json:"description,omitempty"`
 	Title                string   `json:"title,omitempty"`
+	Description          string   `json:"description,omitempty"`
 	LeadAgentID          string   `json:"lead_agent_id,omitempty"`
 	LeadParticipantID    string   `json:"lead_participant_id,omitempty"`
 	MemberAgentIDs       []string `json:"member_agent_ids,omitempty"`
@@ -108,8 +108,8 @@ type CreateTeamRequest struct {
 }
 
 type PatchTeamRequest struct {
-	Description    *string  `json:"description,omitempty"`
 	Title          string   `json:"title,omitempty"`
+	Description    *string  `json:"description,omitempty"`
 	LeadAgentID    string   `json:"lead_agent_id,omitempty"`
 	MemberAgentIDs []string `json:"member_agent_ids,omitempty"`
 	Status         string   `json:"status,omitempty"`

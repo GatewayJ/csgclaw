@@ -113,11 +113,11 @@ export async function updateTeamRequest(teamID: string, payload: UpdateTeamPaylo
     throw new Error("Team ID is required");
   }
   const request: Record<string, unknown> = {};
-  if (payload.title !== undefined) {
-    request.title = payload.title;
-  }
   if (payload.description !== undefined) {
     request.description = payload.description;
+  }
+  if (payload.title !== undefined) {
+    request.title = payload.title;
   }
   if (payload.lead_agent_id !== undefined) {
     request.lead_agent_id = payload.lead_agent_id;

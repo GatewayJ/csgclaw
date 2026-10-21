@@ -37,11 +37,19 @@
   padding: 0;
   list-style: none;
 }
+.navigation ol {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+}
+.navigation li {
+  min-width: 0;
+}
 .navigation button {
   width: 100%;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 12px 10px;
   border: 0;
@@ -63,8 +71,16 @@
 }
 .navigation small {
   margin-left: auto;
+  flex-shrink: 0;
   color: var(--muted);
   font-size: 11px;
+}
+.stepLabel {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .stepMark {
   width: 20px;
@@ -105,6 +121,11 @@
 .instructions textarea {
   resize: vertical;
 }
+.resourceIntro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
 .resourceRow {
   min-height: 76px;
   box-sizing: border-box;
@@ -116,6 +137,10 @@
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
+}
+.resourceRow:hover {
+  background: var(--button-neutral-hover-background);
+  border-color: var(--button-neutral-hover-border);
 }
 .resourceGroup {
   display: grid;
@@ -201,16 +226,53 @@
   display: grid;
   gap: 4px;
 }
+.skillRow .resourceCopy {
+  gap: 2px;
+}
+.connectorRow .resourceCopy {
+  gap: 0;
+}
+.appRow {
+  grid-template-columns: 20px 32px minmax(0, 1fr);
+}
+.connectorRow {
+  align-items: center;
+}
+.resourceIcon {
+  display: flex;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+}
+.resourceIcon img {
+  border-radius: var(--radius-md);
+}
 .resourceCheckbox {
   display: grid;
   place-items: center;
   height: 24px;
 }
-.resourceCopy strong {
-  line-height: 24px;
+.resourceRow strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-sm-size);
+  font-weight: 500;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .resourceRow small {
+  overflow: hidden;
   color: var(--muted);
+  font-size: 14px;
+  font-weight: 300;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.descriptionTooltip {
+  max-width: min(480px, calc(100vw - 24px));
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 .footer {

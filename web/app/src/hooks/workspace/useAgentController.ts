@@ -2532,16 +2532,17 @@ export function useAgentController({
     }
   }
 
-  async function createAgentTeam(payload: CreateTeamPayload): Promise<void> {
+  async function createAgentTeam(payload: CreateTeamPayload): Promise<WorkspaceTeam | undefined> {
     if (teamActionBusy) {
       return;
     }
     setTeamActionBusy(true);
     setTeamActionError("");
     try {
-      await createTeamRequest(payload);
+      const created = await createTeamRequest(payload);
       await teamsQuery.refetch();
       await refreshWorkspaceBootstrap();
+      return created;
     } catch (err) {
       setTeamActionError(errorMessage(err, t("teamActionFailed")));
       throw err;
@@ -2551,13 +2552,16 @@ export function useAgentController({
   }
 
   async function createTeam(): Promise<void> {
-    await createAgentTeam({
+    const created = await createAgentTeam({
       title: createTeamTitle.trim() || t("teamNewFallbackTitle"),
       description: createTeamDescription.trim(),
       lead_agent_id: MANAGER_AGENT_ID,
       member_agent_ids: createTeamMemberIDs,
     });
-    closeCreateTeamModal();
+    if (created) {
+      closeCreateTeamModal();
+      navigatePane({ type: WorkspacePaneTypes.team, id: created.id }, rooms);
+    }
   }
 
   async function saveTeamMembers(): Promise<void> {
@@ -2580,6 +2584,22 @@ export function useAgentController({
     } catch (err) {
       setTeamActionError(errorMessage(err, t("teamActionFailed")));
       throw err;
+    } finally {
+      setTeamActionBusy(false);
+    }
+  }
+
+  async function updateTeamDescription(item: WorkspaceTeam, description: string): Promise<boolean> {
+    if (teamActionBusy) return false;
+    setTeamActionBusy(true);
+    setTeamActionError("");
+    try {
+      await updateTeamRequest(item.id, { description });
+      await teamsQuery.refetch();
+      return true;
+    } catch (err) {
+      setTeamActionError(errorMessage(err, t("teamActionFailed")));
+      return false;
     } finally {
       setTeamActionBusy(false);
     }
@@ -2816,6 +2836,7 @@ export function useAgentController({
     teams: teamsQuery.data ?? [],
     teamsLoading: teamsQuery.isLoading,
     deleteTeam,
+    updateTeamDescription,
     workerAgentItems,
     notifierWebhookPublicOrigin,
     agentViewProps: {

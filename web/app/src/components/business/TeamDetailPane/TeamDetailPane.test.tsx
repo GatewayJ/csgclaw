@@ -17,6 +17,20 @@ const team: WorkspaceTeam = {
 };
 
 describe("TeamDetailPane", () => {
+  it("saves and clears descriptions on blur and cancels with Escape", async () => {
+    const user = userEvent.setup();
+    const onUpdateDescription = vi.fn().mockResolvedValue(true);
+    render(<TeamDetailPane team={team} t={t} onUpdateDescription={onUpdateDescription} />);
+    await user.click(screen.getByRole("button", { name: "editDescription" }));
+    const input = screen.getByRole("textbox", { name: "teamDescriptionLabel" });
+    await user.type(input, "Team introduction");
+    await user.tab();
+    expect(onUpdateDescription).toHaveBeenCalledWith(team, "Team introduction");
+    await user.click(screen.getByRole("button", { name: "editDescription" }));
+    await user.clear(screen.getByRole("textbox", { name: "teamDescriptionLabel" }));
+    await user.keyboard("{Escape}");
+    expect(onUpdateDescription).toHaveBeenCalledTimes(1);
+  });
   it("shows only the saved team description and leaves missing descriptions blank", () => {
     const view = render(<TeamDetailPane team={{ ...team, description: "Review releases together." }} t={t} />);
     expect(screen.getByText("Review releases together.")).toBeVisible();
