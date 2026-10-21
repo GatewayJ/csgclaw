@@ -1641,6 +1641,9 @@ export const messages = {
     profileResourceEnabled: "已启用",
     profileKnowledgeConnectEnable: "连接并启用",
     profileResourceLibraryEmpty: "没有可添加的资源",
+    profileSkillNameConflict:
+      "资源列表中已存在名为 {name} 的 Skill。请从资源列表选择已有 Skill，或在技能管理中处理同名资源后重新安装。",
+    profileMCPIdentityMissing: "MCP 创建成功，但无法找到对应资源。请刷新资源列表并选择该资源。",
     profileSkillMarket: "技能市场",
     profileMCPHint: "为当前智能体启用全局 MCP，也可以手动添加或从 MCP 市场安装。",
     profileMCPMarket: "MCP 市场",
@@ -4663,6 +4666,10 @@ export const messages = {
     profileResourceEnabled: "Enabled",
     profileKnowledgeConnectEnable: "Connect & enable",
     profileResourceLibraryEmpty: "No resources available to add",
+    profileSkillNameConflict:
+      "A skill named {name} already exists in the library. Select that skill from the library, or resolve the name conflict in skill management before installing.",
+    profileMCPIdentityMissing:
+      "The MCP was created, but its resource could not be identified. Refresh the library and select that resource.",
     profileSkillMarket: "Skill market",
     profileMCPHint: "Enable global MCP servers for this agent, or add one manually / install from the MCP market.",
     profileMCPMarket: "MCP market",

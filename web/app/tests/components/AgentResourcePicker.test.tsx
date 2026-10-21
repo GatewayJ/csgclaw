@@ -4,14 +4,14 @@ import { AgentResourcePicker } from "@/components/business/AgentDetails/AgentRes
 import { createTranslator } from "@/shared/i18n";
 import { createQueryWrapper } from "../helpers/queryClient";
 
-function setup(locale: "en" | "zh" = "en", fileFailure = false) {
+function setup(locale: "en" | "zh" = "en", fileFailure = false, existingSkill = false) {
   const t = createTranslator(locale);
-  let installed = false;
+  let installed = existingSkill;
   const fetch = vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost/");
     const path = url.pathname;
     if (path === "/api/v1/skills") return Response.json(installed ? [{ name: "review" }] : []);
-    if (path.endsWith("/skill-summaries")) return Response.json([]);
+    if (path.endsWith("/skill-summaries")) return Response.json(existingSkill ? [{ name: "review" }] : []);
     if (path === "/api/v1/skills/remote") {
       return Response.json({
         items: [{ name: "Review", description: "Review changes", remote_path: "team/review", remote_ref: "main" }],
@@ -57,6 +57,25 @@ function setup(locale: "en" | "zh" = "en", fileFailure = false) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Agent skill market preview", () => {
+  it.each(["en", "zh"] as const)(
+    "shows same-name conflicts in %s without marking the market skill enabled",
+    async (locale) => {
+      const { fetch, onAdd, onClose, t, user } = setup(locale, false, true);
+      await user.click(screen.getByRole("radio", { name: t("profileSkillMarket") }));
+      await screen.findByRole("button", { name: "Review" });
+      expect(screen.queryByRole("button", { name: t("profileResourceEnabled") })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: t("resourcesSkillRemoteInstallAction") })).toBeEnabled();
+      await user.click(screen.getByRole("button", { name: "Review" }));
+      const preview = within(screen.getByRole("dialog", { name: "Review" }));
+      await preview.findByText("Review instructions");
+      await user.click(preview.getByRole("button", { name: t("resourcesSkillRemoteInstallAction") }));
+      expect(await preview.findByRole("alert")).toHaveTextContent(t("profileSkillNameConflict", { name: "review" }));
+      expect(onAdd).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    },
+  );
+
   it.each(["en", "zh"] as const)(
     "opens remote files with keyboard navigation in %s and retains the market search",
     async (locale) => {

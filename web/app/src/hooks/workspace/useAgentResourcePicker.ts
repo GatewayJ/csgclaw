@@ -13,6 +13,7 @@ import {
   type RemoteKnowledgeBase,
 } from "@/models/knowledgeBases";
 import {
+  createdMCPServerName,
   isRemoteMCPInstalled,
   mcpServersFromCatalogResponse,
   type MCPServerPayload,
@@ -28,6 +29,10 @@ import {
 } from "./workspaceQueries";
 
 export type AgentResourcePickerKind = "skill" | "mcp" | "knowledge";
+
+function marketSkillKey(skill: SkillSummary): string {
+  return JSON.stringify(["skill", skill.remotePath?.trim() || "", skill.remoteRef?.trim() || ""]);
+}
 
 export function useAgentResourcePicker({
   agentID,
@@ -130,6 +135,14 @@ export function useAgentResourcePicker({
     return [name];
   }
 
+  async function createCatalogMCPServer(payload: MCPServerPayload): Promise<string> {
+    const state = await createMCPServerRequest(payload);
+    client.setQueryData(workspaceQueryKeys.mcpServers(), state);
+    const name = createdMCPServerName(state, payload);
+    if (!name) throw new Error(t("profileMCPIdentityMissing"));
+    return name;
+  }
+
   return {
     market,
     setMarket,
@@ -138,6 +151,10 @@ export function useAgentResourcePicker({
     busy,
     error,
     installedNames,
+    isSkillEnabled: (skill: SkillSummary) => {
+      const name = prepared.current.get(marketSkillKey(skill));
+      return Boolean(name && installedNames.has(name));
+    },
     skills: skills.data ?? [],
     globalServers,
     libraryLoading:
@@ -153,13 +170,15 @@ export function useAgentResourcePicker({
     knowledgeItems: mergeRemoteKnowledgeBasePages(knowledge.data?.pages ?? []),
     add: (names: string[]) => run("library", async () => names),
     installSkill: (skill: SkillSummary) =>
-      run(skill.remotePath || skill.name, () => {
-        const name = remoteSkillInstallName(skill);
-        if (skills.data?.some((item) => item.name === name)) return Promise.resolve([name]);
-        return acquireSkill(skill.remotePath || name, () =>
-          installRemoteSkillRequest(skill.remotePath || "", skill.remoteRef),
-        );
-      }),
+      run(skill.remotePath || skill.name, () =>
+        acquireSkill(marketSkillKey(skill), async () => {
+          const name = remoteSkillInstallName(skill);
+          if (skills.data?.some((item) => item.name === name)) {
+            throw new Error(t("profileSkillNameConflict", { name }));
+          }
+          return installRemoteSkillRequest(skill.remotePath || "", skill.remoteRef);
+        }),
+      ),
     upload: (file: File) =>
       run("upload", () =>
         acquireSkill(`upload:${file.name}:${file.size}:${file.lastModified}`, () => uploadSkillArchive(file)),
@@ -172,13 +191,7 @@ export function useAgentResourcePicker({
           : acquireMCP(server.id, () => installRemoteMCPServerRequest(server.id));
       }),
     createMCP: (payload: MCPServerPayload) =>
-      run("manual", () =>
-        acquireMCP(JSON.stringify(payload), async () => {
-          const state = await createMCPServerRequest(payload);
-          client.setQueryData(workspaceQueryKeys.mcpServers(), state);
-          return payload.name;
-        }),
-      ),
+      run("manual", () => acquireMCP(JSON.stringify(payload), () => createCatalogMCPServer(payload))),
     connectKnowledge: (item: RemoteKnowledgeBase) =>
       run(item.id, () => {
         const existing = knowledgeBaseMCPServer(item, globalServers);
@@ -186,9 +199,7 @@ export function useAgentResourcePicker({
           ? Promise.resolve([existing.name])
           : acquireMCP(`knowledge:${item.id}`, async () => {
               const payload = await fetchRemoteKnowledgeBaseMCPConfig(item.id);
-              const state = await createMCPServerRequest(payload);
-              client.setQueryData(workspaceQueryKeys.mcpServers(), state);
-              return payload.name;
+              return createCatalogMCPServer(payload);
             });
       }),
   };

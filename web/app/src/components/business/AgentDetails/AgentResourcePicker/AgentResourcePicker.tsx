@@ -6,7 +6,6 @@ import { MCPServerCreateDialog } from "@/components/business/HubDetailPane";
 import { useAgentResourcePicker, type AgentResourcePickerKind } from "@/hooks/workspace/useAgentResourcePicker";
 import { knowledgeBaseMCPServer } from "@/models/knowledgeBases";
 import { isRemoteMCPInstalled, mcpManagedKnowledgeBaseSource, mcpServerDisplayName } from "@/models/mcp";
-import { remoteSkillInstallName } from "@/models/skillhub";
 import type { SkillSummary } from "@/models/skillhub";
 import { ResourceFeaturedIcon } from "@/components/business/ResourceListCard";
 import { SidebarMcpIcon, SidebarPuzzlePiece02Icon } from "@/components/ui/Icons";
@@ -87,7 +86,7 @@ export function AgentResourcePicker({
           },
           name: skill.name,
           description: skill.description,
-          installed: picker.installedNames.has(remoteSkillInstallName(skill)),
+          installed: picker.isSkillEnabled(skill),
           unavailable: false,
           add: () => picker.installSkill(skill),
         }))
@@ -339,7 +338,7 @@ export function AgentResourcePicker({
           skill={preview}
           t={t}
           busy={busy}
-          installed={picker.installedNames.has(remoteSkillInstallName(preview))}
+          installed={picker.isSkillEnabled(preview)}
           installDisabled={picker.libraryLoading || Boolean(picker.libraryError)}
           error={failure}
           onClose={() => setPreview(null)}
