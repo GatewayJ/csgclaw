@@ -190,12 +190,7 @@ export function AgentResourceDetails({
           ) : null}
         </DialogBody>
         <DialogFooter>
-          <Button
-            className={styles.removeButton}
-            variant={server ? "danger" : "outlineDanger"}
-            disabled={busy}
-            onClick={onDelete}
-          >
+          <Button className={styles.removeButton} variant="danger" disabled={busy} onClick={onDelete}>
             {t("profileRemoveResource")}
           </Button>
           {knowledge && server ? (
