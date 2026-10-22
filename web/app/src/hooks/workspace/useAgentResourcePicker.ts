@@ -179,6 +179,10 @@ export function useAgentResourcePicker({
     skillAction,
     skills: skills.data ?? [],
     globalServers,
+    libraryReady:
+      kind === "skill"
+        ? skills.data !== undefined && agentSkills.data !== undefined
+        : servers.data !== undefined && agentServers.data !== undefined,
     libraryLoading:
       kind === "skill" ? skills.isFetching || agentSkills.isFetching : servers.isFetching || agentServers.isFetching,
     libraryError: kind === "skill" ? skills.error || agentSkills.error : servers.error || agentServers.error,
