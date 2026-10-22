@@ -718,6 +718,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     if (deleted) {
       setDeleteMCPDialogOpen(false);
       setMCPPendingDelete(null);
+      setResourceDetail(null);
     }
   }
 
