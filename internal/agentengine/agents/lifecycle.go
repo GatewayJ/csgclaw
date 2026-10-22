@@ -2,8 +2,10 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -20,6 +22,15 @@ func (s *Controller) restartRuntime(ctx context.Context, id string) (Agent, erro
 		return Agent{}, err
 	}
 	defer release()
+	got, ok := s.Agent(id)
+	if !ok {
+		return Agent{}, fmt.Errorf("agent %q not found", strings.TrimSpace(id))
+	}
+	// Configuration saves also start runtimes that were never launched. Recheck
+	// the latest intent and resolved model under the lifecycle gate before doing so.
+	if got.DesiredState == DesiredStateStopped || !s.hydrateProfileFromCatalog(got.AgentProfile).ProfileComplete {
+		return got, nil
+	}
 	return s.restartRuntimeLocked(ctx, id)
 }
 
@@ -79,6 +90,18 @@ func (s *Controller) restartRuntimeLocked(ctx context.Context, id string) (Agent
 	}
 	if err := s.prepareExtensions(ctx, id); err != nil {
 		return Agent{}, err
+	}
+	// A missing handle alone does not prove the runtime is new: older records
+	// may omit it. Only seed defaults when the host runtime itself is absent.
+	// Ordinary restarts must preserve the user's skill selection and edits.
+	if isHostRuntimeKind(got.RuntimeKind) && strings.TrimSpace(got.BoxID) == "" {
+		if _, err := runtimeImpl.Info(ctx, handle); sandbox.IsNotFound(err) || errors.Is(err, os.ErrNotExist) {
+			if err := s.installDefaultSystemSkills(id, got.RuntimeKind); err != nil {
+				return Agent{}, fmt.Errorf("install system skills before first runtime start: %w", err)
+			}
+		} else if err != nil {
+			return Agent{}, fmt.Errorf("inspect runtime before first start: %w", err)
+		}
 	}
 	state, err := runtimeImpl.Start(ctx, handle)
 	if err != nil {
