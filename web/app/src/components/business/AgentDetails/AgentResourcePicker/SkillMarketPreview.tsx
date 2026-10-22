@@ -19,7 +19,7 @@ export function SkillMarketPreview({
   skill,
   t,
   busy,
-  installed,
+  actionLabel,
   installDisabled,
   error,
   onClose,
@@ -30,7 +30,7 @@ export function SkillMarketPreview({
   skill: SkillSummary;
   t: TranslateFn;
   busy: boolean;
-  installed: boolean;
+  actionLabel: string;
   installDisabled: boolean;
   error?: string;
   onClose: () => void;
@@ -77,15 +77,9 @@ export function SkillMarketPreview({
           />
         </DialogBody>
         <DialogFooter className={styles.footer}>
-          <Button
-            size="sm"
-            variant="primary"
-            loading={busy}
-            disabled={busy || installed || installDisabled}
-            onClick={onInstall}
-          >
+          <Button size="sm" variant="primary" loading={busy} disabled={busy || installDisabled} onClick={onInstall}>
             <Plus size={15} aria-hidden="true" />
-            {t(installed ? "profileResourceEnabled" : "resourcesSkillRemoteInstallAction")}
+            {actionLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

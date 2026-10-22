@@ -207,7 +207,13 @@ export function fetchAgentSkills(agentID: string, skillsPath = ""): Promise<Work
   return get(`api/v1/agents/${encodeURIComponent(agentID)}/skills${query ? `?${query}` : ""}`);
 }
 
-export type AgentSkillSummary = { enabled?: boolean; name: string; description?: string; error?: string };
+export type AgentSkillSummary = {
+  enabled?: boolean;
+  name: string;
+  description?: string;
+  error?: string;
+  source?: string;
+};
 
 export function fetchAgentSkillSummaries(agentID: string, signal?: AbortSignal): Promise<AgentSkillSummary[]> {
   return get(`api/v1/agents/${encodeURIComponent(agentID)}/skill-summaries`, { signal });
@@ -240,8 +246,17 @@ export function batchDeleteAgentMCPServersRequest(
   return post(`api/v1/agents/${encodeURIComponent(agentID)}/mcp-servers:batchDelete`, { names: serverNames });
 }
 
-export function batchAddAgentSkillsRequest(agentID: string, skillNames: string[]): Promise<void> {
-  return post(`api/v1/agents/${encodeURIComponent(agentID)}/skills:batchAdd`, { names: skillNames });
+export type AgentSkillInstallOptions = { replace?: boolean };
+
+export function batchAddAgentSkillsRequest(
+  agentID: string,
+  skillNames: string[],
+  options: AgentSkillInstallOptions = {},
+): Promise<void> {
+  return post(`api/v1/agents/${encodeURIComponent(agentID)}/skills:batchAdd`, {
+    names: skillNames,
+    ...(options.replace ? { replace: true } : {}),
+  });
 }
 
 export function deleteAgentSkillRequest(agentID: string, skillName: string): Promise<void> {

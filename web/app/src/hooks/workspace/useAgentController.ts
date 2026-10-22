@@ -20,15 +20,18 @@ import {
   fetchAgentProfile,
   fetchAgentProfileDefaults,
   fetchAgentMCPServers,
+  fetchAgentSkillSummaries,
   finalizeFeishuRegistrationRequest,
   patchNotificationBotRequest,
   runAgentActionRequest,
+  setAgentResourceEnabled,
   startFeishuRegistrationRequest,
   updateAgentRequest,
 } from "@/api/agents";
 import { fetchAgentMCPServerSourceStatus, syncAgentMCPServerSource } from "@/api/mcp";
 import { installAgentRuntime, type AgentRuntimeInstallation } from "@/api/agentRuntimes";
 import type {
+  AgentSkillInstallOptions,
   AgentUpdatePayload,
   FeishuRegistration,
   FeishuRegistrationFinalizeResult,
@@ -2629,24 +2632,45 @@ export function useAgentController({
   }
 
   const batchAddAgentSkills = useCallback(
-    async (skillNames: string[]) => {
+    async (skillNames: string[], options: AgentSkillInstallOptions = {}) => {
       if (!agentDetailAgentID || agentSkillAddBusy) {
         return false;
       }
-      const names = skillNames.map((name) => String(name || "").trim()).filter(Boolean);
+      const names = [...new Set(skillNames.map((name) => String(name || "").trim()).filter(Boolean))];
       if (!names.length) {
         return false;
       }
       setAgentSkillAddBusy(true);
       setAgentSkillAddError("");
       try {
-        await batchAddAgentSkillsRequest(agentDetailAgentID, names);
-        await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID) });
+        if (options.replace) {
+          await batchAddAgentSkillsRequest(agentDetailAgentID, names, options);
+          return true;
+        }
+        const current = new Map(
+          (await fetchAgentSkillSummaries(agentDetailAgentID)).map((skill) => [skill.name, skill]),
+        );
+        const missing = names.filter((name) => !current.has(name));
+        if (missing.length) await batchAddAgentSkillsRequest(agentDetailAgentID, missing);
+        for (const name of names) {
+          if (current.get(name)?.enabled === false) {
+            await setAgentResourceEnabled(agentDetailAgentID, "skill", name, true);
+          }
+        }
         return true;
       } catch (err) {
         setAgentSkillAddError(errorMessage(err, t("agentSkillAddFailed")));
         return false;
       } finally {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.agentSkills(agentDetailAgentID) }),
+          ...(options.replace
+            ? [
+                queryClient.invalidateQueries({ queryKey: ["agent-skill-tree", agentDetailAgentID] }),
+                queryClient.invalidateQueries({ queryKey: ["agent-skill-file", agentDetailAgentID] }),
+              ]
+            : []),
+        ]);
         setAgentSkillAddBusy(false);
       }
     },

@@ -36,7 +36,7 @@ import {
 } from "@/components/business/ResourceListCard";
 import { AgentResourcePicker } from "../AgentResourcePicker";
 import { AgentResourceDetails } from "../AgentResourceDetails";
-import type { AgentResourceKind } from "@/api/agents";
+import type { AgentResourceKind, AgentSkillInstallOptions } from "@/api/agents";
 import { errorMessage } from "@/api/client";
 import {
   fetchAgentInstructionsDocument,
@@ -243,7 +243,7 @@ export type AgentDetailPaneProps = {
   t: TranslateFn;
   workspaceSupported?: boolean;
   directoryPickerAvailable?: boolean;
-  onAddSkills?: (skillNames: string[]) => Promise<boolean> | boolean;
+  onAddSkills?: (skillNames: string[], options?: AgentSkillInstallOptions) => Promise<boolean> | boolean;
   onDeleteSkill?: (skill: SlashSkillOption | string) => Promise<boolean> | boolean;
   onInstallMCPServers?: (serverNames: string[]) => Promise<boolean> | boolean;
   onUpdateMCPServer?: (server: MCPServer | string) => Promise<boolean> | boolean;
@@ -1320,7 +1320,7 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
               {t("cancel")}
             </Button>
             <Button variant="danger" size="sm" loading={skillDeleteBusy} onClick={handleDeleteSkillConfirm}>
-              {t("agentDeleteSkill")}
+              {t("confirm")}
             </Button>
           </div>
         </DialogContent>
@@ -1380,11 +1380,11 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
               variant="danger"
               size="sm"
               loading={mcpDeleteBusy}
-              loadingLabel={t("agentDeleteMCP")}
+              loadingLabel={t("confirm")}
               disabled={mcpDeleteBusy}
               onClick={handleDeleteMCPConfirm}
             >
-              {t("agentDeleteMCP")}
+              {t("confirm")}
             </Button>
           </div>
         </DialogContent>
@@ -1728,7 +1728,7 @@ function AgentMCPPanel({
                 kind === "knowledge" ? "profileKnowledgeEmpty" : hasManagedApps ? "appManualMCPEmpty" : "agentMCPEmpty",
               )}
             </strong>
-            <p>{t(kind === "knowledge" ? "profileKnowledgeHint" : "agentMCPEmptyHint")}</p>
+            <p>{t(kind === "knowledge" ? "profileKnowledgeEmptyHint" : "agentMCPEmptyHint")}</p>
           </div>
           <Button variant="secondaryGray" size="sm" disabled={mutationBusy || addBusy} onClick={onOpenAddMCP}>
             <Plus aria-hidden="true" size={15} strokeWidth={2.2} />

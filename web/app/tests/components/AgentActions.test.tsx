@@ -1,13 +1,22 @@
 import { createQueryWrapper } from "../helpers/queryClient";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render as baseRender, screen, within, type RenderOptions } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { AgentRow } from "@/pages/AgentPage/components";
 import { AgentDetailPane, AgentView, NotificationParticipantDetailPane } from "@/components/business/AgentDetails";
 import { agentToDraft, type AgentDraft } from "@/models/agents";
 import { AGENT_PROFILE_ACTIVE_TAB_STORAGE_KEY } from "@/shared/storage/keys";
 import { createTranslator } from "@/shared/i18n";
 import buttonStyles from "@/components/ui/Button/Button.module.css";
+
+function render(ui: ReactElement, options?: RenderOptions) {
+  const ProvidedWrapper = options?.wrapper;
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <MemoryRouter>{ProvidedWrapper ? <ProvidedWrapper>{children}</ProvidedWrapper> : children}</MemoryRouter>;
+  }
+  return baseRender(ui, { ...options, wrapper: Wrapper });
+}
 
 const labels: Record<string, string> = {
   agentActivityTab: "Activity",
@@ -21,6 +30,8 @@ const labels: Record<string, string> = {
   agentInstructions: "Instructions",
   agentModel: "Model",
   cancel: "Cancel",
+  confirm: "Confirm",
+  profileRemoveResource: "Remove from this agent",
   editDescription: "Edit description",
   editAgentName: "Edit name",
   agentRecreate: "Recreate",
@@ -1409,8 +1420,8 @@ describe("agent action visibility", () => {
     const existingCard = screen.getByText("existing").closest("article");
     expect(existingCard).not.toBeNull();
     await user.click(within(existingCard as HTMLElement).getByRole("button", { name: "existingnode" }));
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
-    await user.click(within(screen.getByRole("dialog", { name: "Delete" })).getByRole("button", { name: "Delete" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove from this agent" }));
+    await user.click(within(screen.getByRole("dialog", { name: "Delete" })).getByRole("button", { name: "Confirm" }));
 
     expect(onDeleteMCPServer).toHaveBeenCalledWith(existingMCP);
   });
@@ -1617,11 +1628,10 @@ describe("agent action visibility", () => {
 
     await user.click(screen.getByRole("button", { name: /^skills/i }));
     await user.click(screen.getByRole("button", { name: /alpha.*Alpha installed/ }));
-    await user.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    await user.click(screen.getByRole("button", { name: "Remove from this agent" }));
     expect(screen.getByText('Delete skill "alpha" from this agent?')).toBeInTheDocument();
 
-    const deleteButtons = screen.getAllByRole("button", { name: "Delete" });
-    await user.click(deleteButtons[deleteButtons.length - 1]);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
     expect(onDeleteSkill).toHaveBeenCalledWith({ name: "alpha", description: "Alpha installed" });
   });
 

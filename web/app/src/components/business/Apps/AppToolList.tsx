@@ -6,10 +6,12 @@ export function AppToolList({
   tools,
   t,
   fillAvailableHeight = false,
+  defaultOpen = true,
 }: {
   tools: AppTool[];
   t: TranslateFn;
   fillAvailableHeight?: boolean;
+  defaultOpen?: boolean;
 }) {
   const label = t("appAvailableTools", { count: tools.length });
   const toolItems = tools.map((tool) => (
@@ -35,7 +37,7 @@ export function AppToolList({
   }
 
   return (
-    <details className={styles.tools} open>
+    <details className={styles.tools} open={defaultOpen}>
       <summary>{label}</summary>
       {tools.length ? <ul>{toolItems}</ul> : <p className={styles.hint}>{t("appNoTools")}</p>}
     </details>

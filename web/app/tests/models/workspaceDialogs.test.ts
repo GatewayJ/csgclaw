@@ -21,4 +21,7 @@ describe("workspace dialog URLs", () => {
     expect(closeDialogSearch(opened)).toBe("tab=skills");
     expect(openWorkspaceDialog("?dialog=unknown")).toBe("");
   });
+  it("cleans up the selected global connector when closing Settings", () => {
+    expect(closeDialogSearch("?tab=apps&dialog=settings&section=connectors&app_resource=gitlab")).toBe("tab=apps");
+  });
 });

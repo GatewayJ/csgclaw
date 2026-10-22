@@ -8,7 +8,58 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
+
+func TestReadSnapshotKeepsOriginsAndFilesTogether(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "content")
+	if err := Update(root, "selected", &Record{Version: "previous"}, func() error {
+		return os.WriteFile(file, []byte("previous"), 0o644)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reading := make(chan struct{})
+	writerStarted := make(chan struct{})
+	writerApplied := make(chan struct{})
+	writerDone := make(chan error, 1)
+	go func() {
+		<-reading
+		close(writerStarted)
+		writerDone <- Update(root, "selected", &Record{Version: "updated"}, func() error {
+			close(writerApplied)
+			return os.WriteFile(file, []byte("updated"), 0o644)
+		})
+	}()
+	err := ReadSnapshot(root, func(origins map[string]Record) error {
+		close(reading)
+		<-writerStarted
+		select {
+		case <-writerApplied:
+			return errors.New("concurrent installation changed files during a snapshot")
+		case <-time.After(25 * time.Millisecond):
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		if string(data) != "previous" || origins["selected"].Version != "previous" {
+			return fmt.Errorf("snapshot content=%q origin=%+v", data, origins["selected"])
+		}
+		return nil
+	})
+	if writeErr := <-writerDone; writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-writerApplied:
+	default:
+		t.Fatal("installation did not resume after the snapshot completed")
+	}
+}
 
 func TestReadMissingSkillsRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "skills")

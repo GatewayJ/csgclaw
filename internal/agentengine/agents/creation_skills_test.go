@@ -78,7 +78,9 @@ func TestCreateCodexPreservesSkillsThroughStartup(t *testing.T) {
 				}
 				var names []string
 				for _, entry := range entries {
-					names = append(names, entry.Name())
+					if entry.IsDir() {
+						names = append(names, entry.Name())
+					}
 				}
 				if tc.skills != nil && !slices.Equal(names, tc.skills) {
 					t.Fatalf("skills before Codex process startup = %v, want %v", names, tc.skills)

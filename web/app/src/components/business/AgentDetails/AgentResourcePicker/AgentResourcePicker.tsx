@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { Plus } from "lucide-react";
-import { Button, Checkbox, DialogRoot, LinkButton, SegmentedControl, TextInput } from "@/components/ui";
+import { Button, Checkbox, DialogRoot, SegmentedControl, TextInput } from "@/components/ui";
 import { SkillUploadDialog } from "@/components/business/SkillUploadDialog";
 import { MCPServerCreateDialog } from "@/components/business/HubDetailPane";
 import { useAgentResourcePicker, type AgentResourcePickerKind } from "@/hooks/workspace/useAgentResourcePicker";
+import { useWorkspaceDialogs } from "@/hooks/workspace/useWorkspaceDialogs";
 import { knowledgeBaseMCPServer } from "@/models/knowledgeBases";
 import { isRemoteMCPInstalled, mcpManagedKnowledgeBaseSource, mcpServerDisplayName } from "@/models/mcp";
 import type { SkillSummary } from "@/models/skillhub";
@@ -13,6 +14,7 @@ import { SkillMarketPreview } from "./SkillMarketPreview";
 import type { TranslateFn } from "@/models/conversations";
 import { localizeAPIError } from "@/shared/i18n";
 import { errorMessage } from "@/api/client";
+import type { AgentSkillInstallOptions } from "@/api/agents";
 import {
   ResourcePicker,
   ResourcePickerList,
@@ -36,13 +38,14 @@ export function AgentResourcePicker({
   kind: AgentResourcePickerKind;
   authenticated: boolean;
   error?: string;
-  onAdd: (names: string[]) => Promise<boolean> | boolean;
+  onAdd: (names: string[], options?: AgentSkillInstallOptions) => Promise<boolean> | boolean;
   onClose: () => void;
   onLogin?: () => boolean;
   portalContainer?: HTMLElement | null;
   t: TranslateFn;
 }) {
   const picker = useAgentResourcePicker({ agentID, kind, authenticated, onAdd, t });
+  const { openSettings } = useWorkspaceDialogs();
   const [selected, setSelected] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -58,7 +61,7 @@ export function AgentResourcePicker({
   const library =
     kind === "skill"
       ? picker.skills
-          .filter((skill) => !picker.installedNames.has(skill.name))
+          .filter((skill) => !picker.enabledNames.has(skill.name))
           .map((skill) => ({ name: skill.name, label: skill.name, description: skill.description }))
       : picker.globalServers
           .filter((server) => Boolean(mcpManagedKnowledgeBaseSource(server.config)) === (kind === "knowledge"))
@@ -76,6 +79,13 @@ export function AgentResourcePicker({
   function select(name: string, checked: boolean) {
     setSelected((current) => (checked ? [...current, name] : current.filter((item) => item !== name)));
   }
+  function skillActionLabel(skill: SkillSummary) {
+    return t(
+      picker.skillAction(skill) === "replace"
+        ? "resourcesSkillRemoteReplaceAction"
+        : "resourcesSkillRemoteInstallAction",
+    );
+  }
   const remoteRows =
     kind === "skill"
       ? (picker.skillMarket.data?.pages.flatMap((page) => page.items) ?? []).map((skill) => ({
@@ -86,7 +96,8 @@ export function AgentResourcePicker({
           },
           name: skill.name,
           description: skill.description,
-          installed: picker.isSkillEnabled(skill),
+          installed: false,
+          actionLabel: skillActionLabel(skill),
           unavailable: false,
           add: () => picker.installSkill(skill),
         }))
@@ -97,8 +108,9 @@ export function AgentResourcePicker({
             name: server.name,
             description: server.description,
             installed: picker.globalServers.some(
-              (item) => picker.installedNames.has(item.name) && isRemoteMCPInstalled([item], server),
+              (item) => picker.enabledNames.has(item.name) && isRemoteMCPInstalled([item], server),
             ),
+            actionLabel: undefined,
             unavailable: false,
             add: () => picker.installMCP(server),
           }))
@@ -110,6 +122,7 @@ export function AgentResourcePicker({
               name: item.name,
               description: item.unavailableReason || item.description,
               installed: false,
+              actionLabel: undefined,
               unavailable: item.availability !== "available",
               add: () => picker.connectKnowledge(item),
             }));
@@ -119,9 +132,7 @@ export function AgentResourcePicker({
       ? picker.market
         ? "iaSkillsMarketSearchPlaceholder"
         : "resourcesSkillSearchPlaceholder"
-      : picker.market
-        ? "iaMCPMarketSearchPlaceholder"
-        : "iaMCPInstalledSearchPlaceholder",
+      : "profileMCPSearchPlaceholder",
   );
   return (
     <>
@@ -156,10 +167,14 @@ export function AgentResourcePicker({
                   {t("resourcesMCPCreateTitle")}
                 </Button>
               ) : null}
-              <LinkButton
+              <Button
                 size="sm"
                 variant="linkColor"
-                href={kind === "skill" ? "#/skills" : kind === "mcp" ? "#/connectors" : "#/knowledge-bases"}
+                disabled={busy}
+                onClick={() => {
+                  onClose();
+                  openSettings(kind === "skill" ? "skills" : kind === "mcp" ? "connectors" : "knowledge");
+                }}
               >
                 {t(
                   kind === "skill"
@@ -168,7 +183,7 @@ export function AgentResourcePicker({
                       ? "profileManageMCP"
                       : "profileManageKnowledge",
                 )}
-              </LinkButton>
+              </Button>
             </>
           }
           footer={
@@ -235,17 +250,17 @@ export function AgentResourcePicker({
               <>
                 {picker.libraryLoading ? <p role="status">{t("loading")}</p> : null}
                 {visibleLibrary.map((item) => {
-                  const installed = picker.installedNames.has(item.name);
+                  const enabled = picker.enabledNames.has(item.name);
                   return (
                     <ResourcePickerRow selectable key={item.name}>
                       <Checkbox
-                        checked={installed || selected.includes(item.name)}
-                        disabled={busy || installed || Boolean(picker.libraryError)}
+                        checked={enabled || selected.includes(item.name)}
+                        disabled={busy || enabled || Boolean(picker.libraryError)}
                         onCheckedChange={(checked) => select(item.name, checked === true)}
                         aria-label={item.label}
                       />
                       <ResourcePickerCopy
-                        name={item.label + (installed ? ` · ${t("profileResourceEnabled")}` : "")}
+                        name={item.label + (enabled ? ` · ${t("profileResourceEnabled")}` : "")}
                         description={item.description}
                       />
                     </ResourcePickerRow>
@@ -299,15 +314,16 @@ export function AgentResourcePicker({
                           }
                           onClick={() => void finish(item.add())}
                         >
-                          {t(
-                            item.installed
-                              ? "profileResourceEnabled"
-                              : item.unavailable
-                                ? "resourcesKnowledgeBaseUnavailable"
-                                : kind === "knowledge"
-                                  ? "profileKnowledgeConnectEnable"
-                                  : "resourcesSkillRemoteInstallAction",
-                          )}
+                          {item.actionLabel ||
+                            t(
+                              item.installed
+                                ? "profileResourceEnabled"
+                                : item.unavailable
+                                  ? "resourcesKnowledgeBaseUnavailable"
+                                  : kind === "knowledge"
+                                    ? "profileKnowledgeConnectEnable"
+                                    : "resourcesSkillRemoteInstallAction",
+                            )}
                         </Button>
                       </ResourcePickerRow>
                     ))}
@@ -338,7 +354,7 @@ export function AgentResourcePicker({
           skill={preview}
           t={t}
           busy={busy}
-          installed={picker.isSkillEnabled(preview)}
+          actionLabel={skillActionLabel(preview)}
           installDisabled={picker.libraryLoading || Boolean(picker.libraryError)}
           error={failure}
           onClose={() => setPreview(null)}

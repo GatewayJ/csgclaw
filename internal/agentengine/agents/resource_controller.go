@@ -398,16 +398,18 @@ type agentUpdateOptions struct {
 	reconcileDesiredState bool
 	reconcileResources    bool
 	forceRecreate         bool
+	replaceSkills         []string
 }
 
 func updateOptionsFor(request contract.AgentUpdateRequest) agentUpdateOptions {
-	loadSkills := len(request.FieldMask) == 0 || fieldMaskContains(request.FieldMask, "skills") || fieldMaskContains(request.FieldMask, "skill_states")
+	loadSkills := len(request.FieldMask) == 0 || fieldMaskContains(request.FieldMask, "skills") || fieldMaskContains(request.FieldMask, "skill_states") || len(request.ReplaceSkills) > 0
 	return agentUpdateOptions{
 		saveInstructions:      len(request.FieldMask) == 0 || fieldMaskContains(request.FieldMask, "instructions"),
 		loadSkills:            loadSkills,
 		loadMemory:            fieldMaskContains(request.FieldMask, "memory") || request.Spec.Memory != nil,
 		reconcileDesiredState: fieldMaskContains(request.FieldMask, "desired_state"),
 		reconcileResources:    loadSkills || fieldMaskContains(request.FieldMask, "mcp_servers"),
+		replaceSkills:         slices.Clone(request.ReplaceSkills),
 	}
 }
 
@@ -449,6 +451,13 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 			desired.DesiredState = contract.AgentDesiredStateRunning
 		}
 		desired = preserveWriteOnlyFields(current, desired)
+		if err := validateSkillReplacements(options.replaceSkills, desired.Skills); err != nil {
+			return err
+		}
+		for _, name := range options.replaceSkills {
+			// Absence is the default enabled state for an installed skill.
+			delete(desired.SkillStates, name)
+		}
 		if err := validateAgentSpec(desired); err != nil {
 			return err
 		}
@@ -467,6 +476,7 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 			}
 		}
 		change := diffAgentSpec(current, desired)
+		change.skills = change.skills || len(options.replaceSkills) > 0
 		change.instructions = options.saveInstructions
 		if change.skillStates {
 			if err := validateSkillStates(createAgentSpec(desired).RuntimeConfig().LegacyKind(), desired.SkillStates); err != nil {
@@ -484,7 +494,15 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 		currentRuntime := previous.RuntimeConfig()
 		desiredRuntime := createAgentSpec(desired).RuntimeConfig()
 		replacesRuntime := change.runtimeSelection || currentRuntime != desiredRuntime
-		skillsChanged := false
+		var replacement *preparedSkillReplacement
+		if len(options.replaceSkills) > 0 && !replacesRuntime {
+			replacement, err = f.prepareSkillReplacement(previous, options.replaceSkills)
+			if err != nil {
+				return err
+			}
+			defer replacement.cleanup()
+		}
+		skillsChanged := replacement != nil
 		if replacesRuntime {
 			if err := f.ReplaceSkills(lifecycleCtx, agentID, desired.Skills); err != nil {
 				return err
@@ -507,8 +525,15 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 		if err != nil {
 			if replacesRuntime {
 				_ = f.ReplaceSkills(lifecycleCtx, agentID, previousSkills)
+			} else if replacement != nil {
+				err = errors.Join(err, f.restoreSkillReplacementRecord(previous))
 			}
 			return err
+		}
+		if replacement != nil {
+			if err := replacement.apply(); err != nil {
+				return errors.Join(err, f.restoreSkillReplacementRecord(previous))
+			}
 		}
 		if replacesRuntime {
 			if err := f.ReplaceSkills(lifecycleCtx, agentID, desired.Skills); err != nil {
@@ -516,7 +541,8 @@ func (f *Controller) updateDesired(ctx context.Context, agentID, resourceVersion
 			}
 		} else if change.skills {
 			added, removed := diffSkillNames(previousSkills, desired.Skills)
-			skillsChanged = len(added) > 0 || len(removed) > 0
+			skillsChanged = skillsChanged || len(added) > 0 || len(removed) > 0
+			added = slices.DeleteFunc(added, func(name string) bool { return slices.Contains(options.replaceSkills, name) })
 			if len(added) > 0 {
 				if err := f.BatchAddSkills(agentID, added); err != nil {
 					return err

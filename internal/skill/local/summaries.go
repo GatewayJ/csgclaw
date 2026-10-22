@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"csgclaw/internal/resourcequery"
+	skillinstall "csgclaw/internal/skill/installstate"
 	"errors"
 	"io"
 	"os"
@@ -82,9 +83,11 @@ enqueue:
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	records, _ := skillinstall.Read(root)
 	out := make([]SkillSummary, 0, len(items))
 	for index, item := range items {
 		if present[index] {
+			item.Source = records[item.Name].SourceKind()
 			out = append(out, item)
 		}
 	}
@@ -134,6 +137,7 @@ func ListSummariesPage(ctx context.Context, root string, q resourcequery.Query, 
 	if err != nil {
 		return nil, meta, err
 	}
+	records, _ := skillinstall.Read(root)
 	items := make([]SkillSummary, 0, len(names))
 	for _, name := range names {
 		if err := ctx.Err(); err != nil {
@@ -143,6 +147,7 @@ func ListSummariesPage(ctx context.Context, root string, q resourcequery.Query, 
 		if !present {
 			return nil, meta, resourcequery.ErrChanged
 		}
+		item.Source = records[item.Name].SourceKind()
 		items = append(items, item)
 	}
 	return items, meta, nil

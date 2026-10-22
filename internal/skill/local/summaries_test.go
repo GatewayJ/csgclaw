@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"csgclaw/internal/resourcequery"
+	skillinstall "csgclaw/internal/skill/installstate"
 	"errors"
 	"fmt"
 	"os"
@@ -133,5 +134,20 @@ func TestPagedSummariesMembershipAndMetadata(t *testing.T) {
 	cancel()
 	if _, _, err := ListSummariesPage(ctx, root, resourcequery.Query{Mode: "page", Page: 1, Size: 1}, func(string) bool { return true }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
+	}
+}
+
+func TestSummariesPreserveMetadataWithInvalidInstallationRecords(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "example", "SKILL.md"), "---\ndescription: example description\n---\n")
+	mustWriteFile(t, filepath.Join(root, ".skillhub-lock.json"), "invalid JSON")
+	for _, paged := range []bool{false, true} {
+		items, err := ListSummaries(context.Background(), root)
+		if paged {
+			items, _, err = ListSummariesPage(context.Background(), root, resourcequery.Query{Mode: "page", Page: 1, Size: 20}, func(string) bool { return true })
+		}
+		if err != nil || len(items) != 1 || items[0].Name != "example" || items[0].Description != "example description" || items[0].Source != skillinstall.SourceUnknown {
+			t.Fatalf("skill summaries = %+v, error = %v", items, err)
+		}
 	}
 }

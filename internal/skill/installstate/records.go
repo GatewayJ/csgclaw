@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,8 @@ import (
 )
 
 const lockFileName = ".skillhub-lock.json"
+
+func IsRecordsFile(name string) bool { return name == lockFileName }
 
 // Serialize callers in this process; the OS file lock also covers other processes.
 var installRecordsMu sync.Mutex
@@ -29,6 +32,7 @@ type Record struct {
 }
 
 const (
+	SourceBuiltin = "builtin"
 	SourceLocal   = "local"
 	SourceMarket  = "market"
 	SourceUnknown = "unknown"
@@ -36,7 +40,7 @@ const (
 
 func (r Record) SourceKind() string {
 	switch r.Source {
-	case SourceLocal, SourceMarket:
+	case SourceBuiltin, SourceLocal, SourceMarket:
 		return r.Source
 	case "":
 		// Recognize full source URLs and older CLI records without an explicit source.
@@ -71,24 +75,67 @@ func readLockFile(skillsRoot string) (lockFile, error) {
 }
 
 func Read(skillsRoot string) (map[string]Record, error) {
+	var records map[string]Record
+	err := readSnapshot(skillsRoot, false, func(snapshot map[string]Record) error {
+		records = snapshot
+		return nil
+	})
+	return records, err
+}
+
+// ReadSnapshot holds the installation lock while consuming origins and files.
+// It creates a missing root so concurrent installations share the same lock.
+// The callback must not call other installstate functions.
+func ReadSnapshot(skillsRoot string, consume func(map[string]Record) error) error {
+	return readSnapshot(skillsRoot, true, consume)
+}
+
+func readSnapshot(skillsRoot string, createRoot bool, consume func(map[string]Record) error) error {
 	installRecordsMu.Lock()
 	defer installRecordsMu.Unlock()
-	lock, err := acquireRecordsLock(skillsRoot, false)
+	lock, err := acquireRecordsLock(skillsRoot, createRoot)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if lock == nil {
-		return map[string]Record{}, nil
+		return consume(map[string]Record{})
 	}
 	defer lock.Close()
 	payload, err := readLockFile(skillsRoot)
-	return payload.Skills, err
+	if err != nil {
+		return err
+	}
+	return consume(payload.Skills)
+}
+
+// RestoreRecords merges preserved origins with regenerated origins without modifying the recovery inputs.
+func RestoreRecords(preservedRoot, generatedRoot, targetRoot string) error {
+	installRecordsMu.Lock()
+	defer installRecordsMu.Unlock()
+	// Unreadable origins do not prevent skill recovery; original files remain available for rollback.
+	preserved, _ := readLockFile(preservedRoot)
+	generated, _ := readLockFile(generatedRoot)
+	if preserved.Skills == nil {
+		preserved.Skills = make(map[string]Record)
+	}
+	for name, record := range generated.Skills {
+		if _, exists := preserved.Skills[name]; !exists || record.SourceKind() == SourceBuiltin {
+			preserved.Skills[name] = record
+		}
+	}
+	return writeLockFile(targetRoot, preserved)
 }
 
 // Update also coordinates a local install or removal. Persist first
 // so a lock-file write failure leaves skill files untouched; restore the previous
 // record if the file operation fails. A nil record removes the installation entry.
 func Update(skillsRoot, name string, record *Record, apply func() error) error {
+	return UpdateMany(skillsRoot, map[string]*Record{strings.TrimSpace(name): record}, apply)
+}
+
+// UpdateMany persists related installation records together and restores them
+// when the prepared file operation fails.
+func UpdateMany(skillsRoot string, records map[string]*Record, apply func() error) error {
 	installRecordsMu.Lock()
 	defer installRecordsMu.Unlock()
 	lock, err := acquireRecordsLock(skillsRoot, true)
@@ -100,33 +147,33 @@ func Update(skillsRoot, name string, record *Record, apply func() error) error {
 	if err != nil {
 		return err
 	}
-	name = strings.TrimSpace(name)
-	previous, existed := payload.Skills[name]
-	if record != nil {
-		next := *record
-		next.Slug = name
-		next.UpdatedAt = time.Now().UTC()
-		next.InstalledAt = next.UpdatedAt
-		if existed && !previous.InstalledAt.IsZero() {
-			next.InstalledAt = previous.InstalledAt
+	previous := maps.Clone(payload.Skills)
+	changed := false
+	for name, record := range records {
+		old, existed := payload.Skills[name]
+		if record != nil {
+			next := *record
+			next.Slug = name
+			next.UpdatedAt = time.Now().UTC()
+			next.InstalledAt = next.UpdatedAt
+			if existed && !old.InstalledAt.IsZero() {
+				next.InstalledAt = old.InstalledAt
+			}
+			payload.Skills[name] = next
+		} else {
+			delete(payload.Skills, name)
 		}
-		payload.Skills[name] = next
-	} else {
-		delete(payload.Skills, name)
+		changed = changed || record != nil || existed
 	}
-	if record != nil || existed {
+	if changed {
 		if err := writeLockFile(skillsRoot, payload); err != nil {
 			return err
 		}
 	}
 	if apply != nil {
 		if err := apply(); err != nil {
-			if existed {
-				payload.Skills[name] = previous
-			} else {
-				delete(payload.Skills, name)
-			}
-			if record != nil || existed {
+			payload.Skills = previous
+			if changed {
 				return errors.Join(err, writeLockFile(skillsRoot, payload))
 			}
 			return err

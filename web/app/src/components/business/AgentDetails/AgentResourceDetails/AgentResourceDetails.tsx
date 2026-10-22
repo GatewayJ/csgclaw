@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { fetchAgentSkills, fetchAgentSkillsFile } from "@/api/agents";
+import { probeMCPServerRequest } from "@/api/mcp";
 import { localizeAPIError } from "@/shared/i18n";
 import type { TranslateFn } from "@/models/conversations";
 import type { MCPServer } from "@/models/mcp";
 import type { SlashSkillOption } from "@/models/slashCommands";
-import { mcpServerDisplayName, mcpServerDetailConfig } from "@/models/mcp";
+import { mcpServerDisplayName, mcpServerDetailConfig, mcpManagedKnowledgeBaseSource } from "@/models/mcp";
+import { skillOriginKind } from "@/models/skillhub";
 import { WorkspaceFileTree, WorkspaceFilePreview } from "@/components/business/WorkspaceFileTree";
 import { JSONConfigEditor } from "@/components/business/HubDetailPane";
 import {
@@ -64,6 +66,23 @@ export function AgentResourceDetails({
     enabled: Boolean(skill),
   });
   const enabled = skill ? skill.enabled !== false : server?.config?.enabled !== false;
+  const knowledge = server && mcpManagedKnowledgeBaseSource(server.config);
+  const origin = skillOriginKind(skill);
+  const skillBadge =
+    origin === "builtin"
+      ? "iaSkillsBadgeBuiltin"
+      : origin === "market"
+        ? "iaSkillsBadgeMarket"
+        : origin === "local"
+          ? "iaSkillsBadgeLocal"
+          : "profileSkillSourceUnknown";
+  const probe = useMutation({ mutationFn: probeMCPServerRequest });
+  const probeError = probe.error
+    ? localizeAPIError(probe.error, t, t("resourcesMCPTestFailed"))
+    : probe.data?.connected === false
+      ? t("resourcesMCPTestFailed")
+      : "";
+  const config = server ? mcpServerDetailConfig(server.config) : {};
   const dialogClassName = skill
     ? `${styles.dialog} hub-standard-skill-dialog`
     : server
@@ -79,7 +98,17 @@ export function AgentResourceDetails({
       <DialogContent className={dialogClassName} portalContainer={portalContainer}>
         <DialogHeader>
           <div>
-            <DialogTitle>{server ? mcpServerDisplayName(server) : name}</DialogTitle>
+            <div className={styles.titleRow}>
+              <DialogTitle>{server ? mcpServerDisplayName(server) : name}</DialogTitle>
+              {skill || knowledge ? (
+                <span
+                  className={styles.sourceBadge}
+                  title={skill && origin === "unknown" ? t("iaSkillsBadgeUntrackedHint") : undefined}
+                >
+                  {t(skill ? skillBadge : "iaKnowledgeBadgeAgenticHub")}
+                </span>
+              ) : null}
+            </div>
             <DialogDescription>{skill?.description || server?.description || name}</DialogDescription>
           </div>
           <div className="flex shrink-0 items-center gap-4">
@@ -133,23 +162,53 @@ export function AgentResourceDetails({
               />
             </div>
           ) : server ? (
-            <JSONConfigEditor
-              fillAvailableHeight
-              hideLabel
-              readOnly
-              label={t("iaMCPConfigTitle")}
-              lineWrapping={false}
-              minRows={12}
-              onChange={() => undefined}
-              t={t}
-              value={JSON.stringify(mcpServerDetailConfig(server.config), null, 2)}
-            />
+            <>
+              {probe.isPending ? <p role="status">{t("resourcesMCPTesting")}</p> : null}
+              {probeError ? (
+                <p role="alert" className="form-error">
+                  {probeError}
+                </p>
+              ) : probe.data?.connected ? (
+                <p role="status">
+                  {t("resourcesMCPTestSuccess")} ·{" "}
+                  {t("resourcesMCPTestSuccessSummary", { count: probe.data.tools.length })}
+                </p>
+              ) : null}
+              {knowledge ? <h3 className={styles.configTitle}>{t("iaMCPConfigTitle")}</h3> : null}
+              <JSONConfigEditor
+                fillAvailableHeight
+                hideLabel
+                readOnly
+                label={t("iaMCPConfigTitle")}
+                lineWrapping={false}
+                minRows={12}
+                onChange={() => undefined}
+                t={t}
+                value={JSON.stringify(knowledge ? { mcpServers: { [server.name]: config } } : config, null, 2)}
+              />
+            </>
           ) : null}
         </DialogBody>
         <DialogFooter>
-          <Button variant={server ? "danger" : "outlineDanger"} disabled={busy} onClick={onDelete}>
-            {t(skill ? "agentDeleteSkill" : "agentDeleteMCP")}
+          <Button
+            className={styles.removeButton}
+            variant={server ? "danger" : "outlineDanger"}
+            disabled={busy}
+            onClick={onDelete}
+          >
+            {t("profileRemoveResource")}
           </Button>
+          {knowledge && server ? (
+            <Button
+              variant="secondaryGray"
+              disabled={busy}
+              loading={probe.isPending}
+              loadingLabel={t("resourcesMCPTesting")}
+              onClick={() => probe.mutate({ name: server.name, config: server.config })}
+            >
+              {t("resourcesMCPTest")}
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </DialogRoot>

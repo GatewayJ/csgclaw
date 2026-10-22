@@ -21,6 +21,7 @@ import (
 	"csgclaw/internal/im"
 	"csgclaw/internal/participant"
 	"csgclaw/internal/runtimecatalog"
+	skillinstall "csgclaw/internal/skill/installstate"
 	webui "csgclaw/web"
 )
 
@@ -91,6 +92,9 @@ func TestAgentSkillSummariesThroughEngineHTTP(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if err := skillinstall.Update(layout.SkillsRoot, "skill-0007", &skillinstall.Record{Source: skillinstall.SourceMarket}, nil); err != nil {
+				t.Fatal(err)
+			}
 			engine := agentengine.New(controller)
 			// This endpoint needs only the Engine, not API-owned Runtime paths.
 			h := NewHandler(AgentServices{}, engine, nil, nil, nil, nil, nil)
@@ -106,13 +110,16 @@ func TestAgentSkillSummariesThroughEngineHTTP(t *testing.T) {
 			if len(items) != 1000 || items[0].Name != "skill-0000" || items[999].Description != "Skill 999" {
 				t.Fatalf("unexpected summaries: count=%d", len(items))
 			}
+			if items[0].Source != skillinstall.SourceUnknown || items[7].Source != skillinstall.SourceMarket {
+				t.Fatalf("skill origins = %+v %+v", items[0], items[7])
+			}
 			if strings.Contains(w.Body.String(), "private-body-marker") || strings.Contains(w.Body.String(), layout.SkillsRoot) {
 				t.Fatal("summary leaked body or Runtime path")
 			}
 			paged := httptest.NewRecorder()
 			h.Routes().ServeHTTP(paged, httptest.NewRequest(http.MethodGet, "/api/v1/agents/agent-skills/skill-summaries?pagination=page&page=2&per=7", nil))
 			var page resourcePage[agentengine.SkillSummary]
-			if err := json.Unmarshal(paged.Body.Bytes(), &page); err != nil || paged.Code != http.StatusOK || len(page.Items) != 7 || page.Total != 1000 || page.Items[0].Name != "skill-0007" || paged.Header().Get("ETag") == "" {
+			if err := json.Unmarshal(paged.Body.Bytes(), &page); err != nil || paged.Code != http.StatusOK || len(page.Items) != 7 || page.Total != 1000 || page.Items[0].Name != "skill-0007" || page.Items[0].Source != skillinstall.SourceMarket || paged.Header().Get("ETag") == "" {
 				t.Fatalf("unexpected paged summaries: %d %s %v", paged.Code, paged.Body, err)
 			}
 			searched := httptest.NewRecorder()

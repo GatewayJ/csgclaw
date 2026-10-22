@@ -70,6 +70,20 @@ describe("agents API", () => {
     );
   });
 
+  it("requests replacement explicitly for installed agent skills", async () => {
+    const fetchMock = mockFetch();
+
+    await batchAddAgentSkillsRequest("worker/id", ["alpha"], { replace: true });
+
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      "api/v1/agents/worker%2Fid/skills:batchAdd",
+      expect.objectContaining({
+        body: JSON.stringify({ names: ["alpha"], replace: true }),
+        method: "POST",
+      }),
+    );
+  });
+
   it("recreates the manager without overriding its runtime or image", async () => {
     const fetchMock = vi.fn<typeof fetch>(
       async () =>

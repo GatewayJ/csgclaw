@@ -28,7 +28,7 @@ func (s *WorkspaceService) SkillSummaries(ctx context.Context, agentID string) (
 	}
 	out := make([]contract.SkillSummary, 0, len(items))
 	for _, item := range items {
-		out = append(out, contract.SkillSummary{Enabled: skill.Enabled(agent.SkillStates, item.Name), Name: item.Name, Description: item.Description, Error: item.Error})
+		out = append(out, contract.SkillSummary{Enabled: skill.Enabled(agent.SkillStates, item.Name), Name: item.Name, Description: item.Description, Source: item.Source, Error: item.Error})
 	}
 	return out, nil
 }
@@ -48,7 +48,7 @@ func (s *WorkspaceService) SkillSummariesPage(ctx context.Context, agentID strin
 	}
 	out := make([]contract.SkillSummary, 0, len(items))
 	for _, item := range items {
-		out = append(out, contract.SkillSummary{Enabled: skill.Enabled(agent.SkillStates, item.Name), Name: item.Name, Description: item.Description, Error: item.Error})
+		out = append(out, contract.SkillSummary{Enabled: skill.Enabled(agent.SkillStates, item.Name), Name: item.Name, Description: item.Description, Source: item.Source, Error: item.Error})
 	}
 	return out, &meta, nil
 }

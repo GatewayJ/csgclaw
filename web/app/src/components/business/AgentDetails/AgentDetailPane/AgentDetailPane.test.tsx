@@ -1,10 +1,11 @@
 import { createQueryWrapper } from "../../../../../tests/helpers/queryClient";
 // @vitest-environment jsdom
 
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render as baseRender, screen, waitFor, within, type RenderOptions } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef, useState } from "react";
-import type { Ref } from "react";
+import type { ReactElement, ReactNode, Ref } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentDraft, AgentLike } from "@/models/agents";
 import type { TranslateFn } from "@/models/conversations";
@@ -12,6 +13,14 @@ import { normalizeModelProviderCatalog } from "@/models/modelProviders";
 import buttonStyles from "@/components/ui/Button/Button.module.css";
 import { AgentDetailPane } from "./AgentDetailPane";
 import type { AgentDetailPaneHandle, AgentDetailPaneProps } from "./AgentDetailPane";
+
+function render(ui: ReactElement, options?: RenderOptions) {
+  const ProvidedWrapper = options?.wrapper;
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <MemoryRouter>{ProvidedWrapper ? <ProvidedWrapper>{children}</ProvidedWrapper> : children}</MemoryRouter>;
+  }
+  return baseRender(ui, { ...options, wrapper: Wrapper });
+}
 
 const t: TranslateFn = (key) => key;
 
@@ -594,7 +603,7 @@ describe("AgentDetailPane MCP snapshots", () => {
     expect(screen.getByText("agentKnowledgeMCPSourceDeleted")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "agentMCPUpdateConfig" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: new RegExp(mcpServer.description) }));
-    const deleteButton = within(screen.getByRole("dialog")).getByRole("button", { name: "agentDeleteMCP" });
+    const deleteButton = within(screen.getByRole("dialog")).getByRole("button", { name: "profileRemoveResource" });
     expect(deleteButton).toBeEnabled();
     expect(deleteButton).toHaveClass(buttonStyles["btn-danger"]);
   });
@@ -622,7 +631,7 @@ describe("AgentDetailPane MCP snapshots", () => {
     expect(screen.queryByText("agentKnowledgeMCPSourceDeleted")).not.toBeInTheDocument();
     expect(screen.queryByText("agentKnowledgeMCPUpdateAvailable")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: new RegExp(mcpServer.description) }));
-    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "agentDeleteMCP" })).toBeEnabled();
+    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "profileRemoveResource" })).toBeEnabled();
   });
 });
 

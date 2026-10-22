@@ -10,6 +10,7 @@ export type SlashSkillOption = {
   enabled?: boolean;
   description?: string;
   name: string;
+  source?: string;
 };
 
 export type SlashPickerCandidate = {

@@ -31,14 +31,12 @@ export function ResourcePicker({
 }) {
   return (
     <DialogContent className={styles.dialog} portalContainer={portalContainer}>
-      <DialogHeader>
-        <div className={styles.headerCopy}>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription size="md">{description}</DialogDescription>
-        </div>
-        <div className={styles.close}>
-          <DialogCloseButton label={closeLabel} disabled={busy} size="sm" variant="tertiaryGray" />
-        </div>
+      <DialogHeader className={styles.header}>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogCloseButton label={closeLabel} disabled={busy} size="sm" variant="tertiaryGray" />
+        <DialogDescription className={styles.description} size="md">
+          {description}
+        </DialogDescription>
       </DialogHeader>
       <DialogBody className={styles.body}>{children}</DialogBody>
       <ResourcePickerActions>{actions}</ResourcePickerActions>
