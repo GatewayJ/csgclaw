@@ -80,11 +80,7 @@ export function AgentResourcePicker({
     setSelected((current) => (checked ? [...current, name] : current.filter((item) => item !== name)));
   }
   function skillActionLabel(skill: SkillSummary) {
-    return t(
-      picker.skillAction(skill) === "replace"
-        ? "resourcesSkillRemoteReplaceAction"
-        : "resourcesSkillRemoteInstallAction",
-    );
+    return t(picker.skillAction(skill) === "replace" ? "iaSkillsUpdate" : "resourcesSkillRemoteInstallAction");
   }
   const remoteRows =
     kind === "skill"
