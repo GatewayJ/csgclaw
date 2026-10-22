@@ -1659,7 +1659,7 @@ export const messages = {
     profileSkillMarket: "技能市场",
     profileMCPHint: "启用全局 MCP 服务，供这个 Agent 调用；没有想要的，可以手动添加或去 MCP 市场装。",
     profileMCPMarket: "MCP 市场",
-    profileSkillPickerHint: "市场技能先安装或更新全局资源，再为当前智能体启用。",
+    profileSkillPickerHint: "勾选要启用的技能；没有想要的，去「技能市场」装一个（装完即为此智能体启用）。",
     profileMCPPickerHint: "勾选要启用的 MCP 服务；没有想要的，手动添加一个或去「MCP 市场」装。",
     profileKnowledgePickerHint: "勾选已接入的知识库即可启用；没有想要的，去 AgenticHub 建一个再接入。",
     profileKnowledgeLoading: "正在加载知识库启用状态...",
@@ -4702,7 +4702,8 @@ export const messages = {
     profileSkillMarket: "Skill market",
     profileMCPHint: "Enable global MCP services for this agent to call, or add one manually or from the MCP market.",
     profileMCPMarket: "MCP market",
-    profileSkillPickerHint: "Market skills are installed or updated globally, then enabled for this agent.",
+    profileSkillPickerHint:
+      "Check the skills to enable, or install one from the Skill Market to enable it for this agent automatically.",
     profileMCPPickerHint: "Check the MCP services to enable, or add one manually or from the MCP market.",
     profileKnowledgePickerHint:
       "Check connected knowledge bases to enable them, or create one in AgenticHub and connect it.",
