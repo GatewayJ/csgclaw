@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type PropsWithChildren } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -32,8 +32,16 @@ function knowledgeConfig(id: string, displayName: string) {
   };
 }
 
-function setup(deleteSucceeds = true) {
-  let workerServers: JSONRecord = { engineering: knowledge[0].config };
+function setup({
+  deleteSucceeds = true,
+  deleteCompletion,
+  initialServers = [knowledge[0]],
+}: {
+  deleteSucceeds?: boolean;
+  deleteCompletion?: Promise<void>;
+  initialServers?: MCPServer[];
+} = {}) {
+  let workerServers: JSONRecord = Object.fromEntries(initialServers.map((server) => [server.name, server.config]));
   const fetch = vi.fn(async (input: string) => {
     const path = new URL(String(input), "http://localhost").pathname;
     if (path === "/api/v1/agents/worker-1/mcp-servers") return Response.json({ servers: workerServers });
@@ -47,8 +55,9 @@ function setup(deleteSucceeds = true) {
   const onDelete = vi.fn();
   const onInstall = vi.fn();
   function Harness() {
-    const [servers, setServers] = useState([knowledge[0]]);
+    const [servers, setServers] = useState(initialServers);
     const [deleteError, setDeleteError] = useState("");
+    const [deleteBusy, setDeleteBusy] = useState(false);
     return (
       <AgentDetailPane
         item={worker}
@@ -58,6 +67,7 @@ function setup(deleteSucceeds = true) {
         requestedProfileTab="knowledge"
         knowledgeServers={servers}
         mcpDeleteError={deleteError}
+        mcpDeleteBusy={deleteBusy}
         onDraftChange={vi.fn()}
         onDelete={vi.fn()}
         onInvite={vi.fn()}
@@ -67,12 +77,16 @@ function setup(deleteSucceeds = true) {
         onStop={vi.fn()}
         onDeleteMCPServer={async (server) => {
           onDelete(server);
+          const name = typeof server === "string" ? server : server.name;
+          setDeleteBusy(true);
+          await deleteCompletion;
+          setDeleteBusy(false);
           if (!deleteSucceeds) {
             setDeleteError("Removal failed");
             return false;
           }
-          workerServers = {};
-          setServers([]);
+          delete workerServers[name];
+          setServers((current) => current.filter((item) => item.name !== name));
           return true;
         }}
         onInstallMCPServers={async (names) => {
@@ -136,7 +150,7 @@ describe("Knowledge enablement after removal", () => {
   );
 
   it("keeps knowledge details available when removal fails", async () => {
-    const { onDelete, onInstall, user } = setup(false);
+    const { onDelete, onInstall, user } = setup({ deleteSucceeds: false });
     const removal = await openRemoval(user);
     await user.click(within(removal).getByRole("button", { name: t("confirm") }));
     expect(await within(removal).findByText("Removal failed")).toBeVisible();
@@ -144,5 +158,26 @@ describe("Knowledge enablement after removal", () => {
     await user.click(within(removal).getByRole("button", { name: t("cancel") }));
     expect(screen.getByRole("dialog", { name: "Engineering" })).toBeVisible();
     expect(onInstall).not.toHaveBeenCalled();
+  });
+
+  it("keeps another knowledge detail open when a previous removal completes", async () => {
+    let completeRemoval!: () => void;
+    const deleteCompletion = new Promise<void>((resolve) => {
+      completeRemoval = resolve;
+    });
+    const { user } = setup({ deleteCompletion, initialServers: knowledge });
+    const removal = await openRemoval(user);
+    await user.click(within(removal).getByRole("button", { name: t("confirm") }));
+    expect(within(removal).getByRole("button", { name: t("confirm") })).toBeDisabled();
+    await user.click(within(removal).getByRole("button", { name: t("cancel") }));
+    const details = screen.getByRole("dialog", { name: "Engineering" });
+    await user.click(within(details).getByRole("button", { name: t("close") }));
+    await user.click(screen.getByRole("button", { name: /Operations/ }));
+    expect(screen.getByRole("dialog", { name: "Operations" })).toBeVisible();
+    await act(async () => {
+      completeRemoval();
+      await deleteCompletion;
+    });
+    expect(screen.getByRole("dialog", { name: "Operations" })).toBeVisible();
   });
 });

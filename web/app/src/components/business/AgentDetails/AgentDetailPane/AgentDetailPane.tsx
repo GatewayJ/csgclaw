@@ -714,11 +714,15 @@ export const AgentDetailPane = forwardRef<AgentDetailPaneHandle, AgentDetailPane
     if (!mcpPendingDelete) {
       return;
     }
+    const agentID = String(item.id);
+    const name = mcpPendingDelete.name;
     const deleted = await onDeleteMCPServer?.(mcpPendingDelete);
     if (deleted) {
       setDeleteMCPDialogOpen(false);
       setMCPPendingDelete(null);
-      setResourceDetail(null);
+      setResourceDetail((current) =>
+        current?.agentID === agentID && current.kind === "mcp" && current.name === name ? null : current,
+      );
     }
   }
 
