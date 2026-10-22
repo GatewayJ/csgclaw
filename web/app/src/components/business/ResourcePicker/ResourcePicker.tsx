@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { classNames } from "@/shared/lib/classNames";
 import {
   DialogBody,
   DialogCloseButton,
@@ -15,6 +16,7 @@ export function ResourcePicker({
   description,
   closeLabel,
   busy,
+  fixedHeight = false,
   portalContainer,
   children,
   actions,
@@ -24,13 +26,17 @@ export function ResourcePicker({
   description: string;
   closeLabel: string;
   busy?: boolean;
+  fixedHeight?: boolean;
   portalContainer?: HTMLElement | null;
   children: ReactNode;
   actions: ReactNode;
   footer: ReactNode;
 }) {
   return (
-    <DialogContent className={styles.dialog} portalContainer={portalContainer}>
+    <DialogContent
+      className={classNames(styles.dialog, fixedHeight && styles.fixedHeight)}
+      portalContainer={portalContainer}
+    >
       <DialogHeader className={styles.header}>
         <DialogTitle>{title}</DialogTitle>
         <DialogCloseButton label={closeLabel} disabled={busy} size="sm" variant="tertiaryGray" />

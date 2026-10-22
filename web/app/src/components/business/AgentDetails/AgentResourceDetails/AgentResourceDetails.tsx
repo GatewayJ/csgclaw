@@ -102,9 +102,10 @@ export function AgentResourceDetails({
               <DialogTitle>{server ? mcpServerDisplayName(server) : name}</DialogTitle>
               {skill || knowledge ? (
                 <span
-                  className={styles.sourceBadge}
+                  className={skill ? styles.skillSourceBadge : styles.sourceBadge}
                   title={skill && origin === "unknown" ? t("iaSkillsBadgeUntrackedHint") : undefined}
                 >
+                  {skill ? <span className={styles.sourceDot} aria-hidden="true" /> : null}
                   {t(skill ? skillBadge : "iaKnowledgeBadgeAgenticHub")}
                 </span>
               ) : null}
@@ -190,12 +191,7 @@ export function AgentResourceDetails({
           ) : null}
         </DialogBody>
         <DialogFooter>
-          <Button
-            className={styles.removeButton}
-            variant={server ? "danger" : "outlineDanger"}
-            disabled={busy}
-            onClick={onDelete}
-          >
+          <Button className={styles.removeButton} variant="danger" disabled={busy} onClick={onDelete}>
             {t("profileRemoveResource")}
           </Button>
           {knowledge && server ? (

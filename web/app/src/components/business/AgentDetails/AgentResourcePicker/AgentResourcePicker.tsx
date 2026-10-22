@@ -56,6 +56,9 @@ export function AgentResourcePicker({
   const marketQuery = kind === "skill" ? picker.skillMarket : kind === "mcp" ? picker.mcpMarket : picker.knowledge;
   const loadError = picker.libraryError || ((picker.market || kind === "knowledge") && marketQuery.error);
   const failure = picker.error || error || (loadError ? localizeAPIError(loadError, t, errorMessage(loadError)) : "");
+  const knowledgeReady = kind !== "knowledge" || picker.libraryReady;
+  const showLibraryLoading =
+    kind === "knowledge" ? !picker.libraryReady && !picker.libraryError : picker.libraryLoading;
   const match = (name: string, description = "") =>
     `${name} ${description}`.toLowerCase().includes(picker.search.trim().toLowerCase());
   const library =
@@ -70,7 +73,7 @@ export function AgentResourcePicker({
             label: mcpServerDisplayName(server),
             description: server.description,
           }));
-  const visibleLibrary = library.filter((item) => match(item.label, item.description));
+  const visibleLibrary = knowledgeReady ? library.filter((item) => match(item.label, item.description)) : [];
   async function finish(operation: Promise<boolean>) {
     const added = await operation;
     if (added) onClose();
@@ -139,6 +142,7 @@ export function AgentResourcePicker({
         }}
       >
         <ResourcePicker
+          fixedHeight={kind === "knowledge"}
           title={title}
           description={t(
             kind === "skill"
@@ -192,7 +196,7 @@ export function AgentResourcePicker({
                   size="sm"
                   variant="primary"
                   loading={picker.busy === "library"}
-                  disabled={busy || !selected.length || Boolean(picker.libraryError)}
+                  disabled={busy || !knowledgeReady || !selected.length || Boolean(picker.libraryError)}
                   onClick={() => void finish(picker.add(selected))}
                 >
                   {title}
@@ -244,7 +248,9 @@ export function AgentResourcePicker({
           <ResourcePickerList>
             {!picker.market ? (
               <>
-                {picker.libraryLoading ? <p role="status">{t("loading")}</p> : null}
+                {showLibraryLoading ? (
+                  <p role="status">{t(kind === "knowledge" ? "profileKnowledgeLoading" : "loading")}</p>
+                ) : null}
                 {visibleLibrary.map((item) => {
                   const enabled = picker.enabledNames.has(item.name);
                   return (
@@ -267,7 +273,7 @@ export function AgentResourcePicker({
                 ) : null}
               </>
             ) : null}
-            {picker.market || kind === "knowledge" ? (
+            {picker.market || (kind === "knowledge" && knowledgeReady) ? (
               <>
                 {!authenticated ? (
                   <ResourcePickerActions>
@@ -284,8 +290,10 @@ export function AgentResourcePicker({
                   </ResourcePickerActions>
                 ) : (
                   <>
-                    {marketQuery.isFetching && !marketQuery.isFetchingNextPage ? (
-                      <p role="status">{t("loading")}</p>
+                    {marketQuery.isFetching &&
+                    !marketQuery.isFetchingNextPage &&
+                    (kind !== "knowledge" || !marketQuery.data) ? (
+                      <p role="status">{t(kind === "knowledge" ? "resourcesKnowledgeBasesLoading" : "loading")}</p>
                     ) : null}
                     {remoteRows.map((item) => (
                       <ResourcePickerRow key={item.id}>

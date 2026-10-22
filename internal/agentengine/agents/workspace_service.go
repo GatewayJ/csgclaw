@@ -26,11 +26,7 @@ func (s *WorkspaceService) SkillSummaries(ctx context.Context, agentID string) (
 	if !ok {
 		return nil, errors.New("agent not found")
 	}
-	out := make([]contract.SkillSummary, 0, len(items))
-	for _, item := range items {
-		out = append(out, contract.SkillSummary{Enabled: skill.Enabled(agent.SkillStates, item.Name), Name: item.Name, Description: item.Description, Source: item.Source, Error: item.Error})
-	}
-	return out, nil
+	return workspaceSkillSummaries(ctx, layout.SkillsRoot, agent, items)
 }
 
 func (s *WorkspaceService) SkillSummariesPage(ctx context.Context, agentID string, q resourcequery.Query) ([]contract.SkillSummary, *resourcequery.Metadata, error) {
@@ -46,9 +42,9 @@ func (s *WorkspaceService) SkillSummariesPage(ctx context.Context, agentID strin
 	if err != nil {
 		return nil, nil, err
 	}
-	out := make([]contract.SkillSummary, 0, len(items))
-	for _, item := range items {
-		out = append(out, contract.SkillSummary{Enabled: skill.Enabled(agent.SkillStates, item.Name), Name: item.Name, Description: item.Description, Source: item.Source, Error: item.Error})
+	out, err := workspaceSkillSummaries(ctx, layout.SkillsRoot, agent, items)
+	if err != nil {
+		return nil, nil, err
 	}
 	return out, &meta, nil
 }

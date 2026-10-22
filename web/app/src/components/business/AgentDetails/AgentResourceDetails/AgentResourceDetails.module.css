@@ -21,12 +21,34 @@
   flex-wrap: wrap;
   gap: 8px;
 }
-.sourceBadge {
+.sourceBadge,
+.skillSourceBadge {
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 2px 6px;
   font-size: 12px;
   color: var(--muted);
+}
+.sourceBadge {
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+.skillSourceBadge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--panel);
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.sourceDot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+  background: var(--primary);
 }
 .removeButton {
   margin-right: auto;
