@@ -60,14 +60,16 @@ it.each([
   ["market", "技能市场"],
   ["local", "本地上传"],
   ["unknown", "来源未知"],
-])("shows the recorded %s skill origin and the agent removal action", async (source, badge) => {
+  [undefined, "来源未知"],
+] as const)("shows the recorded %s skill origin and the agent removal action", async (source, badge) => {
   const user = userEvent.setup();
   render(<AgentResourceDetails {...props} skill={{ name: "alpha", source }} />, {
     wrapper: createQueryWrapper().wrapper,
   });
 
   expect(screen.getByText(badge)).toBeInTheDocument();
-  if (source === "unknown") expect(screen.getByText(badge)).toHaveAttribute("title", t("iaSkillsBadgeUntrackedHint"));
+  if (source === "unknown" || source === undefined)
+    expect(screen.getByText(badge)).toHaveAttribute("title", t("iaSkillsBadgeUntrackedHint"));
   expect(screen.queryByRole("button", { name: "测试连接" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "从本智能体移除" }));
   expect(props.onDelete).toHaveBeenCalledOnce();
