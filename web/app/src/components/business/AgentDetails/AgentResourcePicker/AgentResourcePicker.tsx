@@ -139,6 +139,7 @@ export function AgentResourcePicker({
         }}
       >
         <ResourcePicker
+          fixedHeight={kind === "knowledge"}
           title={title}
           description={t(
             kind === "skill"

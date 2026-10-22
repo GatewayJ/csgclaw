@@ -2,6 +2,19 @@
   width: min(640px, calc(100vw - 40px));
   max-height: calc(100dvh - 40px);
 }
+.fixedHeight {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  height: min(560px, calc(100dvh - 40px));
+}
+.fixedHeight .body {
+  overflow: auto;
+  align-content: start;
+}
+.fixedHeight .list {
+  max-height: none;
+  overflow: visible;
+}
 .header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
